@@ -40,7 +40,7 @@
   },
   "devDependencies": {
     "@cloudflare/workers-oauth-provider": "^1.2.4",
-    "@cloudflare/workers-types": "^5.20261107.1",
+    "@cloudflare/workers-types": "^5.20261108.1",
     "fastmcp": "^4.24.5",
     "vitest": "^5.1.0"
   }
