@@ -18,7 +18,7 @@
   "dependencies": {
     "@cloudflare/workers-oauth-provider": "^1.2.4",
     "@kit/mcp": "workspace:*",
-    "fastmcp": "^4.24.5",
+    "fastmcp": "^4.25.0",
     "zod": "^4.6.7"
   },
   "devDependencies": {
