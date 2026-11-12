@@ -49,11 +49,14 @@ Readers paginate the entire authenticated protocol stream and select its newest 
 
 The gate queues the exact receipt during evaluation and requires that same receipt after fresh checks immediately before the SHA-pinned merge. A replacement receipt, even for the same head, requires a new evaluation. Labels are at most wakeup hints; neither a surviving label nor a successful token mint proves admission. Trusted `issue_comment` events, workflow completion and default-ref dispatch can wake evaluation. A dispatch scans eligible open PRs, not only its optional priority input. Privileged jobs use trusted workflow code and do not execute PR-head code with credentials.
 
+Initial evaluation checks admission before quality: an unadmitted PR is reported with its authorization reason, not a green quality verdict. Admitted PRs receive the complete quality assessment. At landing, fresh quality precedes the final fresh authorization read and exact-receipt comparison.
+
 The completion filter is intended to cover arbitrary workflow names while excluding the reserved gate name; its exact ordered exclusion requires hosted qualification. Automatic evaluations without candidates do not mint a merge token; default-ref dispatch retains the configured-App mint diagnostic even with no candidates. Neither wakeup nor mint proves admission.
 
 ## Holds, repair and residual risk
 
 - Inspect the current PR, head, scope, issuer configuration, comment stream and API errors. Repair missing permissions or invalid variables; a failed withdrawal is not a confirmed disarm. After a confirmed withdrawal, perform fresh source admission and explicit reissue for the current head. Do not delete a denial to restore authority.
+- Assess [API capacity](./testing.md#merge-wakeup-contract) per repository before admission or rollout. A rate-limit error or budget overrun calls for holding new admissions and an operator-approved containment or rollback decision. Disabling automation or limiting wakeups is separately authorized mitigation with manual recovery, not a correction; a rollback must retain admission, revocation and required-check success.
 - Append-only is a publisher contract, not immutable GitHub storage: trusted deletion or editing away of history can erase a fence. Returning to identical head A without an accepted withdrawal can match A again; a grant for A never authorizes B.
 - GitHub reads and merge are not atomic. Changes after the final read and old or alternative workflow definitions remain residual risks. A default-ref guard cannot constrain an older definition.
 - On GitHub Free private, merge-on-green is process, not branch protection: writers can merge or push without the gate. Never claim labels enforce checks or review. See [testing.md](./testing.md#merge-residual-github-free-private).

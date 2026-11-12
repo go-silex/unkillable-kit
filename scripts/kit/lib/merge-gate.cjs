@@ -636,10 +636,9 @@ async function currentPull(github, repo, number) {
  * @param {Repo} repo
  * @param {GateApi} gate
  * @param {number} number
- * @param {Core} core
  * @param {string} [expectedSha]
  */
-async function assess(github, repo, gate, number, core, expectedSha) {
+async function assessHead(github, repo, gate, number, expectedSha) {
   const tag = `PR #${number}`
   const pr = await currentPull(github, repo, number)
   const reason = ineligible(pr)
@@ -651,6 +650,13 @@ async function assess(github, repo, gate, number, core, expectedSha) {
   if (sha !== reportedSha) throw new Error(`${tag} head resolved to a different commit`)
   if (expectedSha && sha !== validSha(expectedSha, `${tag} queued head`))
     return { sha: null, stale: true }
+  return { sha, pr, baseRef: pr.base.ref }
+}
+
+/** @param {GitHubPort} github @param {Repo} repo @param {GateApi} gate @param {number} number
+ * @param {Core} core @param {string} sha @param {PullRequest} pr */
+async function assessQuality(github, repo, gate, number, core, sha, pr) {
+  const tag = `PR #${number}`
   const checkResult = await currentChecksResult(github, repo, sha, pr)
   if (!checkResult.checks) return { sha: null, reason: checkResult.reason }
   // Keep revocation in the required set: otherwise a workflow_run could merge a pushed head
@@ -691,9 +697,18 @@ async function assess(github, repo, gate, number, core, expectedSha) {
   return { sha, baseRef: pr.base.ref }
 }
 
+/** @param {GitHubPort} github @param {Repo} repo @param {GateApi} gate @param {number} number
+ * @param {Core} core @param {string} [expectedSha]
+ * @returns {Promise<{sha: string | null, baseRef?: string, stale?: boolean, reason?: string}>} */
+async function assess(github, repo, gate, number, core, expectedSha) {
+  const head = await assessHead(github, repo, gate, number, expectedSha)
+  if (!head.sha) return head
+  return assessQuality(github, repo, gate, number, core, head.sha, head.pr)
+}
+
 /** @param {GitHubPort & import('./head-authorization.cjs').Reader} github @param {Repo} repo @param {GateApi} gate @param {number} number @param {Core} core @param {AuthorizationPolicy} policy */
 async function evaluateCandidate(github, repo, gate, number, core, policy) {
-  const result = await assess(github, repo, gate, number, core)
+  const result = await assessHead(github, repo, gate, number)
   if (!result.sha) {
     if (result.reason) core.info(`PR #${number}: ${result.reason} — skip.`)
     return null
@@ -705,6 +720,11 @@ async function evaluateCandidate(github, repo, gate, number, core, policy) {
     authority.scope.baseRef !== result.baseRef
   ) {
     core.info(`PR #${number}: authorization held (${authority.reason || 'head changed'}) — skip.`)
+    return null
+  }
+  const quality = await assessQuality(github, repo, gate, number, core, result.sha, result.pr)
+  if (!quality.sha) {
+    if (quality.reason) core.info(`PR #${number}: ${quality.reason} — skip.`)
     return null
   }
   core.info(`PR #${number}: authorization + checks green on ${result.sha} → queue merge.`)

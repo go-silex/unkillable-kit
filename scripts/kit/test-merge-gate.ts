@@ -151,6 +151,7 @@ class Fake {
   runs: Record<string, Workflow[]>
   jobs: Record<number, Record<number, Job[]>> = {}
   afterJobs?: () => void
+  afterCheckRead?: () => Promise<void>
   switchAfterFirstBaseRead?: () => void
   baseReads = 0
   merges: Array<{ number: number; sha: string }> = []
@@ -410,9 +411,11 @@ class Fake {
           per_page?: number
         }) => {
           this.assertRepo({ owner, repo: repoName })
+          this.calls.push(`checks:${ref}`)
           this.fail(`checks:${ref}`)
           const items = this.checks[ref] ?? []
           const { data, headers } = this.page(items, page, per_page)
+          await this.afterCheckRead?.()
           return { data: { total_count: items.length, check_runs: data }, headers }
         },
       },
@@ -3088,6 +3091,140 @@ test('unknown app evidence is retained and required checks still must succeed', 
   const held = await evaluateFake(fake)
   assert.deepEqual(held.toMerge, [])
   assert.deepEqual(held.unreadable, [])
+})
+
+async function assertAuthorizationQuality(
+  admitted: boolean,
+  quality: 'green' | 'red' | 'unreadable',
+) {
+  const fake = new Fake()
+  if (!admitted) fake.comments[7] = []
+  if (quality === 'red') fake.checks[HEAD][0].conclusion = 'failure'
+  if (quality === 'unreadable') fake.errors[`checks:${HEAD}`] = 503
+  const log = core()
+  const result = await evaluate({
+    github: fake.github,
+    repo,
+    payload: { inputs: { pr: '7' } },
+    core: log,
+    policy,
+  })
+  assert.equal(
+    result.toMerge.length,
+    admitted && quality === 'green' ? 1 : 0,
+    `${admitted}/${quality}`,
+  )
+  assert.equal(
+    result.unreadable.length,
+    admitted && quality === 'unreadable' ? 1 : 0,
+    `${admitted}/${quality}`,
+  )
+  assert.equal(fake.calls.includes(`checks:${HEAD}`), admitted, `${admitted}/${quality}`)
+  if (!admitted) assert.ok(log.lines.some((line) => line.includes('authorization held')))
+  if (admitted && quality === 'red')
+    assert.ok(log.lines.some((line) => line.includes('failed CI=failure')))
+}
+
+test('initial evaluation reads authorization before quality with admitted controls', async () => {
+  for (const admitted of [false, true]) {
+    for (const quality of ['green', 'red', 'unreadable'] as const) {
+      await assertAuthorizationQuality(admitted, quality)
+    }
+  }
+  const blocked = new Fake()
+  blocked.checks[HEAD][0].conclusion = 'failure'
+  blocked.errors['comments:7:1'] = 503
+  const result = await evaluateFake(blocked)
+  assert.equal(result.unreadable.length, 1)
+  assert.ok(!blocked.calls.includes(`checks:${HEAD}`))
+})
+
+test('scope changes during authorization hold before quality', async () => {
+  for (const field of ['head', 'base']) {
+    const fake = new Fake()
+    fake.branches.staging = BASE_A
+    const original = fake.github.rest.pulls.get
+    let reads = 0
+    fake.github.rest.pulls.get = async (params) => {
+      const response = await original(params)
+      if (++reads === 2) {
+        if (field === 'head') response.data.head.sha = OTHER
+        else response.data.base.ref = 'staging'
+      }
+      return response
+    }
+    const log = core()
+    const result = await evaluate({
+      github: fake.github,
+      repo,
+      payload: { inputs: { pr: '7' } },
+      core: log,
+      policy,
+    })
+    assert.deepEqual(result.toMerge, [], field)
+    assert.deepEqual(result.unreadable, [], field)
+    assert.ok(!fake.calls.includes(`checks:${HEAD}`), field)
+    assert.ok(
+      log.lines.some((line) => line.includes('authorization held')),
+      field,
+    )
+  }
+})
+
+test('authorization changes during quality cannot survive final landing revalidation', async () => {
+  for (const replacement of [false, true]) {
+    const fake = new Fake()
+    const input = { github: fake.github, repo, prNumber: 7, policy }
+    fake.afterCheckRead = async () => {
+      fake.afterCheckRead = undefined
+      if (replacement) {
+        const snapshot = await captureAuthorization(input)
+        await issueAuthorization({
+          ...input,
+          writer: fake.writer,
+          snapshot,
+          lane: 'reviewed',
+          source: 'manual',
+          evidence: 'new review',
+          operationId: 'quality-reissue',
+        })
+      } else {
+        await withdrawAuthorization({
+          ...input,
+          writer: fake.writer,
+          operationId: 'quality-withdraw',
+          reason: 'stop',
+        })
+      }
+    }
+    const selected = await evaluateFake(fake)
+    assert.equal(selected.toMerge.length, 1)
+    const result = await landFake(fake, selected.toMerge)
+    assert.deepEqual(fake.merges, [])
+    assert.deepEqual(result.unreadable, [])
+  }
+})
+
+test('prioritized unadmitted dispatch candidate does not hide admitted quality verdicts', async () => {
+  const fake = pair()
+  fake.comments[7] = []
+  fake.checks[HEAD][0].conclusion = 'failure'
+  const log = core()
+  const result = await evaluate({
+    github: fake.github,
+    repo,
+    payload: { inputs: { pr: '7' } },
+    core: log,
+    policy,
+  })
+  assert.deepEqual(
+    result.toMerge.map((candidate) => candidate.number),
+    [8],
+  )
+  assert.deepEqual(result.unreadable, [])
+  assert.ok(log.lines.some((line) => line.includes('PR #7: authorization held')))
+  assert.ok(!fake.calls.includes(`checks:${HEAD}`))
+  assert.ok(fake.calls.includes(`checks:${OTHER}`))
 })
 
 let failed = 0
