@@ -51,7 +51,7 @@ The gate queues the exact receipt during evaluation and requires that same recei
 
 Initial evaluation checks admission before quality: an unadmitted PR is reported with its authorization reason, not a green quality verdict. Admitted PRs receive the complete quality assessment. At landing, fresh quality precedes the final fresh authorization read and exact-receipt comparison.
 
-The completion filter is intended to cover arbitrary workflow names while excluding the reserved gate name; its exact ordered exclusion requires hosted qualification. Automatic evaluations without candidates do not mint a merge token; default-ref dispatch retains the configured-App mint diagnostic even with no candidates. Neither wakeup nor mint proves admission.
+The completion filter is intended to cover arbitrary workflow names while excluding the reserved gate name. See the [wakeup contract](./testing.md#merge-wakeup-contract) for bounded hosted evidence and delivery limits. Automatic evaluations without candidates do not mint a merge token; default-ref dispatch retains the configured-App mint diagnostic even with no candidates. Neither wakeup nor mint proves admission.
 
 ## Holds, repair and residual risk
 
