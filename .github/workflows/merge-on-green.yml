@@ -8,11 +8,15 @@ on:
     types: [synchronize, reopened]
     branches: [main, staging]
   pull_request_target:
-    types: [labeled, synchronize, reopened]
+    types: [labeled, synchronize, reopened, edited]
     branches: [main, staging]
   workflow_run:
-    workflows: [Secret scan, CI, Product CI]
+    # Reserved gate name; ordered exclusion requires hosted qualification.
+    workflows: ['**', '!Merge on Green']
     types: [completed]
+  status:
+  push:
+    branches: [main, staging]
   issue_comment:
     types: [created]
   workflow_dispatch:
@@ -34,6 +38,20 @@ jobs:
   # contain the adapter. That event never authorizes; return before require. Privileged
   # events classify with the existing strict policyFromEnv only.
   preflight:
+    # Payload hints avoid provable no-ops; authorization is always read afresh.
+    if: >-
+      github.event_name != 'pull_request' &&
+      (github.event_name != 'workflow_dispatch' ||
+       github.ref == format('refs/heads/{0}', github.event.repository.default_branch)) &&
+      (github.event_name != 'issue_comment' ||
+       (github.event.issue.pull_request &&
+        (!github.event.comment.body || startsWith(github.event.comment.body, '<!-- kit-head-authorization:v1 -->')))) &&
+      (github.event_name != 'pull_request_target' ||
+       ((github.event.action != 'synchronize' && github.event.action != 'reopened') ||
+        github.event.pull_request.user.id != 49699333) &&
+       (github.event.action != 'labeled' || !github.event.label.name ||
+        github.event.label.name == 'reviewed' || github.event.label.name == 'deps-automerge') &&
+       (github.event.action != 'edited' || !!github.event.changes.base))
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -97,13 +115,18 @@ jobs:
       cancel-in-progress: false
     if: >-
       needs.preflight.outputs.eligible == 'true' &&
-      ((github.event_name == 'workflow_run' ||
+      ((github.event_name == 'workflow_run' || github.event_name == 'status' ||
+        github.event_name == 'push' ||
         (github.event_name == 'workflow_dispatch' &&
          github.ref == format('refs/heads/{0}', github.event.repository.default_branch))) ||
-       (github.event_name == 'pull_request_target' && github.event.action == 'labeled' &&
-        (github.event.label.name == 'reviewed' || github.event.label.name == 'deps-automerge') &&
-        github.event.pull_request.head.repo.full_name == github.repository &&
-        github.actor != 'dependabot[bot]') ||
+       (github.event_name == 'pull_request_target' &&
+        ((github.event.action == 'labeled' &&
+          (!github.event.label.name || github.event.label.name == 'reviewed' ||
+           github.event.label.name == 'deps-automerge') &&
+          (!github.event.pull_request.head.repo.full_name ||
+           github.event.pull_request.head.repo.full_name == github.repository) &&
+          github.actor != 'dependabot[bot]') ||
+         (github.event.action == 'edited' && !!github.event.changes.base))) ||
        (github.event_name == 'issue_comment' && github.event.issue.pull_request))
     runs-on: ubuntu-latest
     # Full retained-event scans and GitHub mergeability reads need recovery time; this is not a capacity claim.
@@ -114,19 +137,11 @@ jobs:
       HEAD_AUTH_APP_ID: ${{ vars.HEAD_AUTH_APP_ID }}
       HEAD_AUTH_BOT_USER_ID: ${{ vars.HEAD_AUTH_BOT_USER_ID }}
     steps:
-      - name: Resolve kit-ci availability
-        id: cfg
-        env:
-          APP_ID: ${{ vars.CI_APP_ID }}
+      - name: Report inactive kit-ci
+        if: needs.preflight.outputs.enabled != 'true'
         run: |
-          if [ -n "$APP_ID" ]; then
-            echo "enabled=true" >> "$GITHUB_OUTPUT"
-            echo "kit-ci: App ID present → auto-merge enabled"
-          else
-            echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "::notice title=kit-ci not configured::Auto-merge OFF. Evaluation requires a complete head-authorization policy and does not run when that policy is absent. Operator-authorized merge after normal current-head review admission and quality CI still works. Install App + set repo-level CI_APP_ID and CI_APP_PRIVATE_KEY (required on Free private; org values do not reach private repos on Free) — docs/kit/ci-app-setup.md"
-            echo "::warning title=Manual merge required::Normal current-head review admission remains required; label reviewed will NOT auto-merge until kit-ci is set up."
-          fi
+          echo "::notice title=kit-ci not configured::Auto-merge OFF. Evaluation requires a complete head-authorization policy and does not run when that policy is absent. Operator-authorized merge after normal current-head review admission and quality CI still works. Install App + set repo-level CI_APP_ID and CI_APP_PRIVATE_KEY (required on Free private; org values do not reach private repos on Free) — docs/kit/ci-app-setup.md"
+          echo "::warning title=Manual merge required::Normal current-head review admission remains required; label reviewed will NOT auto-merge until kit-ci is set up."
 
       # Dispatch is reserved for trusted operators on the default ref. An older workflow
       # revision can omit this guard; the preflight checkout fixes the trusted code revision.
@@ -158,12 +173,14 @@ jobs:
             core.setOutput('to_merge', JSON.stringify(toMerge));
             core.setOutput('unreadable', JSON.stringify(unreadable));
 
-      # Minting after preselection is hygiene, not the authorization boundary. It intentionally runs
-      # on every enabled evaluation so docs/kit/ci-app-setup.md can confirm the App by dispatch.
+      # Default-ref dispatch also mints without candidates for the configuration diagnostic.
       # The App client only merges; all fresh verdict reads retain the read-only token.
       - name: Mint app token (kit-ci)
         id: app
-        if: ${{ !cancelled() && steps.cfg.outputs.enabled == 'true' }}
+        if: >-
+          !cancelled() && needs.preflight.outputs.enabled == 'true' &&
+          (github.event_name == 'workflow_dispatch' ||
+           (steps.evaluate.outputs.to_merge != '' && steps.evaluate.outputs.to_merge != '[]'))
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           # client-id accepts the numeric App ID; this is the documented kit-ci setup path.
@@ -177,7 +194,7 @@ jobs:
       - name: Merge green PRs
         id: merge
         if: >-
-          steps.cfg.outputs.enabled == 'true' &&
+          needs.preflight.outputs.enabled == 'true' &&
           steps.app.outcome == 'success' &&
           steps.evaluate.outputs.to_merge != '' &&
           steps.evaluate.outputs.to_merge != '[]'
@@ -216,7 +233,7 @@ jobs:
       - name: Summary
         if: always()
         env:
-          ENABLED: ${{ steps.cfg.outputs.enabled }}
+          ENABLED: ${{ needs.preflight.outputs.enabled }}
           TO_MERGE: ${{ steps.evaluate.outputs.to_merge }}
           EVALUATE_OUTCOME: ${{ steps.evaluate.outcome }}
           EVALUATE_UNREADABLE: ${{ steps.evaluate.outputs.unreadable }}
