@@ -201,14 +201,17 @@ function actionSuites(checks) {
 /** @param {Set<any>} suites @param {any} index */
 function actionProducers(suites, index) {
   const workflows = new Set()
+  const producers = new Set()
   for (const suite of suites) {
     const run = index.bySuite.get(suite)
     if (run === undefined) throw new Error('unmatched Actions suite')
     workflows.add(run.workflow_id)
+    producers.add(producerKey(run, index.context))
   }
-  return new Set(
-    [...index.latest].filter(([, run]) => workflows.has(run.workflow_id)).map(([key]) => key),
-  )
+  for (const [key, run] of index.latest) {
+    if (key.startsWith('pr:') && workflows.has(run.workflow_id)) producers.add(key)
+  }
+  return producers
 }
 
 /** @param {GitHubPort} github @param {Repo} repo @param {any} run */

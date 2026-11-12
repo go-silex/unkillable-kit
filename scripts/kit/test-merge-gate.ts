@@ -373,14 +373,12 @@ class Fake {
         }) => {
           this.assertRepo({ owner, repo: repoName })
           this.fail(`pulls.list:${page ?? 1}`)
-          const pulls = Object.values(this.prs)
-          return this.page(
-            state === 'all' && head
-              ? pulls.filter((pr) => `${pr.head.repo.owner.login}:${pr.head.ref}` === head)
-              : pulls,
-            page,
-            per_page,
+          const pulls = Object.values(this.prs).filter(
+            (pr) =>
+              ((state ?? 'open') === 'all' || pr.state === (state ?? 'open')) &&
+              (!head || `${pr.head.repo.owner.login}:${pr.head.ref}` === head),
           )
+          return this.page(pulls, page, per_page)
         },
         get: async ({
           owner,
@@ -2596,6 +2594,129 @@ const freshnessFixture = () => {
   return fake
 }
 
+test('independent runs vote only once their own checks are listed', async () => {
+  for (const state of ['queued', 'action_required', 'failure']) {
+    const fake = freshnessFixture()
+    const independent = actionsRun(3, 10, 13)
+    independent.head_repository = { id: 2 }
+    independent.status = state === 'queued' ? 'queued' : 'completed'
+    independent.conclusion = state === 'queued' ? null : state
+    fake.runs[HEAD].push(independent)
+    const selected = await evaluateFake(fake)
+    assert.equal(selected.toMerge.length, 1, state)
+    assert.deepEqual(selected.unreadable, [], state)
+    await landFake(fake, selected.toMerge)
+    assert.equal(fake.merges.length, 1, state)
+  }
+  for (const state of ['pending', 'skipped', 'failure']) {
+    const fake = freshnessFixture()
+    const independent = actionsRun(3, 10, 13)
+    independent.head_branch = 'other'
+    const check = actionsCheck('CI', 13, state === 'pending' ? null : state)
+    if (state === 'pending') {
+      independent.status = 'queued'
+      independent.conclusion = null
+      check.status = 'queued'
+    } else {
+      fake.jobs[3] = { 1: [actionsJob(13000, 'CI', state)] }
+    }
+    fake.runs[HEAD].push(independent)
+    fake.checks[HEAD].push(check)
+    const result = await evaluateFake(fake)
+    assert.deepEqual(result.toMerge, [], state)
+    assert.deepEqual(result.unreadable, [], state)
+  }
+})
+
+test('proven own queued producer holds even before its checks register', async () => {
+  for (const foreignOnly of [false, true]) {
+    const fake = freshnessFixture()
+    fake.runs[HEAD][1].status = 'queued'
+    fake.runs[HEAD][1].conclusion = null
+    if (foreignOnly) {
+      const foreign = actionsRun(3, 10, 13)
+      foreign.head_repository = { id: 2 }
+      fake.runs[HEAD].push(foreign)
+      fake.jobs[3] = { 1: [actionsJob(13000, 'CI')] }
+      fake.checks[HEAD][0] = actionsCheck('CI', 13)
+    }
+    const result = await evaluateFake(fake)
+    assert.deepEqual(result.toMerge, [], String(foreignOnly))
+    assert.deepEqual(result.unreadable, [], String(foreignOnly))
+  }
+})
+
+test('proven own jobs can supply required CI without a registered own suite', async () => {
+  for (const outcome of ['success', 'failure', 'queued', 'unproven']) {
+    const fake = freshnessFixture()
+    const foreign = actionsRun(3, 10, 13)
+    foreign.head_repository = { id: 2 }
+    fake.runs[HEAD].push(foreign)
+    fake.jobs[3] = { 1: [actionsJob(13000, 'optional')] }
+    fake.checks[HEAD][0] = actionsCheck('optional', 13)
+    if (outcome === 'failure') fake.jobs[2][1] = [actionsJob(12000, 'CI', 'failure')]
+    if (outcome === 'queued') {
+      fake.runs[HEAD][1].status = 'queued'
+      fake.runs[HEAD][1].conclusion = null
+    }
+    if (outcome === 'unproven') {
+      fake.prs[8] = fake.pr(8, HEAD)
+      fake.prs[8].state = 'closed'
+    }
+    const result = await evaluateFake(fake)
+    assert.equal(result.toMerge.length, outcome === 'success' ? 1 : 0, outcome)
+    assert.deepEqual(result.unreadable, [], outcome)
+  }
+})
+
+test('unproven context counts only listed checks and cannot replace old evidence', async () => {
+  const fake = freshnessFixture()
+  fake.prs[8] = fake.pr(8, HEAD)
+  fake.prs[8].state = 'closed'
+  fake.checks[HEAD][0].conclusion = 'success'
+  fake.jobs[1][1] = [actionsJob(11000, 'CI')]
+  fake.runs[HEAD][1].status = 'queued'
+  fake.runs[HEAD][1].conclusion = null
+  assert.equal((await evaluateFake(fake)).toMerge.length, 1)
+  const pending = actionsCheck('CI', 12, null)
+  pending.status = 'queued'
+  fake.checks[HEAD].push(pending)
+  const held = await evaluateFake(fake)
+  assert.deepEqual(held.toMerge, [])
+  assert.deepEqual(held.unreadable, [])
+  fake.runs[HEAD][1].status = 'completed'
+  fake.runs[HEAD][1].conclusion = 'success'
+  pending.status = 'completed'
+  pending.conclusion = 'success'
+  fake.checks[HEAD][0].conclusion = 'skipped'
+  fake.jobs[1][1] = [actionsJob(11000, 'CI', 'skipped')]
+  const oldSkipped = await evaluateFake(fake)
+  assert.deepEqual(oldSkipped.toMerge, [])
+  assert.deepEqual(oldSkipped.unreadable, [])
+})
+
+test('listed independent reruns and changing unlisted runs hold fresh assessment', async () => {
+  const fake = freshnessFixture()
+  const independent = actionsRun(3, 10, 13, 2)
+  independent.head_branch = 'other'
+  independent.status = 'queued'
+  independent.conclusion = null
+  fake.runs[HEAD].push(independent)
+  const staticResult = await evaluateFake(fake)
+  assert.equal(staticResult.toMerge.length, 1)
+  fake.afterJobs = () => {
+    independent.status = 'in_progress'
+  }
+  const changed = await evaluateFake(fake)
+  assert.deepEqual(changed.toMerge, [])
+  assert.deepEqual(changed.unreadable, [])
+  fake.afterJobs = undefined
+  fake.checks[HEAD].push(actionsCheck('CI', 13))
+  const listed = await evaluateFake(fake)
+  assert.deepEqual(listed.toMerge, [])
+  assert.deepEqual(listed.unreadable, [])
+})
+
 test('distinct Actions execution contexts cannot supersede a PR run', async () => {
   for (const variant of [
     'push',
@@ -2648,6 +2769,7 @@ test('another historical PR or a base retarget prevents cross-run replacement', 
       fake.baseEvents = 1
       fake.baseEventType = variant
     } else {
+      assert.equal((await evaluateFake(fake)).toMerge.length, 1)
       fake.prs[8] = fake.pr(8, HEAD)
       fake.prs[8].state = 'closed'
     }
