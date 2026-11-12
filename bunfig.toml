@@ -12,6 +12,6 @@
 # "No version matching … blocked by minimum-release-age"; Bun's docs say existing lock entries
 # are untouched — they are not). So installs that must reproduce an already-reviewed lock pass
 # `--minimum-release-age 0`: ci.yml, scripts/kit/cf-builds/install-monorepo.sh, worktree-setup.sh.
-# Otherwise a reviewed security update (never delayed by Dependabot's cooldown) would break CI,
+# Otherwise a reviewed fix younger than 3 days would break CI,
 # every Workers Build and every new worktree for its first 3 days.
 minimumReleaseAge = 259200

@@ -40,6 +40,7 @@
     ".github/ISSUE_TEMPLATE/bug.yml",
     ".github/ISSUE_TEMPLATE/feature.yml",
     ".github/dependabot.yml",
+    ".github/dependabot.yaml",
     ".github/workflows/ci.yml",
     ".github/workflows/deploy-main.yml",
     ".github/workflows/secret-scan.yml",

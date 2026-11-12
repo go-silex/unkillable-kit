@@ -54,6 +54,10 @@ Distinguish cold task/transform caches from warm runs, and record the runner, ca
 
 The measured multi-file Auth, Flows, UI, Example API and Example Web suites use all available CPUs only when the existing `CI` flag is non-empty. Without it, Vitest's run/watch worker defaults remain unchanged. Local Root executes the complete ordered recipe sequentially and fails fast. `COVERAGE_CHANGED_BASE` is a local seam and cannot execute the Root gate.
 
+The existing Coverage plan runner first checks inheritance and zero-edit with Node and full Git history, before Bun setup, installations or coverage matrix expansion. Root core and coverage depend on that plan; the final `ci` join runs after a failed plan and requires its success as well as all receipt producers. Missing, skipped or failed prerequisite evidence is never a successful join. Separate Product CI and Secret scan remain independent and blocking.
+
+`test:dogfood-zero-edit` also exercises the canonical Product Dependabot configuration and Node-only inheritance preflight. Ownership fixtures reject protected Product manifest edits and noncanonical/disabled configurations; dependency-admission fixtures separately evaluate immutable Product identity and protected manifest paths while retaining whole-lock supply-chain checks. These local fixtures do not prove hosted Bun updater diffs, App-only shared-lock regeneration or GitHub runner savings.
+
 CI runs its ordered Core complement on one hosted VM. The read-only Root `--coverage-plan` mode partitions the complete discovered Coverage bar: every App has a dedicated job, while Packages are distributed round-robin into groups of at most four, preserving their relative order inside each group. Packages in a group share a VM and filesystem, but each workspace runs in a separate canonical Root process through the same `bunx vitest run --coverage` invocation, with unchanged per-file isolation and coverage floors. The coverage script itself stays sequential when it runs more than one workspace. No runner-level worker override changes Product configurations.
 
 Each workspace produces its own receipt. Ordinary workspace failures do not prevent later members of the group from running; any failure keeps the group red. Before the next invocation clears `coverage/`, the entire available report tree is moved into a workspace-qualified directory, including after a failed invocation. Receipt and report artifacts remain separate.
@@ -69,6 +73,8 @@ Vitest 5.0.5 enables persistent transformed-module caching by default. A cold pr
 ### Merge residual (GitHub Free private)
 
 The maintained merge gate uses an authenticated receipt bound to the repository, PR and exact head, not a `reviewed` or `deps-automerge` label. Dependabot receipts also bind the evaluated base SHA. See [CI App setup](./ci-app-setup.md#reviewed-head-authorization) and [the guard](./security-dependabot.md#auto-merge-guard).
+
+The explicitly adopted [temporary manual process](./processes/dev-process.md#parcours-manuel-transitoire--nouvelles-pr-sans-propriétaire-natif) permits a supervised SHA-pinned merge of a new manual PR without native ownership, after independent current-head review, resolved findings, the applicable local gate and successful current-head CI and secret scan. Its ordinary PR evidence comment is not an authorization receipt and never arms automation. Native ownership/refusal/withdrawal/exhaustion and succession rules are not bypassed. The automated gate below keeps its authenticated receipt protocol unchanged.
 
 On GitHub Free private, `merge-on-green` is **process**, not branch protection: no required checks or reviewers are implied.
 

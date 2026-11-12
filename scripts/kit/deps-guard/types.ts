@@ -16,6 +16,8 @@ export type ReasonCode =
   | 'WORKFLOW_BEYOND_PINS'
   | 'UNEXPECTED_FILE'
   | 'FOREIGN_COMMIT'
+  | 'OWNERSHIP_UNAVAILABLE'
+  | 'KIT_PATH'
 
 export type Reason = { code: ReasonCode; subject: string; detail: string }
 

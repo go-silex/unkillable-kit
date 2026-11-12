@@ -86,7 +86,16 @@ async function main(): Promise<void> {
       baseSha: required('--base'),
       baseRef: required('--base-ref'),
     }
-    const result = await evaluatePr({ repo, snapshot, cooldownSeconds, now, registry, api })
+    const result = await evaluatePr({
+      repo,
+      snapshot,
+      cooldownSeconds,
+      now,
+      registry,
+      api,
+      readOwnershipPolicy: () =>
+        readFileSync(join(ROOT, 'config/kit/zero-edit-zones.json'), 'utf8'),
+    })
     verdict = result
     headSha = result.snapshot.headSha
     if (args.includes('--pr-evaluate')) emitMachineVerdict(result)

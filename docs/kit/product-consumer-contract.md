@@ -46,6 +46,8 @@ Machine gates here only care: product does not dual-edit kit paths; `upstream` i
 | `lefthook.yml` | **kit** | **Do not edit or fork hooks through a tracked Lefthook local overlay.** Zero-edit does not detect such overlays; that limit grants no permission (ADR-0013 amendment 2026-10-13). Kit already runs deny-upstream + validate:full. |
 | `package.json` root scripts (validate:full, build:kit, …) | **kit** | **Do not edit.** Product scripts → `apps/<product>-*/package.json` or `scripts/product/*.sh` called from product workflow. |
 | `bunfig.toml` | **kit** | **Do not edit.** Install-time supply-chain policy (`minimumReleaseAge`, [security-dependabot.md](./security-dependabot.md)). |
+| `.github/dependabot.yml` | **Kit policy, bounded Product configuration** | Remains protected. Only the canonical Product App scan generated below may diverge; no broad root scan, inherited-workflow scan, empty updates or permanent exception. |
+| `.github/dependabot.yaml` | **Kit-reserved alternative filename** | **Do not create**, including with an exception. GitHub accepts this name too; the Kit ships none and requires the canonical `.yml` path to avoid an alternate scan. |
 | `biome.json` · `knip.ts` · `turbo.jsonc` · `tsconfig.json` · `commitlint*` | **kit** | **Do not edit** unless promoting a kit-wide change upstream first. The protected root `knip` script loads `knip.ts` with `--config knip.ts`, so that script never loads a root `knip.json`, `knip.jsonc`, `.knip.json` or `.knip.jsonc`. Knip still merges a `knip` key of the root `package.json` under `knip.ts` and takes the workspace set from a root `pnpm-workspace.yaml`; both paths are kit-owned (`protected_files`). Product Worker apps need no edit: knip ignores the `cloudflare` pseudo-dependency (`cloudflare:workers`) for every workspace via a root-level `ignoreDependencies`, and the root `tsconfig.json` covers `apps/*/scripts/**/*.ts`. |
 | `AGENTS.md` · root `README.md` · root `GLOSSARY.md` · `docs/kit/*` kit | **kit** | **Do not edit.** Product narrative → `docs/product/*` or `apps/<product>-*/README.md`. A product glossary stays under `docs/product/`. |
 | `docs/agents/issue-tracker.md` | **kit** | **Do not edit.** Tracker contract read by the agent skills at this fixed path; repo-agnostic, so it is inherited unchanged. Listed in `tool_mandated_paths` (the one carve-out to the inventory, [ADR-0009](./architecture/adr/0009-kit-namespace-polarity-inheritance-marker.md) D1 amendment) and in `protected_files`; any other `docs/*` path outside `docs/kit/` / `docs/product/` still fails. Product additions (lanes, extra label families) → `docs/product/issue-tracker.md`. Create its seven labels with `issue-triage init`, which keeps this file byte-identical (`contract: keep-existing`) — [start-product](./playbooks/start-product.md) day-0 step 5. |
@@ -54,6 +56,27 @@ Machine gates here only care: product does not dual-edit kit paths; `upstream` i
 | `scripts/kit/` · `tooling/` | **kit** | **Do not edit.** Product helpers → `scripts/product/` only. `tools/` is folded ([ADR-0011](./architecture/adr/0011-tools-fold-scripts-config-polarity.md)): must stay absent or empty; executable → `scripts/kit/`, data → `config/kit/`. |
 | `.dev.vars` · `.env` · CF secrets | product / env | **Never commit.** Copy from `*.example`. |
 | Wrangler product worker names / DB ids | product app | Only under **`apps/<product>-*/wrangler.toml`** (new file). `migrations_dir` must not resolve under `packages/` (not the apply path). |
+
+### Product Dependabot configuration
+
+GitHub fixes the configuration path at `.github/dependabot.yml`. That does not make dependency ownership a package-name rule: root and protected manifests belong to the Kit; other `apps/*/package.json` manifests belong to the Product. Shared dependency names do not transfer ownership.
+
+After adding Product App manifests to Git's index, run:
+
+```bash
+node scripts/kit/configure-product-dependabot.cjs
+bun run zero-edit
+```
+
+The Node-only generator reads the complete tracked Product App manifest inventory, excludes protected paths, and writes the canonical Bun version-update scan. The [example](./templates/product-dependabot.example.yml) illustrates its output; generate the real file, do not hand-copy placeholder directories. It requires a classified Product, a valid committed inherited baseline and complete history, and refuses protected manifest drift. A Product without any App manifests cannot generate a disabled/empty scan.
+
+Zero-edit still protects this path, with one content-bound alternative to inherited byte equality: the exact canonical generated file. No other protected path is exempted; ordinary inheritance/lineage and exception expiry checks still run. Regenerate when an App manifest is added, removed or renamed. A malformed, broadened, disabled or stale generated file fails, even with a time-boxed exception for this path. The unchanged inherited Kit configuration remains a legacy state, not evidence of a Product-isolated scanner; migrate it when onboarding Apps.
+
+The generated-file rule cannot be widened by an exception on its implementation: when `.github/dependabot.yml` diverges, the renderer and ownership policy must still match the inherited baseline. Promote renderer or ownership changes through the Kit first.
+
+On every Kit upgrade, keep the Product configuration through conflict resolution and inherit the new generator and policy. The generator requires the new baseline to be an ancestor of committed `HEAD`: finish the upgrade merge and marker commit first, then regenerate, stage and commit any refresh through normal hooks **before pushing or running the final gates**. It refuses an open merge or an uncommitted marker. If a future renderer-policy change makes the preserved scan incompatible with a merge hook, stop and obtain a Kit-side migration; never bypass that hook or weaken marker lineage. Do not take the incoming Kit root scan or keep stale generated bytes. This is a bounded customization, not unrestricted Product ownership of the file.
+
+Directories are scan controls, **not proof of isolated Bun mutations or shared-root-lock support**. Cross-owner robot diffs remain forbidden by zero-edit and withheld by automatic dependency admission even with a zero-edit exception. Kit dependency fixes and inherited workflow pins land in the Kit then arrive through inheritance; Product-only workflow pins require reviewed Product updates. Review all of `bun.lock`, preserve every workspace's ranges/resolutions and prove frozen installation. If App-only scanning cannot yield a conforming shared-lock PR, use the [manual update route](./security-dependabot.md#kit-and-product-ownership), never a file-restoration filter, discarded lock or false green.
 
 ## Product local database commands
 
@@ -445,6 +468,7 @@ Pull kit updates from `upstream/main` into `main`. For `.dev/stack.yml`, keep th
 4. Copy env examples → gitignored local files only.
 5. Configure a target-only **kit-ci** App and repository-scoped credentials and authorization variables, or establish verified inactive App mode and use separately authorized manual merge — see [`ci-app-setup.md`](./ci-app-setup.md#trust-and-setup).
 6. Choose the Product's terms in the root `LICENSE` ([Zones](#zones)), then add product apps under `apps/<product>-*` only.
+   Stage the Product App manifests, then run `node scripts/kit/configure-product-dependabot.cjs` ([bounded configuration](#product-dependabot-configuration)); commit the generated file with the Product setup.
 7. When `apps/<product>-api` exists: `bash scripts/kit/kit-schema-sync.sh --app apps/<product>-api --modules core,audit` for a product that mounts Better Auth. The throttle needs the `audit` set. Omitted `--modules` syncs `core` ∪ the manifest `sets`, which is `core` only on a new product, and every non-exempt auth request then returns 500. Last-resort clones: `--adopt` immediately. Product domain SQL starts at `1000_`.
 8. Keep `bun run validate:full` green (kit bar). When `apps/<product>-*` exist, also wire product-validate / product-ci (see Product CI DoD below).
 
@@ -552,6 +576,13 @@ else
   bun install &&                   # kit may have added/removed a workspace; does NOT re-check versions the merge kept
   bun run lock-ranges:check &&     # every bun.lock resolution inside its workspace range (Roxabi/roxabi-boilerplate-cf#319)
   git add bun.lock config/product/inheritance.json && git commit --no-edit &&
+  if ! git diff --quiet upstream/main -- .github/dependabot.yml; then
+    node scripts/kit/configure-product-dependabot.cjs &&
+    git add .github/dependabot.yml &&
+    if ! git diff --cached --quiet -- .github/dependabot.yml; then
+      git commit -m "chore(deps): refresh Product Dependabot scan"
+    fi
+  fi &&
   bun run zero-edit                # must stay green (or refresh exceptions intentionally)
 fi
 ```
@@ -564,16 +595,22 @@ If `lock-ranges:check` fails, the merge is still open (no merge commit yet). Eac
 # Product workspace (apps/<product>-*): bun update rewrites that package.json too, so stage both.
 (cd apps/<product>-web && bun update <dep>)
 git add bun.lock apps/<product>-web/package.json
-# Kit workspace (., packages/*, kit apps): never bun update — it edits a kit zone. Take the kit lock;
-# bun install re-adds the product's own entries (it may re-resolve them). A kit range that is wrong is fixed in the kit.
-git checkout upstream/main -- bun.lock && bun install
-# Either way, re-check before the merge commit:
-bun run lock-ranges:check && git add bun.lock config/product/inheritance.json && git commit --no-edit && bun run zero-edit
+# A Kit workspace finding often means the text merge kept an old resolution, not a wrong Kit range.
+# STOP on that finding: inspect the complete pre-merge, incoming and merged locks;
+# resolve without losing/re-resolving Product entries or changing protected manifest ranges.
+# If that preservation cannot be demonstrated, obtain a reviewed Kit-side resolution before continuing.
+# For a resolved lock, re-check before the merge commit (zero-edit requires committed ancestry):
+bun run lock-ranges:check &&
+  bun install --frozen-lockfile --minimum-release-age 0 &&
+  git add bun.lock config/product/inheritance.json && git commit --no-edit
+# Then run the conditional Product scan refresh and final zero-edit from the upgrade block above.
 ```
 
-If conflict in a **kit zone** → product probably edited a forbidden path: restore kit version and move product change to a product path / design override.
+If conflict in a **kit zone**, restore the Kit version and move the Product change to a Product path / design override, **except** the bounded `.github/dependabot.yml` customization: preserve the Product scan and regenerate it after the upgrade merge as above. A conflict on that customization does not justify restoring the legacy root scan.
 
 Root `LICENSE` is not a kit zone ([Zones](#zones)). Its lines run on every merge, conflict or not, and also settle a `LICENSE` conflict: the merge commit keeps the root `LICENSE` presence and bytes of the pre-merge `HEAD`. A change of Product terms is its own reviewed commit, never part of a Kit merge.
+
+The bounded `.github/dependabot.yml` customization is the other deliberate content difference: preserve the Product scan through conflict resolution. After the upgrade merge and marker are committed, regenerate with the inherited generator, stage and commit any refresh through ordinary hooks, then run the final zero-edit and applicable local gates before any push ([configuration and migration limits](#product-dependabot-configuration)). The shared `bun.lock` is always reviewed in full; taking the Kit lock wholesale can erase or re-resolve Product dependencies and is not a safe conflict-resolution recipe.
 
 If product build breaks after pull → fix product code or contribute a kit fix **in kit first**.
 

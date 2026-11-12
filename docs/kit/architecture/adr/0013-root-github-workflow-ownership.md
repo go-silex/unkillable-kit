@@ -3,7 +3,7 @@ title: 'ADR-0013 — Root and GitHub workflow ownership (resolves ADR-0009 D3)'
 status: accepted
 normative: true
 date: 2026-09-01
-amended: 2026-11-11
+amended: 2026-11-12
 axial: false
 related:
   - docs/kit/architecture/adr/0001-primary-axis-packages-compose-apps.md
@@ -95,7 +95,7 @@ Root kit surfaces stay on `protected_files`. The list is [`config/kit/zero-edit-
 | `.claude/settings.json` | Claude plugin and marketplace enablement |
 | `docs/agents/issue-tracker.md` | Tracker contract omp-build skills read at this fixed path (`tool_mandated_paths`, ADR-0009 D1 amendment) |
 | `.github/PULL_REQUEST_TEMPLATE.md` | Kit PR checklist (security + CP mapping) |
-| `.github/dependabot.yml` | Dependabot bun + GitHub Actions update policy |
+| `.github/dependabot.yml` · `.github/dependabot.yaml` | Kit dependency policy; only the canonical `.yml` Product scan may diverge (D5). Kit ships no `.yaml`, and Products must not add one |
 | `.github/workflows/ci.yml` | Primary CI gate (`bun run validate:full`); does not deploy |
 | `.github/workflows/deploy-main.yml` | Retired no-op; showcase CD is Cloudflare Builds |
 | `.github/workflows/secret-scan.yml` | CI TruffleHog secondary secret scan |
@@ -123,11 +123,24 @@ The list does not shrink by deleting rules. A path leaves the list only after it
 
 **Amendment (2026-11-11, [Roxabi/roxabi-boilerplate-cf#591](https://github.com/Roxabi/roxabi-boilerplate-cf/issues/591)) — API-only `frontend: null`.** Replace the whole `frontend` block with `frontend: null` and keep that scalar on upgrade. No frontend App is required. The guard compares values, not filesystem existence. `~`, an implicit empty value, `Null`, a quoted string, a missing `frontend`, and a partial map still fail.
 
+
 Products accept the `GLOSSARY.md` rename and do not retain a root `CONTEXT.md`. The protected root `knip` script pins `--config knip.ts`; a product config discovered earlier by bare Knip is not loaded by that script. The [CP-KNIP non-claims](../../testing.md#env--i18n--license--import-boundary--non-claims) inventory remaining inputs.
 
 The commit-msg runner resolves the message path, exports checkout `GIT_DIR` and `GIT_WORK_TREE`, runs in an empty temporary directory and passes absolute `--cwd`, `--config` and `--edit` paths. This isolates commitlint and cosmiconfig discovery while preserving the checkout's `core.commentChar`; it does not close other runners' discovery or per-developer Node settings.
 
 Products must not fork kit hooks, including by committing a Lefthook local overlay. Zero-edit does not detect tracked overlays; per-developer `LEFTHOOK*` variables and Git `core.hooksPath` can also skip or replace hooks. CI backs up quality gates, `secret-scan.yml` backs up secret scanning, and GitHub write ACLs back up deny-upstream. **Commit-message rules have no CI backstop**: `pr-title.yml` lints only the PR title.
+
+### D5 — Content-bound customization at an externally fixed path
+
+**Amendment (2026-11-12).** This rule applies only when an external tool fixes the path, a Kit-owned pure renderer derives all permitted content from the tracked Product inventory, and zero-edit recomputes and compares those bytes exactly. Each additional path requires an ADR amendment; this is not a general Product configuration escape hatch.
+
+The only path is `.github/dependabot.yml`, fixed by GitHub. It stays in `protected_files`. A Product may replace inherited bytes only with `scripts/kit/configure-product-dependabot.cjs` output, derived from every tracked Product `apps/*/package.json` outside protected paths. The nonempty Bun-only version scan has explicit directories and inherited cooldown; it never scans root manifests or inherited workflows. The alternative `.github/dependabot.yaml` name is reserved and protected; Products must not create it. Arbitrary YAML, disabled scans and stale generated inventories fail, including with a time-boxed exception. An unchanged inherited `.yml` remains legacy, not evidence of Product isolation.
+
+When the generated file diverges, the renderer and ownership policy must match the inherited baseline even if exceptions cover them: an exception cannot redefine canonical content. Other marker-lineage, full-history and expiry checks remain. The generator requires a committed baseline and marker; finish the upgrade merge, regenerate, then commit any refresh through normal hooks before final gates or pushing. Inherited Actions pins and protected manifests still change in the Kit; Product-only pins use ordinary reviewed Product changes.
+
+Rejected alternatives: free Product-owned YAML admits arbitrary scans; permanent or repeated configuration exceptions do not establish bounded ownership; `/apps/*` plus `exclude-paths` relies on scan filtering to exclude Example Apps rather than enumerating protected-path ownership.
+
+`directories` / `exclude-paths` are scan controls, not a workspace mutation boundary. The shared `bun.lock` remains fully reviewed and co-owned; no hosted App-only root-lock regeneration is proved. Cross-owner PRs fail zero-edit and automatic admission. Use the [manual update route](../../security-dependabot.md#kit-and-product-ownership) when needed, never filtered/restored robot diffs or a wholesale lock transplant. The [consumer contract](../../product-consumer-contract.md#product-dependabot-configuration) owns upgrade ordering and migration limits.
 
 ## Consequences
 
@@ -145,7 +158,7 @@ Products must not fork kit hooks, including by committing a Lefthook local overl
 ### Neutral
 
 - Existing nine workflows are not renamed.
-- ADR-0009 D1 / D6 are unchanged; this ADR only resolves D3.
+- ADR-0009 D1 / D6 are unchanged; D1–D4 resolve D3, and D5 adds only the bounded fixed-path configuration rule.
 
 ## Non-goals
 
@@ -161,6 +174,8 @@ Products must not fork kit hooks, including by committing a Lefthook local overl
 - Façades rejected with recorded reasons
 - `bun.lock` remains unprotected (Roxabi/roxabi-boilerplate-cf#114)
 - Consumer contract states the `product-*.yml` rule
+- D5 permits only canonical generated `.github/dependabot.yml` bytes, with baseline-equal renderer/policy and a nonempty Product manifest inventory; exceptions cannot widen it.
+- `.github/dependabot.yaml` remains protected and forbidden in Products; Kit ships none.
 
 ## Refs
 

@@ -1,11 +1,11 @@
-# Dependabot — bun.lock + GitHub Actions.
-# Cooldown 3d on patch/minor (fleet convention). github-actions: default-days only
-# (semver-*-days rejected by GitHub for that ecosystem).
-# Ref: kit-marketplace dependabot + checkup dependabot-cooldown tests.
+# Kit Dependabot — bun.lock + inherited GitHub Actions.
+# Products: node scripts/kit/configure-product-dependabot.cjs generates the
+# bounded Product App scan at this same fixed path. Do not copy this root scan.
+# Cooldown 3d on patch/minor; github-actions supports default-days only.
 #
-# IMPORTANT: cooldown applies to VERSION updates only — NOT security/CVE updates.
-# Security alerts open immediately; Slack: .github/workflows/dependabot-alert-slack.yml
-# See docs/kit/security-dependabot.md
+# Bun supports VERSION updates, NOT native security-update PRs.
+# Keep alerts enabled; Slack's alert snapshot is manual, not continuous monitoring.
+# See docs/kit/security-dependabot.md for manual remediation and Kit escalation.
 #
 # Grouping policy (kit deps waves 2026-08):
 # - patch/minor bun → bun-dependencies
@@ -23,7 +23,7 @@
 # - cooldown below = bunfig.toml `minimumReleaseAge` (259200 s = 3 d). Keep both equal: check-deps-guard.ts reads the
 #   bunfig value as the guard's age threshold, and test:deps-guard fails when they drift from `default-days` here.
 # - deps-automerge is only applied after scripts/kit/check-deps-guard.ts passes (provenance, publisher, install
-#   scripts, age incl. security updates, advisories, unpinned/impostor action SHAs).
+#   scripts, age, advisories, unpinned/impostor action SHAs).
 #
 # Ecosystem is bun (not npm): the npm updater edits package.json and leaves
 # bun.lock stale, so CI `bun install --frozen-lockfile` fails before the suite.

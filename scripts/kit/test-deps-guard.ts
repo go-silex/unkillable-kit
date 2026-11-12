@@ -8,6 +8,7 @@
  * fire on ordinary bumps. Run: bun run test:deps-guard
  */
 import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { evaluateWorkflowChange } from './deps-guard/actions.ts'
@@ -141,7 +142,7 @@ test('a lock with no package change passes and checks nothing', async () => {
 })
 
 // ---------- npm: one case per WITHHOLD reason ----------
-test('TOO_YOUNG: a version younger than the cooldown is withheld (security updates skip Dependabot cooldown)', async () => {
+test('TOO_YOUNG: a version younger than the cooldown is withheld', async () => {
   const v = await npmVerdict([['hono', '4.13.9']], [['hono', '4.13.12']], { now: NOW_YOUNG })
   assert.deepEqual(codes(v), ['TOO_YOUNG'])
   assert.match(v.reasons[0]?.detail as string, /0\.6 d ago\), cooldown is 3\.0 d/)
@@ -587,10 +588,21 @@ const dependabotCommit = {
   commit: { message: metadata(), verification: { verified: true } },
 }
 
-async function prVerdict(opts: {
+type PrOptions = {
   author?: string
   commits?: unknown[]
   files?: string[]
+  fileStatus?: string
+  product?: boolean
+  policy?: string | null
+  marker?: string | null
+  headMarker?: string | null
+  declaration?: string | null
+  headDeclaration?: string | null
+  ownershipError?: boolean
+  policyReadError?: boolean
+  workflowHeadSha?: string
+  now?: Date
   head?: LockRow[]
   message?: string
   actualHead?: string
@@ -599,11 +611,75 @@ async function prVerdict(opts: {
   laterBase?: string
   refSha?: string
   compareTotal?: number
-}) {
+}
+
+function prIdentityRoutes(opts: PrOptions, marker: string | null, declaration: string | null) {
+  const routes = new Map<string, Response>()
+  const baseUrl = 'https://api.github.com/repos/o/r/contents/'
+  const add = (path: string, sha: string, value: string | null) => {
+    routes.set(
+      `${baseUrl}${path}?ref=${sha}`,
+      value === null ? new Response('', { status: 404 }) : new Response(value),
+    )
+  }
+  for (const sha of [MERGE_BASE, BASE, HEAD]) {
+    add(
+      'config/product/inheritance.json',
+      sha,
+      sha === HEAD && opts.headMarker !== undefined ? opts.headMarker : marker,
+    )
+    add(
+      'config/product/deploy-gate.json',
+      sha,
+      sha === HEAD && opts.headDeclaration !== undefined ? opts.headDeclaration : declaration,
+    )
+  }
+  if (opts.ownershipError) {
+    routes.set(
+      `${baseUrl}config/product/inheritance.json?ref=${BASE}`,
+      new Response('failure', { status: 500 }),
+    )
+  }
+  return routes
+}
+
+function prIdentityResponse(opts: PrOptions) {
+  const marker =
+    opts.marker === undefined
+      ? opts.product
+        ? JSON.stringify({ upstreamCommit: 'e'.repeat(40) })
+        : null
+      : opts.marker
+  const declaration =
+    opts.declaration === undefined ? (opts.product ? '{"workflows":[]}' : null) : opts.declaration
+  const routes = prIdentityRoutes(opts, marker, declaration)
+  return (url: string): Response | undefined => routes.get(url)
+}
+
+function prFixtureApi(opts: PrOptions) {
   const baseLock = lock([['hono', '4.13.9']])
   const headLock = lock(opts.head ?? [['hono', '4.13.12']])
   let pullReads = 0
   const fixtureFetch = githubFetch({
+    ...actionRoutes,
+    [`/repos/o/r/contents/.github/workflows/ci.yml?ref=${MERGE_BASE}`]: {
+      text: wf(SHA_OLD, 'v1.0.0'),
+    },
+    [`/repos/o/r/contents/.github/workflows/ci.yml?ref=${HEAD}`]: {
+      text: wf(opts.workflowHeadSha ?? SHA_GOOD, 'v1.1.0'),
+    },
+    [`/repos/o/r/contents/.github/workflows/product-ci.yml?ref=${MERGE_BASE}`]: {
+      text: wf(SHA_OLD, 'v1.0.0'),
+    },
+    [`/repos/o/r/contents/.github/workflows/product-ci.yml?ref=${HEAD}`]: {
+      text: wf(opts.workflowHeadSha ?? SHA_GOOD, 'v1.1.0'),
+    },
+    [`/repos/o/r/contents/.github/workflows/other.yml?ref=${MERGE_BASE}`]: {
+      text: wf(SHA_OLD, 'v1.0.0'),
+    },
+    [`/repos/o/r/contents/.github/workflows/other.yml?ref=${HEAD}`]: {
+      text: wf(SHA_GOOD, 'v1.1.0'),
+    },
     '/repos/o/r/git/ref/heads/main': {
       body: { ref: 'refs/heads/main', object: { sha: opts.refSha ?? BASE } },
     },
@@ -630,13 +706,17 @@ async function prVerdict(opts: {
             commit: { ...dependabotCommit.commit, message: opts.message ?? metadata() },
           },
         ],
-        files: (opts.files ?? ['bun.lock']).map((filename) => ({ filename, status: 'modified' })),
+        files: (opts.files ?? ['bun.lock']).map((filename) => ({
+          filename,
+          status: opts.fileStatus ?? 'modified',
+        })),
       },
     },
     [`/repos/o/r/contents/bun.lock?ref=${MERGE_BASE}`]: { text: baseLock },
     [`/repos/o/r/contents/bun.lock?ref=${HEAD}`]: { text: headLock },
   })
-  const api = createGitHubApi('t', async (url, init) => {
+  const identityResponse = prIdentityResponse(opts)
+  const currentResponse = (url: string): Response | undefined => {
     if (url.endsWith('/repos/o/r/git/ref/heads/main') && pullReads > 1 && opts.laterBase) {
       return Response.json({ ref: 'refs/heads/main', object: { sha: opts.laterBase } })
     }
@@ -654,8 +734,16 @@ async function prVerdict(opts: {
         head: { sha: opts.laterHead ?? HEAD },
       })
     }
-    return fixtureFetch(url, init)
-  })
+    return undefined
+  }
+  return createGitHubApi(
+    't',
+    async (url, init) => identityResponse(url) ?? currentResponse(url) ?? fixtureFetch(url, init),
+  )
+}
+
+async function prVerdict(opts: PrOptions) {
+  const api = prFixtureApi(opts)
   const registry = createNpmRegistry({
     fetchFn: npmFetch(basePackuments),
     backoffMs: 1,
@@ -665,7 +753,20 @@ async function prVerdict(opts: {
     repo: 'o/r',
     snapshot: SNAPSHOT,
     cooldownSeconds: COOLDOWN,
-    now: NOW_OK,
+    readOwnershipPolicy: () => {
+      if (opts.policyReadError || opts.policy === null) throw new Error('policy unavailable')
+      return (
+        opts.policy ??
+        JSON.stringify({
+          version: 1,
+          protected_prefixes: ['packages/', 'apps/example-api/', 'apps/example-web/'],
+          protected_files: ['package.json', '.github/workflows/ci.yml'],
+          kit_origin_allowlist: opts.product ? ['kit/repo'] : ['o/r'],
+          inheritance_file: 'config/product/inheritance.json',
+        })
+      )
+    },
+    now: opts.now ?? NOW_OK,
     registry,
     api,
   })
@@ -675,6 +776,104 @@ test('PR: a Dependabot-only bun.lock bump passes end to end (merge base read thr
   const v = await prVerdict({})
   assert.equal(v.verdict, 'PASS')
   assert.match(v.checked.join('\n'), /commits: 1 checked/)
+})
+
+test('manifest ownership follows paths, not shared dependency names or the shared lock', async () => {
+  for (const path of ['apps/product-web/package.json', 'apps/example-api-extra/package.json']) {
+    const product = await prVerdict({ product: true, files: [path, 'bun.lock'] })
+    assert.equal(product.verdict, 'PASS')
+  }
+  for (const path of [
+    'package.json',
+    'packages/ui/package.json',
+    'apps/example-api/package.json',
+    'apps/example-web/package.json',
+  ]) {
+    const product = await prVerdict({ product: true, files: [path, 'bun.lock'] })
+    assert.deepEqual(codes(product), ['KIT_PATH'])
+    assert.equal(product.reasons[0]?.subject, path)
+    const kit = await prVerdict({ files: [path, 'bun.lock'] })
+    assert.equal(kit.verdict, 'PASS')
+  }
+})
+
+test('ownership uses the trusted policy port without repository metadata or live default-branch policy reads', async () => {
+  // The GitHub fixture deliberately exposes neither repository metadata nor a remote policy.
+  const verdict = await prVerdict({
+    product: true,
+    files: ['apps/product-web/package.json', 'bun.lock'],
+  })
+  assert.equal(verdict.verdict, 'PASS')
+})
+
+test('protected workflow pins withhold in Product while Product and Kit pins remain eligible', async () => {
+  const kitWorkflow = '.github/workflows/ci.yml'
+  const productWorkflow = '.github/workflows/product-ci.yml'
+  const protectedUpdate = await prVerdict({ product: true, files: [kitWorkflow] })
+  assert.deepEqual(codes(protectedUpdate), ['KIT_PATH'])
+  assert.equal((await prVerdict({ product: true, files: [productWorkflow] })).verdict, 'PASS')
+  const unclassified = await prVerdict({ product: true, files: ['.github/workflows/other.yml'] })
+  assert.deepEqual(codes(unclassified), ['OWNERSHIP_UNAVAILABLE'])
+  assert.equal((await prVerdict({ files: [kitWorkflow] })).verdict, 'PASS')
+  const impostor = await prVerdict({
+    product: true,
+    files: [kitWorkflow],
+    workflowHeadSha: SHA_IMPOSTOR,
+  })
+  assert.deepEqual(codes(impostor), ['ACTION_IMPOSTOR', 'KIT_PATH'])
+})
+
+test('identity and policy uncertainty or transitions withhold admission', async () => {
+  for (const options of [
+    { product: true, policy: null },
+    { product: true, policy: '{' },
+    {
+      product: true,
+      policy:
+        '{"version":1,"protected_prefixes":[],"protected_files":[],"kit_origin_allowlist":[]}',
+    },
+    { product: true, marker: null },
+    { product: true, marker: '{' },
+    { product: true, marker: '{}' },
+    { marker: JSON.stringify({ upstreamCommit: 'e'.repeat(40) }) },
+    { product: true, declaration: null },
+    { product: true, declaration: '{' },
+    { product: true, headMarker: null },
+    { product: true, headDeclaration: null },
+    { product: true, ownershipError: true },
+    { product: true, policyReadError: true },
+  ]) {
+    const v = await prVerdict({ ...options, files: ['apps/product-web/package.json', 'bun.lock'] })
+    assert.ok(codes(v).includes('OWNERSHIP_UNAVAILABLE'), JSON.stringify(options))
+  }
+})
+
+test('nonmodified Product manifests are withheld even when rename source is unavailable', async () => {
+  for (const fileStatus of ['added', 'removed', 'renamed']) {
+    const v = await prVerdict({
+      product: true,
+      fileStatus,
+      files: ['apps/product-web/package.json', 'bun.lock'],
+    })
+    assert.ok(codes(v).includes('UNEXPECTED_FILE'))
+  }
+})
+
+test('ownership does not bypass signature, cooldown, or final snapshot checks', async () => {
+  const unsigned = {
+    ...dependabotCommit,
+    commit: { ...dependabotCommit.commit, verification: { verified: false } },
+  }
+  const options = {
+    product: true,
+    files: ['packages/ui/package.json', 'bun.lock'],
+    commits: [unsigned],
+    now: NOW_YOUNG,
+  }
+  const v = await prVerdict(options)
+  assert.deepEqual(codes(v), ['FOREIGN_COMMIT', 'KIT_PATH', 'TOO_YOUNG'])
+  await assert.rejects(() => prVerdict({ ...options, laterHead: 'd'.repeat(40) }), /snapshot/)
+  await assert.rejects(() => prVerdict({ ...options, laterBase: 'd'.repeat(40) }), /base ref/)
 })
 
 test('FOREIGN_COMMIT: a human push onto the Dependabot branch (RED-05) is withheld', async () => {
@@ -751,14 +950,24 @@ test('comparison truncation or uncertain file cap never passes', async () => {
   )
 })
 // ---------- configuration invariants the guard depends on ----------
-test('bunfig.toml minimumReleaseAge equals both Dependabot cooldowns (3 d) — one age policy, no drift', async () => {
+test('bunfig.toml minimumReleaseAge equals every Dependabot cooldown — one age policy, no drift', async () => {
   const age = Bun.TOML.parse(readFileSync(join(ROOT, 'bunfig.toml'), 'utf8')) as {
     install?: { minimumReleaseAge?: number }
   }
   const dependabot = Bun.YAML.parse(readFileSync(join(ROOT, '.github/dependabot.yml'), 'utf8')) as {
     updates: { 'package-ecosystem': string; cooldown: { 'default-days': number } }[]
   }
-  assert.ok(dependabot.updates.length >= 2)
+  assert.ok(dependabot.updates.length >= 1)
+  const identity = execFileSync('node', [join(ROOT, 'scripts/kit/resolve-tree-identity.mjs')], {
+    cwd: ROOT,
+    encoding: 'utf8',
+    env: { ...process.env, ROOT, EXTRACT_MODE: '', EXTRACT_HARNESS_SENTINEL: '' },
+  })
+  assert.match(identity, /^mode=(kit|product) identity=/, 'tree identity must be explicit')
+  if (identity.startsWith('mode=kit ')) {
+    const ecosystems = dependabot.updates.map((u) => u['package-ecosystem'])
+    assert.ok(ecosystems.includes('bun') && ecosystems.includes('github-actions'))
+  }
   for (const u of dependabot.updates) {
     assert.equal(
       u.cooldown['default-days'] * DAY,

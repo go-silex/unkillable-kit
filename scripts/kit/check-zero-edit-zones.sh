@@ -17,7 +17,8 @@
 set -euo pipefail
 
 # Script lives at scripts/kit/ → monorepo is ../..
-ROOT="${ZERO_EDIT_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
+CHECKER_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT="${ZERO_EDIT_ROOT:-$(cd "$CHECKER_DIR/../.." && pwd)}"
 cd "$ROOT"
 
 ZONES_FILE="${ZERO_EDIT_ZONES_FILE:-config/kit/zero-edit-zones.json}"
@@ -26,14 +27,18 @@ if [[ ! -f "$ZONES_FILE" ]]; then
   exit 1
 fi
 
-export ROOT ZONES_FILE
+export ROOT ZONES_FILE CHECKER_DIR
 export ZERO_EDIT_MODE="${ZERO_EDIT_MODE:-}"
 export ZERO_EDIT_HARNESS_SENTINEL="${ZERO_EDIT_HARNESS_SENTINEL:-}"
+export ZERO_EDIT_DEPENDABOT_PREFLIGHT="${1:-}"
 
 exec node --input-type=module <<'NODE'
 import { readFileSync, existsSync } from 'node:fs'
 import { join, basename, resolve } from 'node:path'
 import { execFileSync } from 'node:child_process'
+import { createRequire } from 'node:module'
+import { lstatSync } from 'node:fs'
+const require = createRequire(join(process.env.ROOT, 'package.json'))
 
 const root = process.env.ROOT
 // resolve: ZERO_EDIT_ZONES_FILE may be absolute (dry-running a consumer with this checkout's zones).
@@ -486,9 +491,68 @@ const violations = []
 const expiredHits = []
 const covered = []
 
+const dependabotPath = '.github/dependabot.yml'
+// This fixed tool path is checked independently of the untrusted zones pathspecs:
+// an exception on zones must not suppress the canonical configuration rule.
+const dependabotChanged = [
+  ['diff', '--no-renames', '--name-only', '-z', baseRef, 'HEAD'],
+  ['diff', '--no-renames', '--name-only', '-z', 'HEAD'],
+  ['diff', '--no-renames', '--cached', '--name-only', '-z'],
+  ['ls-files', '--others', '--exclude-standard', '-z'],
+].some((args) => gitPaths([...args, '--', `:(literal)${dependabotPath}`]).length > 0)
+if (dependabotChanged) changed.add(dependabotPath)
+const dependabotPreflight = process.env.ZERO_EDIT_DEPENDABOT_PREFLIGHT === '--product-dependabot-preflight'
+const alternateDependabot = '.github/dependabot.yaml'
+let alternateExists = false
+try { lstatSync(join(root, alternateDependabot)); alternateExists = true } catch (error) {
+  if (error.code !== 'ENOENT') die(`cannot inspect ${alternateDependabot}: ${error.message}`)
+}
+if (alternateExists || gitPaths(['ls-files', '-z', '--', alternateDependabot]).length) {
+  die(`${alternateDependabot} is forbidden in Product; use the canonical .github/dependabot.yml`)
+}
+if (dependabotChanged || dependabotPreflight) {
+  for (const [path, actual] of [
+    ['config/kit/zero-edit-zones.json', zonesPath],
+    ['scripts/kit/lib/product-dependabot.cjs', join(process.env.CHECKER_DIR, 'lib/product-dependabot.cjs')],
+  ]) {
+    try {
+      if (!lstatSync(actual).isFile()) throw new Error('not a regular file')
+      const inherited = execFileSync('git', ['show', `${baseRef}:${path}`], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] })
+      if (!readFileSync(actual).equals(inherited)) throw new Error('differs from inherited baseline')
+      if (
+        gitPaths(['diff', '--no-renames', '--name-only', '-z', baseRef, 'HEAD', '--', path]).length ||
+        gitPaths(['diff', '--no-renames', '--name-only', '-z', 'HEAD', '--', path]).length ||
+        gitPaths(['diff', '--no-renames', '--cached', '--name-only', '-z', '--', path]).length
+      ) throw new Error('index, history or working tree differs from inherited baseline')
+    } catch (error) {
+      die(`untrusted Product Dependabot policy ${path}: ${error.message}`)
+    }
+  }
+}
+if (dependabotChanged && !dependabotPreflight) {
+  try {
+    for (const p of ['.github', dependabotPath]) {
+      const stat = lstatSync(join(root, p))
+      if (stat.isSymbolicLink() || (p === dependabotPath ? !stat.isFile() : !stat.isDirectory())) throw new Error('noncanonical file')
+    }
+    const indexEntry = git(['ls-files', '--stage', '--', dependabotPath])
+    if (!/^100644 [0-9a-f]+ 0\t\.github\/dependabot\.yml$/.test(indexEntry)) throw new Error('noncanonical index entry')
+    const { productManifestDirectories, renderProductDependabot } = require(join(process.env.CHECKER_DIR, 'lib/product-dependabot.cjs'))
+    const expected = renderProductDependabot(productManifestDirectories(root, zones))
+    if (readFileSync(join(root, dependabotPath), 'utf8') !== expected) throw new Error('content differs from canonical Product configuration')
+    if (gitPaths(['diff', '--cached', '--no-renames', '--name-only', '-z', '--', `:(literal)${dependabotPath}`]).length) {
+      const staged = execFileSync('git', ['show', `:${dependabotPath}`], { cwd: root, encoding: 'utf8' })
+      if (staged !== expected) throw new Error('staged content differs from canonical Product configuration')
+    }
+  } catch (error) {
+    die(`invalid Product Dependabot configuration: ${error.message}`)
+  }
+}
+
 for (const file of [...changed].sort()) {
   if (!isProtected(file)) continue
   if (isFreeProductAppPath(file)) continue
+  if (file === dependabotPath && !exceptionByPath.has(file)) continue
 
   const ex = exceptionByPath.get(file)
   if (!ex) {
@@ -575,7 +639,9 @@ if (failed) {
 }
 
 console.log(
-  `check-zero-edit-zones: OK (product mode, base=${baseRef}, source=${baseSource}, diverged_covered=${covered.length})`,
+  dependabotPreflight
+    ? `check-zero-edit-zones: PREFLIGHT ONLY (Dependabot content not validated, base=${baseRef})`
+    : `check-zero-edit-zones: OK (product mode, base=${baseRef}, source=${baseSource}, diverged_covered=${covered.length})`,
 )
 process.exit(0)
 NODE
