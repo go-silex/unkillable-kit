@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Flow run persistence
+
+- Commit run mutations and status/receipt events atomically, with path-specific Organization and snapshot fences. Failed-run closure checks ownership, preserves terminal status and errors during receipt cleanup, retains malformed receipt bytes and propagates the original exception.
+
 ### API-only stack contract
 
 - An API-only Product replaces the whole `.dev/stack.yml` `frontend` block with the canonical null scalar `frontend: null` and keeps that scalar on upgrade. No frontend App is required. The guard compares values, not filesystem existence; `~`, implicit empty, `Null`, a quoted string, a missing key, and a partial map still fail (Roxabi/roxabi-boilerplate-cf#591).

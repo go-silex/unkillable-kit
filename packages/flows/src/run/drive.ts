@@ -2,12 +2,12 @@
 
 import { z } from 'zod'
 import type { interpretRun } from '../interpret'
-import { emptyBundle, type ReceiptBundle, receiptsFromRow } from '../receipts'
+import { emptyBundle, parseReceipts, type ReceiptBundle } from '../receipts'
 import { parseRunnerView } from '../snapshot'
 import type { ApprovalNotificationPorts, AwaitApprovalPort } from './approve-step'
 import { driveWaves } from './drive-waves'
 import { DriveNonRetryableError } from './errors'
-import { claimRun, loadRun as defaultLoadRun, persistBundle, scrubReceiptJson } from './persist'
+import { claimRun, closeOwnedRun, loadRun as defaultLoadRun, persistBundle } from './persist'
 import {
   commitReceipts,
   type DriveStep,
@@ -63,35 +63,67 @@ async function failClosed(
 
 const closeRetries = { retries: { limit: 3 } } as const
 
-/** Port-free: leftover `started` becomes fail/RECEIPT_LOST. Open runs fail; terminal is receipt-only. */
-async function closeLostReceipts(step: DriveStep, io: StepReceiptCtx): Promise<void> {
+function closeStartedReceipts(raw: string | null) {
+  if (!raw) return null
+  try {
+    const parsed = parseReceipts(JSON.parse(raw) as unknown)
+    return parsed.ok ? failStartedTasks(parsed.receipts) : null
+  } catch {
+    // Preserve malformed receipt bytes while closing the run.
+    return null
+  }
+}
+
+async function rejectChangedClose(io: StepReceiptCtx, instanceId: string): Promise<void> {
+  const current = await defaultLoadRun(io.db, io.ids.runId, io.ids.orgId)
+  if (
+    current &&
+    (current.workflow_instance_id === null || current.workflow_instance_id === instanceId)
+  ) {
+    throw new Error('close snapshot changed')
+  }
+}
+
+/** Close an open run or scrub its terminal receipt, fenced to its owner. */
+async function closeFailedRun(
+  step: DriveStep,
+  io: StepReceiptCtx,
+  instanceId: string,
+): Promise<void> {
   await step(
     'persist:receipt-lost',
     async () => {
-      const row = await io.load(io.db, io.ids.runId, io.ids.orgId)
+      const row = await defaultLoadRun(io.db, io.ids.runId, io.ids.orgId)
       if (!row) return
-      const receipts = receiptsFromRow(row.receipt_json, io.taskIds)
-      if (!receipts) return
-      const closed = failStartedTasks(receipts)
-      if (!closed.lost) return
+      if (row.workflow_instance_id !== null && row.workflow_instance_id !== instanceId) return
+      const closed = closeStartedReceipts(row.receipt_json)
       const open = row.status === 'queued' || row.status === 'running'
-      if (open) {
-        await commitReceipts(io, {
-          status: 'failed',
-          bundle: closed.bundle,
-          errorCode: 'RECEIPT_LOST',
-        })
-        return
-      }
-      const changes = await scrubReceiptJson(io.db, {
-        runId: io.ids.runId,
-        orgId: io.ids.orgId,
-        receiptJson: JSON.stringify(closed.bundle),
+      if (!(open || closed?.lost)) return
+      const changes = await closeOwnedRun(io.db, {
+        ...io.ids,
+        instanceId,
+        beforeReceiptJson: row.receipt_json,
+        receiptJson: closed?.lost ? JSON.stringify(closed.bundle) : row.receipt_json,
+        errorCode: closed?.lost ? 'RECEIPT_LOST' : null,
       })
-      if (changes !== 1) throw new DriveNonRetryableError('persist lost')
+      if (changes !== 1) await rejectChangedClose(io, instanceId)
     },
     closeRetries,
   )
+}
+
+async function closeAndRethrow(
+  step: DriveStep,
+  io: StepReceiptCtx,
+  instanceId: string,
+  error: unknown,
+): Promise<never> {
+  try {
+    await closeFailedRun(step, io, instanceId)
+  } catch {
+    // The workflow must retain the original error even if closure exhausts its retries.
+  }
+  throw error
 }
 
 export type DriveFlowRunInput = {
@@ -125,33 +157,31 @@ export async function driveFlowRun(input: DriveFlowRunInput): Promise<void> {
   const ids = { runId, orgId }
   let io: StepReceiptCtx = { persist, load, db, ids, taskIds: [] }
 
-  await step(
-    'claim',
-    async () => {
-      const changes = await claimRun(db, { runId, orgId, instanceId })
-      if (changes === 0) throw new DriveNonRetryableError('claim lost')
-    },
-    noRetry,
-  )
-
-  const row = await step('load', () => load(db, runId, orgId), noRetry)
-  if (!row) throw new DriveNonRetryableError('run not found')
-
-  const viewParsed = parseSnapshot(row.snapshot_json)
-  if (!viewParsed.ok) {
-    return await failClosed(step, io, 'persist:invalid-view', 'RUNNER_VIEW_INVALID')
-  }
-  const view = viewParsed.runnerView
-  if (view.orgId !== orgId || view.orgId !== row.org_id) {
-    return await failClosed(step, io, 'persist:org-mismatch', 'ORG_MISMATCH')
-  }
-
-  const taskIds = Object.keys(view.sealedPlan.tasks)
-  io = { ...io, taskIds }
+  let claimed: number
   try {
+    claimed = await step('claim', () => claimRun(db, { runId, orgId, instanceId }), noRetry)
+  } catch (error) {
+    return await closeAndRethrow(step, io, instanceId, error)
+  }
+  if (claimed === 0) throw new DriveNonRetryableError('claim lost')
+
+  try {
+    const row = await step('load', () => load(db, runId, orgId), noRetry)
+    if (!row) throw new DriveNonRetryableError('run not found')
+
+    const viewParsed = parseSnapshot(row.snapshot_json)
+    if (!viewParsed.ok) {
+      return await failClosed(step, io, 'persist:invalid-view', 'RUNNER_VIEW_INVALID')
+    }
+    const view = viewParsed.runnerView
+    if (view.orgId !== orgId || view.orgId !== row.org_id) {
+      return await failClosed(step, io, 'persist:org-mismatch', 'ORG_MISMATCH')
+    }
+
+    const taskIds = Object.keys(view.sealedPlan.tasks)
+    io = { ...io, taskIds }
     await driveWaves({ input, view, row, io, taskIds, writeBundle, failClosed })
-  } catch (err) {
-    await closeLostReceipts(step, io)
-    throw err
+  } catch (error) {
+    return await closeAndRethrow(step, io, instanceId, error)
   }
 }

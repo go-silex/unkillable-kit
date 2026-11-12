@@ -10,6 +10,7 @@ import {
   recordRunApproval as recordRunApprovalRepo,
 } from '../repos'
 import { persistReceiptJson as persistReceiptJsonRepo } from '../repos/events'
+import { closeOwnedRun as closeOwnedRunRepo } from '../repos/run-mutations'
 
 export type FlowRunRow = {
   id: string
@@ -70,6 +71,22 @@ export async function claimRun(
   input: { runId: string; orgId: string; instanceId: string; now?: number },
 ): Promise<number> {
   return claimRunRepo(dbFromD1(db), input)
+}
+
+/** Atomically close an open run or scrub a terminal receipt, fenced to its owner. */
+export async function closeOwnedRun(
+  db: D1Database,
+  input: {
+    runId: string
+    orgId: string
+    instanceId: string
+    beforeReceiptJson: string | null
+    receiptJson: string | null
+    errorCode: string | null
+    now?: number
+  },
+): Promise<number> {
+  return closeOwnedRunRepo(dbFromD1(db), input)
 }
 
 /** Writes receipts + rollup. Returns meta.changes (1 = wrote). */

@@ -3,7 +3,7 @@ title: 'ADR-0005 — Flows platform: governed plans + durable runs (agentic SaaS
 status: accepted
 normative: true
 date: 2026-08-05
-amended: 2026-10-18
+amended: 2026-11-12
 axial: false
 related:
   - docs/kit/architecture/adr/0001-primary-axis-packages-compose-apps.md
@@ -178,6 +178,9 @@ infer allowed only if grant.allowsInfer === true
 
 
 - **Amendment (2026-09-29, Roxabi/roxabi-boilerplate-cf#230) — append-only `flow_run_events`.** Status CAS and task-receipt writes append an org-scoped event (`kind` `status`|`receipt`). Events are not a second snapshot and do not grant tools. No `output` column (redaction is Roxabi/roxabi-boilerplate-cf#231). List always filters `org_id`.
+
+- **Amendment (2026-11-12) — run mutations and their events are atomic.** Claim, state/receipt persistence, orphan receipt scrub and Workflow-create failure commit the accepted run mutation and every generated event in one D1 batch. An event insertion failure rolls back the mutation and preceding event inserts. Receipt-only persistence compares the Organization and prior receipt. Bundle persistence compares the Organization, state, receipt, error and owner field from its prior read, not the caller's identity. Failed-run closure additionally restricts the owner to the supplied instance or an unclaimed row and compares state, receipt, error and owner against its prior read. A refused mutation appends no event and an idempotent claim does not append a second claim event.
+
 #### Authn / authz
 
 | Concern | Rule |
@@ -192,7 +195,7 @@ infer allowed only if grant.allowsInfer === true
 
 - **Effect receipts and retries.** An effect step (`invoke`, `infer`) commits `started` before calling its port. Ordinarily a surviving `started` receipt closes as `fail` / `RECEIPT_LOST` without another port call; an open run remains running until rollup, while an already-terminal run receives only a receipt scrub. The exception is a native Workflow retry for an invoke whose sealed effect is `read`: it may resume the port from `started` without writing `started` again, with up to three retries. Exhausted read retries write `INVOKE_FAILED`. Write and unknown effects have zero native retries. Thus physical at-most-once execution is not claimed for read invokes. Recorded `ok`, `fail` or `skip` return without another port call; approvals use `waiting`, never `started`.
 
-  `interpretRun` never treats `started` as ready or waiting: dependents cascade-skip and the rollup fails. Terminal persistence and the port-free `persist:receipt-lost` failure step scrub remaining `started` receipts to `RECEIPT_LOST`; an open run fails and an already-terminal run receives a receipt-only scrub. A committed `started` whose acknowledgement is lost can fail even if the port never ran. The claimed Workflow instance is the single writer; `persistRunBundle` is blind read-modify-write, not CAS, so concurrent executions of the same step are not covered.
+  `interpretRun` never treats `started` as ready or waiting: dependents cascade-skip and the rollup fails. Terminal persistence and the port-free `persist:receipt-lost` failure step scrub remaining `started` receipts to `RECEIPT_LOST`; an open run fails and an already-terminal run receives a receipt-only scrub, preserving terminal status and error. A committed `started` whose acknowledgement is lost can fail even if the port never ran. The claimed native Workflow instance remains the single Durable owner. `persistRunBundle` uses compare-before-write predicates and an atomic state/receipt/event batch; this is not a claim of at-most-once port execution against concurrent executions of the same step. A claim or persistence exception before the first `started` also attempts a port-free failure close, restricted to the same instance or the still-unclaimed row; a refused claim never closes another owner. The original exception propagates, and a persistent D1 outage can prevent recording that close.
 
 #### Run snapshot / RunnerView (adversarial TOCTOU + dual-field fix)
 

@@ -2,6 +2,7 @@ import { drizzle } from 'drizzle-orm/d1'
 import { describe, expect, it } from 'vitest'
 import { flowsDrizzleSchema } from '../drizzle-schema'
 import { createMemoryDb } from '../run/test/memory-db'
+import { persistReceiptJson } from './events'
 import {
   claimRun,
   insertFlowRunEvent,
@@ -9,6 +10,7 @@ import {
   markQueuedRunCreateFailed,
   persistRunBundle,
 } from './index'
+import { closeOwnedRun } from './run-mutations'
 
 async function seedQueued(db: ReturnType<typeof createMemoryDb>, runId: string, orgId: string) {
   const now = Date.now()
@@ -159,5 +161,265 @@ describe('flow_run_events (Roxabi/roxabi-boilerplate-cf#230)', () => {
         statusTo: 'running',
       }),
     ).rejects.toThrow()
+  })
+
+  it('rolls back a claim if its status event aborts, then retries exactly once with ownership fences', async () => {
+    const db = createMemoryDb()
+    await seedQueued(db, 'atomic_claim', 'org_a')
+    const before = await db
+      .prepare(`SELECT status, workflow_instance_id, receipt_json, error_code, updated_at
+      FROM flow_runs WHERE id = ?`)
+      .bind('atomic_claim')
+      .first()
+    await db
+      .prepare(`CREATE TRIGGER reject_event BEFORE INSERT ON flow_run_events
+      WHEN EXISTS (SELECT 1 FROM flow_runs WHERE id = NEW.run_id AND org_id = NEW.org_id
+        AND status = 'running' AND workflow_instance_id = 'wf_1' AND updated_at = 123)
+      BEGIN SELECT RAISE(ABORT, 'event rejected'); END`)
+      .run()
+    const input = { runId: 'atomic_claim', orgId: 'org_a', instanceId: 'wf_1', now: 123 }
+    await expect(claimRun(kitDb(db), input)).rejects.toThrow()
+    expect(
+      await db
+        .prepare(`SELECT status, workflow_instance_id, receipt_json, error_code, updated_at
+      FROM flow_runs WHERE id = ?`)
+        .bind(input.runId)
+        .first(),
+    ).toEqual(before)
+    expect(await listFlowRunEvents(kitDb(db), 'org_a', input.runId)).toEqual([])
+    await db.prepare(`DROP TRIGGER reject_event`).run()
+    expect(await claimRun(kitDb(db), input)).toBe(1)
+    expect(await claimRun(kitDb(db), input)).toBe(1)
+    expect(await claimRun(kitDb(db), { ...input, instanceId: 'wf_2' })).toBe(0)
+    expect(await claimRun(kitDb(db), { ...input, orgId: 'org_b' })).toBe(0)
+    expect(await listFlowRunEvents(kitDb(db), 'org_a', input.runId)).toMatchObject([
+      { kind: 'status', statusFrom: 'queued', statusTo: 'running' },
+    ])
+  })
+
+  it('rolls back the bundle and earlier event inserts when a later receipt event aborts', async () => {
+    const db = createMemoryDb()
+    await seedQueued(db, 'atomic_bundle', 'org_a')
+    await claimRun(kitDb(db), { runId: 'atomic_bundle', orgId: 'org_a', instanceId: 'wf_1' })
+    const before = await db
+      .prepare(`SELECT status, receipt_json, error_code, updated_at FROM flow_runs WHERE id = ?`)
+      .bind('atomic_bundle')
+      .first()
+    const previousEvents = await listFlowRunEvents(kitDb(db), 'org_a', 'atomic_bundle')
+    await db
+      .prepare(`CREATE TRIGGER reject_second BEFORE INSERT ON flow_run_events
+      WHEN NEW.task_id = 'second' AND EXISTS (SELECT 1 FROM flow_runs
+        WHERE id = NEW.run_id AND org_id = NEW.org_id AND status = 'succeeded'
+        AND updated_at = 456 AND json_extract(receipt_json, '$.tasks.second.outcome') = 'ok')
+      BEGIN SELECT RAISE(ABORT, 'second rejected'); END`)
+      .run()
+    const input = {
+      runId: 'atomic_bundle',
+      orgId: 'org_a',
+      status: 'succeeded',
+      now: 456,
+      receiptJson: JSON.stringify({
+        receiptVersion: 1,
+        tokensUsed: 0,
+        tasks: {
+          first: { taskId: 'first', outcome: 'ok' },
+          second: { taskId: 'second', outcome: 'ok' },
+        },
+      }),
+    }
+    await expect(persistRunBundle(kitDb(db), input)).rejects.toThrow()
+    expect(
+      await db
+        .prepare(`SELECT status, receipt_json, error_code, updated_at FROM flow_runs WHERE id = ?`)
+        .bind(input.runId)
+        .first(),
+    ).toEqual(before)
+    expect(await listFlowRunEvents(kitDb(db), 'org_a', input.runId)).toEqual(previousEvents)
+    await db.prepare(`DROP TRIGGER reject_second`).run()
+    expect(await persistRunBundle(kitDb(db), { ...input, orgId: 'org_b' })).toBe(0)
+    expect(await persistRunBundle(kitDb(db), input)).toBe(1)
+    expect(await persistRunBundle(kitDb(db), input)).toBe(0)
+    expect(await listFlowRunEvents(kitDb(db), 'org_a', input.runId)).toMatchObject([
+      { kind: 'status', statusTo: 'running' },
+      { kind: 'status', statusFrom: 'running', statusTo: 'succeeded' },
+      { kind: 'receipt', taskId: 'first', outcome: 'ok' },
+      { kind: 'receipt', taskId: 'second', outcome: 'ok' },
+    ])
+  })
+
+  it('rejects a stale bundle after a competing receipt commits before its batch', async () => {
+    const db = createMemoryDb()
+    const runId = 'snapshot_race'
+    const orgId = 'org_a'
+    await seedQueued(db, runId, orgId)
+    expect(await claimRun(kitDb(db), { runId, orgId, instanceId: 'wf_1' })).toBe(1)
+    const winner = JSON.stringify({ tasks: { task: { taskId: 'task', outcome: 'started' } } })
+    const loser = JSON.stringify({ tasks: { task: { taskId: 'task', outcome: 'ok' } } })
+    const snapshot = async () => ({
+      row: await db
+        .prepare(`SELECT status, workflow_instance_id, snapshot_json, receipt_json,
+        error_code, updated_at FROM flow_runs WHERE id = ? AND org_id = ?`)
+        .bind(runId, orgId)
+        .first(),
+      events: await listFlowRunEvents(kitDb(db), orgId, runId),
+    })
+    let winningSnapshot = ''
+    const interleaved = new Proxy(db, {
+      get(target, property, receiver) {
+        if (property !== 'batch') return Reflect.get(target, property, receiver)
+        return async (statements: D1PreparedStatement[]) => {
+          expect(
+            await persistRunBundle(kitDb(db), {
+              runId,
+              orgId,
+              status: 'running',
+              receiptJson: winner,
+              now: 101,
+            }),
+          ).toBe(1)
+          const committed = await snapshot()
+          expect(committed.row).toMatchObject({
+            status: 'running',
+            workflow_instance_id: 'wf_1',
+            snapshot_json: '{}',
+            receipt_json: winner,
+            error_code: null,
+            updated_at: 101,
+          })
+          expect(committed.events).toMatchObject([
+            { kind: 'status', statusTo: 'running' },
+            { kind: 'receipt', taskId: 'task', outcome: 'started' },
+          ])
+          winningSnapshot = JSON.stringify(committed)
+          return target.batch(statements)
+        }
+      },
+    })
+    expect(
+      await persistRunBundle(kitDb(interleaved), {
+        runId,
+        orgId,
+        status: 'running',
+        receiptJson: loser,
+        now: 102,
+      }),
+    ).toBe(0)
+    expect(winningSnapshot).not.toBe('')
+    expect(JSON.stringify(await snapshot())).toBe(winningSnapshot)
+  })
+
+  it('refuses closure at the SQL owner fence when the current owner differs', async () => {
+    const db = createMemoryDb()
+    const runId = 'close_other_owner'
+    const orgId = 'org_a'
+    await seedQueued(db, runId, orgId)
+    await claimRun(kitDb(db), { runId, orgId, instanceId: 'wf_owner' })
+    const before = await db.prepare('SELECT * FROM flow_runs WHERE id = ?').bind(runId).first()
+    const events = await listFlowRunEvents(kitDb(db), orgId, runId)
+    expect(
+      await closeOwnedRun(kitDb(db), {
+        runId,
+        orgId,
+        instanceId: 'wf_other',
+        beforeReceiptJson: null,
+        receiptJson: null,
+        errorCode: null,
+      }),
+    ).toBe(0)
+    expect(await db.prepare('SELECT * FROM flow_runs WHERE id = ?').bind(runId).first()).toEqual(
+      before,
+    )
+    expect(await listFlowRunEvents(kitDb(db), orgId, runId)).toEqual(events)
+  })
+
+  it('rolls back a terminal receipt scrub and retries without duplicate receipt events', async () => {
+    const db = createMemoryDb()
+    await seedQueued(db, 'atomic_scrub', 'org_a')
+    await db
+      .prepare(`UPDATE flow_runs SET status = 'failed', error_code = 'CANCELLED',
+      receipt_json = ? WHERE id = ?`)
+      .bind(
+        JSON.stringify({
+          tasks: { first: { outcome: 'started' }, second: { outcome: 'started' } },
+        }),
+        'atomic_scrub',
+      )
+      .run()
+    const before = await db
+      .prepare(`SELECT status, receipt_json, error_code, updated_at FROM flow_runs WHERE id = ?`)
+      .bind('atomic_scrub')
+      .first()
+    await db
+      .prepare(`CREATE TRIGGER reject_second BEFORE INSERT ON flow_run_events
+      WHEN NEW.task_id = 'second' AND EXISTS (SELECT 1 FROM flow_runs
+        WHERE id = NEW.run_id AND org_id = NEW.org_id AND status = 'failed'
+        AND updated_at = 789 AND json_extract(receipt_json, '$.tasks.second.outcome') = 'fail')
+      BEGIN SELECT RAISE(ABORT, 'second rejected'); END`)
+      .run()
+    const input = {
+      runId: 'atomic_scrub',
+      orgId: 'org_a',
+      now: 789,
+      receiptJson: JSON.stringify({
+        tasks: {
+          first: { outcome: 'fail', errorCode: 'RECEIPT_LOST' },
+          second: { outcome: 'fail', errorCode: 'RECEIPT_LOST' },
+        },
+      }),
+    }
+    await expect(persistReceiptJson(kitDb(db), input)).rejects.toThrow()
+    expect(
+      await db
+        .prepare(`SELECT status, receipt_json, error_code, updated_at FROM flow_runs WHERE id = ?`)
+        .bind(input.runId)
+        .first(),
+    ).toEqual(before)
+    expect(await listFlowRunEvents(kitDb(db), 'org_a', input.runId)).toEqual([])
+    await db.prepare(`DROP TRIGGER reject_second`).run()
+    expect(await persistReceiptJson(kitDb(db), { ...input, orgId: 'org_b' })).toBe(0)
+    expect(await persistReceiptJson(kitDb(db), input)).toBe(1)
+    await persistReceiptJson(kitDb(db), input)
+    expect(
+      await db
+        .prepare(`SELECT status, receipt_json, error_code FROM flow_runs WHERE id = ?`)
+        .bind(input.runId)
+        .first(),
+    ).toMatchObject({ status: 'failed', error_code: 'CANCELLED', receipt_json: input.receiptJson })
+    expect(await listFlowRunEvents(kitDb(db), 'org_a', input.runId)).toMatchObject([
+      { kind: 'receipt', taskId: 'first', outcome: 'fail', errorCode: 'RECEIPT_LOST' },
+      { kind: 'receipt', taskId: 'second', outcome: 'fail', errorCode: 'RECEIPT_LOST' },
+    ])
+  })
+
+  it('rolls back create failure when its event aborts and keeps queued and tenant fences', async () => {
+    const db = createMemoryDb()
+    await seedQueued(db, 'atomic_create', 'org_a')
+    await db
+      .prepare(`CREATE TRIGGER reject_event BEFORE INSERT ON flow_run_events
+      WHEN EXISTS (SELECT 1 FROM flow_runs WHERE id = NEW.run_id AND org_id = NEW.org_id
+        AND status = 'failed' AND error_code = 'WORKFLOW_CREATE_FAILED')
+      BEGIN SELECT RAISE(ABORT, 'event rejected'); END`)
+      .run()
+    const input = { id: 'atomic_create', orgId: 'org_a' }
+    await expect(markQueuedRunCreateFailed(kitDb(db), input)).rejects.toThrow()
+    expect(
+      await db
+        .prepare(`SELECT status, error_code FROM flow_runs WHERE id = ?`)
+        .bind(input.id)
+        .first(),
+    ).toMatchObject({ status: 'queued', error_code: null })
+    expect(await listFlowRunEvents(kitDb(db), 'org_a', input.id)).toEqual([])
+    await db.prepare(`DROP TRIGGER reject_event`).run()
+    expect(await markQueuedRunCreateFailed(kitDb(db), { ...input, orgId: 'org_b' })).toBe(false)
+    expect(await markQueuedRunCreateFailed(kitDb(db), input)).toBe(true)
+    expect(await markQueuedRunCreateFailed(kitDb(db), input)).toBe(false)
+    expect(await listFlowRunEvents(kitDb(db), 'org_a', input.id)).toMatchObject([
+      {
+        kind: 'status',
+        statusFrom: 'queued',
+        statusTo: 'failed',
+        errorCode: 'WORKFLOW_CREATE_FAILED',
+      },
+    ])
   })
 })
