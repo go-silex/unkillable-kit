@@ -38,6 +38,19 @@ fail generate
 git -C "$repo" checkout -- config/product/inheritance.json
 pass generate
 pass check
+# A canonical staged repair cannot hide a noncanonical committed configuration.
+(
+  repo="$tmp/committed-dependabot"
+  git clone -q --no-hardlinks "$tmp/repo" "$repo"
+  printf 'version: 2\nupdates: []\n' > "$repo/.github/dependabot.yml"
+  git -C "$repo" add .github/dependabot.yml
+  commit 'invalid configuration'
+  pass generate
+  git -C "$repo" add .github/dependabot.yml
+  fail check
+  commit 'canonical configuration'
+  pass check
+)
 git -C "$repo" remote add origin "$tmp/local-origin"
 (cd "$repo" && env -u GITHUB_REPOSITORY bash scripts/kit/check-zero-edit-zones.sh >/dev/null)
 if (cd "$repo" && env -u GITHUB_REPOSITORY node scripts/kit/configure-product-dependabot.cjs >/dev/null 2>&1); then

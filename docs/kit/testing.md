@@ -74,8 +74,6 @@ Vitest 5.0.5 enables persistent transformed-module caching by default. A cold pr
 
 The maintained merge gate uses an authenticated receipt bound to the repository, PR and exact head, not a `reviewed` or `deps-automerge` label. Dependabot receipts also bind the evaluated base SHA. See [CI App setup](./ci-app-setup.md#reviewed-head-authorization) and [the guard](./security-dependabot.md#auto-merge-guard).
 
-The explicitly adopted [temporary manual process](./processes/dev-process.md#parcours-manuel-transitoire--nouvelles-pr-sans-propriétaire-natif) permits a supervised SHA-pinned merge of a new manual PR without native ownership, after independent current-head review, resolved findings, the applicable local gate and successful current-head CI and secret scan. Its ordinary PR evidence comment is not an authorization receipt and never arms automation. Native ownership/refusal/withdrawal/exhaustion and succession rules are not bypassed. The automated gate below keeps its authenticated receipt protocol unchanged.
-
 On GitHub Free private, `merge-on-green` is **process**, not branch protection: no required checks or reviewers are implied.
 
 Anyone with **write** (or admin) can:

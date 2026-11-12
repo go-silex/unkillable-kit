@@ -540,6 +540,10 @@ if (dependabotChanged && !dependabotPreflight) {
     const { productManifestDirectories, renderProductDependabot } = require(join(process.env.CHECKER_DIR, 'lib/product-dependabot.cjs'))
     const expected = renderProductDependabot(productManifestDirectories(root, zones))
     if (readFileSync(join(root, dependabotPath), 'utf8') !== expected) throw new Error('content differs from canonical Product configuration')
+    if (gitPaths(['diff', '--no-renames', '--name-only', '-z', baseRef, 'HEAD', '--', `:(literal)${dependabotPath}`]).length) {
+      const committed = execFileSync('git', ['show', `HEAD:${dependabotPath}`], { cwd: root, encoding: 'utf8' })
+      if (committed !== expected) throw new Error('committed content differs from canonical Product configuration')
+    }
     if (gitPaths(['diff', '--cached', '--no-renames', '--name-only', '-z', '--', `:(literal)${dependabotPath}`]).length) {
       const staged = execFileSync('git', ['show', `:${dependabotPath}`], { cwd: root, encoding: 'utf8' })
       if (staged !== expected) throw new Error('staged content differs from canonical Product configuration')
