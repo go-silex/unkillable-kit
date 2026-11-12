@@ -61,12 +61,14 @@ Machine gates here only care: product does not dual-edit kit paths; `upstream` i
 
 GitHub fixes the configuration path at `.github/dependabot.yml`. That does not make dependency ownership a package-name rule: root and protected manifests belong to the Kit; other `apps/*/package.json` manifests belong to the Product. Shared dependency names do not transfer ownership.
 
-After adding Product App manifests to Git's index, run:
+After adding Product App manifests to Git's index, run the generator and stage its output:
 
 ```bash
 node scripts/kit/configure-product-dependabot.cjs
-bun run zero-edit
+git add .github/dependabot.yml
 ```
+
+Commit the staged manifests and generated configuration together through normal hooks, then run `bun run zero-edit` and the final gates. For an existing generated scan, zero-edit holds between staging an inventory change and committing its refresh because committed `HEAD` still contains the old inventory. The generator's preflight permits the bounded repair while retaining inheritance and protected-manifest checks; it does not authorize a push or replace the final gate.
 
 The Node-only generator reads the complete tracked Product App manifest inventory, excludes protected paths, and writes the canonical Bun version-update scan. The [example](./templates/product-dependabot.example.yml) illustrates its output; generate the real file, do not hand-copy placeholder directories. It requires a classified Product, a valid committed inherited baseline and complete history, and refuses protected manifest drift. A Product without any App manifests cannot generate a disabled/empty scan.
 

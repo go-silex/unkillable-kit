@@ -51,6 +51,23 @@ pass check
   commit 'canonical configuration'
   pass check
 )
+# A changed inventory holds until its generated refresh is committed.
+(
+  repo="$tmp/inventory-refresh"
+  git clone -q --no-hardlinks "$tmp/repo" "$repo"
+  pass generate
+  git -C "$repo" add .github/dependabot.yml
+  commit 'canonical baseline'
+  pass check
+  mkdir -p "$repo/apps/product-web"
+  printf '{}\n' > "$repo/apps/product-web/package.json"
+  git -C "$repo" add apps/product-web/package.json
+  pass generate
+  git -C "$repo" add .github/dependabot.yml
+  fail check
+  commit 'refresh inventory'
+  pass check
+)
 git -C "$repo" remote add origin "$tmp/local-origin"
 (cd "$repo" && env -u GITHUB_REPOSITORY bash scripts/kit/check-zero-edit-zones.sh >/dev/null)
 if (cd "$repo" && env -u GITHUB_REPOSITORY node scripts/kit/configure-product-dependabot.cjs >/dev/null 2>&1); then
