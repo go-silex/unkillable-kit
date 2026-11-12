@@ -1,8 +1,7 @@
 #!/usr/bin/env bun
 import assert from 'node:assert/strict'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { data, Evaluator, Lexer, Parser } from '@actions/expressions'
 import {
@@ -17,7 +16,14 @@ import { evaluate, land, productHold } from './lib/merge-gate.cjs'
 const require = createRequire(import.meta.url)
 type Queue = { number: number; sha: string; receipt: { id: number; body: string } }
 type EventPayload = Parameters<typeof evaluate>[0]['payload']
-type Check = { name: string; status: string; conclusion: string | null }
+type Check = {
+  id?: number
+  name: string
+  status: string
+  conclusion: string | null
+  app?: { slug: string } | null
+  check_suite?: { id: number }
+}
 type Workflow = {
   id: number
   path: string
@@ -25,8 +31,19 @@ type Workflow = {
   conclusion: string | null
   run_attempt: number
   head_sha: string
+  workflow_id?: number
+  check_suite_id?: number
+  event?: string
+  head_branch?: string
+  head_repository?: { id: number }
+  pull_requests?: Array<{
+    id: number
+    number: number
+    head: { ref: string; sha: string; repo: { id: number } }
+    base: { ref: string; sha: string; repo: { id: number } }
+  }>
 }
-type Job = { name: string; status: string; conclusion: string | null }
+type Job = { id?: number; name: string; status: string; conclusion: string | null }
 type ListBody<R> =
   | R[]
   | { total_count: number; workflow_runs: R[] }
@@ -40,7 +57,7 @@ type Pull = {
   draft: boolean
   merged: boolean
   base: { ref: string; sha: string }
-  head: { sha: string }
+  head: { sha: string; ref: string; repo: { id: number; owner: { login: string } } }
   labels: Array<{ name: string }>
   user: { login: string; id: number }
 }
@@ -134,6 +151,7 @@ class Fake {
   runs: Record<string, Workflow[]>
   jobs: Record<number, Record<number, Job[]>> = {}
   afterJobs?: () => void
+  afterCheckRead?: () => Promise<void>
   switchAfterFirstBaseRead?: () => void
   baseReads = 0
   merges: Array<{ number: number; sha: string }> = []
@@ -141,6 +159,8 @@ class Fake {
   errors: Record<string, number> = {}
   mergeStatuses: Record<number, number> = {}
   commitAsObject = false
+  baseEvents = 0
+  baseEventType = 'BaseRefChangedEvent'
   commitBodies: Record<string, unknown> = {}
   comments: Record<number, Comment[]> = {}
   edited = new Set<number>()
@@ -208,15 +228,19 @@ class Fake {
       draft: false,
       merged: false,
       base: { ref: 'main', sha: baseSha },
-      head: { sha },
+      head: {
+        sha,
+        ref: sha === HEAD ? 'feature' : 'other',
+        repo: { id: 1, owner: { login: 'kit' } },
+      },
       labels: [{ name: 'reviewed' }],
       user: { login: 'human', id: 10 },
     }
   }
   greenChecks() {
     return [
-      { name: 'CI', status: 'completed', conclusion: 'success' },
-      { name: 'Secret scan', status: 'completed', conclusion: 'success' },
+      { name: 'CI', status: 'completed', conclusion: 'success', app: null },
+      { name: 'Secret scan', status: 'completed', conclusion: 'success', app: null },
     ]
   }
   resolve(ref: string) {
@@ -240,35 +264,60 @@ class Fake {
     const end = start + perPage
     return {
       data: structuredClone(items.slice(start, end)),
-      headers: end < items.length ? { next: 'next' } : {},
+      headers: {
+        link:
+          end < items.length ? `<https://api.github.com/items?page=${page + 1}>; rel="next"` : '',
+      },
     }
   }
 
   github = {
-    graphql: async (_query: string, { ids }: { ids: string[] }) => ({
-      nodes: ids.map((id) => {
-        for (const [number, comments] of Object.entries(this.comments)) {
-          const comment = comments.find((entry) => entry.node_id === id)
-          if (comment)
-            return {
-              __typename: 'IssueComment',
-              id,
-              fullDatabaseId: String(comment.id),
-              lastEditedAt: this.edited.has(comment.id) ? '2026-01-01T00:00:00Z' : null,
-              repository: { fullDatabaseId: '1' },
-              pullRequest: {
-                fullDatabaseId: String(this.prs[Number(number)].id),
-                number: Number(number),
+    graphql: async (_query: string, { ids, number }: { ids: string[]; number?: number }) => {
+      if (number !== undefined) {
+        this.fail(`timeline:${number}`)
+        return {
+          nodes: [],
+          repository: {
+            pullRequest: {
+              number,
+              baseRefName: this.prs[number].base.ref,
+              headRefName: this.prs[number].head.ref,
+              headRefOid: this.prs[number].head.sha,
+              headRepository: { databaseId: this.prs[number].head.repo.id },
+              timelineItems: {
+                totalCount: 8,
+                nodes: this.baseEvents ? [{ __typename: this.baseEventType }] : [],
+                pageInfo: { hasNextPage: this.baseEvents > 1 },
               },
-            }
+            },
+          },
         }
-        return null
-      }),
-    }),
+      }
+      return {
+        nodes: ids.map((id) => {
+          for (const [number, comments] of Object.entries(this.comments)) {
+            const comment = comments.find((entry) => entry.node_id === id)
+            if (comment)
+              return {
+                __typename: 'IssueComment',
+                id,
+                fullDatabaseId: String(comment.id),
+                lastEditedAt: this.edited.has(comment.id) ? '2026-01-01T00:00:00Z' : null,
+                repository: { fullDatabaseId: '1' },
+                pullRequest: {
+                  fullDatabaseId: String(this.prs[Number(number)].id),
+                  number: Number(number),
+                },
+              }
+          }
+          return null
+        }),
+      }
+    },
     paginate: async <P, R>(
       endpoint: (params: P & { page: number }) => Promise<{
         data: ListBody<R>
-        headers?: { next?: string }
+        headers?: { link?: string }
       }>,
       params: P,
     ): Promise<R[]> => {
@@ -284,7 +333,7 @@ class Fake {
                 ? data.jobs
                 : data.check_runs),
         )
-        if (!headers?.next) return all
+        if (!headers?.link?.includes('rel="next"')) return all
       }
     },
     rest: {
@@ -303,11 +352,7 @@ class Fake {
           const result = this.page(items, page, per_page)
           return {
             data: result.data,
-            headers: {
-              link: result.headers.next
-                ? `<https://api.github.com/comments?page=${page + 1}>; rel="next"`
-                : '',
-            },
+            headers: result.headers,
           }
         },
       },
@@ -315,17 +360,26 @@ class Fake {
         list: async ({
           owner,
           repo: repoName,
+          head,
+          state,
           page,
           per_page,
         }: {
           owner: string
           repo: string
+          head?: string
+          state?: string
           page?: number
           per_page?: number
         }) => {
           this.assertRepo({ owner, repo: repoName })
           this.fail(`pulls.list:${page ?? 1}`)
-          return this.page(Object.values(this.prs), page, per_page)
+          const pulls = Object.values(this.prs).filter(
+            (pr) =>
+              ((state ?? 'open') === 'all' || pr.state === (state ?? 'open')) &&
+              (!head || `${pr.head.repo.owner.login}:${pr.head.ref}` === head),
+          )
+          return this.page(pulls, page, per_page)
         },
         get: async ({
           owner,
@@ -357,9 +411,11 @@ class Fake {
           per_page?: number
         }) => {
           this.assertRepo({ owner, repo: repoName })
+          this.calls.push(`checks:${ref}`)
           this.fail(`checks:${ref}`)
           const items = this.checks[ref] ?? []
           const { data, headers } = this.page(items, page, per_page)
+          await this.afterCheckRead?.()
           return { data: { total_count: items.length, check_runs: data }, headers }
         },
       },
@@ -2071,25 +2127,6 @@ function guardOpen(expression: string | undefined, context: { [key: string]: Exp
   ).evaluate()
   return evaluated.coerceString() === 'true'
 }
-function kitCiEnabled(appId: string) {
-  const script = workflowJobs(WORKFLOW)['merge-on-green'].steps.find(
-    (step) => step.id === 'cfg',
-  )?.run
-  assert.ok(script)
-  const dir = mkdtempSync(join(tmpdir(), 'kit-ci-'))
-  const output = join(dir, 'github-output')
-  try {
-    const result = Bun.spawnSync(['bash', '-e', '-c', script], {
-      env: { APP_ID: appId, GITHUB_OUTPUT: output, PATH: process.env.PATH ?? '' },
-    })
-    assert.equal(result.exitCode, 0)
-    const enabled = /^enabled=(.*)$/m.exec(readFileSync(output, 'utf8'))?.[1]
-    assert.ok(enabled === 'true' || enabled === 'false')
-    return enabled
-  } finally {
-    rmSync(dir, { recursive: true, force: true })
-  }
-}
 function prComment() {
   const fake = new Fake()
   const comment = {
@@ -2202,12 +2239,12 @@ test('inactive workflow_run, revoke, comments, and Dependabot capture do not min
     payload: {},
   })
   assert.equal(workflowRun.outputs.eligible, 'true')
-  const enabled = kitCiEnabled('')
+  assert.equal(workflowRun.outputs.enabled, 'false')
   const mergeJob = merge['merge-on-green']
   const skipped = {
+    github: { event_name: 'workflow_run' },
     needs: { preflight: { outputs: workflowRun.outputs } },
     steps: {
-      cfg: { outputs: { enabled } },
       app: { outcome: 'skipped' },
       evaluate: { outputs: { to_merge: '', unreadable: '' } },
       merge: { outputs: { unreadable: '' } },
@@ -2305,11 +2342,11 @@ test('valid policy with the App disabled queues a receipt and stays red when Eva
   assert.equal(queue[0].receipt.id, fake.comments[7][0].id)
   assert.equal(queue[0].receipt.body, fake.comments[7][0].body)
   assert.deepEqual(JSON.parse(selected.outputs.unreadable), [])
-  const enabled = kitCiEnabled('')
+  assert.equal(classified.outputs.enabled, 'false')
   const held = {
     needs: { preflight: { outputs: classified.outputs } },
+    github: { event_name: 'workflow_run' },
     steps: {
-      cfg: { outputs: { enabled } },
       app: { outcome: 'skipped' },
       evaluate: {
         outputs: { to_merge: selected.outputs.to_merge, unreadable: selected.outputs.unreadable },
@@ -2461,10 +2498,30 @@ test('partial, malformed, and App-without-policy reject while an active App stil
       workflowJobs(WORKFLOW)['merge-on-green'].steps.find((step) =>
         step.uses?.includes('create-github-app-token'),
       )?.if,
-      { steps: { cfg: { outputs: { enabled: kitCiEnabled('12345') } } } },
+      {
+        github: { event_name: 'workflow_dispatch' },
+        needs: { preflight: { outputs: active.outputs } },
+        steps: { evaluate: { outputs: { to_merge: '[]' } } },
+      },
     ),
     true,
   )
+  assert.equal(active.outputs.enabled, 'true')
+  const mint = workflowJobs(WORKFLOW)['merge-on-green'].steps.find((step) => step.id === 'app')?.if
+  for (const [queue, expected] of [
+    ['[]', false],
+    ['', false],
+    ['[{"number":7}]', true],
+  ] as const) {
+    assert.equal(
+      guardOpen(mint, {
+        github: { event_name: 'workflow_run' },
+        needs: { preflight: { outputs: active.outputs } },
+        steps: { evaluate: { outputs: { to_merge: queue } } },
+      }),
+      expected,
+    )
+  }
   assert.equal(
     guardOpen(
       workflowJobs(WORKFLOW)['revoke-reviewed-on-push'].steps.find((step) =>
@@ -2488,6 +2545,732 @@ test('partial, malformed, and App-without-policy reject while an active App stil
     }),
     true,
   )
+})
+
+const actionsCheck = (
+  name: string,
+  suite: number,
+  conclusion: string | null = 'success',
+): Check => ({
+  id: suite * 1000,
+  name,
+  status: 'completed',
+  conclusion,
+  app: { slug: 'github-actions' },
+  check_suite: { id: suite },
+})
+const actionsRun = (id: number, workflow: number, suite: number, attempt = 1): Workflow => ({
+  ...run(
+    id,
+    workflow === 10 ? CI : `.github/workflows/fixture-${workflow}.yml`,
+    'completed',
+    'success',
+    attempt,
+  ),
+  workflow_id: workflow,
+  check_suite_id: suite,
+  event: 'pull_request',
+  head_branch: 'feature',
+  head_repository: { id: 1 },
+  pull_requests: [
+    {
+      id: 1007,
+      number: 7,
+      head: { ref: 'feature', sha: HEAD, repo: { id: 1 } },
+      base: { ref: 'main', sha: BASE_A, repo: { id: 1 } },
+    },
+  ],
+})
+const actionsJob = (id: number, name: string, conclusion: string | null = 'success'): Job => ({
+  id,
+  name,
+  status: 'completed',
+  conclusion,
+})
+
+const freshnessFixture = () => {
+  const fake = new Fake()
+  fake.checks[HEAD] = [actionsCheck('CI', 11, 'skipped'), ...fake.greenChecks().slice(1)]
+  fake.runs[HEAD] = [actionsRun(1, 10, 11), actionsRun(2, 10, 12)]
+  fake.jobs[1] = { 1: [actionsJob(11000, 'CI', 'skipped')] }
+  fake.jobs[2] = { 1: [actionsJob(12000, 'CI')] }
+  return fake
+}
+
+test('independent runs vote only once their own checks are listed', async () => {
+  for (const state of ['queued', 'action_required', 'failure']) {
+    const fake = freshnessFixture()
+    const independent = actionsRun(3, 10, 13)
+    independent.head_repository = { id: 2 }
+    independent.status = state === 'queued' ? 'queued' : 'completed'
+    independent.conclusion = state === 'queued' ? null : state
+    fake.runs[HEAD].push(independent)
+    const selected = await evaluateFake(fake)
+    assert.equal(selected.toMerge.length, 1, state)
+    assert.deepEqual(selected.unreadable, [], state)
+    await landFake(fake, selected.toMerge)
+    assert.equal(fake.merges.length, 1, state)
+  }
+  for (const state of ['pending', 'skipped', 'failure']) {
+    const fake = freshnessFixture()
+    const independent = actionsRun(3, 10, 13)
+    independent.head_branch = 'other'
+    const check = actionsCheck('CI', 13, state === 'pending' ? null : state)
+    if (state === 'pending') {
+      independent.status = 'queued'
+      independent.conclusion = null
+      check.status = 'queued'
+    } else {
+      fake.jobs[3] = { 1: [actionsJob(13000, 'CI', state)] }
+    }
+    fake.runs[HEAD].push(independent)
+    fake.checks[HEAD].push(check)
+    const result = await evaluateFake(fake)
+    assert.deepEqual(result.toMerge, [], state)
+    assert.deepEqual(result.unreadable, [], state)
+  }
+})
+
+test('proven own queued producer holds even before its checks register', async () => {
+  for (const foreignOnly of [false, true]) {
+    const fake = freshnessFixture()
+    fake.runs[HEAD][1].status = 'queued'
+    fake.runs[HEAD][1].conclusion = null
+    if (foreignOnly) {
+      const foreign = actionsRun(3, 10, 13)
+      foreign.head_repository = { id: 2 }
+      fake.runs[HEAD].push(foreign)
+      fake.jobs[3] = { 1: [actionsJob(13000, 'CI')] }
+      fake.checks[HEAD][0] = actionsCheck('CI', 13)
+    }
+    const result = await evaluateFake(fake)
+    assert.deepEqual(result.toMerge, [], String(foreignOnly))
+    assert.deepEqual(result.unreadable, [], String(foreignOnly))
+  }
+})
+
+test('proven own jobs can supply required CI without a registered own suite', async () => {
+  for (const outcome of ['success', 'failure', 'queued', 'unproven']) {
+    const fake = freshnessFixture()
+    const foreign = actionsRun(3, 10, 13)
+    foreign.head_repository = { id: 2 }
+    fake.runs[HEAD].push(foreign)
+    fake.jobs[3] = { 1: [actionsJob(13000, 'optional')] }
+    fake.checks[HEAD][0] = actionsCheck('optional', 13)
+    if (outcome === 'failure') fake.jobs[2][1] = [actionsJob(12000, 'CI', 'failure')]
+    if (outcome === 'queued') {
+      fake.runs[HEAD][1].status = 'queued'
+      fake.runs[HEAD][1].conclusion = null
+    }
+    if (outcome === 'unproven') {
+      fake.prs[8] = fake.pr(8, HEAD)
+      fake.prs[8].state = 'closed'
+    }
+    const result = await evaluateFake(fake)
+    assert.equal(result.toMerge.length, outcome === 'success' ? 1 : 0, outcome)
+    assert.deepEqual(result.unreadable, [], outcome)
+  }
+})
+
+test('unproven context counts only listed checks and cannot replace old evidence', async () => {
+  const fake = freshnessFixture()
+  fake.prs[8] = fake.pr(8, HEAD)
+  fake.prs[8].state = 'closed'
+  fake.checks[HEAD][0].conclusion = 'success'
+  fake.jobs[1][1] = [actionsJob(11000, 'CI')]
+  fake.runs[HEAD][1].status = 'queued'
+  fake.runs[HEAD][1].conclusion = null
+  assert.equal((await evaluateFake(fake)).toMerge.length, 1)
+  const pending = actionsCheck('CI', 12, null)
+  pending.status = 'queued'
+  fake.checks[HEAD].push(pending)
+  const held = await evaluateFake(fake)
+  assert.deepEqual(held.toMerge, [])
+  assert.deepEqual(held.unreadable, [])
+  fake.runs[HEAD][1].status = 'completed'
+  fake.runs[HEAD][1].conclusion = 'success'
+  pending.status = 'completed'
+  pending.conclusion = 'success'
+  fake.checks[HEAD][0].conclusion = 'skipped'
+  fake.jobs[1][1] = [actionsJob(11000, 'CI', 'skipped')]
+  const oldSkipped = await evaluateFake(fake)
+  assert.deepEqual(oldSkipped.toMerge, [])
+  assert.deepEqual(oldSkipped.unreadable, [])
+})
+
+test('listed independent reruns and changing unlisted runs hold fresh assessment', async () => {
+  const fake = freshnessFixture()
+  const independent = actionsRun(3, 10, 13, 2)
+  independent.head_branch = 'other'
+  independent.status = 'queued'
+  independent.conclusion = null
+  fake.runs[HEAD].push(independent)
+  const staticResult = await evaluateFake(fake)
+  assert.equal(staticResult.toMerge.length, 1)
+  fake.afterJobs = () => {
+    independent.status = 'in_progress'
+  }
+  const changed = await evaluateFake(fake)
+  assert.deepEqual(changed.toMerge, [])
+  assert.deepEqual(changed.unreadable, [])
+  fake.afterJobs = undefined
+  fake.checks[HEAD].push(actionsCheck('CI', 13))
+  const listed = await evaluateFake(fake)
+  assert.deepEqual(listed.toMerge, [])
+  assert.deepEqual(listed.unreadable, [])
+})
+
+test('distinct Actions execution contexts cannot supersede a PR run', async () => {
+  for (const variant of [
+    'push',
+    'pull_request_target',
+    'workflow_dispatch',
+    'schedule',
+    'unknown',
+    'branch',
+    'repo',
+  ]) {
+    const fake = freshnessFixture()
+    const latest = fake.runs[HEAD][1]
+    if (
+      ['push', 'pull_request_target', 'workflow_dispatch', 'schedule', 'unknown'].includes(variant)
+    )
+      latest.event = variant
+    if (variant === 'branch') latest.head_branch = 'other'
+    if (variant === 'repo') latest.head_repository!.id = 2
+    fake.checks[HEAD].push(actionsCheck('CI', 12))
+    for (const reverse of [false, true]) {
+      if (reverse) {
+        fake.checks[HEAD][0].conclusion = 'success'
+        fake.checks[HEAD][2].conclusion = 'skipped'
+        fake.jobs[1][1] = [actionsJob(11000, 'CI')]
+        fake.jobs[2][1] = [actionsJob(12000, 'CI', 'skipped')]
+      }
+      const result = await evaluateFake(fake)
+      assert.deepEqual(result.toMerge, [], `${variant}/${reverse}`)
+      assert.deepEqual(result.unreadable, [], `${variant}/${reverse}`)
+    }
+  }
+})
+
+test('association snapshots are ignored and unique head with unchanged base permits refresh', async () => {
+  const fake = freshnessFixture()
+  fake.runs[HEAD][0].pull_requests = []
+  fake.runs[HEAD][1].pull_requests = []
+  assert.equal((await evaluateFake(fake)).toMerge.length, 1)
+})
+
+test('another historical PR or a base retarget prevents cross-run replacement', async () => {
+  for (const variant of [
+    'another-pr',
+    'BaseRefChangedEvent',
+    'BaseRefDeletedEvent',
+    'AutomaticBaseChangeSucceededEvent',
+  ]) {
+    const fake = freshnessFixture()
+    if (variant !== 'another-pr') {
+      fake.baseEvents = 1
+      fake.baseEventType = variant
+    } else {
+      assert.equal((await evaluateFake(fake)).toMerge.length, 1)
+      fake.prs[8] = fake.pr(8, HEAD)
+      fake.prs[8].state = 'closed'
+    }
+    const result = await evaluateFake(fake)
+    assert.deepEqual(result.toMerge, [], variant)
+    assert.deepEqual(result.unreadable, [], variant)
+  }
+})
+
+test('unreadable base history does not fall back to coalescing', async () => {
+  const fake = freshnessFixture()
+  fake.errors['timeline:7'] = 403
+  const result = await evaluateFake(fake)
+  assert.deepEqual(result.toMerge, [])
+  assert.equal(result.unreadable.length, 1)
+})
+
+test('ordinary Actions holds remain readable on evaluation and landing', async () => {
+  for (const variant of ['pending', 'red', 'changed']) {
+    const fake = freshnessFixture()
+    const selected = await evaluateFake(fake)
+    if (variant === 'pending') {
+      fake.runs[HEAD][1].status = 'queued'
+      fake.runs[HEAD][1].conclusion = null
+    }
+    if (variant === 'red') fake.runs[HEAD][1].conclusion = 'failure'
+    if (variant === 'changed')
+      fake.afterJobs = () => {
+        fake.runs[HEAD][1].run_attempt = 2
+      }
+    const evaluated = await evaluateFake(fake)
+    assert.deepEqual(evaluated.toMerge, [], variant)
+    assert.deepEqual(evaluated.unreadable, [], variant)
+    if (variant === 'changed') {
+      fake.runs[HEAD][1].run_attempt = 1
+    }
+    const landed = await landFake(fake, selected.toMerge)
+    assert.deepEqual(fake.merges, [], variant)
+    assert.deepEqual(landed.unreadable, [], variant)
+  }
+})
+
+test('Actions freshness replaces old suite evidence only with the latest exact attempt', async () => {
+  const green = freshnessFixture()
+  const selected = await evaluateFake(green)
+  assert.equal(selected.toMerge.length, 1)
+  await landFake(green, selected.toMerge)
+  assert.equal(green.merges.length, 1)
+  for (const conclusion of ['skipped', 'neutral', 'failure']) {
+    const fake = freshnessFixture()
+    fake.checks[HEAD][0].conclusion = 'success'
+    fake.jobs[2][1] = [actionsJob(12000, 'CI', conclusion)]
+    assert.deepEqual((await evaluateFake(fake)).toMerge, [], conclusion)
+  }
+  const attempt = freshnessFixture()
+  attempt.runs[HEAD][1].run_attempt = 2
+  attempt.jobs[2] = { 1: [actionsJob(12000, 'CI')], 2: [actionsJob(12001, 'CI', 'failure')] }
+  assert.deepEqual((await evaluateFake(attempt)).toMerge, [])
+  attempt.jobs[2][2] = [actionsJob(12001, 'CI')]
+  assert.equal((await evaluateFake(attempt)).toMerge.length, 1)
+  attempt.afterJobs = () => {
+    attempt.runs[HEAD][1].run_attempt = 3
+  }
+  assert.deepEqual((await evaluateFake(attempt)).toMerge, [])
+})
+
+test('Actions incomplete or conflicting freshness proof holds rather than using old green', async () => {
+  for (const mutate of [
+    (f: Fake) => {
+      f.runs[HEAD][1].status = 'queued'
+      f.runs[HEAD][1].conclusion = null
+    },
+    (f: Fake) => {
+      f.jobs[2][1] = []
+    },
+    (f: Fake) => {
+      f.jobs[2][1] = [actionsJob(12000, 'other')]
+    },
+    (f: Fake) => {
+      f.checks[HEAD][0].check_suite = undefined
+    },
+    (f: Fake) => {
+      f.checks[HEAD][0].check_suite = { id: 99 }
+    },
+    (f: Fake) => {
+      f.runs[HEAD][1].workflow_id = undefined
+    },
+    (f: Fake) => {
+      f.errors[`runs:${HEAD}`] = 403
+    },
+  ]) {
+    const fake = freshnessFixture()
+    fake.checks[HEAD][0].conclusion = 'success'
+    mutate(fake)
+    assert.deepEqual((await evaluateFake(fake)).toMerge, [])
+  }
+  const duplicate = freshnessFixture()
+  duplicate.checks[HEAD].push(actionsCheck('CI', 21))
+  duplicate.runs[HEAD].push(actionsRun(3, 20, 21))
+  duplicate.jobs[3] = { 1: [actionsJob(21000, 'CI', 'skipped')] }
+  assert.deepEqual((await evaluateFake(duplicate)).toMerge, [])
+  const foreign = freshnessFixture()
+  foreign.checks[HEAD].push({
+    name: 'CI',
+    status: 'completed',
+    conclusion: 'neutral',
+    app: { slug: 'external' },
+  })
+  assert.deepEqual((await evaluateFake(foreign)).toMerge, [])
+})
+
+test('each required alias succeeds while optional neutral and skipped checks remain allowed', async () => {
+  for (const name of [
+    'CI',
+    'validate-full',
+    'lint-typecheck-test',
+    'Secret scan',
+    'TruffleHog (nightly)',
+  ]) {
+    for (const conclusion of ['skipped', 'neutral']) {
+      const fake = new Fake()
+      const selected = await evaluateFake(fake)
+      fake.checks[HEAD].push({ name, status: 'completed', conclusion })
+      assert.deepEqual((await evaluateFake(fake)).toMerge, [])
+      await landFake(fake, selected.toMerge)
+      assert.deepEqual(fake.merges, [])
+    }
+  }
+  const fake = new Fake()
+  fake.checks[HEAD].push({ name: 'optional', status: 'completed', conclusion: 'skipped' })
+  assert.equal((await evaluateFake(fake)).toMerge.length, 1)
+})
+
+test('last check and corrected title recover using current evidence', async () => {
+  for (const name of ['CI', 'Secret scan', 'PR Title', 'Product CI']) {
+    const fake = new Fake()
+    let check = fake.checks[HEAD].find((item) => item.name === name)
+    if (!check) {
+      check = job(name)
+      fake.checks[HEAD].push(check)
+    }
+    check.conclusion = 'failure'
+    assert.deepEqual((await evaluateFake(fake)).toMerge, [])
+    check.status = 'in_progress'
+    check.conclusion = null
+    assert.deepEqual((await evaluateFake(fake)).toMerge, [])
+    check.status = 'completed'
+    check.conclusion = 'success'
+    await landFake(fake, (await evaluateFake(fake)).toMerge)
+    assert.equal(fake.merges.length, 1, name)
+  }
+})
+
+test('additional declared Product workflow finishing last permits landing', async () => {
+  const fake = new Fake({ trees: { [BASE_A]: tree([E2E]), [HEAD]: tree([E2E]) } })
+  assert.deepEqual((await evaluateFake(fake)).toMerge, [])
+  fake.runs[HEAD] = [run(1, E2E)]
+  fake.jobs[1] = { 1: [job()] }
+  await landFake(fake, (await evaluateFake(fake)).toMerge)
+  assert.equal(fake.merges.length, 1)
+})
+
+test('active gate job is ignored without losing any self-workflow revocation checks', async () => {
+  const fake = freshnessFixture()
+  const self = {
+    ...actionsRun(3, 30, 31),
+    path: '.github/workflows/merge-on-green.yml',
+    status: 'in_progress',
+    conclusion: null,
+  }
+  fake.runs[HEAD].push(self)
+  const active = actionsCheck('merge-on-green', 31, null)
+  active.status = 'in_progress'
+  fake.afterJobs = () => {
+    fake.runs[HEAD][2].status = 'queued'
+  }
+  fake.checks[HEAD].push(actionsCheck('preflight', 31), active)
+  assert.equal((await evaluateFake(fake)).toMerge.length, 1)
+  const old = { ...actionsRun(4, 30, 32), path: self.path }
+  fake.runs[HEAD].push(old)
+  fake.checks[HEAD].push(actionsCheck('revoke-reviewed-on-push', 32, 'failure'))
+  assert.deepEqual((await evaluateFake(fake)).toMerge, [])
+  fake.checks[HEAD].pop()
+  fake.checks[HEAD].push({
+    ...actionsCheck('preflight', 32),
+    status: 'in_progress',
+    conclusion: null,
+  })
+  assert.deepEqual((await evaluateFake(fake)).toMerge, [])
+})
+
+test('a new run during jobs invalidates both evaluation and landing', async () => {
+  for (const landing of [false, true]) {
+    const fake = freshnessFixture()
+    const selected = await evaluateFake(fake)
+    fake.afterJobs = () => {
+      fake.afterJobs = undefined
+      fake.runs[HEAD].push(actionsRun(3, 10, 13))
+    }
+    if (landing) {
+      await landFake(fake, selected.toMerge)
+      assert.deepEqual(fake.merges, [])
+    } else {
+      assert.deepEqual((await evaluateFake(fake)).toMerge, [])
+    }
+  }
+})
+
+test('landing rereads Actions evidence after a new run appears', async () => {
+  const fake = freshnessFixture()
+  const selected = await evaluateFake(fake)
+  assert.equal(selected.toMerge.length, 1)
+  fake.runs[HEAD].push(actionsRun(3, 10, 13))
+  fake.jobs[3] = { 1: [actionsJob(13000, 'CI', 'failure')] }
+  await landFake(fake, selected.toMerge)
+  assert.deepEqual(fake.merges, [])
+})
+
+test('freshness reads later run and job pages before deciding', async () => {
+  const fake = freshnessFixture()
+  fake.runs[HEAD] = Array.from({ length: 101 }, (_, index) => actionsRun(index + 1, 10, index + 11))
+  fake.jobs[101] = {
+    1: Array.from({ length: 100 }, (_, index) =>
+      actionsJob(111000 + index, `optional ${index}`),
+    ).concat(actionsJob(111100, 'CI')),
+  }
+  assert.equal((await evaluateFake(fake)).toMerge.length, 1)
+  fake.jobs[101][1][100].conclusion = 'failure'
+  assert.deepEqual((await evaluateFake(fake)).toMerge, [])
+})
+test('unmatched checks in old and latest Actions suites remain authoritative', async () => {
+  for (const suite of [11, 12]) {
+    for (const app of ['github-actions', 'external']) {
+      for (const [name, conclusion] of [
+        ['custom', 'failure'],
+        ['CI', 'skipped'],
+      ]) {
+        const fake = freshnessFixture()
+        fake.checks[HEAD].push({
+          id: suite * 1000 + 999,
+          name,
+          status: 'completed',
+          conclusion,
+          app: { slug: app },
+          check_suite: { id: suite },
+        })
+        assert.deepEqual((await evaluateFake(fake)).toMerge, [], `${suite}/${app}/${name}`)
+      }
+    }
+  }
+})
+
+test('latest title run replaces failure without masking other producers or external checks', async () => {
+  const fake = freshnessFixture()
+  fake.checks[HEAD].push(actionsCheck('PR Title', 31, 'failure'))
+  fake.runs[HEAD].push(actionsRun(3, 30, 31), actionsRun(4, 30, 32))
+  fake.jobs[3] = { 1: [actionsJob(31000, 'PR Title', 'failure')] }
+  fake.jobs[4] = { 1: [actionsJob(32000, 'PR Title')] }
+  assert.equal((await evaluateFake(fake)).toMerge.length, 1)
+  fake.jobs[4][1][0].conclusion = 'failure'
+  assert.deepEqual((await evaluateFake(fake)).toMerge, [])
+})
+
+test('freshness rejects truncated check, run and exact-attempt job pages', async () => {
+  for (const kind of ['checks', 'runs', 'jobs'] as const) {
+    const fake = freshnessFixture()
+    if (kind === 'checks') {
+      const original = fake.github.rest.checks.listForRef
+      fake.github.rest.checks.listForRef = async (params) => {
+        const response = await original(params)
+        response.data.total_count++
+        return response
+      }
+    } else if (kind === 'runs') {
+      const original = fake.github.rest.actions.listWorkflowRunsForRepo
+      fake.github.rest.actions.listWorkflowRunsForRepo = async (params) => {
+        const response = await original(params)
+        response.data.total_count++
+        return response
+      }
+    } else {
+      const original = fake.github.rest.actions.listJobsForWorkflowRunAttempt
+      fake.github.rest.actions.listJobsForWorkflowRunAttempt = async (params) => {
+        const response = await original(params)
+        response.data.total_count++
+        return response
+      }
+    }
+    const result = await evaluateFake(fake)
+    assert.deepEqual(result.toMerge, [], kind)
+    assert.equal(result.unreadable.length, 1, kind)
+  }
+})
+
+test('capped check listing is unreadable without blocking another candidate', async () => {
+  const fake = pair()
+  fake.checks[HEAD] = Array.from({ length: 1000 }, (_, index) => ({
+    name: `optional ${index}`,
+    status: 'completed',
+    conclusion: 'success',
+    app: null,
+  }))
+  const result = await evaluateFake(fake)
+  assert.deepEqual(
+    result.toMerge.map((candidate) => candidate.number),
+    [8],
+  )
+  assert.equal(result.unreadable.length, 1)
+  await landFake(fake, result.toMerge)
+  assert.deepEqual(fake.merges, [{ number: 8, sha: OTHER }])
+})
+
+test('unknown app evidence is retained and required checks still must succeed', async () => {
+  const fake = freshnessFixture()
+  fake.checks[HEAD].push({ name: 'CI', status: 'completed', conclusion: 'skipped', app: null })
+  const held = await evaluateFake(fake)
+  assert.deepEqual(held.toMerge, [])
+  assert.deepEqual(held.unreadable, [])
+})
+
+async function assertAuthorizationQuality(
+  admitted: boolean,
+  quality: 'green' | 'red' | 'unreadable',
+) {
+  const fake = new Fake()
+  if (!admitted) fake.comments[7] = []
+  if (quality === 'red') fake.checks[HEAD][0].conclusion = 'failure'
+  if (quality === 'unreadable') fake.errors[`checks:${HEAD}`] = 503
+  const log = core()
+  const result = await evaluate({
+    github: fake.github,
+    repo,
+    payload: { inputs: { pr: '7' } },
+    core: log,
+    policy,
+  })
+  assert.equal(
+    result.toMerge.length,
+    admitted && quality === 'green' ? 1 : 0,
+    `${admitted}/${quality}`,
+  )
+  assert.equal(
+    result.unreadable.length,
+    admitted && quality === 'unreadable' ? 1 : 0,
+    `${admitted}/${quality}`,
+  )
+  assert.equal(fake.calls.includes(`checks:${HEAD}`), admitted, `${admitted}/${quality}`)
+  if (!admitted) assert.ok(log.lines.some((line) => line.includes('authorization held')))
+  if (admitted && quality === 'red')
+    assert.ok(log.lines.some((line) => line.includes('failed CI=failure')))
+}
+
+test('initial evaluation reads authorization before quality with admitted controls', async () => {
+  for (const admitted of [false, true]) {
+    for (const quality of ['green', 'red', 'unreadable'] as const) {
+      await assertAuthorizationQuality(admitted, quality)
+    }
+  }
+  const blocked = new Fake()
+  blocked.checks[HEAD][0].conclusion = 'failure'
+  blocked.errors['comments:7:1'] = 503
+  const result = await evaluateFake(blocked)
+  assert.equal(result.unreadable.length, 1)
+  assert.ok(!blocked.calls.includes(`checks:${HEAD}`))
+})
+
+test('scope changes during authorization hold before quality', async () => {
+  for (const field of ['head', 'base']) {
+    const fake = new Fake()
+    fake.branches.staging = BASE_A
+    const original = fake.github.rest.pulls.get
+    let reads = 0
+    fake.github.rest.pulls.get = async (params) => {
+      const response = await original(params)
+      if (++reads === 2) {
+        if (field === 'head') response.data.head.sha = OTHER
+        else response.data.base.ref = 'staging'
+      }
+      return response
+    }
+    const log = core()
+    const result = await evaluate({
+      github: fake.github,
+      repo,
+      payload: { inputs: { pr: '7' } },
+      core: log,
+      policy,
+    })
+    assert.deepEqual(result.toMerge, [], field)
+    assert.deepEqual(result.unreadable, [], field)
+    assert.ok(!fake.calls.includes(`checks:${HEAD}`), field)
+    assert.ok(
+      log.lines.some((line) => line.includes('authorization held')),
+      field,
+    )
+  }
+})
+
+type QualityAuthChange = 'withdraw' | 'reissue' | 'id-only' | 'body-only'
+
+function armQualityAuthorizationChange(fake: Fake, change: QualityAuthChange) {
+  const input = { github: fake.github, repo, prNumber: 7, policy }
+  const original = { id: fake.comments[7][0].id, body: fake.comments[7][0].body }
+  fake.afterCheckRead = async () => {
+    fake.afterCheckRead = undefined
+    if (change === 'reissue') {
+      const snapshot = await captureAuthorization(input)
+      await issueAuthorization({
+        ...input,
+        writer: fake.writer,
+        snapshot,
+        lane: 'reviewed',
+        source: 'manual',
+        evidence: 'new review',
+        operationId: 'quality-reissue',
+      })
+    } else if (change === 'withdraw') {
+      await withdrawAuthorization({
+        ...input,
+        writer: fake.writer,
+        operationId: 'quality-withdraw',
+        reason: 'stop',
+      })
+    } else if (change === 'id-only') {
+      fake.comments[7][0].id += 100
+      fake.comments[7][0].node_id = `node${fake.comments[7][0].id}`
+    } else {
+      // Deliberately inconsistent stale edit proof: exercise the independent body fence.
+      const record = JSON.parse(original.body.slice(PREFIX.length))
+      fake.comments[7][0].body = render({ ...record, evidence: 'changed evidence' })
+    }
+    const current = await readAuthorization(input)
+    if (change === 'withdraw') {
+      assert.equal(current.allowed, false)
+      return
+    }
+    assert.equal(current.allowed, true)
+    if (!current.allowed) throw new Error('expected valid authorization')
+    assert.equal(current.receipt.id === original.id, change === 'body-only')
+    assert.equal(current.receipt.body === original.body, change === 'id-only')
+  }
+}
+
+test('authorization changes during quality cannot survive final landing revalidation', async () => {
+  const control = new Fake()
+  await landFake(control, (await evaluateFake(control)).toMerge)
+  assert.deepEqual(control.merges, [{ number: 7, sha: HEAD }])
+  for (const phase of ['evaluate', 'land']) {
+    for (const change of ['withdraw', 'reissue', 'id-only', 'body-only'] as const) {
+      const fake = new Fake()
+      if (phase === 'evaluate') armQualityAuthorizationChange(fake, change)
+      const selected = await evaluateFake(fake)
+      assert.equal(selected.toMerge.length, 1)
+      if (phase === 'land') armQualityAuthorizationChange(fake, change)
+      const log = core()
+      const result = await land({
+        github: fake.github,
+        merger: fake.merger,
+        repo,
+        queue: selected.toMerge,
+        core: log,
+        policy,
+      })
+      assert.equal(fake.afterCheckRead, undefined, phase)
+      assert.deepEqual(fake.merges, [], `${phase}/${change}`)
+      assert.deepEqual(result.unreadable, [], `${phase}/${change}`)
+      assert.ok(
+        log.lines.some((line) => line.includes('authorization changed')),
+        `${phase}/${change}`,
+      )
+    }
+  }
+})
+
+test('prioritized unadmitted dispatch candidate does not hide admitted quality verdicts', async () => {
+  const fake = pair()
+  fake.comments[7] = []
+  fake.checks[HEAD][0].conclusion = 'failure'
+  const log = core()
+  const result = await evaluate({
+    github: fake.github,
+    repo,
+    payload: { inputs: { pr: '7' } },
+    core: log,
+    policy,
+  })
+  assert.deepEqual(
+    result.toMerge.map((candidate) => candidate.number),
+    [8],
+  )
+  assert.deepEqual(result.unreadable, [])
+  assert.ok(log.lines.some((line) => line.includes('authorization held')))
+  assert.equal(
+    fake.calls.find((call) => call.startsWith('pulls.get:')),
+    'pulls.get:7',
+  )
+  assert.ok(!fake.calls.includes(`checks:${HEAD}`))
+  assert.ok(fake.calls.includes(`checks:${OTHER}`))
 })
 
 let failed = 0

@@ -19,9 +19,9 @@ const { readAuthorization } = require('./head-authorization.cjs')
  * @property {(message: string) => void} warning
  * @property {(message: string) => void} error
  */
-/** @typedef {{ name: string, status: string, conclusion: string | null }} CheckRun */
-/** @typedef {{ name: string, status: string, conclusion: string | null }} Job */
-/** @typedef {{ id: number, path: string, head_sha: string, status: string | null, conclusion: string | null, run_attempt?: number }} WorkflowRun */
+/** @typedef {{ id?: number, name: string, status: string, conclusion: string | null, app?: { slug: string } | null, check_suite?: { id: number } | null }} CheckRun */
+/** @typedef {{ id?: number, name: string, status: string, conclusion: string | null }} Job */
+/** @typedef {{ id: number, workflow_id?: number, check_suite_id?: number, path: string, head_sha: string, status: string | null, conclusion: string | null, run_attempt?: number }} WorkflowRun */
 /** @typedef {{ number: number, state: string, draft?: boolean, merged?: boolean, base: { ref: string }, labels?: Array<{ name: string }> | null, user?: { login: string } | null }} PullSummary */
 /** @typedef {PullSummary & { mergeable: boolean | null, head: { sha: string } }} PullRequest */
 /** @typedef {{ inheritance: boolean, gate: string | null }} Side */
@@ -99,6 +99,359 @@ function validSha(value, name) {
     throw new Error(`${name} did not resolve to an immutable 40-hex SHA`)
   }
   return value.toLowerCase()
+}
+/** @param {unknown} value @returns {value is number} */
+const positive = (value) => typeof value === 'number' && Number.isSafeInteger(value) && value > 0
+
+/** @param {any} body @param {string} key @param {number | undefined} total */
+function pageTotal(body, key, total) {
+  if (
+    !(body && Number.isSafeInteger(body.total_count)) ||
+    body.total_count < 0 ||
+    !Array.isArray(body[key])
+  )
+    throw new Error(`invalid ${key} page`)
+  if (total !== undefined && total !== body.total_count)
+    throw new Error(`${key} changed during pagination`)
+  return body.total_count
+}
+
+// A missing total, truncated page, or GitHub's result cap cannot prove freshness.
+/** @param {any} endpoint @param {any} params @param {string} key @returns {Promise<any[]>} */
+async function complete(endpoint, params, key) {
+  const rows = []
+  let total
+  for (let page = 1; ; page++) {
+    const response = await endpoint({ ...params, per_page: 100, page })
+    const body = response.data
+    total = pageTotal(body, key, total)
+    rows.push(...body[key])
+    const next = /rel="next"/.test(response.headers?.link || '')
+    if (!next) break
+    if (!body[key].length || rows.length >= total) throw new Error(`invalid ${key} pagination`)
+  }
+  if (rows.length !== total || rows.length >= 1000) throw new Error(`incomplete ${key} pagination`)
+  return rows
+}
+
+class CheckHold extends Error {}
+
+/** @param {any} run @param {any} context */
+function producerKey(run, context) {
+  if (
+    context &&
+    run.event === 'pull_request' &&
+    run.head_sha === context.sha &&
+    run.head_branch === context.branch &&
+    run.head_repository?.id === context.repoId
+  )
+    return `pr:${run.workflow_id}`
+  return `run:${run.id}`
+}
+
+/** @param {any[]} runs @param {string} head @param {any} context */
+function indexActionRuns(runs, head, context) {
+  const bySuite = new Map()
+  const latest = new Map()
+  const paths = new Map()
+  const pathOwners = new Map()
+  const ids = new Map()
+  for (const run of runs) {
+    if (
+      !(positive(run.id) && positive(run.workflow_id) && positive(run.check_suite_id)) ||
+      run.head_sha !== head ||
+      typeof run.path !== 'string' ||
+      !run.path ||
+      ids.has(run.id) ||
+      bySuite.has(run.check_suite_id)
+    )
+      throw new Error('invalid Actions run identity')
+    ids.set(run.id, run)
+    if (
+      (paths.has(run.workflow_id) && paths.get(run.workflow_id) !== run.path) ||
+      (pathOwners.has(run.path) && pathOwners.get(run.path) !== run.workflow_id)
+    )
+      throw new Error('ambiguous Actions workflow path')
+    paths.set(run.workflow_id, run.path)
+    pathOwners.set(run.path, run.workflow_id)
+    bySuite.set(run.check_suite_id, run)
+    const key = producerKey(run, context)
+    if (!latest.has(key) || latest.get(key).id < run.id) latest.set(key, run)
+  }
+  return { bySuite, latest, paths, ids, context }
+}
+
+const SELF_WORKFLOW = '.github/workflows/merge-on-green.yml'
+const REQUIRED_CHECK = /^(ci|validate-full|lint-typecheck-test)$|TruffleHog|Secret scan/i
+
+/** @param {any[]} checks */
+function actionSuites(checks) {
+  const suites = new Set()
+  for (const check of checks) {
+    if (check.app === null || check.app === undefined) continue // Unknown providers remain conservative.
+    if (typeof check.app.slug !== 'string' || !check.app.slug)
+      throw new Error('invalid check provider')
+    if (check.app.slug !== 'github-actions') continue
+    if (!positive(check.check_suite?.id)) throw new Error('invalid Actions check suite')
+    suites.add(check.check_suite.id)
+  }
+  return suites
+}
+
+/** @param {Set<any>} suites @param {any} index */
+function actionProducers(suites, index) {
+  const workflows = new Set()
+  const producers = new Set()
+  for (const suite of suites) {
+    const run = index.bySuite.get(suite)
+    if (run === undefined) throw new Error('unmatched Actions suite')
+    workflows.add(run.workflow_id)
+    producers.add(producerKey(run, index.context))
+  }
+  for (const [key, run] of index.latest) {
+    if (key.startsWith('pr:') && workflows.has(run.workflow_id)) producers.add(key)
+  }
+  return producers
+}
+
+/** @param {GitHubPort} github @param {Repo} repo @param {any} run */
+async function attemptJobs(github, repo, run) {
+  if (!positive(run.run_attempt)) throw new Error('Actions run has no valid attempt')
+  return complete(
+    github.rest.actions.listJobsForWorkflowRunAttempt,
+    {
+      ...repo,
+      run_id: run.id,
+      attempt_number: run.run_attempt,
+    },
+    'jobs',
+  )
+}
+
+/** @param {GitHubPort} github @param {Repo} repo @param {Set<any>} producers @param {any} index */
+async function latestProducerJobs(github, repo, producers, index) {
+  const proven = new Map()
+  const jobs = []
+  for (const producer of producers) {
+    const run = index.latest.get(producer)
+    if (run.path === SELF_WORKFLOW) continue
+    if (!positive(run.run_attempt)) throw new Error('Actions run has no valid attempt')
+    if (run.status !== 'completed' || !PASSING.has(run.conclusion))
+      throw new CheckHold(`Actions run ${run.status === 'completed' ? run.conclusion : run.status}`)
+    const current = await attemptJobs(github, repo, run)
+    if (!current.length) throw new CheckHold('Actions run has no jobs')
+    if (
+      current.some(
+        (job) =>
+          !positive(job.id) ||
+          typeof job.name !== 'string' ||
+          !job.name ||
+          typeof job.status !== 'string',
+      )
+    )
+      throw new Error('invalid Actions jobs')
+    proven.set(run.check_suite_id, new Set(current.map((job) => job.id)))
+    jobs.push(...current)
+  }
+  return { proven, jobs }
+}
+
+/** @param {GitHubPort} github @param {Repo} repo @param {Set<any>} suites @param {any} index @param {Map<any, any>} proven */
+async function proveOlderJobs(github, repo, suites, index, proven) {
+  for (const suite of suites) {
+    const run = index.bySuite.get(suite)
+    if (index.paths.get(run.workflow_id) === SELF_WORKFLOW || proven.has(suite)) continue
+    const jobs = await attemptJobs(github, repo, run)
+    if (jobs.some((job) => !positive(job.id))) throw new Error('invalid old Actions job identity')
+    proven.set(suite, new Set(jobs.map((job) => job.id)))
+  }
+}
+
+/** @param {any[]} checks @param {any} index @param {Map<any, any>} proven @param {any[]} jobs */
+function pruneProvenChecks(checks, index, proven, jobs) {
+  const result = checks.filter(
+    (check) =>
+      check.app?.slug !== 'github-actions' ||
+      index.bySuite.get(check.check_suite.id).path === SELF_WORKFLOW,
+  )
+  result.push(...jobs)
+  for (const check of checks) {
+    if (check.app?.slug !== 'github-actions') continue
+    const run = index.bySuite.get(check.check_suite.id)
+    if (!proven.get(check.check_suite.id)?.has(check.id)) {
+      if (run.path !== SELF_WORKFLOW) result.push(check)
+      continue
+    }
+    const latest = index.latest.get(producerKey(run, index.context))
+    if (
+      REQUIRED_CHECK.test(check.name || '') &&
+      !jobs.some((job) => job.name === check.name && proven.get(latest.check_suite_id)?.has(job.id))
+    )
+      throw new CheckHold('required Actions check missing from latest attempt')
+  }
+  return result
+}
+
+/** @param {any} run */
+const runIdentity = (run) =>
+  run &&
+  JSON.stringify([
+    run.id,
+    run.workflow_id,
+    run.path,
+    run.head_sha,
+    run.check_suite_id,
+    run.run_attempt,
+    run.status,
+    run.conclusion,
+    run.event,
+    run.head_branch,
+    run.head_repository?.id,
+  ])
+
+/** @param {any} before @param {any} after */
+function verifyRunIdentities(before, after) {
+  for (const runId of new Set([...before.ids.keys(), ...after.ids.keys()])) {
+    const previous = before.ids.get(runId)
+    const current = after.ids.get(runId)
+    if (
+      (!previous || previous.path === SELF_WORKFLOW) &&
+      (!current || current.path === SELF_WORKFLOW)
+    )
+      continue
+    if (runIdentity(previous) !== runIdentity(current))
+      throw new CheckHold('Actions run changed after jobs')
+  }
+}
+
+/** @param {any[]} runs @param {any} pr @param {string} sha */
+function possibleContext(runs, pr, sha) {
+  const branch = pr.head?.ref
+  const repoId = pr.head?.repo?.id
+  const owner = pr.head?.repo?.owner?.login
+  if (
+    typeof branch !== 'string' ||
+    !branch ||
+    !positive(repoId) ||
+    typeof owner !== 'string' ||
+    !owner
+  )
+    return null
+  const counts = new Map()
+  for (const run of runs) {
+    if (
+      run.event !== 'pull_request' ||
+      run.head_sha !== sha ||
+      run.head_branch !== branch ||
+      run.head_repository?.id !== repoId
+    )
+      continue
+    counts.set(run.workflow_id, (counts.get(run.workflow_id) ?? 0) + 1)
+  }
+  if (![...counts.values()].some((count) => count >= 2)) return null
+  return { branch, repoId, owner, sha }
+}
+
+/** @param {any} github @param {Repo} repo @param {any} pr @param {any} context */
+async function proveUniqueHead(github, repo, pr, context) {
+  const response = await github.rest.pulls.list({
+    ...repo,
+    state: 'all',
+    head: `${context.owner}:${context.branch}`,
+    per_page: 100,
+    page: 1,
+  })
+  if (!Array.isArray(response.data)) throw new Error('invalid head PR listing')
+  if (response.data.length >= 100 || /rel="next"/.test(response.headers?.link || '')) return false
+  if (response.data.length !== 1) return false
+  const only = response.data[0]
+  return (
+    only.number === pr.number &&
+    only.head?.ref === context.branch &&
+    only.head?.repo?.id === context.repoId &&
+    only.head?.sha === context.sha
+  )
+}
+
+/** @param {any} github @param {Repo} repo @param {any} assessed @param {any} context */
+async function unchangedBase(github, repo, assessed, context) {
+  const query = `query MergeGateBaseHistory($owner: String!, $repo: String!, $number: Int!) {
+    repository(owner: $owner, name: $repo) {
+      pullRequest(number: $number) {
+        number baseRefName headRefName headRefOid headRepository { databaseId }
+        timelineItems(first: 1, itemTypes: [BASE_REF_CHANGED_EVENT, BASE_REF_DELETED_EVENT, AUTOMATIC_BASE_CHANGE_SUCCEEDED_EVENT]) {
+          nodes { __typename } pageInfo { hasNextPage }
+        }
+      }
+    }
+  }`
+  const response = await github.graphql(query, { ...repo, number: assessed.number })
+  const pr = response?.repository?.pullRequest
+  const timeline = pr?.timelineItems
+  if (
+    pr?.number !== assessed.number ||
+    pr.baseRefName !== assessed.base.ref ||
+    pr.headRefName !== context.branch ||
+    pr.headRefOid !== context.sha ||
+    pr.headRepository?.databaseId !== context.repoId ||
+    !timeline ||
+    !Array.isArray(timeline.nodes) ||
+    typeof timeline.pageInfo?.hasNextPage !== 'boolean' ||
+    timeline.nodes.length > 1
+  )
+    throw new Error('invalid base history proof')
+  if (timeline.nodes.length === 0 && !timeline.pageInfo.hasNextPage) return true
+  if (
+    timeline.nodes.length === 1 &&
+    ['BaseRefChangedEvent', 'BaseRefDeletedEvent', 'AutomaticBaseChangeSucceededEvent'].includes(
+      timeline.nodes[0]?.__typename,
+    )
+  )
+    return false
+  throw new Error('incomplete base history proof')
+}
+
+/** @param {GitHubPort} github @param {Repo} repo @param {string} head @param {PullRequest} pr @returns {Promise<CheckRun[]>} */
+async function currentChecks(github, repo, head, pr) {
+  const checks = await complete(
+    github.rest.checks.listForRef,
+    { ...repo, ref: head, filter: 'latest' },
+    'check_runs',
+  )
+  const suites = actionSuites(checks)
+  if (!suites.size) return checks
+  const listRuns = () =>
+    complete(
+      github.rest.actions.listWorkflowRunsForRepo,
+      { ...repo, head_sha: head },
+      'workflow_runs',
+    )
+  const runs = await listRuns()
+  const candidate = possibleContext(runs, pr, head)
+  const context =
+    candidate &&
+    (await proveUniqueHead(github, repo, pr, candidate)) &&
+    (await unchangedBase(github, repo, pr, candidate))
+      ? candidate
+      : null
+  const index = indexActionRuns(runs, head, context)
+  const producers = actionProducers(suites, index)
+  const { proven, jobs } = await latestProducerJobs(github, repo, producers, index)
+  await proveOlderJobs(github, repo, suites, index, proven)
+  const result = pruneProvenChecks(checks, index, proven, jobs)
+  verifyRunIdentities(index, indexActionRuns(await listRuns(), head, context))
+  return result
+}
+
+/** @param {GitHubPort} github @param {Repo} repo @param {string} head @param {PullRequest} pr
+ * @returns {Promise<{checks: CheckRun[], reason: null} | {checks: null, reason: string}>} */
+async function currentChecksResult(github, repo, head, pr) {
+  try {
+    return { checks: await currentChecks(github, repo, head, pr), reason: null }
+  } catch (error) {
+    if (error instanceof CheckHold) return { checks: null, reason: error.message }
+    throw error
+  }
 }
 
 /**
@@ -283,10 +636,9 @@ async function currentPull(github, repo, number) {
  * @param {Repo} repo
  * @param {GateApi} gate
  * @param {number} number
- * @param {Core} core
  * @param {string} [expectedSha]
  */
-async function assess(github, repo, gate, number, core, expectedSha) {
+async function assessHead(github, repo, gate, number, expectedSha) {
   const tag = `PR #${number}`
   const pr = await currentPull(github, repo, number)
   const reason = ineligible(pr)
@@ -298,25 +650,35 @@ async function assess(github, repo, gate, number, core, expectedSha) {
   if (sha !== reportedSha) throw new Error(`${tag} head resolved to a different commit`)
   if (expectedSha && sha !== validSha(expectedSha, `${tag} queued head`))
     return { sha: null, stale: true }
-  const checks = await github.paginate(github.rest.checks.listForRef, {
-    ...repo,
-    ref: sha,
-    per_page: 100,
-  })
+  return { sha, pr, baseRef: pr.base.ref }
+}
+
+/** @param {GitHubPort} github @param {Repo} repo @param {GateApi} gate @param {number} number
+ * @param {Core} core @param {string} sha @param {PullRequest} pr */
+async function assessQuality(github, repo, gate, number, core, sha, pr) {
+  const tag = `PR #${number}`
+  const checkResult = await currentChecksResult(github, repo, sha, pr)
+  if (!checkResult.checks) return { sha: null, reason: checkResult.reason }
   // Keep revocation in the required set: otherwise a workflow_run could merge a pushed head
   // while a stale reviewed label has not yet been removed.
-  const others = checks.filter((check) => check.name !== SELF_JOB)
+  const others = checkResult.checks.filter((check) => check.name !== SELF_JOB)
   if (!others.length) return { sha: null, reason: 'no check runs on head (fail-closed)' }
   /** @param {RegExp} pattern */
   const has = (pattern) => others.some((check) => pattern.test(check.name || ''))
-  const secret = has(/TruffleHog|Secret scan/i)
-  const ci = has(/^(ci|validate-full|lint-typecheck-test)$/i)
+  const secretPattern = /TruffleHog|Secret scan/i
+  const ciPattern = /^(ci|validate-full|lint-typecheck-test)$/i
+  const secret = has(secretPattern)
+  const ci = has(ciPattern)
   if (!(secret && ci))
     return { sha: null, reason: `missing required checks (secret=${secret}, ci=${ci})` }
   const pending = others.filter((check) => check.status !== 'completed')
   if (pending.length)
     return { sha: null, reason: `pending ${pending.map((check) => check.name).join(', ')}` }
-  const failed = others.filter((check) => !PASSING.has(check.conclusion ?? ''))
+  const failed = others.filter((check) =>
+    secretPattern.test(check.name || '') || ciPattern.test(check.name || '')
+      ? check.conclusion !== 'success'
+      : !PASSING.has(check.conclusion ?? ''),
+  )
   if (failed.length)
     return {
       sha: null,
@@ -335,9 +697,18 @@ async function assess(github, repo, gate, number, core, expectedSha) {
   return { sha, baseRef: pr.base.ref }
 }
 
+/** @param {GitHubPort} github @param {Repo} repo @param {GateApi} gate @param {number} number
+ * @param {Core} core @param {string} [expectedSha]
+ * @returns {Promise<{sha: string | null, baseRef?: string, stale?: boolean, reason?: string}>} */
+async function assess(github, repo, gate, number, core, expectedSha) {
+  const head = await assessHead(github, repo, gate, number, expectedSha)
+  if (!head.sha) return head
+  return assessQuality(github, repo, gate, number, core, head.sha, head.pr)
+}
+
 /** @param {GitHubPort & import('./head-authorization.cjs').Reader} github @param {Repo} repo @param {GateApi} gate @param {number} number @param {Core} core @param {AuthorizationPolicy} policy */
 async function evaluateCandidate(github, repo, gate, number, core, policy) {
-  const result = await assess(github, repo, gate, number, core)
+  const result = await assessHead(github, repo, gate, number)
   if (!result.sha) {
     if (result.reason) core.info(`PR #${number}: ${result.reason} — skip.`)
     return null
@@ -349,6 +720,11 @@ async function evaluateCandidate(github, repo, gate, number, core, policy) {
     authority.scope.baseRef !== result.baseRef
   ) {
     core.info(`PR #${number}: authorization held (${authority.reason || 'head changed'}) — skip.`)
+    return null
+  }
+  const quality = await assessQuality(github, repo, gate, number, core, result.sha, result.pr)
+  if (!quality.sha) {
+    if (quality.reason) core.info(`PR #${number}: ${quality.reason} — skip.`)
     return null
   }
   core.info(`PR #${number}: authorization + checks green on ${result.sha} → queue merge.`)
