@@ -1,4 +1,10 @@
 /** Read-only Dependabot admission over one immutable repository/PR/base/head snapshot. */
+
+import {
+  INHERITANCE_MARKER,
+  PRODUCT_CONFIG,
+  parseDeclaration,
+} from '../lib/product-declaration.cjs'
 import { evaluateWorkflowChange, type WorkflowChange } from './actions.ts'
 import type { GitHubApi } from './github.ts'
 import { at, str } from './json.ts'
@@ -24,6 +30,7 @@ export type PrContext = {
   now: Date
   registry: Registry
   api: GitHubApi
+  readOwnershipPolicy: () => string
 }
 export type PrVerdict = Verdict & { snapshot: PrSnapshot }
 type PullFile = { filename: string; status: string }
@@ -208,6 +215,133 @@ function classifyFiles(
   return { reasons, workflows, lockChanged }
 }
 
+function validPolicyPaths(value: unknown, prefix: boolean): value is string[] {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.every(
+      (p) =>
+        typeof p === 'string' &&
+        p.length > 0 &&
+        !p.startsWith('/') &&
+        !p.includes('//') &&
+        !p.split('/').some((part: string) => part === '.' || part === '..') &&
+        (prefix ? p.endsWith('/') : !p.endsWith('/')),
+    )
+  )
+}
+
+function parseOwnershipPolicy(text: string) {
+  const policy = JSON.parse(text)
+  if (
+    policy?.version !== 1 ||
+    !validPolicyPaths(policy.protected_prefixes, true) ||
+    !validPolicyPaths(policy.protected_files, false) ||
+    !policy.protected_files.includes('package.json') ||
+    !policy.protected_prefixes.includes('packages/') ||
+    !Array.isArray(policy.kit_origin_allowlist) ||
+    policy.kit_origin_allowlist.length === 0 ||
+    !policy.kit_origin_allowlist.every(
+      (entry: unknown) =>
+        typeof entry === 'string' && /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(entry),
+    ) ||
+    policy.inheritance_file !== INHERITANCE_MARKER ||
+    policy.protected_prefixes.some(
+      (p: string) => /^apps(?:\/|$)/.test(p) && !/^apps\/[^/]+\/$/.test(p),
+    )
+  )
+    throw new Error('ownership policy malformed')
+  return policy
+}
+
+async function readOwnershipIdentity(
+  ctx: PrContext,
+  mergeBase: string,
+  kit: boolean,
+): Promise<void> {
+  const { api, repo, snapshot } = ctx
+  const root = `/repos/${repo}`
+  const revisions = [mergeBase, snapshot.baseSha, snapshot.headSha]
+  const states = await Promise.all(
+    revisions.map(async (sha) => ({
+      marker: await api.raw(`${root}/contents/${enc(INHERITANCE_MARKER)}?ref=${sha}`),
+      declaration: await api.raw(`${root}/contents/${enc(PRODUCT_CONFIG)}?ref=${sha}`),
+    })),
+  )
+  if (
+    states.some(
+      (state) => state.marker !== states[0]?.marker || state.declaration !== states[0]?.declaration,
+    )
+  )
+    throw new Error('inheritance marker or Product declaration changed across revisions')
+  const state = states[0]
+  if (!state) throw new Error('identity unavailable')
+  if (state.marker !== undefined) {
+    const marker = JSON.parse(state.marker)
+    if (
+      kit ||
+      typeof marker?.upstreamCommit !== 'string' ||
+      !/^[a-f0-9]{40}$/i.test(marker.upstreamCommit.trim())
+    )
+      throw new Error('inheritance marker conflicts with repository identity or is malformed')
+  } else if (!kit) {
+    throw new Error('repository is not allowlisted and has no inheritance marker')
+  }
+  const declaration = parseDeclaration(state.declaration ?? null, !kit)
+  if (declaration.findings.length || (kit && state.declaration !== undefined))
+    throw new Error('Product declaration missing, malformed, or conflicts with Kit identity')
+}
+
+/** Policy comes from the same trusted checkout as the guard, never from the PR or a moving ref. */
+async function ownershipReasons(
+  ctx: PrContext,
+  files: PullFile[],
+  mergeBase: string,
+): Promise<Reason[]> {
+  const { repo } = ctx
+  const unavailable = (detail: string): Reason[] => [
+    { code: 'OWNERSHIP_UNAVAILABLE', subject: repo, detail },
+  ]
+  try {
+    const policy = parseOwnershipPolicy(ctx.readOwnershipPolicy())
+    const kit = policy.kit_origin_allowlist.includes(repo)
+    await readOwnershipIdentity(ctx, mergeBase, kit)
+    if (kit) return []
+    const findings: Reason[] = files
+      .filter(
+        ({ filename }) =>
+          policy.protected_files.includes(filename) ||
+          policy.protected_prefixes.some(
+            (p: string) => filename === p.slice(0, -1) || filename.startsWith(p),
+          ),
+      )
+      .map(({ filename }) => ({
+        code: 'KIT_PATH' as const,
+        subject: filename,
+        detail: 'Kit-owned path in a Product; update the Kit and inherit it instead',
+      }))
+    for (const { filename } of files) {
+      if (
+        WORKFLOW.test(filename) &&
+        !filename.startsWith('.github/workflows/product-') &&
+        !policy.protected_files.includes(filename) &&
+        !policy.protected_prefixes.some((prefix: string) => filename.startsWith(prefix))
+      ) {
+        findings.push({
+          code: 'OWNERSHIP_UNAVAILABLE',
+          subject: filename,
+          detail: 'workflow is not classified as Product or Kit',
+        })
+      }
+    }
+    return findings
+  } catch (error) {
+    return unavailable(
+      `identity or ownership policy could not be read: ${error instanceof Error ? error.message : String(error)}`,
+    )
+  }
+}
+
 export async function evaluatePr(ctx: PrContext): Promise<PrVerdict> {
   const { api, repo, snapshot: s } = ctx
   validateSnapshot(s)
@@ -229,6 +363,7 @@ export async function evaluatePr(ctx: PrContext): Promise<PrVerdict> {
     lockChanged,
   } = classifyFiles(files, `${repo}#${s.pullRequest}`)
   reasons.push(...fileReasons)
+  reasons.push(...(await ownershipReasons(ctx, files, mergeBase)))
   const root = `/repos/${repo}`
   const content = (path: string, sha: string) => api.raw(`${root}/contents/${enc(path)}?ref=${sha}`)
   const verdicts: Verdict[] = []

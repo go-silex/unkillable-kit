@@ -72,4 +72,5 @@ This index locates the authoritative home for each rule and the operational guid
 ## Consumer templates
 
 - [Product CI](./templates/product-ci.example.yml) and [validation script](./templates/product-validate.example.sh) — examples for consumer-owned CI.
+- [Product Dependabot configuration](./templates/product-dependabot.example.yml) — generated App-only scan at GitHub's fixed path; the [consumer contract](./product-consumer-contract.md#product-dependabot-configuration) defines its content bound and shared-lock limits.
 - [Schema manifest](./templates/kit-schema-manifest.example.json) — example for Kit schema composition.

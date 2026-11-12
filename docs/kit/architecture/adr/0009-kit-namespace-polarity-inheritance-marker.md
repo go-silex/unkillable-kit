@@ -3,7 +3,7 @@ title: 'ADR-0009 — Kit namespace polarity (`*/kit`) + inheritance marker SSoT'
 status: accepted
 normative: true
 date: 2026-08-21
-amended: 2026-11-11
+amended: 2026-11-12
 axial: false
 related:
   - docs/kit/architecture/adr/0001-primary-axis-packages-compose-apps.md
@@ -83,6 +83,8 @@ Root kit files remain on the explicit `protected_files` list in `config/kit/zero
 `bun.lock` is product workspace co-owned and is not protected. `.dev/stack.yml` is product-owned. `scripts/kit/check-stack-contract.ts` checks shape in kit mode and, in product mode, compares against the inherited baseline: it rejects new `review.roster` `never`, reduced `max_agents`, `landing.required_checks`, a `landing.mode` outside `merge-on-green | native`, changes or removal of pinned `commands.*`, any `bun.*version` key, non-canonical review/landing shapes, and unchanged product identity fields (`name`, `backend.path`, `release.component`, and `frontend.path` unless the whole `frontend` value is the canonical null scalar `frontend: null`). Additive keys stay free. The check does not attest baseline provenance. The kit no longer ships semctx surfaces.
 
 **Amendment (2026-11-11, [Roxabi/roxabi-boilerplate-cf#591](https://github.com/Roxabi/roxabi-boilerplate-cf/issues/591)) — API-only `frontend: null`.** An API-only product replaces the whole `frontend` block with the canonical null scalar `frontend: null` and keeps that scalar on upgrade. No frontend App is required. The guard compares values, not filesystem existence. `~`, an implicit empty value, `Null`, a quoted string, a missing `frontend`, and a partial map still fail `frontend.path`.
+
+**Amendment (2026-11-12) — fixed-path Product Dependabot scan.** `.github/dependabot.yml` remains protected, with the content-bound customization in [ADR-0013 D5](./0013-root-github-workflow-ownership.md#d5--content-bound-customization-at-an-externally-fixed-path): the Kit generator's exact nonempty Product App scan is accepted instead of inherited bytes. The alternative `.github/dependabot.yaml` stays protected and forbidden in Products. This grants no manifest exception, package-name ownership, lockfile replacement or disabled scan. Other generated-file drift fails; unchanged inherited config is legacy only. Complete marker history, lineage and exception expiry remain unchanged.
 
 ADR stance: **document the list; do not shrink it by deleting rules without a move or ownership decision.**
 

@@ -2,23 +2,48 @@
 
 ## Two channels
 
-| | Version updates | Security updates + alerts |
+| | Version updates | Vulnerability alerts and remediation |
 |---|---|---|
-| Config | [`.github/dependabot.yml`](../../.github/dependabot.yml) | Repo **Dependabot alerts** + **Dependabot security updates** |
-| Ecosystem | **`bun`** (text `bun.lock`) — not `npm` | Separate channel (CVE / GHSA) |
-| Cadence | Weekly (Mon) + **cooldown** (patch/minor 3d, major 7d) | **Immediate** when a GHSA/CVE matches the lockfile |
-| Cooldown | Yes (version only) | **No** — never delayed by `cooldown:` |
-| Output | PR “stay current” | Alert in Security tab + optional security PR |
+| Config | [`.github/dependabot.yml`](../../.github/dependabot.yml) | Repository Dependabot alerts; security-update settings only for supported ecosystems |
+| Bun support | **Yes**, text `bun.lock` (not `npm` / `bun.lockb`) | **No native Bun security-update PRs** |
+| Cadence | Weekly (Mon), cooldown: patch/minor 3d, major 7d | Review available alerts/advisories; fix through the manifest owner's reviewed update |
+| Output | Version-update PR | Alert when GitHub can identify the dependency; no promise of a Bun security PR |
+
+[GitHub's current ecosystem table](https://docs.github.com/en/code-security/reference/supply-chain-security/supported-ecosystems-and-repositories#bun) lists Bun version updates, but **not security updates** (checked 2026-11-12). Keep alerts enabled; enabling the security-update setting cannot add unsupported Bun coverage. `cooldown` only controls version updates, not the supported ecosystems' security updates.
 
 `package-ecosystem: npm` does not own `bun.lock`. Those PRs fail CI at `bun install --frozen-lockfile` before the suite runs.
+
+## Kit and Product ownership
+
+Ownership follows the **manifest path**, not a dependency's name. A dependency used by both a Package and a Product App can have different reviewed ranges and resolutions.
+
+| Update | Route |
+|---|---|
+| Root `package.json`, `packages/*`, Example Apps or inherited workflow pins | Update and review in the Kit, then inherit into the Product |
+| `apps/<product>-*/package.json` | Update in the Product; keep every protected manifest unchanged |
+| Shared `bun.lock` | Review the **entire** diff, including all workspaces and transitives; never transplant the Kit lock over Product resolutions |
+
+Products install the bounded [Product configuration](./product-consumer-contract.md#product-dependabot-configuration), generated at GitHub's fixed `.github/dependabot.yml` path. The Kit keeps its root Bun and GitHub Actions scan. The Product model scans only its explicit App directories; it has no inherited-workflow Actions scan. Product-only workflow pins require reviewed Product changes; inherited pins go through the Kit.
+
+[GitHub's `directories` and `exclude-paths`](https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-options-reference#directories-or-directory--) choose **scan inputs**, not a Bun workspace mutation boundary. This repository does not prove that the hosted Bun updater can regenerate the shared root lock from an App-only scan, or that it leaves other manifests alone. A robot PR that cannot do so is held, never made green by filtering/restoring files or dropping lock changes.
+
+Safe manual route when the scan cannot produce a conforming PR:
+
+1. Update only the owning Product App's range, with the repository-pinned Bun; resolve the existing shared lock without replacing it wholesale. If the fix requires a protected range change, stop and promote that change through the Kit first.
+2. Review every manifest and the complete `bun.lock` diff. Run `bun run zero-edit`, `bun run lock-ranges:check`, and `bun install --frozen-lockfile --minimum-release-age 0`. A successful frozen install is not a supply-chain verdict.
+3. Run the existing dependency guard on the old/new whole lock, then the applicable Kit and Product gates and independent review. A manual change does not qualify for Dependabot's bot-signature admission; obtain ordinary current-head authorization.
+
+Do not disable alerts, remove the lock, relax supply-chain checks, or add a permanent zero-edit exception to rescue a cross-owner bump.
 
 ### Ignored version updates
 
 Need a migration / decision, not a Dependabot bump. An `ignore` with `update-types` applies only to version updates; a `versions` range also affects security updates.
 
+The canonical Product file is not a free-form ignore list. Hold a particular update with Dependabot's `@dependabot ignore …` PR comment commands and record the decision; a shared scheduling/grouping-policy change belongs in the Kit renderer, followed by inheritance and regeneration.
+
 | Package | Why |
 |---|---|
-| `@biomejs/biome` (semver-minor and semver-major version updates) | Temporary hold on 2.5.14: real-document Markdown semantics and idempotence must pass before Kit maintainers remove it (Roxabi/roxabi-boilerplate-cf#549). Patch updates in 2.5 and security PRs remain visible; features and fixes requiring 2.6 or later are deferred until reviewed safely. |
+| `@biomejs/biome` (semver-minor and semver-major version updates) | Temporary hold: real-document Markdown semantics and idempotence must pass before Kit maintainers remove it. Patch updates remain eligible; advisories still need manual triage because Bun has no native security-update PRs. |
 | `@tanstack/react-table` (semver-major) | v9 rewrites the API (`useTable` + `tableFeatures`) |
 | `trufflesecurity/trufflehog` (all version updates, `github-actions`) | Pin SSoT is `config/kit/trufflehog.version`. Action-only PRs fail `scripts/kit/trufflehog-check.sh --assert-pin`. Bump the pin file + both `uses:` lines together (kit Roxabi/roxabi-boilerplate-cf#170). A security PR for this action still fails the pin — close it and bump SSoT; the alert remains in the Security tab. |
 
@@ -28,7 +53,7 @@ Need a migration / decision, not a Dependabot bump. An `ignore` with `update-typ
 
 | Package | Why | Dependabot | Merge |
 |---|---|---|---|
-| `wrangler` (every update, `bun`, security updates included) | committed runtime types are version-bound | `exclude-patterns: ["wrangler"]` on `bun-dependencies` → one PR per weekly run | The guard withholds with `REGENERATE_TYPES` |
+| `wrangler` (every Bun update, including a manually prepared security fix) | committed runtime types are version-bound | Excluded from the Bun patch/minor group → separate version PR | The guard withholds with `REGENERATE_TYPES` |
 
 Procedure for a wrangler PR:
 
@@ -49,6 +74,7 @@ GitHub docs: `cooldown` applies **only** to version updates, not security update
 
 - The existing native or manual review admission issues a head-bound reviewed receipt; `reviewed` and `deps-automerge` labels are only hints, not authorization.
 - For eligible Dependabot **patch/minor** PRs, the guard can issue a machine receipt for the exact evaluated head and base. It requires the real numeric Dependabot author and the configured CI App and bot identities. Majors and `wrangler` changes do not receive automatic admission.
+- Automatic admission reads the ownership policy from the same trusted checkout as the guard code and the Product identity at captured merge-base, base and head. A protected manifest or inherited workflow change in a Product is withheld, even if zero-edit has an active exception. Product-owned workflow pin changes retain the action integrity checks; unclassified workflow names are withheld. Unreadable policy, ambiguous identity or identity transitions withhold rather than granting authorization. After an upstream merge changes the marker, open Dependabot PRs need a rebase and fresh evaluation.
 - The workflow withdraws before capturing a new snapshot and running the guard. A failed or unconfirmed withdrawal holds; a new admission after withdrawal must be explicit, not a silently rebased earlier attempt. A head or machine baseline change requires a fresh evaluation.
 - Selection uses the newest authenticated record over the whole PR stream, not a label or a filtered matching head. See [CI App setup](./ci-app-setup.md#reviewed-head-authorization) for issuer, predecessor, edit-proof and failure rules.
 
@@ -79,7 +105,7 @@ PR mode requires a read token and the captured repository, PR, head and base ide
 | `PROVENANCE_DOWNGRADE` | previous version had `dist.attestations`, the new one has none | publish from a stolen token instead of the CI pipeline |
 | `PUBLISHER_CHANGE` | `_npmUser.name` or the trusted-publisher OIDC config differs from the previous version, **unless** the new version has npm provenance whose SLSA source repository equals the previous version's (its own attestation, else its packument `repository` field; `host/owner/repo`, case-insensitive). The reason says which case applied: no provenance · provenance from another repository · previous repository unresolvable · attestation unreadable (fetch error, fail closed). An accepted change is listed under `checked`. | maintainer/account takeover, hand-off, publish from an unrelated repository |
 | `NEW_INSTALL_SCRIPT` / `NEW_PACKAGE_INSTALL_SCRIPT` | a `preinstall`/`install`/`postinstall` absent from (or different in) the previous version, or in a package new to the lock | worm-style install payloads (also blocked at install by `trustedDependencies: []`) |
-| `TOO_YOUNG` | published < cooldown ago (`bunfig.toml` value) | the one hole in Dependabot's cooldown: security updates |
+| `TOO_YOUNG` | published < cooldown ago (`bunfig.toml` value) | an update prepared outside the version scheduler, including a manual Bun security fix |
 | `NON_REGISTRY` | git / github / tarball / file / non-default-registry resolution | dependency swapped for an unreviewed source |
 | `INTEGRITY_CHANGED` | same `name@version`, different integrity | tarball replaced under a fixed version |
 | `ADVISORY` | the registry bulk advisory endpoint matches a changed version | knowingly vulnerable bump |
@@ -90,6 +116,8 @@ PR mode requires a read token and the captured repository, PR, head and base ide
 | `WORKFLOW_BEYOND_PINS` | a touched workflow differs from base in anything but `uses:` pins | an actions PR smuggling a `run:` step |
 | `FOREIGN_COMMIT` | a PR commit is not authored by `dependabot[bot]`, committed by `web-flow`, GitHub-verified; or the PR author is not Dependabot | a human push onto the branch (RED-05) |
 | `UNEXPECTED_FILE` | a changed file is not `bun.lock`, a `package.json` or a workflow; or nothing verifiable changed | a bump PR carrying source changes |
+| `KIT_PATH` | a changed path is Kit-protected in a Product | a root/Package/Example App manifest or inherited workflow pin updated on the wrong owner |
+| `OWNERSHIP_UNAVAILABLE` | immutable policy or repository/Product identity is missing, malformed, unreadable or changes across the evaluated revisions | automatic admission without ownership evidence |
 
 Every changed or added package of `bun.lock` is judged, direct and transitive (diffed by `name@version` against the merge base, not the moving `main`).
 
@@ -99,7 +127,11 @@ Malicious code in an ordinary file, published by the usual maintainer, with prov
 
 ## Alerts and notification setup
 
-Enable Dependabot alerts and security updates in the repository. The optional [Slack workflow](../../.github/workflows/dependabot-alert-slack.yml) handles Dependabot security-update PR metadata via `pull_request_target` without checking out PR code, and supports a manually dispatched alert snapshot. Notification failures warn rather than becoming merge gates. `dependabot_alert` is a webhook, not a GitHub Actions event.
+Keep Dependabot alerts enabled; keep security updates enabled where the ecosystem supports them. The optional [Slack workflow](../../.github/workflows/dependabot-alert-slack.yml) has **no active schedule** and no Actions-native `dependabot_alert` trigger. Its `pull_request_target` path reads security-PR metadata without checking out PR code; because Bun has no native security PRs, that path is **not Bun advisory monitoring**. The manual `workflow_dispatch` path fetches one page (up to 100 open alerts) and can post an alert snapshot. It is an operator catch-up aid, not a complete or continuous alert feed.
+
+Review the repository Security tab / paginated alerts API and the relevant advisories; the guard's registry bulk-advisory check covers changed lock versions, not continuous scanning of unchanged dependencies. For a Bun advisory, identify the affected manifest owners, prepare the manual route above, and escalate protected ranges or transitives requiring a Kit change to Kit maintainers before inheritance. An urgent young fix requires an explicit reviewed age override; it is not automatically admitted.
+
+The workflow's PR notifications warn on missing configuration or Slack errors; its manual snapshot can fail, or warn and return without a snapshot on an integration-permission 403. Neither proves that alerts were delivered. No live alert settings, notification delivery or hosted remediation have been verified by these local changes.
 
 Configure `SLACK_FLINT_BOT_TOKEN` and `SLACK_CHANNEL_BUGS_ALERT` for the intended destination. Alert snapshots use `CI_APP_PRIVATE_KEY` and `CI_APP_ID`; the GitHub App needs repository **Dependabot alerts: Read** permission. Dependabot-authored `pull_request` runs do not receive repository secrets; keep the target workflow metadata-only and do not duplicate the Slack token into Dependabot secrets.
 

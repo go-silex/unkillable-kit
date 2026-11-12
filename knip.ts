@@ -17,6 +17,8 @@ const config: KnipConfig = {
       // Shell, workflow and spawn entrypoints Knip's script parser cannot see.
       // package.json exports of @kit/* stay entries via each workspace manifest — do not override those.
       entry: [
+        'scripts/kit/configure-product-dependabot.cjs',
+        'scripts/kit/lib/product-dependabot.cjs',
         'scripts/kit/extract-compose-proof.ts',
         'scripts/kit/extract-residency.ts',
         'scripts/kit/print-coverage-summary.mjs',
