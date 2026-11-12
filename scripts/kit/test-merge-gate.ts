@@ -3171,37 +3171,79 @@ test('scope changes during authorization hold before quality', async () => {
   }
 })
 
-test('authorization changes during quality cannot survive final landing revalidation', async () => {
-  for (const replacement of [false, true]) {
-    const fake = new Fake()
-    const input = { github: fake.github, repo, prNumber: 7, policy }
-    fake.afterCheckRead = async () => {
-      fake.afterCheckRead = undefined
-      if (replacement) {
-        const snapshot = await captureAuthorization(input)
-        await issueAuthorization({
-          ...input,
-          writer: fake.writer,
-          snapshot,
-          lane: 'reviewed',
-          source: 'manual',
-          evidence: 'new review',
-          operationId: 'quality-reissue',
-        })
-      } else {
-        await withdrawAuthorization({
-          ...input,
-          writer: fake.writer,
-          operationId: 'quality-withdraw',
-          reason: 'stop',
-        })
-      }
+type QualityAuthChange = 'withdraw' | 'reissue' | 'id-only' | 'body-only'
+
+function armQualityAuthorizationChange(fake: Fake, change: QualityAuthChange) {
+  const input = { github: fake.github, repo, prNumber: 7, policy }
+  const original = { id: fake.comments[7][0].id, body: fake.comments[7][0].body }
+  fake.afterCheckRead = async () => {
+    fake.afterCheckRead = undefined
+    if (change === 'reissue') {
+      const snapshot = await captureAuthorization(input)
+      await issueAuthorization({
+        ...input,
+        writer: fake.writer,
+        snapshot,
+        lane: 'reviewed',
+        source: 'manual',
+        evidence: 'new review',
+        operationId: 'quality-reissue',
+      })
+    } else if (change === 'withdraw') {
+      await withdrawAuthorization({
+        ...input,
+        writer: fake.writer,
+        operationId: 'quality-withdraw',
+        reason: 'stop',
+      })
+    } else if (change === 'id-only') {
+      fake.comments[7][0].id += 100
+      fake.comments[7][0].node_id = `node${fake.comments[7][0].id}`
+    } else {
+      // Deliberately inconsistent stale edit proof: exercise the independent body fence.
+      const record = JSON.parse(original.body.slice(PREFIX.length))
+      fake.comments[7][0].body = render({ ...record, evidence: 'changed evidence' })
     }
-    const selected = await evaluateFake(fake)
-    assert.equal(selected.toMerge.length, 1)
-    const result = await landFake(fake, selected.toMerge)
-    assert.deepEqual(fake.merges, [])
-    assert.deepEqual(result.unreadable, [])
+    const current = await readAuthorization(input)
+    if (change === 'withdraw') {
+      assert.equal(current.allowed, false)
+      return
+    }
+    assert.equal(current.allowed, true)
+    if (!current.allowed) throw new Error('expected valid authorization')
+    assert.equal(current.receipt.id === original.id, change === 'body-only')
+    assert.equal(current.receipt.body === original.body, change === 'id-only')
+  }
+}
+
+test('authorization changes during quality cannot survive final landing revalidation', async () => {
+  const control = new Fake()
+  await landFake(control, (await evaluateFake(control)).toMerge)
+  assert.deepEqual(control.merges, [{ number: 7, sha: HEAD }])
+  for (const phase of ['evaluate', 'land']) {
+    for (const change of ['withdraw', 'reissue', 'id-only', 'body-only'] as const) {
+      const fake = new Fake()
+      if (phase === 'evaluate') armQualityAuthorizationChange(fake, change)
+      const selected = await evaluateFake(fake)
+      assert.equal(selected.toMerge.length, 1)
+      if (phase === 'land') armQualityAuthorizationChange(fake, change)
+      const log = core()
+      const result = await land({
+        github: fake.github,
+        merger: fake.merger,
+        repo,
+        queue: selected.toMerge,
+        core: log,
+        policy,
+      })
+      assert.equal(fake.afterCheckRead, undefined, phase)
+      assert.deepEqual(fake.merges, [], `${phase}/${change}`)
+      assert.deepEqual(result.unreadable, [], `${phase}/${change}`)
+      assert.ok(
+        log.lines.some((line) => line.includes('authorization changed')),
+        `${phase}/${change}`,
+      )
+    }
   }
 })
 
@@ -3222,7 +3264,11 @@ test('prioritized unadmitted dispatch candidate does not hide admitted quality v
     [8],
   )
   assert.deepEqual(result.unreadable, [])
-  assert.ok(log.lines.some((line) => line.includes('PR #7: authorization held')))
+  assert.ok(log.lines.some((line) => line.includes('authorization held')))
+  assert.equal(
+    fake.calls.find((call) => call.startsWith('pulls.get:')),
+    'pulls.get:7',
+  )
   assert.ok(!fake.calls.includes(`checks:${HEAD}`))
   assert.ok(fake.calls.includes(`checks:${OTHER}`))
 })
