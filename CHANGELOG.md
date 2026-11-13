@@ -8,6 +8,10 @@
 - String columns now sort with TanStack's corrected automatic choice: case-insensitive `text`, or natural `alphanumeric` when sampled values contain digits. Version 8 sampled only rows after the tenth, so lists of ten rows or fewer compared raw strings.
 - Remove the Dependabot semver-major hold for `@tanstack/react-table`.
 
+### Bun runtime
+
+- Upgrade the root Bun pin to 1.4.4. Before this change reaches the Kit deploy branch, update `BUN_VERSION` on each showcase Workers Builds and Pages project as described in [the deploy runbook](docs/kit/deploy-cloudflare.md#4b-bun-and-node-versions).
+
 ### Wrangler runtime types
 
 - Upgrade the example Workers to Wrangler 4.159.0 and regenerate their committed runtime declarations.
