@@ -74,9 +74,21 @@ Installed via `bunx --bun shadcn@latest add sidebar-07` into `packages/ui`. That
 | `@tanstack/react-router` | SPA routes |
 | `@tanstack/react-query` | Server state |
 | `@tanstack/react-form` | Forms + Zod validators (login, notes, …) |
-| `@tanstack/react-table` | Headless tables (e.g. notes list) |
+| `@tanstack/react-table` | Headless tables (v9 `useTable`: notes list, design-system demo) |
 | `@tanstack/react-hotkeys` | Shortcuts (`HotkeysProvider` in `main.tsx`; notes `Mod+Shift+N`) |
 | `@tanstack/markdown` | Markdown render (`@tanstack/markdown/react` on note body) |
+
+### TanStack Table v9
+
+The Example App follows the official [v8 → v9 migration guide](https://tanstack.com/table/latest/docs/framework/react/guide/migrating) without the deprecated `useLegacyTable` bridge.
+
+| Rule | Example App |
+|------|-------------|
+| Declare a module-scope `tableFeatures()` object and register every feature, row-model slot and named function the table uses | `listTableFeatures` in `src/components/list-table.ts`: sorting, column and global filtering, `text`/`alphanumeric` sort and `includesString` filter functions |
+| String `sortFn`, `filterFn` and `globalFilterFn` names resolve only registered functions; an unregistered auto sort falls back to `basic` | Register a name in the features object before a column or table option uses it |
+| Keep `features`, `columns` and fallback `data` stable | Columns are built with `columnHelper.columns([...])` inside `useMemo`; the notes fallback is a module constant |
+| Give each state slice one owner: the table, React state (with its `on<Slice>Change` whenever the table writes that slice), or an atom | Sorting is table-owned; the search box and filter select own their filter slices |
+| Render with `FlexRender`; iterate `row.getAllCells()` unless `columnVisibilityFeature` is registered | `SortableTableHead` keeps `aria-sort` and the labelled sort button |
 
 ### List data shapes
 

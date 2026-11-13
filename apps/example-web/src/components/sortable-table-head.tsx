@@ -1,6 +1,7 @@
 import { TableHead } from '@kit/ui'
-import { flexRender, type Header } from '@tanstack/react-table'
+import { FlexRender, type Header, type RowData } from '@tanstack/react-table'
 import { ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react'
+import type { ListTableFeatures } from './list-table'
 
 function sortAria(
   canSort: boolean,
@@ -18,15 +19,15 @@ function SortIcon({ sorted }: { sorted: false | 'asc' | 'desc' }) {
   return <ArrowUpDown className="size-3.5 opacity-40" aria-hidden />
 }
 
-type SortableHeadProps<T> = {
-  header: Header<T, unknown>
+type SortableHeadProps<T extends RowData> = {
+  header: Header<ListTableFeatures, T>
   sortHint: string
   className?: string
   withAriaSort?: boolean
 }
 
 /** Shared sortable table head — keeps list callbacks under the complexity cap. */
-export function SortableTableHead<T>({
+export function SortableTableHead<T extends RowData>({
   header,
   sortHint,
   className,
@@ -34,7 +35,7 @@ export function SortableTableHead<T>({
 }: SortableHeadProps<T>) {
   const canSort = header.column.getCanSort()
   const sorted = header.column.getIsSorted()
-  const label = flexRender(header.column.columnDef.header, header.getContext())
+  const label = <FlexRender header={header} />
   return (
     <TableHead
       key={header.id}
