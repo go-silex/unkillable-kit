@@ -45,7 +45,7 @@ The canonical Product file is not a free-form ignore list. Hold a particular upd
 |---|---|
 | `@biomejs/biome` (semver-minor and semver-major version updates) | Temporary hold: real-document Markdown semantics and idempotence must pass before Kit maintainers remove it. Patch updates remain eligible; advisories still need manual triage because Bun has no native security-update PRs. |
 | `@tanstack/react-table` (semver-major) | v9 rewrites the API (`useTable` + `tableFeatures`) |
-| `trufflesecurity/trufflehog` (all version updates, `github-actions`) | Pin SSoT is `config/kit/trufflehog.version`. Action-only PRs fail `scripts/kit/trufflehog-check.sh --assert-pin`. Bump the pin file + both `uses:` lines together (kit Roxabi/roxabi-boilerplate-cf#170). A security PR for this action still fails the pin — close it and bump SSoT; the alert remains in the Security tab. |
+| `trufflesecurity/trufflehog` (all version updates, `github-actions`) | Pin SSoT is `config/kit/trufflehog.version`. CI runs the shared script, not the action; `scripts/kit/trufflehog-check.sh --assert-pin` requires zero action `uses:` lines to prevent the unsafe range walk from returning. Update the version, release archive and extracted binary hashes for every supported target, historical `action_sha` metadata and workflow version annotation together. A security PR for the action cannot land on its own; close it and update the SSoT instead. The alert remains in the Security tab. |
 
 ### Excluded from the group: `wrangler` (own PR, operator-authorized merge)
 
