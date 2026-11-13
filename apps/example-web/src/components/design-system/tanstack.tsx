@@ -18,26 +18,19 @@ import {
   TableRow,
 } from '@kit/ui'
 import { useForm } from '@tanstack/react-form'
-import {
-  createColumnHelper,
-  flexRender,
-  getCoreRowModel,
-  getFilteredRowModel,
-  getSortedRowModel,
-  type SortingState,
-  useReactTable,
-} from '@tanstack/react-table'
+import { createColumnHelper, FlexRender, useTable } from '@tanstack/react-table'
 import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import { z } from 'zod'
 import { useLocale } from '../../lib/locale'
+import { type ListTableFeatures, listTableFeatures } from '../list-table'
 import { SafeMarkdown } from '../safe-markdown'
 import { SortableTableHead } from '../sortable-table-head'
 import { DemoBox, Section } from './section'
 
 type DemoRow = { id: string; name: string; status: 'ok' | 'pending' }
 
-const demoCol = createColumnHelper<DemoRow>()
+const demoCol = createColumnHelper<ListTableFeatures, DemoRow>()
 
 const DEMO_ROWS: DemoRow[] = [
   { id: '1', name: 'hello kit', status: 'ok' },
@@ -75,31 +68,31 @@ export function TanstackSection() {
     },
   })
 
-  const [tsSorting, setTsSorting] = useState<SortingState>([])
   const [tsSearch, setTsSearch] = useState('')
   const [tsStatus, setTsStatus] = useState<'all' | 'ok' | 'pending'>('all')
 
   const tsColumns = useMemo(
-    () => [
-      demoCol.accessor('name', {
-        header: 'Name',
-        enableSorting: true,
-        cell: (info) => <span className="font-medium">{info.getValue()}</span>,
-      }),
-      demoCol.accessor('status', {
-        header: 'Status',
-        enableSorting: true,
-        filterFn: (row, _id, value: string) => {
-          if (!value || value === 'all') return true
-          return row.getValue('status') === value
-        },
-        cell: (info) => (
-          <Badge variant={info.getValue() === 'ok' ? 'secondary' : 'outline'}>
-            {info.getValue()}
-          </Badge>
-        ),
-      }),
-    ],
+    () =>
+      demoCol.columns([
+        demoCol.accessor('name', {
+          header: 'Name',
+          enableSorting: true,
+          cell: (info) => <span className="font-medium">{info.getValue()}</span>,
+        }),
+        demoCol.accessor('status', {
+          header: 'Status',
+          enableSorting: true,
+          filterFn: (row, _id, value: string) => {
+            if (!value || value === 'all') return true
+            return row.getValue('status') === value
+          },
+          cell: (info) => (
+            <Badge variant={info.getValue() === 'ok' ? 'secondary' : 'outline'}>
+              {info.getValue()}
+            </Badge>
+          ),
+        }),
+      ]),
     [],
   )
   const tsStatusItems = useMemo(
@@ -110,19 +103,16 @@ export function TanstackSection() {
     ],
     [m.tableFilterAll],
   )
-  const tsTable = useReactTable({
+  // Sorting stays table-owned; search owns the global filter, status derives the column filter.
+  const tsTable = useTable({
+    features: listTableFeatures,
     data: DEMO_ROWS,
     columns: tsColumns,
     state: {
-      sorting: tsSorting,
       globalFilter: tsSearch,
       columnFilters: tsStatus === 'all' ? [] : [{ id: 'status', value: tsStatus }],
     },
-    onSortingChange: setTsSorting,
     onGlobalFilterChange: setTsSearch,
-    getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
     globalFilterFn: 'includesString',
   })
 
@@ -216,9 +206,9 @@ export function TanstackSection() {
               ) : (
                 tsTable.getRowModel().rows.map((row) => (
                   <TableRow key={row.id}>
-                    {row.getVisibleCells().map((cell) => (
+                    {row.getAllCells().map((cell) => (
                       <TableCell key={cell.id}>
-                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                        <FlexRender cell={cell} />
                       </TableCell>
                     ))}
                   </TableRow>

@@ -96,7 +96,7 @@
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.3.0",
     "better-auth": "^1.7.23",
-    "better-sqlite3": "^13.0.2",
+    "better-sqlite3": "^13.1.1",
     "drizzle-orm": "^0.45.4",
     "hono": "^4.13.18",
     "happy-dom": "^21.0.4",
