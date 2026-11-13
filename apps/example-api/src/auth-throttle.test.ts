@@ -278,14 +278,16 @@ describe('Better Auth throttle — deny by default (Roxabi/roxabi-boilerplate-cf
     try {
       vi.setSystemTime(now)
       for (let n = 1; n <= BA_THROTTLE_LIMIT + 1; n++) {
-        const r = post('/verify-password', `198.51.100.${n}`, { password: 'x' }, cookie)
+        // Validation failures still spend the session budget before reaching Better Auth.
+        const body = n === 1 || n === BA_THROTTLE_LIMIT + 1 ? { password: DEMO_PASSWORD } : {}
+        const r = post('/verify-password', `198.51.100.${n}`, body, cookie)
         last = await app.request(r.url, r.init, env)
         statuses.push(last.status)
       }
     } finally {
       vi.useRealTimers()
     }
-    expect(statuses.slice(0, BA_THROTTLE_LIMIT)).not.toContain(429)
+    expect(statuses).toEqual([200, ...Array(BA_THROTTLE_LIMIT - 1).fill(400), 429])
     expect(last?.status).toBe(429)
     const body = (await last?.json()) as { error: { code: string } }
     expect(body.error.code).toBe('RATE_LIMITED')
