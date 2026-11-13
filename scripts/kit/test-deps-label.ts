@@ -10,15 +10,12 @@ const minor = '- dependency-name: vite\n  update-type: version-update:semver-min
 const end = '...\n'
 assert.equal(dependencyEligibility([header + patch + minor + end]), undefined)
 for (const bad of [
-  header + patch + '- dependency-name: vite\n  update-type: version-update:semver-major\n' + end,
-  header +
-    patch +
-    '- dependency-name: wrangler\n  update-type: version-update:semver-minor\n' +
-    end,
-  header + patch + '- dependency-name: vite\n  update-type: unknown\n' + end,
-  header + '[]\n' + end,
+  `${header}${patch}- dependency-name: vite\n  update-type: version-update:semver-major\n${end}`,
+  `${header}${patch}- dependency-name: wrangler\n  update-type: version-update:semver-minor\n${end}`,
+  `${header}${patch}- dependency-name: vite\n  update-type: unknown\n${end}`,
+  `${header}[]\n${end}`,
   'not metadata',
-  header + '- dependency-name: [invalid\n' + end,
+  `${header}- dependency-name: [invalid\n${end}`,
 ])
   assert.ok(dependencyEligibility([bad]))
 assert.ok(dependencyEligibility([]))

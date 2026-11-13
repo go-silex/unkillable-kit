@@ -32,13 +32,13 @@ A Cloudflare Workflow owns each complete external Delivery, with a stable instan
 
 ## D1 — Ownership and access
 
-| Owner | Interface responsibility |
-|---|---|
-| `@kit/notifications` | Pure type declarations, registration, resolution and email layout; no D1, bindings, `fetch`, ambient clock or global registry |
-| `@kit/notifications/schema` and `@kit/notifications/repos` | Capability tables, atomic admissions, scoped queries and conditional receipts; no HTTP auth, runtime restart or custom scheduler |
-| App | Producer authority, recipient ids and source ACL, registry/renderers/catalogues, current access facts, service factory, routes and Workflow entrypoint |
-| Cloudflare Workflows | Entire external Delivery and its failure retries; admission/reconciliation contract in ADR-0020, no second owner |
-| `@kit/slack/notifications` | Implements the Channel interface with a **type-only** import from notifications; notifications never imports Slack |
+| Owner                                                      | Interface responsibility                                                                                                                               |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `@kit/notifications`                                       | Pure type declarations, registration, resolution and email layout; no D1, bindings, `fetch`, ambient clock or global registry                          |
+| `@kit/notifications/schema` and `@kit/notifications/repos` | Capability tables, atomic admissions, scoped queries and conditional receipts; no HTTP auth, runtime restart or custom scheduler                       |
+| App                                                        | Producer authority, recipient ids and source ACL, registry/renderers/catalogues, current access facts, service factory, routes and Workflow entrypoint |
+| Cloudflare Workflows                                       | Entire external Delivery and its failure retries; admission/reconciliation contract in ADR-0020, no second owner                                       |
+| `@kit/slack/notifications`                                 | Implements the Channel interface with a **type-only** import from notifications; notifications never imports Slack                                     |
 
 `orgId` is the Organization that owns the source. It is not the browser's selected Organization or the sender's Organization. Every recipient must be a real member of that Organization, which must be active. A type with `moduleId` also requires the recipient's effective Module **read** access: Deployment availability, Organization enablement and their Role–module grant. The sender's grants or support bypass never substitute for these checks.
 
@@ -128,13 +128,13 @@ declare function resolveUserNotification(input: Readonly<{
 4. A User never locks. An unlocked Deployment off is a default, not a veto: an Organization may lock Slack on above it. A broad lock does not override a more specific rule at its own level; only that level's selected rule participates in the cross-level comparison.
 5. **Email locked-on is invalid at every level.** Validate at write and SQL boundaries; invalid persisted rules fail closed for external Channels, never silently become on. `in_app`, unknown Channels and a rule that cannot match any declared Channel/type are rejected.
 
-| Deployment / Organization / User | External result; authorized Inbox remains present |
-|---|---|
-| locked-off / locked-on / on | off, Deployment |
-| unlocked-off / locked-on Slack / off | on, Organization |
-| unlocked-off / unlocked-off / on | on, User |
+| Deployment / Organization / User                                       | External result; authorized Inbox remains present                              |
+| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| locked-off / locked-on / on                                            | off, Deployment                                                                |
+| unlocked-off / locked-on Slack / off                                   | on, Organization                                                               |
+| unlocked-off / unlocked-off / on                                       | on, User                                                                       |
 | category locked-off plus type unlocked-on at Deployment / absent / off | off, User; the Deployment type rule supersedes its category rule at that level |
-| all absent | type default; an undeclared Channel is never added by `all` |
+| all absent                                                             | type default; an undeclared Channel is never added by `all`                    |
 
 `mandatory` is **not exposed by the V0 registry or resolver**. Its reserved semantics are: a type-declared Channel bypasses rules only after access checks; absent address still skips. Only security or a legal/contractual obligation whose loss could harm a User/Organization qualifies, not business importance. Authentication reset, magic link and invitation emails remain outside this engine permanently, synchronous on EmailPort. A future Mandatory Channel requires its first concrete need and additive interface change; this ADR does not force any V0 email.
 
@@ -245,9 +245,9 @@ Admission writes each Notification and its initial external Delivery intentions 
 
 ## D4 — Producers and best-effort flow ports
 
-| Type | Declaration and recipients | Resolution |
-|---|---|---|
-| `tasks.assigned` | Category `tasks`; `moduleId:'tasks'`; external order email then Slack, both **on by default**; no destination opt-in. Notify added assignees, filtered with each recipient's Audience/object ACL. `actorId` is the assigning User. | Removed assignee: that User only. Deleted/done/terminal-stage task: all. Reopening alone does not re-notify. |
+| Type                       | Declaration and recipients                                                                                                                                                                                                                             | Resolution                                                                                                                                    |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tasks.assigned`           | Category `tasks`; `moduleId:'tasks'`; external order email then Slack, both **on by default**; no destination opt-in. Notify added assignees, filtered with each recipient's Audience/object ACL. `actorId` is the assigning User.                     | Removed assignee: that User only. Deleted/done/terminal-stage task: all. Reopening alone does not re-notify.                                  |
 | `flows.approval_requested` | Category `flows`; `moduleId:'flows'`; email then Slack, both **on by default**; `organizationDestinations:true`. Explicit members satisfying `canDecideFlowApproval` / `FLOWS_ADMIN_ROLES`; **no actorId**, including a run started by its sole owner. | Decision row approved/rejected: route resolves immediately; expiration: close port; cancellation: route resolves before Workflow termination. |
 
 The dogfood payload schemas are App-owned and strict. Tasks retain only a display title; approval copy is generic and derives its authenticated link from the source tuple. No sender name, User email, plan prompt or approval instruction is retained.
@@ -295,7 +295,6 @@ The App `opened` callback treats the current org-scoped D1 run, its persisted ta
 
 Thus successful `opened → closed/resolve → replay(opened)` observes the terminal D1 lifecycle and creates no fresh active Notification or Delivery. A read/resolution failure after commit, owner exhaustion, or a later race with an already in-flight external POST remains an accepted best-effort limit; this is not a transaction with the decision and not exactly-once callbacks or messages. An independent still-waiting approval in the same run remains eligible because the source/guard includes `taskId`. A wake failure never erases the D1 decision, so it cannot reopen emission. Task reassignment continues to use its own added-assignee event and may create a new Notification after resolution.
 
-
 ## D5 — Persistence and lifecycle contract
 
 ### Tables and constraints
@@ -315,13 +314,13 @@ Apply these validations at registration, selectors/route inputs, repository writ
 
 Source kind remains ≤64 and source id ≤1024 characters; non-secret destination external ids remain non-empty ≤1024. Organization/User/actor identity references retain their id bounds and are scoped explicitly, not inserted into a cursor. Localized titles, bodies, display parameters, source ids, external addresses and catalogue text are **not** restricted to ASCII by this cursor policy. Parameters follow the type's bounded JSON schema. No FK targets Better Auth or a polymorphic source. Internal tenant FKs include Organization.
 
-| Table | Fields / constraints |
-|---|---|
-| `kit_notifications` | `id` PK; `org_id,user_id,type_key,source_kind,source_id,params_json,created_at` required; `module_id,read_at,resolved_at` nullable. Unique `(id,org_id)`; unique active `(org_id,type_key,source_kind,source_id,user_id) WHERE resolved_at IS NULL`. |
-| `kit_notification_deliveries` | `id` PK; `org_id,notification_id,channel,status,created_at` required. Unique `(org_id,notification_id,channel)`; FK `(notification_id,org_id)` → Notifications `(id,org_id)` CASCADE. Owner/attempt receipt fields below. |
-| `kit_notification_organization_deliveries` | `id` PK; `org_id,destination_id,channel,type_key,source_kind,source_id,params_json,status,created_at` required; `module_id,resolved_at` nullable. Same owner/attempt receipt fields. Unique active `(org_id,destination_id,channel,type_key,source_kind,source_id) WHERE resolved_at IS NULL`. No Inbox row. |
-| `kit_notification_destinations` | `id` PK; `org_id,channel,external_id,selector_kind,selector_value,created_at,updated_at`; unique `(id,org_id)` and `(org_id,channel,external_id)`. One effective address + selector per row; no token. |
-| `kit_notification_deployment_rules`, `kit_notification_organization_rules`, `kit_notification_user_rules` | Rule id, selector kind/value, Channel, enabled/locked, created/updated dates. Deployment: neither org nor User. Organization: required `org_id`. User: required `user_id`, **no org**, `locked=0`. Unique natural selector/Channel key within that owner. |
+| Table                                                                                                     | Fields / constraints                                                                                                                                                                                                                                                                                         |
+| --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `kit_notifications`                                                                                       | `id` PK; `org_id,user_id,type_key,source_kind,source_id,params_json,created_at` required; `module_id,read_at,resolved_at` nullable. Unique `(id,org_id)`; unique active `(org_id,type_key,source_kind,source_id,user_id) WHERE resolved_at IS NULL`.                                                         |
+| `kit_notification_deliveries`                                                                             | `id` PK; `org_id,notification_id,channel,status,created_at` required. Unique `(org_id,notification_id,channel)`; FK `(notification_id,org_id)` → Notifications `(id,org_id)` CASCADE. Owner/attempt receipt fields below.                                                                                    |
+| `kit_notification_organization_deliveries`                                                                | `id` PK; `org_id,destination_id,channel,type_key,source_kind,source_id,params_json,status,created_at` required; `module_id,resolved_at` nullable. Same owner/attempt receipt fields. Unique active `(org_id,destination_id,channel,type_key,source_kind,source_id) WHERE resolved_at IS NULL`. No Inbox row. |
+| `kit_notification_destinations`                                                                           | `id` PK; `org_id,channel,external_id,selector_kind,selector_value,created_at,updated_at`; unique `(id,org_id)` and `(org_id,channel,external_id)`. One effective address + selector per row; no token.                                                                                                       |
+| `kit_notification_deployment_rules`, `kit_notification_organization_rules`, `kit_notification_user_rules` | Rule id, selector kind/value, Channel, enabled/locked, created/updated dates. Deployment: neither org nor User. Organization: required `org_id`. User: required `user_id`, **no org**, `locked=0`. Unique natural selector/Channel key within that owner.                                                    |
 
 User Delivery ids begin `u_`, Organization Delivery ids `o_`, followed by the App's collision-resistant id; both stay within 256 characters. The prefix provides a total ordering across the two tables.
 
@@ -335,13 +334,13 @@ Indexes cover Inbox `(org_id,user_id,created_at DESC,id DESC)`, active uniquenes
 
 ### State transitions and idempotence
 
-| Object | Transition | Consequence |
-|---|---|---|
-| Notification | Create unread/unresolved; mark read once; resolve once | Read and resolved are independent timestamps: another person can finish an unseen action. Unread count requires **both null**. Resolving never fabricates a read. |
-| Active Notification | Duplicate notify | SQL uniqueness wins atomically; preserve initial parameters/read state. Do not create Channels that became enabled later. Read but unresolved still deduplicates. |
-| Resolved Notification | New notify of same source/type/User | New Notification allowed, needed for reassignment. Approval `opened` must first pass D4's current lifecycle guard; active-action uniqueness alone is not permanent opening-event deduplication. |
-| Delivery | pending → sent / failed / skipped | Terminal CAS, `finished_at` set; no automatic resurrection. Resolving its source skips pending only. |
-| Admission receipt | pending/unknown → admitted or expired under ADR-0020 | Independent of Delivery status. Unknown/expired does not prove absence or failure of the Workflow and is not a provider failure. |
+| Object                | Transition                                             | Consequence                                                                                                                                                                                     |
+| --------------------- | ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Notification          | Create unread/unresolved; mark read once; resolve once | Read and resolved are independent timestamps: another person can finish an unseen action. Unread count requires **both null**. Resolving never fabricates a read.                               |
+| Active Notification   | Duplicate notify                                       | SQL uniqueness wins atomically; preserve initial parameters/read state. Do not create Channels that became enabled later. Read but unresolved still deduplicates.                               |
+| Resolved Notification | New notify of same source/type/User                    | New Notification allowed, needed for reassignment. Approval `opened` must first pass D4's current lifecycle guard; active-action uniqueness alone is not permanent opening-event deduplication. |
+| Delivery              | pending → sent / failed / skipped                      | Terminal CAS, `finished_at` set; no automatic resurrection. Resolving its source skips pending only.                                                                                            |
+| Admission receipt     | pending/unknown → admitted or expired under ADR-0020   | Independent of Delivery status. Unknown/expired does not prove absence or failure of the Workflow and is not a provider failure.                                                                |
 
 Collective active identity is per source/type/destination, independent of the User fan-out. Complete source resolution closes its active identity even if the Delivery was already sent/failed; User-filtered resolution does not. Deleting/purging history ends the corresponding historical deduplication guarantee.
 
@@ -487,40 +486,40 @@ Types are catalogue metadata, never source parameters/Zod schema/renderers. `ava
 
 ### User routes
 
-| Method and path | Request | 200 response / additional scope |
-|---|---|---|
-| GET `/api/notification-types` | Page query | `Page<TypeDto>`; static App registry metadata |
-| GET `/api/me/notification-rules` | Page query | `Page<RuleDto>` for subject, no Organization context |
-| PUT `/api/me/notification-rules` | `{selector,channel,enabled}` | `{rule:RuleDto,requestId}` natural-key upsert; locked always false |
-| DELETE `/api/me/notification-rules/{ruleId}` | No body | `{ok:true,requestId}` for subject-owned rule only |
-| GET `/api/orgs/{orgId}/notifications/effective-rules` | Page query | `Page<EffectiveRuleDto>`; subject membership, no support bypass |
+| Method and path                                       | Request                      | 200 response / additional scope                                    |
+| ----------------------------------------------------- | ---------------------------- | ------------------------------------------------------------------ |
+| GET `/api/notification-types`                         | Page query                   | `Page<TypeDto>`; static App registry metadata                      |
+| GET `/api/me/notification-rules`                      | Page query                   | `Page<RuleDto>` for subject, no Organization context               |
+| PUT `/api/me/notification-rules`                      | `{selector,channel,enabled}` | `{rule:RuleDto,requestId}` natural-key upsert; locked always false |
+| DELETE `/api/me/notification-rules/{ruleId}`          | No body                      | `{ok:true,requestId}` for subject-owned rule only                  |
+| GET `/api/orgs/{orgId}/notifications/effective-rules` | Page query                   | `Page<EffectiveRuleDto>`; subject membership, no support bypass    |
 
-| Method and path | Request | 200 response / additional scope |
-|---|---|---|
-| GET `/api/orgs/{orgId}/notifications` | `filter=all|unread` default all + page query | `Page<InboxDto>` for subject; Module filter before keyset; all includes retained resolved rows |
-| GET `/api/orgs/{orgId}/notifications/unread-count` | None | `{unreadCount:number,requestId}` with the same visibility predicate |
-| POST `/api/orgs/{orgId}/notifications/{notificationId}/read` | `{}` | `{ok:true,requestId}`; scoped lookup, first read only |
-| POST `/api/orgs/{orgId}/notifications/read-all` | `{}` | `{ok:true,updated:number,requestId}`; currently visible rows, no concurrent-insert snapshot guarantee |
+| Method and path                                              | Request     | 200 response / additional scope                                                                       |
+| ------------------------------------------------------------ | ----------- | ----------------------------------------------------------------------------------------------------- |
+| GET `/api/orgs/{orgId}/notifications`                        | `filter=all | unread` default all + page query                                                                      | `Page<InboxDto>` for subject; Module filter before keyset; all includes retained resolved rows |
+| GET `/api/orgs/{orgId}/notifications/unread-count`           | None        | `{unreadCount:number,requestId}` with the same visibility predicate                                   |
+| POST `/api/orgs/{orgId}/notifications/{notificationId}/read` | `{}`        | `{ok:true,requestId}`; scoped lookup, first read only                                                 |
+| POST `/api/orgs/{orgId}/notifications/read-all`              | `{}`        | `{ok:true,updated:number,requestId}`; currently visible rows, no concurrent-insert snapshot guarantee |
 
 ### Administration routes
 
-| Method and path | Request | 200 response / authorization |
-|---|---|---|
-| GET `/api/platform/notification-rules` | Page query | `Page<RuleDto>`; super_admin or staff |
-| PUT `/api/platform/notification-rules` | `{selector,channel,enabled,locked}` | `{rule:RuleDto,requestId}`; super_admin |
-| DELETE `/api/platform/notification-rules/{ruleId}` | No body | `{ok:true,requestId}`; super_admin |
-| GET `/api/platform/notification-deliveries` | `channel?,type?,targetKind?` + page query | `Page<DeliveryMetadata & {orgId:string}>`; **failed only**, super_admin, not staff |
+| Method and path                                    | Request                                   | 200 response / authorization                                                       |
+| -------------------------------------------------- | ----------------------------------------- | ---------------------------------------------------------------------------------- |
+| GET `/api/platform/notification-rules`             | Page query                                | `Page<RuleDto>`; super_admin or staff                                              |
+| PUT `/api/platform/notification-rules`             | `{selector,channel,enabled,locked}`       | `{rule:RuleDto,requestId}`; super_admin                                            |
+| DELETE `/api/platform/notification-rules/{ruleId}` | No body                                   | `{ok:true,requestId}`; super_admin                                                 |
+| GET `/api/platform/notification-deliveries`        | `channel?,type?,targetKind?` + page query | `Page<DeliveryMetadata & {orgId:string}>`; **failed only**, super_admin, not staff |
 
-| Method and path | Request | 200 response / authorization |
-|---|---|---|
-| GET `/api/orgs/{orgId}/notification-rules` | Page query | `Page<RuleDto>`; manage_notifications |
-| PUT `/api/orgs/{orgId}/notification-rules` | `{selector,channel,enabled,locked}` | `{rule:RuleDto,requestId}`; manage_notifications |
-| DELETE `/api/orgs/{orgId}/notification-rules/{ruleId}` | No body | `{ok:true,requestId}`; manage_notifications |
-| GET `/api/orgs/{orgId}/notification-deliveries` | `status?,channel?,type?,targetKind?` + page query | `Page<DeliveryMetadata>`; manage_notifications |
-| GET `/api/orgs/{orgId}/notification-destinations` | Page query | `Page<DestinationDto>`; manage_notifications |
-| POST `/api/orgs/{orgId}/notification-destinations` | `{channel,externalId,selector}` | **201** `{destination:DestinationDto,requestId}`; manage_notifications; validate installed address and type opt-in |
-| PUT `/api/orgs/{orgId}/notification-destinations/{destinationId}` | `{selector}` | `{destination:DestinationDto,requestId}`; address identity immutable |
-| DELETE `/api/orgs/{orgId}/notification-destinations/{destinationId}` | No body | `{ok:true,requestId}`; manage_notifications |
+| Method and path                                                      | Request                                           | 200 response / authorization                                                                                       |
+| -------------------------------------------------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| GET `/api/orgs/{orgId}/notification-rules`                           | Page query                                        | `Page<RuleDto>`; manage_notifications                                                                              |
+| PUT `/api/orgs/{orgId}/notification-rules`                           | `{selector,channel,enabled,locked}`               | `{rule:RuleDto,requestId}`; manage_notifications                                                                   |
+| DELETE `/api/orgs/{orgId}/notification-rules/{ruleId}`               | No body                                           | `{ok:true,requestId}`; manage_notifications                                                                        |
+| GET `/api/orgs/{orgId}/notification-deliveries`                      | `status?,channel?,type?,targetKind?` + page query | `Page<DeliveryMetadata>`; manage_notifications                                                                     |
+| GET `/api/orgs/{orgId}/notification-destinations`                    | Page query                                        | `Page<DestinationDto>`; manage_notifications                                                                       |
+| POST `/api/orgs/{orgId}/notification-destinations`                   | `{channel,externalId,selector}`                   | **201** `{destination:DestinationDto,requestId}`; manage_notifications; validate installed address and type opt-in |
+| PUT `/api/orgs/{orgId}/notification-destinations/{destinationId}`    | `{selector}`                                      | `{destination:DestinationDto,requestId}`; address identity immutable                                               |
+| DELETE `/api/orgs/{orgId}/notification-destinations/{destinationId}` | No body                                           | `{ok:true,requestId}`; manage_notifications                                                                        |
 
 Organization admin routes require Organization context + capability; authenticated member/reader receive 403, another Organization receives 404. Inbox/read routes never enable a super_admin bypass. User rules are global subject-owned rows even when the UI previews the current Organization. Installation, Slack channel discovery and User-link routes are specified by ADR-0021; they do not duplicate these generic destination endpoints.
 
@@ -528,21 +527,21 @@ Organization admin routes require Organization context + capability; authenticat
 
 Page query is `limit?: integer 1..100` (default 50), `cursor?: string` ≤512 characters. Reuse ADR-0010 helpers from `@kit/core`, `limit+1` and `{items,nextCursor,requestId}`; no offset, total or resource-key envelope. Dates/cursors use epoch milliseconds. Exact decoded keys:
 
-| List | Keyset and order |
-|---|---|
+| List                                   | Keyset and order                                                                                       |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------ |
 | Inbox, rules, destinations, Deliveries | `{createdAt:number,id:string}`; `created_at DESC,id DESC`; seek lower date, or equal date and lower id |
-| Registry types | `{type:string}`; lexical ascending |
-| Effective type/Channel rules | `{type:string,channel:string}`; lexical ascending |
+| Registry types                         | `{type:string}`; lexical ascending                                                                     |
+| Effective type/Channel rules           | `{type:string,channel:string}`; lexical ascending                                                      |
 
 Decoded HTTP keysets must have exactly these keys, the D5 ASCII key/id grammars and bounds, and safe integer epoch dates. A Unicode/escaped/control-character identifier is not a valid key even if its character count fits. Unknown keys/malformed encoding fail generic 400 without exposing decoded contents. User/Organization scope is applied independently of cursor content; changing filters is an allowed seek, not authorization. Union Delivery ids have distinct kind prefixes for total order. Concurrent writes may skip/repeat items; pagination is not snapshot-isolated.
 
 Every encoder output must be accepted again by the same ≤512-character request schema. With compact `JSON.stringify`, ASCII keys/ids requiring no escaping, and dates bounded by `Number.MAX_SAFE_INTEGER`, the static upper bounds are:
 
-| Cursor | Maximum UTF-8 JSON bytes | Maximum unpadded base64url characters |
-|---|---|---|
-| `{type}` | `128 + 11 = 139` | `ceil(4 × 139 / 3) = 186` |
-| `{type,channel}` | `128 + 64 + 24 = 216` | `288` |
-| `{createdAt,id}` | `16 + 256 + 22 = 294` | `392` |
+| Cursor                                                               | Maximum UTF-8 JSON bytes           | Maximum unpadded base64url characters              |
+| -------------------------------------------------------------------- | ---------------------------------- | -------------------------------------------------- |
+| `{type}`                                                             | `128 + 11 = 139`                   | `ceil(4 × 139 / 3) = 186`                          |
+| `{type,channel}`                                                     | `128 + 64 + 24 = 216`              | `288`                                              |
+| `{createdAt,id}`                                                     | `16 + 256 + 22 = 294`              | `392`                                              |
 | Internal admission `{asOf,lastCheckAt,createdAt,kind,id}` (ADR-0020) | `3 × 16 + 14 + 258 + 45 + 6 = 371` | `ceil(4 × 371 / 3) = 495` (≤496 even with padding) |
 
 The admission cursor uses `lastCheckAt=-1` for a null stored observation, because the shared generic record decoder accepts strings/numbers, not null. Its kind is at most `organization` (12 ASCII bytes), its id is bounded as above, and ADR-0020 defines its exact validation/order/paging policy. These are JSON record cursors through the existing helpers, not an array codec or a change to ADR-0010. The shared 512-character cap is retained. A raw cursor must be ASCII base64url and within that cap before decoding; after generic decode, the endpoint validates the exact key schema before SQL. Future key/grammar changes must re-establish encode→request closure rather than raising the shared limit or truncating an emitted cursor.
@@ -571,23 +570,23 @@ The final recheck is not atomic with an external POST: a decision/rule may chang
 
 Required targeted proofs, in addition to the root gate at implementation delivery:
 
-| Proof surface | Acceptance |
-|---|---|
-| Pure public interface | Full lock/specificity table; email lock rejection; authorized Inbox independent of all external settings; destination ceiling/opt-in/zero-User cases; no I/O |
-| Applied SQL/repos | Concurrent active uniqueness; Notification+Delivery rollback; new admission after resolution; two independent read/resolved axes; owner/User/global scopes; composite FK cross-org negatives; admission observation CAS/monotonicity and fair org-page contract from ADR-0020; purge |
-| Producers and ports | Correct added/removed ids; each recipient's object ACL; optional actor exclusion; sole owner flow notified; `opened → closed/resolve → replay(opened)` creates no fresh active rows/owner refs; decision/cancel commit before late emission is resolved by the post-notify guard; two approvals in one run remain independent; a decision with failed wake still blocks replayed opening; callback read/resolve failure retries only under its bounded owner, then logs and continues; task reassignment after resolution remains possible |
-| HTTP/security | CP-IDOR/CP-UNAUTH per resource, session-only, no Inbox support bypass, metadata-only admin, User rules unaudited, atomic admin audit, exact keysets/OpenAPI, API/web catalogue parity; maximum-length valid ASCII keysets round-trip through cursor≤512, Unicode identifier keys rejected without restricting localized content, invalid newId rejected before batch write |
-| Delivery and crash paths | Repeated notify without new Delivery; terminal replay without provider; lost provider receipt permits duplicate; access/rule/source-resolution changes skip when observed; removed/replaced destination never redirects; admission-before/after-create ambiguity and retention boundaries per ADR-0020; independent durable-ownership review |
+| Proof surface            | Acceptance                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Pure public interface    | Full lock/specificity table; email lock rejection; authorized Inbox independent of all external settings; destination ceiling/opt-in/zero-User cases; no I/O                                                                                                                                                                                                                                                                                                                                                                               |
+| Applied SQL/repos        | Concurrent active uniqueness; Notification+Delivery rollback; new admission after resolution; two independent read/resolved axes; owner/User/global scopes; composite FK cross-org negatives; admission observation CAS/monotonicity and fair org-page contract from ADR-0020; purge                                                                                                                                                                                                                                                       |
+| Producers and ports      | Correct added/removed ids; each recipient's object ACL; optional actor exclusion; sole owner flow notified; `opened → closed/resolve → replay(opened)` creates no fresh active rows/owner refs; decision/cancel commit before late emission is resolved by the post-notify guard; two approvals in one run remain independent; a decision with failed wake still blocks replayed opening; callback read/resolve failure retries only under its bounded owner, then logs and continues; task reassignment after resolution remains possible |
+| HTTP/security            | CP-IDOR/CP-UNAUTH per resource, session-only, no Inbox support bypass, metadata-only admin, User rules unaudited, atomic admin audit, exact keysets/OpenAPI, API/web catalogue parity; maximum-length valid ASCII keysets round-trip through cursor≤512, Unicode identifier keys rejected without restricting localized content, invalid newId rejected before batch write                                                                                                                                                                 |
+| Delivery and crash paths | Repeated notify without new Delivery; terminal replay without provider; lost provider receipt permits duplicate; access/rule/source-resolution changes skip when observed; removed/replaced destination never redirects; admission-before/after-create ambiguity and retention boundaries per ADR-0020; independent durable-ownership review                                                                                                                                                                                               |
 
 ## Existing seams and alternatives
 
-| Current evidence | Proposed use / rejected alternative |
-|---|---|
-| `packages/auth/src/hono.ts`, `packages/auth/src/org-roles.ts`, `apps/example-api/src/services/org-roles.ts`, `packages/flows/src/access.ts` | Reuse real membership, Role and Module facts; reject the sender/support grant as recipient authority. |
-| `packages/types/src/list.ts`, `packages/core/src/list-page.ts`, `packages/core/src/errors.ts` | Reuse list/query/cursor/error shapes; reject custom collection envelopes and offset pagination. |
-| Existing task mutation hook and flows approve/step-io seams | Add optional producer ports; reject a notifications tool, implicit recipients and failing the run after best-effort callback exhaustion. |
-| ADR-0012 persistence split, ADR-0004 EmailPort and existing i18n catalogue composition | Package-owned schema/repos, App SQL/routes/copy; reject `@kit/db` as a capability hub or a provider-specific pure core. |
-| ADR-0018 D2 plus owner choice in this session | Full Delivery Workflow, stable native identity and bounded admission; reject Queue publication recovery, custom leases/checkpoints, `@kit/jobs` for one consumer and a promised exactly-once provider effect. |
+| Current evidence                                                                                                                            | Proposed use / rejected alternative                                                                                                                                                                           |
+| ------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/auth/src/hono.ts`, `packages/auth/src/org-roles.ts`, `apps/example-api/src/services/org-roles.ts`, `packages/flows/src/access.ts` | Reuse real membership, Role and Module facts; reject the sender/support grant as recipient authority.                                                                                                         |
+| `packages/types/src/list.ts`, `packages/core/src/list-page.ts`, `packages/core/src/errors.ts`                                               | Reuse list/query/cursor/error shapes; reject custom collection envelopes and offset pagination.                                                                                                               |
+| Existing task mutation hook and flows approve/step-io seams                                                                                 | Add optional producer ports; reject a notifications tool, implicit recipients and failing the run after best-effort callback exhaustion.                                                                      |
+| ADR-0012 persistence split, ADR-0004 EmailPort and existing i18n catalogue composition                                                      | Package-owned schema/repos, App SQL/routes/copy; reject `@kit/db` as a capability hub or a provider-specific pure core.                                                                                       |
+| ADR-0018 D2 plus owner choice in this session                                                                                               | Full Delivery Workflow, stable native identity and bounded admission; reject Queue publication recovery, custom leases/checkpoints, `@kit/jobs` for one consumer and a promised exactly-once provider effect. |
 
 Business decisions are recorded in [Roxabi/roxabi-boilerplate-cf#451](https://github.com/Roxabi/roxabi-boilerplate-cf/issues/451), [Roxabi/roxabi-boilerplate-cf#452](https://github.com/Roxabi/roxabi-boilerplate-cf/issues/452), [Roxabi/roxabi-boilerplate-cf#453](https://github.com/Roxabi/roxabi-boilerplate-cf/issues/453), [Roxabi/roxabi-boilerplate-cf#454](https://github.com/Roxabi/roxabi-boilerplate-cf/issues/454), [Roxabi/roxabi-boilerplate-cf#455](https://github.com/Roxabi/roxabi-boilerplate-cf/issues/455), [Roxabi/roxabi-boilerplate-cf#456](https://github.com/Roxabi/roxabi-boilerplate-cf/issues/456), [Roxabi/roxabi-boilerplate-cf#457](https://github.com/Roxabi/roxabi-boilerplate-cf/issues/457), [Roxabi/roxabi-boilerplate-cf#458](https://github.com/Roxabi/roxabi-boilerplate-cf/issues/458), [Roxabi/roxabi-boilerplate-cf#459](https://github.com/Roxabi/roxabi-boilerplate-cf/issues/459) and [Roxabi/roxabi-boilerplate-cf#461](https://github.com/Roxabi/roxabi-boilerplate-cf/issues/461). Owner/delivery admission, bounded approval callbacks, both dogfood external defaults and zero-User collective delivery include the explicit E0 session refinements; stale Queue claims are not normative. Definitions live in GLOSSARY, not a second implementation glossary here.
 

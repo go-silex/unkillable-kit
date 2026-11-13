@@ -341,7 +341,7 @@ function wrapsInParens(text: string): boolean | null {
 
 function stripOuterParens(operand: string): string | null {
   let text = operand.trim()
-  for (;;) {
+  while (true) {
     const wraps = wrapsInParens(text)
     if (wraps === null) return null
     if (!wraps) return text

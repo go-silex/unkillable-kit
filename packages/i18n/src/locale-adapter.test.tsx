@@ -2,6 +2,7 @@
 import '@testing-library/jest-dom/vitest'
 import { createReactI18n } from '@kit/i18n/react'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { useState } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const { LocaleProvider, useLocale } = createReactI18n({
@@ -12,6 +13,21 @@ const { LocaleProvider, useLocale } = createReactI18n({
   defaultLocale: 'es',
   storageKey: 'ua.locale',
 })
+
+const single = createReactI18n({
+  catalogs: { it: { greeting: 'Ciao' } },
+  defaultLocale: 'it',
+  storageKey: 'single.locale',
+})
+
+function SingleConsumer() {
+  const { locale, locales, showSwitcher, m } = single.useLocale()
+  return (
+    <span>
+      {locale}:{locales.join(',')}:{String(showSwitcher)}:{m.greeting}
+    </span>
+  )
+}
 
 afterEach(() => {
   cleanup()
@@ -37,6 +53,38 @@ function Consumer() {
   )
 }
 
+function StatefulConsumer() {
+  const { locale, setLocale } = useLocale()
+  const [count, setCount] = useState(0)
+  return (
+    <>
+      <span data-testid="stateful">
+        {locale}:{count}
+      </span>
+      <button type="button" onClick={() => setCount((value) => value + 1)}>
+        Count
+      </button>
+      <button type="button" onClick={() => setLocale('de')}>
+        Switch
+      </button>
+    </>
+  )
+}
+
+function RerenderingParent() {
+  const [tick, setTick] = useState(0)
+  return (
+    <>
+      <button type="button" onClick={() => setTick((value) => value + 1)}>
+        Rerender {tick}
+      </button>
+      <LocaleProvider>
+        <StatefulConsumer />
+      </LocaleProvider>
+    </>
+  )
+}
+
 // This function is typechecked but never executed.
 function useCheckTypes() {
   const { locale, setLocale, m } = useLocale()
@@ -50,6 +98,14 @@ function useCheckTypes() {
 void useCheckTypes
 
 describe('React locale adapter', () => {
+  it('preserves child state across locale changes and parent rerenders', () => {
+    render(<RerenderingParent />)
+    fireEvent.click(screen.getByRole('button', { name: 'Count' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Switch' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Rerender 0' }))
+    expect(screen.getByTestId('stateful')).toHaveTextContent('de:1')
+  })
+
   it('reads the consumer storage key and supplies its own catalogs', () => {
     localStorage.setItem('kit.locale', 'es')
     localStorage.setItem('ua.locale', 'de')
@@ -114,19 +170,6 @@ describe('React locale adapter', () => {
   })
 
   it('hides the switcher for a single catalog', () => {
-    const single = createReactI18n({
-      catalogs: { it: { greeting: 'Ciao' } },
-      defaultLocale: 'it',
-      storageKey: 'single.locale',
-    })
-    function SingleConsumer() {
-      const { locale, locales, showSwitcher, m } = single.useLocale()
-      return (
-        <span>
-          {locale}:{locales.join(',')}:{String(showSwitcher)}:{m.greeting}
-        </span>
-      )
-    }
     render(
       <single.LocaleProvider>
         <SingleConsumer />

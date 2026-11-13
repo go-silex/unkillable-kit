@@ -10,6 +10,12 @@ import {
 } from 'react'
 import { createI18n, hasLocaleSwitcher, resolveLocale } from './index'
 
+/**
+ * Call once per catalog set at module scope and export the pair, as with
+ * createContext or lazy. Each call creates its own Context, LocaleProvider and
+ * useLocale. Calling it during render remounts the provider subtree and detaches
+ * useLocale from its provider on every render.
+ */
 export function createReactI18n<C extends Record<string, unknown>>(opts: {
   catalogs: C
   defaultLocale: NoInfer<keyof C & string>
@@ -39,6 +45,7 @@ export function createReactI18n<C extends Record<string, unknown>>(opts: {
     }
   }
 
+  // biome-ignore lint/correctness/noComponentHookFactories: one typed provider per createReactI18n call, composed once at module scope — DEBT:i18n-react-factory
   function LocaleProvider({ children }: { children: ReactNode }) {
     const [locale, setLocaleState] = useState<Locale>(() => {
       if (typeof window === 'undefined') return engine.defaultLocale
@@ -82,6 +89,7 @@ export function createReactI18n<C extends Record<string, unknown>>(opts: {
     return createElement(Context.Provider, { value }, children)
   }
 
+  // biome-ignore lint/correctness/noComponentHookFactories: hook reads this call's Context; same module-scope invariant — DEBT:i18n-react-factory
   function useLocale(): LocaleContext {
     const context = useContext(Context)
     if (!context) throw new Error('useLocale must be used within LocaleProvider')

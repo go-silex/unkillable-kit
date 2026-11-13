@@ -4,18 +4,18 @@ Cloudflare SaaS monorepo kit built with Bun, Turborepo, Workers/Hono, D1/R2, Tan
 
 ## Start here
 
-| Goal | Home |
-|---|---|
-| Learn the vocabulary this repository uses | [`GLOSSARY.md`](GLOSSARY.md) |
-| Understand documentation authority and find any kit document | [`docs/kit/README.md`](docs/kit/README.md) |
-| Read the agent constitution | [`AGENTS.md`](AGENTS.md) |
-| Start a product | [`docs/kit/playbooks/start-product.md`](docs/kit/playbooks/start-product.md) |
-| Apply the zero-edit consumer contract | [`docs/kit/product-consumer-contract.md`](docs/kit/product-consumer-contract.md) |
-| Understand stack and architecture | [`docs/kit/standards/stack.md`](docs/kit/standards/stack.md) · [`docs/kit/architecture/index.md`](docs/kit/architecture/index.md) |
-| Test or verify a change | [`docs/kit/testing.md`](docs/kit/testing.md) |
-| Develop safely with agents | [`docs/kit/processes/dev-process.md`](docs/kit/processes/dev-process.md) |
-| Contribute, or report a defect or vulnerability | [`CONTRIBUTING.md`](CONTRIBUTING.md) · [`SECURITY.md`](SECURITY.md) |
-| Configure environments and deploy | [`docs/kit/environments.md`](docs/kit/environments.md) · [`docs/kit/deploy-cloudflare.md`](docs/kit/deploy-cloudflare.md) |
+| Goal                                                         | Home                                                                                                                              |
+| ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| Learn the vocabulary this repository uses                    | [`GLOSSARY.md`](GLOSSARY.md)                                                                                                      |
+| Understand documentation authority and find any kit document | [`docs/kit/README.md`](docs/kit/README.md)                                                                                        |
+| Read the agent constitution                                  | [`AGENTS.md`](AGENTS.md)                                                                                                          |
+| Start a product                                              | [`docs/kit/playbooks/start-product.md`](docs/kit/playbooks/start-product.md)                                                      |
+| Apply the zero-edit consumer contract                        | [`docs/kit/product-consumer-contract.md`](docs/kit/product-consumer-contract.md)                                                  |
+| Understand stack and architecture                            | [`docs/kit/standards/stack.md`](docs/kit/standards/stack.md) · [`docs/kit/architecture/index.md`](docs/kit/architecture/index.md) |
+| Test or verify a change                                      | [`docs/kit/testing.md`](docs/kit/testing.md)                                                                                      |
+| Develop safely with agents                                   | [`docs/kit/processes/dev-process.md`](docs/kit/processes/dev-process.md)                                                          |
+| Contribute, or report a defect or vulnerability              | [`CONTRIBUTING.md`](CONTRIBUTING.md) · [`SECURITY.md`](SECURITY.md)                                                               |
+| Configure environments and deploy                            | [`docs/kit/environments.md`](docs/kit/environments.md) · [`docs/kit/deploy-cloudflare.md`](docs/kit/deploy-cloudflare.md)         |
 
 The kit parent URL and repository lineage are operator concerns outside this monorepo.
 
@@ -37,12 +37,12 @@ The local API health endpoint is `http://127.0.0.1:8787/health`; the web app is 
 
 The seed source of truth is `apps/example-api/src/seed/demo-data.ts`.
 
-| User | Password | Role |
-|---|---|---|
-| `staff@kit.local` | `demo-password-change-me` | staff, multi-org |
-| `demo@kit.local` | `demo-password-change-me` | demo admin |
+| User               | Password                    | Role                    |
+| ------------------ | --------------------------- | ----------------------- |
+| `staff@kit.local`  | `demo-password-change-me`   | staff, multi-org        |
+| `demo@kit.local`   | `demo-password-change-me`   | demo admin              |
 | `demo-b@kit.local` | `demo-password-b-change-me` | user for IDOR scenarios |
-| `super@kit.local` | `demo-password-change-me` | platform super-admin |
+| `super@kit.local`  | `demo-password-change-me`   | platform super-admin    |
 
 Browser authentication uses Better Auth cookies; machine clients use Bearer `sk_` keys.
 
@@ -50,13 +50,13 @@ For individual app startup, MCP smoke, email behavior and the complete quality g
 
 ## Repository shape
 
-| Area | Role |
-|---|---|
-| `packages/*` | Reusable `@kit/*` capabilities |
-| `apps/example-api` | Hono/D1/R2 composition proof |
-| `apps/example-web` | TanStack and `@kit/ui` composition proof |
-| `apps/mcp-example` | MCP catalogue and transport proof |
-| `docs/kit` | Standards, architecture, processes and playbooks |
+| Area               | Role                                             |
+| ------------------ | ------------------------------------------------ |
+| `packages/*`       | Reusable `@kit/*` capabilities                   |
+| `apps/example-api` | Hono/D1/R2 composition proof                     |
+| `apps/example-web` | TanStack and `@kit/ui` composition proof         |
+| `apps/mcp-example` | MCP catalogue and transport proof                |
+| `docs/kit`         | Standards, architecture, processes and playbooks |
 
 Product domain belongs in new product-owned apps and product repositories, never in `packages/*` or the example apps.
 

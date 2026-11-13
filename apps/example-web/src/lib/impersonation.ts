@@ -109,7 +109,7 @@ async function resync(): Promise<void> {
   if (!(queryClient && revalidate)) throw new Error('Impersonation is not configured')
   const client = queryClient
   const invalidateRouter = revalidate
-  for (;;) {
+  while (true) {
     if (lifecycle) await lifecycle
     if (await resyncAttempt(client, invalidateRouter)) return
   }

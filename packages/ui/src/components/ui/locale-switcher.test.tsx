@@ -11,6 +11,18 @@ import {
 } from './dropdown-menu'
 import { LocaleSwitcher } from './locale-switcher'
 
+function Harness() {
+  const [locale, setLocale] = useState<'fr' | 'en'>('fr')
+  return (
+    <LocaleSwitcher
+      locales={['fr', 'en']}
+      value={locale}
+      onChange={setLocale}
+      labels={{ fr: 'Français', en: 'English' }}
+    />
+  )
+}
+
 describe('LocaleSwitcher', () => {
   it('renders nothing when a single locale is registered', () => {
     const { container } = render(
@@ -22,17 +34,6 @@ describe('LocaleSwitcher', () => {
 
   it('renders a button per locale and calls onChange', async () => {
     const user = userEvent.setup()
-    function Harness() {
-      const [locale, setLocale] = useState<'fr' | 'en'>('fr')
-      return (
-        <LocaleSwitcher
-          locales={['fr', 'en']}
-          value={locale}
-          onChange={setLocale}
-          labels={{ fr: 'Français', en: 'English' }}
-        />
-      )
-    }
     render(<Harness />)
     const fr = screen.getByRole('button', { name: 'Français' })
     const en = screen.getByRole('button', { name: 'English' })

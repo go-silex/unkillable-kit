@@ -2,25 +2,25 @@
 
 **SSoT** for how **product consumers** map **git branches** → **Wrangler named envs** → **Cloudflare resources**. Kit HEAD is trunk/`main` only.
 
-| Related | Role |
-|---------|------|
-| This page | Protocol — planes, isolation, git × CF, anti-patterns |
-| [`deploy-cloudflare.md`](./deploy-cloudflare.md) | Kit **showcase** CD (Workers Builds / Pages from the CI-gated **`deploy/main`**) |
-| [`email-cf-runbook.md`](./email-cf-runbook.md) | Email Sending (`cf` / allowlist) |
-| [`product-consumer-contract.md`](./product-consumer-contract.md) | Product wrangler lives only under `apps/<product>-*` |
-| [ADR-0002](./architecture/adr/0002-session-hmac-interim-vs-better-auth.md) | Browser session = Better Auth cookies |
-| [ADR-0004](./architecture/adr/0004-email-transport-cf-default.md) | Transport by environment |
+| Related                                                                    | Role                                                                             |
+| -------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| This page                                                                  | Protocol — planes, isolation, git × CF, anti-patterns                            |
+| [`deploy-cloudflare.md`](./deploy-cloudflare.md)                           | Kit **showcase** CD (Workers Builds / Pages from the CI-gated **`deploy/main`**) |
+| [`email-cf-runbook.md`](./email-cf-runbook.md)                             | Email Sending (`cf` / allowlist)                                                 |
+| [`product-consumer-contract.md`](./product-consumer-contract.md)           | Product wrangler lives only under `apps/<product>-*`                             |
+| [ADR-0002](./architecture/adr/0002-session-hmac-interim-vs-better-auth.md) | Browser session = Better Auth cookies                                            |
+| [ADR-0004](./architecture/adr/0004-email-transport-cf-default.md)          | Transport by environment                                                         |
 
 **Status**
 
-| Surface | Today |
-|---------|--------|
-| Protocol (this page) | Normative |
-| Kit `apps/example-*/wrangler.toml` | Top-level = **local** · `[env.production]` = showcase · **no** `[env.staging]` |
-| Kit git | **`main` only.** There is no kit `staging` branch. Do not create one on the kit to “match the docs”. |
+| Surface                            | Today                                                                                                                                              |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Protocol (this page)               | Normative                                                                                                                                          |
+| Kit `apps/example-*/wrangler.toml` | Top-level = **local** · `[env.production]` = showcase · **no** `[env.staging]`                                                                     |
+| Kit git                            | **`main` only.** There is no kit `staging` branch. Do not create one on the kit to “match the docs”.                                               |
 | Kit CD (`scripts/kit/cf-builds/*`) | Refuses any branch ≠ `deploy/main` (CI-gated) · **always** `--env production`. Copying it onto a product `staging` branch writes **production** D1 |
-| Product `apps/<product>-*` | Owns `[env.staging]` / `[env.production]` (new files, zero-edit) |
-| Product git | **Trunk.** PRs land on `main`. Optional staging CD is a fast-forward pin `staging` from `main`, not a second landing branch. |
+| Product `apps/<product>-*`         | Owns `[env.staging]` / `[env.production]` (new files, zero-edit)                                                                                   |
+| Product git                        | **Trunk.** PRs land on `main`. Optional staging CD is a fast-forward pin `staging` from `main`, not a second landing branch.                       |
 
 Provisioning kit example staging is **B4**. Products do not wait — they add `[env.staging]` in **product** wrangler and **product** CD.
 
@@ -28,11 +28,11 @@ Provisioning kit example staging is **B4**. Products do not wait — they add `[
 
 ## 1. Three planes
 
-| Plane | `ENVIRONMENT` | Wrangler | Where it runs |
-|-------|---------------|----------|----------------|
-| **local** | `development` (or `test` in Vitest) | **top-level** (no `--env`) | `wrangler dev` · `.dev.vars` · local D1/R2 |
-| **staging** | `staging` | `--env staging` | Named Worker + **own** D1/R2/secrets/hosts |
-| **production** | `production` | `--env production` | Named Worker + **own** D1/R2/secrets/hosts |
+| Plane          | `ENVIRONMENT`                       | Wrangler                   | Where it runs                              |
+| -------------- | ----------------------------------- | -------------------------- | ------------------------------------------ |
+| **local**      | `development` (or `test` in Vitest) | **top-level** (no `--env`) | `wrangler dev` · `.dev.vars` · local D1/R2 |
+| **staging**    | `staging`                           | `--env staging`            | Named Worker + **own** D1/R2/secrets/hosts |
+| **production** | `production`                        | `--env production`         | Named Worker + **own** D1/R2/secrets/hosts |
 
 Which **git branch** triggers which `--env` is §4 (two models). Do not infer `--env` from the branch name — CD must pass `--env` explicitly.
 
@@ -46,15 +46,15 @@ Never ship `ENVIRONMENT=development` or `EMAIL_TRANSPORT=log` to a Cloudflare Wo
 
 Staging is a **second Worker**, not a preview of production.
 
-| Resource | Rule |
-|----------|------|
-| Worker `name` | Distinct (`<api>` vs `<api>-staging`) |
-| D1 | Distinct `database_id` — migrate each env |
-| R2 | Distinct `bucket_name` |
-| Secrets | Distinct `BETTER_AUTH_SECRET`. `wrangler secret put --env staging` |
-| Public hosts | Distinct custom domains on the **same registrable zone** as the SPA |
-| Queues / Workflows / crons | Distinct names; staging **`crons = []`** unless a dry-run is explicit |
-| Email | Staging: `cf` or `resend` + `EMAIL_ALLOW_DOMAINS` + `[TEST STAGING]` ([ADR-0004](./architecture/adr/0004-email-transport-cf-default.md)) |
+| Resource                   | Rule                                                                                                                                     |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Worker `name`              | Distinct (`<api>` vs `<api>-staging`)                                                                                                    |
+| D1                         | Distinct `database_id` — migrate each env                                                                                                |
+| R2                         | Distinct `bucket_name`                                                                                                                   |
+| Secrets                    | Distinct `BETTER_AUTH_SECRET`. `wrangler secret put --env staging`                                                                       |
+| Public hosts               | Distinct custom domains on the **same registrable zone** as the SPA                                                                      |
+| Queues / Workflows / crons | Distinct names; staging **`crons = []`** unless a dry-run is explicit                                                                    |
+| Email                      | Staging: `cf` or `resend` + `EMAIL_ALLOW_DOMAINS` + `[TEST STAGING]` ([ADR-0004](./architecture/adr/0004-email-transport-cf-default.md)) |
 
 Same binding **names** in code (`env.DB`, `env.BUCKET`). Different Cloudflare objects behind them.
 
@@ -74,12 +74,12 @@ Sharing production D1/R2 with staging **is** a prod incident. Do **not** copy `[
 
 Better Auth sessions are **host-only cookies** (`HttpOnly` · `Secure` on staging/prod · `SameSite=Lax`).
 
-| Do | Do not |
-|----|--------|
-| Custom domains on one registrable zone | `*.workers.dev` / `*.pages.dev` as the session pair |
-| `workers_dev = false` and `preview_urls = false` on **product** deployed envs | Gradual versions of the **prod** Worker as “staging” |
-| `BETTER_AUTH_URL` = public API origin of **that** env | Reuse prod `BETTER_AUTH_URL` on staging |
-| `CORS_ORIGINS` = explicit SPA origin(s) of **that** env | Add the staging SPA origin to **production** CORS to “make login work” |
+| Do                                                                            | Do not                                                                 |
+| ----------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| Custom domains on one registrable zone                                        | `*.workers.dev` / `*.pages.dev` as the session pair                    |
+| `workers_dev = false` and `preview_urls = false` on **product** deployed envs | Gradual versions of the **prod** Worker as “staging”                   |
+| `BETTER_AUTH_URL` = public API origin of **that** env                         | Reuse prod `BETTER_AUTH_URL` on staging                                |
+| `CORS_ORIGINS` = explicit SPA origin(s) of **that** env                       | Add the staging SPA origin to **production** CORS to “make login work” |
 
 Kit showcase `[env.production]` does **not** yet set `workers_dev = false` (dogfood leftover). Products must set the flags; do not copy that omission.
 
@@ -100,10 +100,10 @@ feature PR
  CD trigger B  ──►  wrangler deploy --env production   ──►  prod hosts
 ```
 
-| Model | PRs land on | Staging CD trigger | Production CD trigger |
-|-------|-------------|--------------------|------------------------|
-| **staging-train** | `staging`; `/promote` → `main` | git `deploy/staging` | git `deploy/main` |
-| **trunk + staging pin** | `main`; optional `staging` fast-forwarded from `main` | git `deploy/staging` | git `deploy/main` |
+| Model                   | PRs land on                                           | Staging CD trigger   | Production CD trigger |
+| ----------------------- | ----------------------------------------------------- | -------------------- | --------------------- |
+| **staging-train**       | `staging`; `/promote` → `main`                        | git `deploy/staging` | git `deploy/main`     |
+| **trunk + staging pin** | `main`; optional `staging` fast-forwarded from `main` | git `deploy/staging` | git `deploy/main`     |
 
 **CD never builds `staging` or `main` directly** (Roxabi/roxabi-boilerplate-cf#256). The inherited **Deploy gate** (`.github/workflows/deploy-gate.yml` → `scripts/kit/promote-deploy.ts`) fast-forwards `deploy/<branch>` to the newest first-parent commit that descends from it, whose required push runs are all green and whose range has no red Secret scan. Required: kit CI + Secret scan, plus the product workflows declared in `config/product/deploy-gate.json` (mandatory for a product). It never promotes a newer untested push, never goes backwards and never forces. Once the **cutover** is done ([`deploy-cloudflare.md`](./deploy-cloudflare.md) § Cutover), a red commit on `staging` or `main` reaches neither D1 nor the Worker nor the SPA. Inheriting the workflow alone does not switch the dashboards. Break-glass: § Break-glass.
 
@@ -113,12 +113,12 @@ feature PR
 
 Cloudflare’s default deploy command is `npx wrangler deploy` (**no** `--env`). Default non-production command is `npx wrangler versions upload` (preview of **that** Worker, **same** D1/R2). Both are forbidden.
 
-| Worker project | Production branch | Deploy command | Non-production builds |
-|----------------|-------------------|----------------|------------------------|
-| `<api>-staging` | `deploy/staging` | `wrangler deploy --env staging` | **Off** |
-| `<api>` | `deploy/main` | `wrangler deploy --env production` | **Off** |
-| SPA staging (Pages or Worker) | `deploy/staging` | build with `VITE_API_URL` = staging `BETTER_AUTH_URL` | **Off** |
-| SPA production | `deploy/main` | build with `VITE_API_URL` = prod `BETTER_AUTH_URL` | **Off** |
+| Worker project                | Production branch | Deploy command                                        | Non-production builds |
+| ----------------------------- | ----------------- | ----------------------------------------------------- | --------------------- |
+| `<api>-staging`               | `deploy/staging`  | `wrangler deploy --env staging`                       | **Off**               |
+| `<api>`                       | `deploy/main`     | `wrangler deploy --env production`                    | **Off**               |
+| SPA staging (Pages or Worker) | `deploy/staging`  | build with `VITE_API_URL` = staging `BETTER_AUTH_URL` | **Off**               |
+| SPA production                | `deploy/main`     | build with `VITE_API_URL` = prod `BETTER_AUTH_URL`    | **Off**               |
 
 A product deploy script guards its branch the same way the kit's does: refuse anything but its `deploy/<branch>` before migrate or deploy.
 
@@ -213,17 +213,17 @@ Provisioning example staging (B4) requires named staging D1/R2, a second Worker 
 
 ## 8. Anti-patterns
 
-| Instead | Use |
-|---------|-----|
-| Preview URL / `*.workers.dev` as the SPA↔API pair | Custom domains, `workers_dev = false` |
-| Versions / `versions upload` of the **prod** Worker as staging | Second Worker project + `[env.staging]` + own D1/R2 |
-| Copy `scripts/kit/cf-builds/*` onto git `staging` | Product deploy command with explicit `--env staging` |
-| Copy `[env.production]` UUIDs into `[env.staging]` | `wrangler d1 create` / `r2 bucket create` per plane |
-| Default `VITE_API_URL` to prod on a staging SPA | Required build var = staging `BETTER_AUTH_URL` |
-| Open **prod** `CORS_ORIGINS` for the staging SPA | Staging CORS on the staging Worker only |
-| `ENVIRONMENT=development` on CF | Real `BETTER_AUTH_SECRET` (≥32, non-placeholder) |
-| `wrangler deploy` with no `--env` | `--env staging` or `--env production` |
-| Copy showcase `ALLOW_PUBLIC_SIGNUP=true` | Product default: unset / false |
+| Instead                                                        | Use                                                  |
+| -------------------------------------------------------------- | ---------------------------------------------------- |
+| Preview URL / `*.workers.dev` as the SPA↔API pair              | Custom domains, `workers_dev = false`                |
+| Versions / `versions upload` of the **prod** Worker as staging | Second Worker project + `[env.staging]` + own D1/R2  |
+| Copy `scripts/kit/cf-builds/*` onto git `staging`              | Product deploy command with explicit `--env staging` |
+| Copy `[env.production]` UUIDs into `[env.staging]`             | `wrangler d1 create` / `r2 bucket create` per plane  |
+| Default `VITE_API_URL` to prod on a staging SPA                | Required build var = staging `BETTER_AUTH_URL`       |
+| Open **prod** `CORS_ORIGINS` for the staging SPA               | Staging CORS on the staging Worker only              |
+| `ENVIRONMENT=development` on CF                                | Real `BETTER_AUTH_SECRET` (≥32, non-placeholder)     |
+| `wrangler deploy` with no `--env`                              | `--env staging` or `--env production`                |
+| Copy showcase `ALLOW_PUBLIC_SIGNUP=true`                       | Product default: unset / false                       |
 
 ---
 

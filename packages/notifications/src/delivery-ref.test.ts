@@ -4,7 +4,7 @@ import { deliveryRefSchema } from './index'
 describe('server-owned Delivery references', () => {
   it.each([
     '',
-    'u_' + 'a'.repeat(255),
+    `u_${'a'.repeat(255)}`,
     'u_alpha\n',
     'u_alpha\r',
     'u_alpha\u2028',

@@ -23,10 +23,10 @@ ADR-0009 namespaced only `{config,scripts,docs}/{kit,product}`. `tools/` and `to
 
 That left two rules in the same repo:
 
-| After ADR-0009 | `tools/` leftover |
-|---|---|
-| code → `scripts/{kit,product}/` | checkers + worktree helpers |
-| data → `config/{kit,product}/` | `*_exemptions.txt`, `qg.conf` |
+| After ADR-0009                  | `tools/` leftover             |
+| ------------------------------- | ----------------------------- |
+| code → `scripts/{kit,product}/` | checkers + worktree helpers   |
+| data → `config/{kit,product}/`  | `*_exemptions.txt`, `qg.conf` |
 
 Roxabi/roxabi-boilerplate-cf#118 had to invent `config/product/file_exemptions.txt` because putting a product register under `tools/` would require `tools/product/` and punch a hole in the `tools/` zero-edit prefix.
 
@@ -60,10 +60,10 @@ No `tools/kit`. No `tools/product`. Product-owned helpers live in `scripts/produ
 
 ### D2 — Kit map (from `tools/`)
 
-| From | To |
-|---|---|
+| From                                                                                                                                  | To             |
+| ------------------------------------------------------------------------------------------------------------------------------------- | -------------- |
 | `check_file_length.sh` · `check_folder_size.sh` · `check_lib.sh` · `licenseChecker.ts` · `worktree-setup.sh` · `worktree-teardown.sh` | `scripts/kit/` |
-| `file_exemptions.txt` · `folder_exemptions.txt` · `import-boundary-exemptions.txt` · `qg.conf` | `config/kit/` |
+| `file_exemptions.txt` · `folder_exemptions.txt` · `import-boundary-exemptions.txt` · `qg.conf`                                        | `config/kit/`  |
 
 Live kit register paths after cutover:
 

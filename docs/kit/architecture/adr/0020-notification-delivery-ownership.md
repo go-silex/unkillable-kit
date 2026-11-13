@@ -36,11 +36,11 @@ Le Kit compose déjà `WorkflowEntrypoint`, `step.do` et les reçus D1 dans ses 
 
 ### D1 — Le Workflow possède la Delivery entière
 
-| Exécution | Durable owner | Composition App |
-|---|---|---|
+| Exécution                                              | Durable owner                                                                       | Composition App                                                     |
+| ------------------------------------------------------ | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
 | Une Delivery externe, User ou Organization destination | **Une instance Cloudflare Workflows à ID stable**, de l’admission à la finalisation | `NotificationDeliveryWorkflow`, ports Channel et stockage org-scopé |
-| Un plan run gouverné | Cloudflare Workflows, inchangé | `FlowRunWorkflow`, sans wrapper de Delivery |
-| Un job message du demo existant | Cloudflare Queues, retries et DLQ explicites | Consumer demo App, sans nouveau Package |
+| Un plan run gouverné                                   | Cloudflare Workflows, inchangé                                                      | `FlowRunWorkflow`, sans wrapper de Delivery                         |
+| Un job message du demo existant                        | Cloudflare Queues, retries et DLQ explicites                                        | Consumer demo App, sans nouveau Package                             |
 
 Le Workflow de Delivery réalise lui-même les guards, l’appel Channel, les retries et la persistance du résultat. **Il ne se contente pas de publier dans une Queue.** Il n’existe ni Queue de notifications, ni DLQ de notifications, ni consumer de finalisation, ni Queue de parking. Les propositions de rétention Queue à 14 jours et de parking d’une DLQ de finalisation deviennent sans objet.
 
@@ -72,13 +72,13 @@ export const deliveryRefSchema = z.object({
 export type DeliveryRef = z.infer<typeof deliveryRefSchema>
 ```
 
-| Champ / règle | Contrat |
-|---|---|
-| `orgId` | Organization propriétaire. Toute lecture, tentative et transition porte ce scope. Aucun privilège ambiant du producteur n’est transmis. |
-| `kind` | Discriminant fixe de la table de Delivery : User ou Organization destination. Ce n’est pas un stage d’exécution. |
-| `id` | Identifiant de la Delivery, jamais réutilisé pour une nouvelle intention. Le Workflow recharge Notification, destinataire et Channel depuis cette ligne org-scopée. |
-| Params | Exactement cette référence : pas de contenu, adresse, token, User IDs redondants, grants, compteur, délai, stage ou clé d’autorité fournie par le client. Les génériques TypeScript ne remplacent pas la validation Zod. |
-| Entrée | Le Workflow revalide les params et vérifie son ID avant tout effet ou lookup non bornée. Une référence invalide ou un ID incohérent termine par `NonRetryableError`, sans envoi ni lookup globale de récupération. |
+| Champ / règle | Contrat                                                                                                                                                                                                                  |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `orgId`       | Organization propriétaire. Toute lecture, tentative et transition porte ce scope. Aucun privilège ambiant du producteur n’est transmis.                                                                                  |
+| `kind`        | Discriminant fixe de la table de Delivery : User ou Organization destination. Ce n’est pas un stage d’exécution.                                                                                                         |
+| `id`          | Identifiant de la Delivery, jamais réutilisé pour une nouvelle intention. Le Workflow recharge Notification, destinataire et Channel depuis cette ligne org-scopée.                                                      |
+| Params        | Exactement cette référence : pas de contenu, adresse, token, User IDs redondants, grants, compteur, délai, stage ou clé d’autorité fournie par le client. Les génériques TypeScript ne remplacent pas la validation Zod. |
+| Entrée        | Le Workflow revalide les params et vérifie son ID avant tout effet ou lookup non bornée. Une référence invalide ou un ID incohérent termine par `NonRetryableError`, sans envoi ni lookup globale de récupération.       |
 
 L’identité est déterministe :
 
@@ -98,13 +98,13 @@ Le mapping `workflowId ↔ (orgId, kind, id)` est persisté immuablement avec l�
 
 Les deux tables de Delivery portent les mêmes métadonnées d’admission. Les timestamps sont des entiers millisecondes UTC, issus du serveur.
 
-| Champ | Sens |
-|---|---|
-| `workflowId: string` | ID stable calculé avant le batch de création, jamais remplacé. |
-| `admissionStatus: 'pending' \| 'admitted' \| 'unknown' \| 'expired'` | Admission distincte de `Delivery.status`. `pending` n’est pas une preuve d’absence d’owner. |
-| `admissionDeadlineAt: number` | Fixé atomiquement à `createdAt + 86_400_000`; jamais repoussé lors d’un nouvel essai. |
-| `admittedAt: number \| null` | Date de première preuve positive observée; pas une estimation de l’heure d’envoi provider. |
-| `lastAdmissionCheckAt: number \| null` | Observation pour diagnostic et pagination équitable, pas checkpoint de progression de la Delivery. |
+| Champ                                                                | Sens                                                                                               |
+| -------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `workflowId: string`                                                 | ID stable calculé avant le batch de création, jamais remplacé.                                     |
+| `admissionStatus: 'pending' \| 'admitted' \| 'unknown' \| 'expired'` | Admission distincte de `Delivery.status`. `pending` n’est pas une preuve d’absence d’owner.        |
+| `admissionDeadlineAt: number`                                        | Fixé atomiquement à `createdAt + 86_400_000`; jamais repoussé lors d’un nouvel essai.              |
+| `admittedAt: number \| null`                                         | Date de première preuve positive observée; pas une estimation de l’heure d’envoi provider.         |
+| `lastAdmissionCheckAt: number \| null`                               | Observation pour diagnostic et pagination équitable, pas checkpoint de progression de la Delivery. |
 
 Colonnes SQL correspondantes : `workflow_id`, `admission_status`, `admission_deadline_at`, `admitted_at`, `last_admission_check_at`. `Delivery.status` reste `pending | sent | failed | skipped`. `attemptCount`, `lastAttemptAt`, `errorCode` et `finishedAt` suivent le contrat notifications. Aucun `enqueuedAt`, stage, lease de reprise ou compteur d’essais d’admission ne devient une deuxième autorité de retry.
 
@@ -125,14 +125,14 @@ D1 batch : Notification éventuelle + Delivery + identité + deadline
   → preuve positive : admissionStatus=admitted
 ```
 
-| Observation | Action bornée |
-|---|---|
-| Delivery terminale, ou admission déjà prouvée | Pas de `create`. La fin native ou son reçu suffit; aucun reset du budget. |
+| Observation                                               | Action bornée                                                                                                                                                                                                                                                                              |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Delivery terminale, ou admission déjà prouvée             | Pas de `create`. La fin native ou son reçu suffit; aucun reset du budget.                                                                                                                                                                                                                  |
 | Référence admissible avant deadline, sans preuve positive | Tenter un `get(workflowId)`; une instance présente est une preuve positive, quel que soit son statut. Si sa présence n’est pas établie, `create` reste possible avec **le même ID**, sous les préconditions de rétention. Un `get` qui échoue n’est pas décrit comme une preuve d’absence. |
-| `create` résout | Persister `admitted`, `admittedAt` si absent et la date d’observation. L’écriture peut être répétée conditionnellement sans refaire le Workflow. |
-| `create` échoue, notamment parce que l’ID existe | Consulter cette même instance. Seul un `get`/statut positif confirme l’admission; un texte d’exception « exists » deviné n’est pas une preuve suffisante. Ne jamais appeler `restart`. |
-| Réseau, timeout ou persistance ambigus | Conserver ou écrire `unknown`; si ce marquage échoue, la ligne peut rester `pending`. Ni l’un ni l’autre ne signifie « jamais créé ». Réessayer l’observation/admission avec le même ID seulement tant que la fenêtre reste ouverte. |
-| Deadline atteinte sans preuve positive | CAS `admissionStatus=expired` depuis `pending`/`unknown`; **conserver `Delivery.status=pending`** et rendre l’incertitude visible. Aucun échec provider n’est fabriqué, même si la ligne était encore `pending`. |
+| `create` résout                                           | Persister `admitted`, `admittedAt` si absent et la date d’observation. L’écriture peut être répétée conditionnellement sans refaire le Workflow.                                                                                                                                           |
+| `create` échoue, notamment parce que l’ID existe          | Consulter cette même instance. Seul un `get`/statut positif confirme l’admission; un texte d’exception « exists » deviné n’est pas une preuve suffisante. Ne jamais appeler `restart`.                                                                                                     |
+| Réseau, timeout ou persistance ambigus                    | Conserver ou écrire `unknown`; si ce marquage échoue, la ligne peut rester `pending`. Ni l’un ni l’autre ne signifie « jamais créé ». Réessayer l’observation/admission avec le même ID seulement tant que la fenêtre reste ouverte.                                                       |
+| Deadline atteinte sans preuve positive                    | CAS `admissionStatus=expired` depuis `pending`/`unknown`; **conserver `Delivery.status=pending`** et rendre l’incertitude visible. Aucun échec provider n’est fabriqué, même si la ligne était encore `pending`.                                                                           |
 
 Un crash après `create` mais avant le marqueur est donc réconcilié par l’identité native retenue, pas par la supposition qu’une marque absente prouve un premier envoi. Deux demandeurs concurrents utilisent le même ID; un seul crée l’instance. Le premier step de cette instance peut aussi enregistrer sa propre admission prouvée. Une preuve positive tardive peut faire `expired → admitted`, sans création, restart ou nouvelle deadline.
 
@@ -142,12 +142,12 @@ Le Cron `*/5 * * * *` traite les intentions âgées d’au moins deux minutes, e
 
 Une passe traite au plus 100 références par Organization; ordre équitable sur dernière observation puis création/ID, sans boucle de drainage illimitée. L’Organization et `now` sont fournis par du code serveur. Le cadrage cross-Organization du job de maintenance reste explicite : chaque appel aux repos est org-scopé, jamais porté par une autorité de navigateur.
 
-| État natif constaté pendant cette réconciliation | Conséquence |
-|---|---|
-| `queued`, `running`, `waiting`, `paused`, `waitingForPause` | L’owner existe : marquer son admission si nécessaire; ne pas l’éveiller ni le recréer. Une pause n’autorise pas un second owner. |
-| `complete` | Le résultat terminal validé peut être projeté conditionnellement dans D1 s’il manque. La projection n’exécute aucun Channel et n’écrase pas un reçu terminal existant. Un output absent/invalide reste un incident visible, pas un succès inventé. |
-| `errored` ou `terminated` | Preuve d’une fin native, pas d’un refus provider : une projection `failed` porte `delivery_workflow_errored` ou `delivery_workflow_terminated`. L’effet externe peut avoir eu lieu; aucun redrive automatique. |
-| `unknown`, appel en erreur ou instance introuvable | Conserver l’incertitude. Aucun état terminal provider déduit de cette absence d’observation. |
+| État natif constaté pendant cette réconciliation            | Conséquence                                                                                                                                                                                                                                        |
+| ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `queued`, `running`, `waiting`, `paused`, `waitingForPause` | L’owner existe : marquer son admission si nécessaire; ne pas l’éveiller ni le recréer. Une pause n’autorise pas un second owner.                                                                                                                   |
+| `complete`                                                  | Le résultat terminal validé peut être projeté conditionnellement dans D1 s’il manque. La projection n’exécute aucun Channel et n’écrase pas un reçu terminal existant. Un output absent/invalide reste un incident visible, pas un succès inventé. |
+| `errored` ou `terminated`                                   | Preuve d’une fin native, pas d’un refus provider : une projection `failed` porte `delivery_workflow_errored` ou `delivery_workflow_terminated`. L’effet externe peut avoir eu lieu; aucun redrive automatique.                                     |
+| `unknown`, appel en erreur ou instance introuvable          | Conserver l’incertitude. Aucun état terminal provider déduit de cette absence d’observation.                                                                                                                                                       |
 
 **Au-delà de 24 h, aucune création ni relance automatique**, même si `get` échoue et même si l’ID est stable. Les recherches de preuve de cette réconciliation automatique sont bornées à cette fenêtre; les lignes non prouvées passent à `expired`, sans sondage perpétuel. Un Workflow déjà admis continue normalement ses steps et peut écrire ses reçus après la deadline : l’horizon ferme l’admission, pas son exécution.
 
@@ -157,11 +157,11 @@ Après la rétention native, une instance introuvable peut être une instance an
 
 L’App exporte `NotificationDeliveryWorkflow extends WorkflowEntrypoint<Env, DeliveryRef>`. Les steps ont des noms fixes et tous les effets sont dans `step.do`; aucune écriture requise pour la correction n’est détachée dans `waitUntil()`.
 
-| Step | Travail complet et résultat | Retry natif |
-|---|---|---|
-| `delivery:admit` | Charger la bonne table par `orgId + id`, vérifier `kind/workflowId`, enregistrer l’admission positive de cette instance. Une ligne manquante n’est jamais recréée. | Trois retries, délai initial 10 s exponentiel, timeout par tentative 1 min. |
-| `delivery:send` | À **chaque tentative**, relire le reçu terminal et les faits d’autorité, préparer/rendre et appeler un Channel au plus une fois. Renvoyer un petit résultat terminal sérialisable, ou lever une erreur retryable normalisée après une tentative incapable de continuer. | **Cinq retries maximum** : six tentatives au plus; délai dynamique §D6; timeout par tentative 1 min. |
-| `delivery:finish` | Depuis le résultat que Workflows a persisté, CAS de la ligne non terminale vers `sent`, `failed` ou `skipped`; poser code/date de fin et produire le log requis. Un reçu terminal existant n’est jamais écrasé. | Trois retries, délai initial 10 s exponentiel, timeout par tentative 1 min. |
+| Step              | Travail complet et résultat                                                                                                                                                                                                                                             | Retry natif                                                                                          |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `delivery:admit`  | Charger la bonne table par `orgId + id`, vérifier `kind/workflowId`, enregistrer l’admission positive de cette instance. Une ligne manquante n’est jamais recréée.                                                                                                      | Trois retries, délai initial 10 s exponentiel, timeout par tentative 1 min.                          |
+| `delivery:send`   | À **chaque tentative**, relire le reçu terminal et les faits d’autorité, préparer/rendre et appeler un Channel au plus une fois. Renvoyer un petit résultat terminal sérialisable, ou lever une erreur retryable normalisée après une tentative incapable de continuer. | **Cinq retries maximum** : six tentatives au plus; délai dynamique §D6; timeout par tentative 1 min. |
+| `delivery:finish` | Depuis le résultat que Workflows a persisté, CAS de la ligne non terminale vers `sent`, `failed` ou `skipped`; poser code/date de fin et produire le log requis. Un reçu terminal existant n’est jamais écrasé.                                                         | Trois retries, délai initial 10 s exponentiel, timeout par tentative 1 min.                          |
 
 Le résultat de `delivery:send` est `{status:'sent'|'failed'|'skipped', code:string|null}`. Une Delivery déjà terminale renvoie son état réel sans Channel. Le code appartient au protocole interne non secret; aucune adresse, contenu rendu ou réponse provider brute n’est persistée dans un output de step ou dans l’erreur de retry. Le résultat final de l’instance reflète le reçu terminal effectivement constaté par `delivery:finish`.
 
@@ -186,12 +186,12 @@ type ChannelResult =
   | { status: 'permanent'; code: string }
 ```
 
-| Résultat / exception | Décision du step `delivery:send` |
-|---|---|
-| `sent` | Retourner le résultat `sent`; l’owner le checkpointe avant la persistance terminale D1. Cela signifie accepté par le transport, pas reçu/lu par le destinataire. |
-| `permanent` | Retourner `failed` avec le code connu. Aucun retry de l’effet ni throw destiné à forcer un budget natif. |
-| `retryable`, hint absent ou ≤86 400 s | Lever l’erreur privée retryable normalisée; le runtime réessaie ce même step. |
-| `retryable`, hint >86 400 s | Retourner `failed`, code **`retry_after_exceeds_budget`**. Le budget local ne permet pas d’honorer ce minimum : ce n’est **pas** une reclassification de permanence provider. Ne pas clamper le hint puis envoyer trop tôt. |
+| Résultat / exception                                          | Décision du step `delivery:send`                                                                                                                                                                                                   |
+| ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sent`                                                        | Retourner le résultat `sent`; l’owner le checkpointe avant la persistance terminale D1. Cela signifie accepté par le transport, pas reçu/lu par le destinataire.                                                                   |
+| `permanent`                                                   | Retourner `failed` avec le code connu. Aucun retry de l’effet ni throw destiné à forcer un budget natif.                                                                                                                           |
+| `retryable`, hint absent ou ≤86 400 s                         | Lever l’erreur privée retryable normalisée; le runtime réessaie ce même step.                                                                                                                                                      |
+| `retryable`, hint >86 400 s                                   | Retourner `failed`, code **`retry_after_exceeds_budget`**. Le budget local ne permet pas d’honorer ce minimum : ce n’est **pas** une reclassification de permanence provider. Ne pas clamper le hint puis envoyer trop tôt.        |
 | Erreur inconnue de DB, rendu, transport ou runtime capturable | La tentative n’a pas pu continuer; erreur retryable normalisée avec code `delivery_attempt_interrupted`, sans hint inventé. Ne pas deviner la permanence depuis `Error.name`, un message de provider ou une erreur HTTP générique. |
 
 L’adaptateur Slack parse `Retry-After` en entier sûr non négatif; une valeur invalide est omise et zéro est normalisé à une seconde. L’adaptateur ne tronque pas une valeur valide à 24 h, n’effectue ni sleep ni retry et conserve le résultat `retryable`; le Workflow applique le budget local.
@@ -216,13 +216,13 @@ Le timeout est également une interruption, pas la preuve qu’un provider n’a
 
 ### D7 — Garanties, transitions et limites
 
-| Situation | État / garantie honnête |
-|---|---|
-| Commit D1, puis interruption avant toute preuve d’admission | Notification et intention existent atomiquement. Admission récupérable avec le même ID pendant 24 h; après, `expired` et incertitude visible, pas de promesse at-least-once globale sans condition d’admission. |
-| Doublon de demande d’admission dans la fenêtre sûre | Un seul Workflow retenu pour la référence; pas de budget neuf. L’ID ne déduplique pas l’effet provider. |
-| Provider accepte, puis résultat `delivery:send` perdu avant checkpoint natif | Le runtime peut refaire l’appel : doublon externe possible. Ni l’ID stable, ni D1, ni Workflows ne promet exactly-once sans idempotence provider. |
-| Résultat `delivery:send` checkpointé, puis panne d’écriture D1 | Retry de `delivery:finish` sans nouvel appel provider. La séparation des steps réduit une fenêtre; elle ne supprime pas la précédente. |
-| Reçu terminal présent | La tentative native renvoie ce reçu sans nouvel envoi; `finish` est conditionnel et n’écrase pas cet état. |
+| Situation                                                                    | État / garantie honnête                                                                                                                                                                                         |
+| ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Commit D1, puis interruption avant toute preuve d’admission                  | Notification et intention existent atomiquement. Admission récupérable avec le même ID pendant 24 h; après, `expired` et incertitude visible, pas de promesse at-least-once globale sans condition d’admission. |
+| Doublon de demande d’admission dans la fenêtre sûre                          | Un seul Workflow retenu pour la référence; pas de budget neuf. L’ID ne déduplique pas l’effet provider.                                                                                                         |
+| Provider accepte, puis résultat `delivery:send` perdu avant checkpoint natif | Le runtime peut refaire l’appel : doublon externe possible. Ni l’ID stable, ni D1, ni Workflows ne promet exactly-once sans idempotence provider.                                                               |
+| Résultat `delivery:send` checkpointé, puis panne d’écriture D1               | Retry de `delivery:finish` sans nouvel appel provider. La séparation des steps réduit une fenêtre; elle ne supprime pas la précédente.                                                                          |
+| Reçu terminal présent                                                        | La tentative native renvoie ce reçu sans nouvel envoi; `finish` est conditionnel et n’écrase pas cet état.                                                                                                      |
 
 Un changement de permission entre le dernier guard et l’appel externe peut aussi courir avec cet appel : aucun verrou distribué n’est promis. Les logs structurés portent Organization, type, Channel et code non secret, sans adresse email, body, contenu sensible ou token. Aucune alerte active via le moteur en panne n’est ajoutée.
 
@@ -232,13 +232,13 @@ La purge reste celle du contrat notifications : Notification à 90 jours depuis 
 
 ### D8 — Preuve de conformité à ADR-0018 D2
 
-| Critère | Application |
-|---|---|
-| Un seul owner persiste et reprend l’exécution | Les steps, résultats, retries et réveils sont ceux de la seule instance Workflows. D1 porte intentions, guards, reçus et projections; pas un programme de reprise. |
-| Admission et guards autorisés | Cron appelle uniquement l’interface d’admission à ID stable sous horizon/rétention, ou observe l’owner. Un marqueur D1 absent n’est pas assimilé à un owner absent. |
-| Pas de continuation Queue | Aucune Queue ne conduit un morceau de la Delivery; aucun stage sélectionné par `attempts`. Le contexte natif sert uniquement au délai de la tentative interrompue. |
-| Pas de replacement/restart | Aucun nouvel ID, renouvellement de deadline, suppression/recréation tardive, DLQ cycle ou `Workflow.restart()` automatique. Une absence après rétention ne rouvre jamais l’admission. |
-| Steps distincts après succès | Le succès du send conduit au step de finalisation **dans le même owner**, qui a checkpointé le résultat. La projection d’un terminal natif ne rejoue aucun effet. |
+| Critère                                       | Application                                                                                                                                                                           |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Un seul owner persiste et reprend l’exécution | Les steps, résultats, retries et réveils sont ceux de la seule instance Workflows. D1 porte intentions, guards, reçus et projections; pas un programme de reprise.                    |
+| Admission et guards autorisés                 | Cron appelle uniquement l’interface d’admission à ID stable sous horizon/rétention, ou observe l’owner. Un marqueur D1 absent n’est pas assimilé à un owner absent.                   |
+| Pas de continuation Queue                     | Aucune Queue ne conduit un morceau de la Delivery; aucun stage sélectionné par `attempts`. Le contexte natif sert uniquement au délai de la tentative interrompue.                    |
+| Pas de replacement/restart                    | Aucun nouvel ID, renouvellement de deadline, suppression/recréation tardive, DLQ cycle ou `Workflow.restart()` automatique. Une absence après rétention ne rouvre jamais l’admission. |
+| Steps distincts après succès                  | Le succès du send conduit au step de finalisation **dans le même owner**, qui a checkpointé le résultat. La projection d’un terminal natif ne rejoue aucun effet.                     |
 
 La preuve reste soumise à la revue d’un agent indépendant exigée par `AGENTS.md`. Cette ADR n’affirme pas qu’un gate mécanique vérifie D2, l’isolement Organization, l’unicité physique d’un effet ou la politique d’un Product.
 
@@ -303,13 +303,13 @@ Les entrées sont validées avant SQL : référence et `workflowId` selon D3, ti
 
 Chaque mutation choisit la table par `ref.kind` et borne **dans le prédicat SQL** `org_id=ref.orgId`, `id=ref.id`, `workflow_id=input.workflowId`. La condition de transition est appliquée atomiquement au dernier état, pas depuis un read antérieur devenu périmé. Écriture et lecture du reçu de retour forment une même opération transactionnelle D1; une projection retournée peut ensuite évoluer par concurrence, mais aucun résultat ne prétend avoir écrasé un état plus récent.
 
-| Observation | Transition atomique permise |
-|---|---|
+| Observation                     | Transition atomique permise                                                                                                                                                                                                                                                                                    |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `admitted` avec preuve positive | `pending`, `unknown` ou `expired` → `admitted`, même si `observedAt >= admissionDeadlineAt`. Si déjà admitted, conserver cet état. Poser `admittedAt=observedAt` seulement s’il était nul; une date déjà persistée reste inchangée. Ne déplacer ni l’identité ni la deadline. Une preuve tardive ne crée rien. |
-| `unknown`, avant deadline | `pending`/`unknown` → `unknown`. Si une preuve admitted a gagné entre-temps, **conserver admitted et admittedAt**. Si l’état est expired, conserver expired. |
-| `unknown`, à/après deadline | `pending`/`unknown` → `expired`, sans changer `Delivery.status`; un résultat réseau tardif ne rouvre jamais la fenêtre. admitted et expired ne sont pas dégradés. |
-| `expired`, à/après deadline | `pending`/`unknown` → `expired` seulement. Une preuve admitted concurrente gagne définitivement; un état expired déjà présent est conservé. Avant deadline, cette demande ne change aucun champ et retourne unchanged. |
-| Toute observation applicable | `lastAdmissionCheckAt=max(valeur persistée, observedAt)`, avec null comme absence de date. Une réponse ancienne ne fait jamais reculer cette observation. Aucun champ de tentative, contenu, identité, deadline ou résultat terminal n’est remplacé. |
+| `unknown`, avant deadline       | `pending`/`unknown` → `unknown`. Si une preuve admitted a gagné entre-temps, **conserver admitted et admittedAt**. Si l’état est expired, conserver expired.                                                                                                                                                   |
+| `unknown`, à/après deadline     | `pending`/`unknown` → `expired`, sans changer `Delivery.status`; un résultat réseau tardif ne rouvre jamais la fenêtre. admitted et expired ne sont pas dégradés.                                                                                                                                              |
+| `expired`, à/après deadline     | `pending`/`unknown` → `expired` seulement. Une preuve admitted concurrente gagne définitivement; un état expired déjà présent est conservé. Avant deadline, cette demande ne change aucun champ et retourne unchanged.                                                                                         |
+| Toute observation applicable    | `lastAdmissionCheckAt=max(valeur persistée, observedAt)`, avec null comme absence de date. Une réponse ancienne ne fait jamais reculer cette observation. Aucun champ de tentative, contenu, identité, deadline ou résultat terminal n’est remplacé.                                                           |
 
 Une ligne absente **dans l’Organization demandée** retourne `not_found`, sans lookup globale ni recréation. Si cette ligne existe mais porte un autre `workflowId`, retourner `identity_mismatch` sans mutation ni reçu de l’autre identité. `updated` signifie qu’au moins un champ d’admission/observation a effectivement changé; sinon retourner `unchanged` avec le reçu courant. Aucun de ces retours n’autorise un nouveau Workflow après deadline.
 
@@ -321,10 +321,10 @@ La liste fait un `UNION ALL` des deux tables de Delivery, **chacune déjà filtr
 
 Le temps de sélection `asOf` est `query.now`, fixé pour la page et ses continuations. Les seuls candidats sont :
 
-| Action | Prédicats supplémentaires |
-|---|---|
-| `observe` | `created_at <= asOf - 120_000`, `admission_deadline_at > asOf`, admission `pending|unknown|admitted`. admitted signifie observation de l’owner seulement, jamais nouveau create. |
-| `expire` | `admission_deadline_at <= asOf`, admission `pending|unknown`. Une admission déjà expired n’est plus sondée; admitted n’expire pas. |
+| Action    | Prédicats supplémentaires                                                          |
+| --------- | ---------------------------------------------------------------------------------- |
+| `observe` | `created_at <= asOf - 120_000`, `admission_deadline_at > asOf`, admission `pending | unknown                                                                        | admitted`. admitted signifie observation de l’owner seulement, jamais nouveau create. |
+| `expire`  | `admission_deadline_at <= asOf`, admission `pending                                | unknown`. Une admission déjà expired n’est plus sondée; admitted n’expire pas. |
 
 Appliquer également `last_admission_check_at IS NULL OR last_admission_check_at < asOf`. Trier en ordre ascendant par `(coalesce(last_admission_check_at,-1), created_at, id COLLATE BINARY)`. Les IDs ASCII préfixés `u_`/`o_` définis par ADR-0019 rendent cet ordre total entre les deux tables. Une continuation utilise le **strict après** lexicographique du même tuple; `kind` doit être cohérent avec le préfixe de l’ID. Aucun offset, ordre implicite ou page par table concaténée après limitation.
 
@@ -364,11 +364,11 @@ function reconcileDeliveryAdmissions(input: {
 }): Promise<void>
 ```
 
-| Interface | Obligations cachées derrière ce seam |
-|---|---|
-| `deliveryWorkflowId` | Validation de la référence et encodage exact de D3; aucune génération aléatoire ni appel réseau. |
-| `ensureDeliveryAdmission` | Recharge la ligne org-scopée, terminal-first, contrôle deadline et rétention, utilise exclusivement l’ID persisté et les opérations natives `get/create/status`. Persiste les observations; une erreur réseau reste unknown, pas succès d’effet. Une panne qui empêche même la persistance de l’observation peut lever sans réarmer l’identité. |
-| `reconcileDeliveryAdmissions` | Entrées serveur, `limit` entier 1..100, une page équitable dans l’Organization, protocole D4. Ne boucle pas sur le stockage jusqu’à épuisement, n’appelle aucun Channel et ne reset aucun owner. |
+| Interface                     | Obligations cachées derrière ce seam                                                                                                                                                                                                                                                                                                            |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `deliveryWorkflowId`          | Validation de la référence et encodage exact de D3; aucune génération aléatoire ni appel réseau.                                                                                                                                                                                                                                                |
+| `ensureDeliveryAdmission`     | Recharge la ligne org-scopée, terminal-first, contrôle deadline et rétention, utilise exclusivement l’ID persisté et les opérations natives `get/create/status`. Persiste les observations; une erreur réseau reste unknown, pas succès d’effet. Une panne qui empêche même la persistance de l’observation peut lever sans réarmer l’identité. |
+| `reconcileDeliveryAdmissions` | Entrées serveur, `limit` entier 1..100, une page équitable dans l’Organization, protocole D4. Ne boucle pas sur le stockage jusqu’à épuisement, n’appelle aucun Channel et ne reset aucun owner.                                                                                                                                                |
 
 La closure App fournit stockage, horloge serveur, binding et ports; le cœur notifications ne crée pas ses dépendances. L’entrypoint et le binding `NOTIFICATION_DELIVERY: Workflow<DeliveryRef>` appartiennent à l’App. Noms : `example-api-notification-delivery` pour le local simulé, `boilerplate-api-notification-delivery` pour le showcase; classe `NotificationDeliveryWorkflow`, exportée par le Worker. `FLOW_RUN` reste inchangé.
 
@@ -376,21 +376,21 @@ Les blocs Workflows non héritables sont répétés dans les deux configurations
 
 ## Alternatives écartées et conséquences
 
-| Alternative | Motif |
-|---|---|
-| Queue + Cron qui republie les `enqueued_at=NULL` | Absence de marque non probante; remplacement possible d’un owner et nouvelle allocation de retries. |
-| Workflow wrapper qui publie un job Queue | Ne résout pas l’ownership complet demandé; réintroduit le split et la finalisation d’effet entre deux chemins. |
-| Admission one-shot puis unknown sans récupération native | Containment qui réduit la garantie; Q6 retient plutôt l’identité native stable avec fenêtre de récupération, tout en conservant l’unknown hors fenêtre. |
-| Garder `@kit/jobs` pour le seul demo | Extraction sans deuxième usage actuel; dette et contrat générique maintenus pour un découpage abandonné. |
-| Boucle D1 de retries, IDs renouvelés ou restart automatique | Hand-built durability/replacement au sens D2, même derrière un Package ou une supervision générale. |
+| Alternative                                                 | Motif                                                                                                                                                   |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Queue + Cron qui republie les `enqueued_at=NULL`            | Absence de marque non probante; remplacement possible d’un owner et nouvelle allocation de retries.                                                     |
+| Workflow wrapper qui publie un job Queue                    | Ne résout pas l’ownership complet demandé; réintroduit le split et la finalisation d’effet entre deux chemins.                                          |
+| Admission one-shot puis unknown sans récupération native    | Containment qui réduit la garantie; Q6 retient plutôt l’identité native stable avec fenêtre de récupération, tout en conservant l’unknown hors fenêtre. |
+| Garder `@kit/jobs` pour le seul demo                        | Extraction sans deuxième usage actuel; dette et contrat générique maintenus pour un découpage abandonné.                                                |
+| Boucle D1 de retries, IDs renouvelés ou restart automatique | Hand-built durability/replacement au sens D2, même derrière un Package ou une supervision générale.                                                     |
 
-| Conséquence | Portée |
-|---|---|
-| Positive | Un owner fourni possède l’effet et ses steps; admission réconciliable sans doubler l’instance pendant la fenêtre sûre; finalisation séparée du send checkpointé. |
-| Coût | Nouvelle définition Workflows, consommation native par Delivery/step/retry, metadata d’admission et preuve de rétention; revue indépendante du changement de déploiement. Ce n’est pas une Queue gratuite sous un autre nom. |
-| Limite | Une panne d’admission peut durer au-delà de 24 h; une panne D1 peut survivre au budget de finalisation; un provider peut accepter avant perte du checkpoint. Ces cas ne sont pas masqués par une garantie exactement-once ou une fausse permanence provider. |
-| Dépendances | Aucune bibliothèque nouvelle : Zod et Web Crypto existants, types runtime CF déjà générés par App. Pas de SDK Workflows supplémentaire, de lib de backoff ou de Package jobs. |
-| Livraison | E0 fixe ce contrat; J1 aligne le demo sans Package; E5 livre Workflow, admission/réconciliation et purge. Les tickets, index, glossaire et autres ADR sont alignés séparément; aucun code applicatif n’est livré par cette ADR. |
+| Conséquence | Portée                                                                                                                                                                                                                                                       |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Positive    | Un owner fourni possède l’effet et ses steps; admission réconciliable sans doubler l’instance pendant la fenêtre sûre; finalisation séparée du send checkpointé.                                                                                             |
+| Coût        | Nouvelle définition Workflows, consommation native par Delivery/step/retry, metadata d’admission et preuve de rétention; revue indépendante du changement de déploiement. Ce n’est pas une Queue gratuite sous un autre nom.                                 |
+| Limite      | Une panne d’admission peut durer au-delà de 24 h; une panne D1 peut survivre au budget de finalisation; un provider peut accepter avant perte du checkpoint. Ces cas ne sont pas masqués par une garantie exactement-once ou une fausse permanence provider. |
+| Dépendances | Aucune bibliothèque nouvelle : Zod et Web Crypto existants, types runtime CF déjà générés par App. Pas de SDK Workflows supplémentaire, de lib de backoff ou de Package jobs.                                                                                |
+| Livraison   | E0 fixe ce contrat; J1 aligne le demo sans Package; E5 livre Workflow, admission/réconciliation et purge. Les tickets, index, glossaire et autres ADR sont alignés séparément; aucun code applicatif n’est livré par cette ADR.                              |
 
 ## Preuves attendues à l’implémentation
 
@@ -402,12 +402,12 @@ Les blocs Workflows non héritables sont répétés dans les deux configurations
 
 ## Sources relues et limites de preuve
 
-| Source | Observation utilisée |
-|---|---|
-| [ADR-0001](./0001-primary-axis-packages-compose-apps.md), [ADR-0018](./0018-durable-execution-ownership.md), [GLOSSARY](../../../../GLOSSARY.md) | Composition Packages/App, Organization, durable owner, admission/guards/reçus, absence de reprise App ou de double owner. |
-| [`workflow.ts`](../../../../apps/example-api/src/flows-run/workflow.ts), [`wrangler.toml`](../../../../apps/example-api/wrangler.toml) | Précédent natif `WorkflowEntrypoint`/`step.do`, binding App, local et production distincts, demo Queue actuel. Les types générés actuels exposent déjà `WorkflowDelayFunction` et `WorkflowStepContext.attempt`. |
-| [Workflows Workers API](https://developers.cloudflare.com/workflows/build/workers-api/) | `create` avec ID choisi; erreur si ID encore existant sous rétention; `get/status`, rétention effective/overrides; configuration de retry dynamique. |
-| [Sleeping and retrying](https://developers.cloudflare.com/workflows/build/sleeping-and-retrying/), [Step context](https://developers.cloudflare.com/workflows/build/step-context/) | `retries.limit` compte les retries, délai fonction de `{ctx,error}`, nombres en millisecondes, `ctx.attempt` indexé à 1, catch d’un step épuisé pour finalisation. |
+| Source                                                                                                                                                                                   | Observation utilisée                                                                                                                                                                                                          |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [ADR-0001](./0001-primary-axis-packages-compose-apps.md), [ADR-0018](./0018-durable-execution-ownership.md), [GLOSSARY](../../../../GLOSSARY.md)                                         | Composition Packages/App, Organization, durable owner, admission/guards/reçus, absence de reprise App ou de double owner.                                                                                                     |
+| [`workflow.ts`](../../../../apps/example-api/src/flows-run/workflow.ts), [`wrangler.toml`](../../../../apps/example-api/wrangler.toml)                                                   | Précédent natif `WorkflowEntrypoint`/`step.do`, binding App, local et production distincts, demo Queue actuel. Les types générés actuels exposent déjà `WorkflowDelayFunction` et `WorkflowStepContext.attempt`.              |
+| [Workflows Workers API](https://developers.cloudflare.com/workflows/build/workers-api/)                                                                                                  | `create` avec ID choisi; erreur si ID encore existant sous rétention; `get/status`, rétention effective/overrides; configuration de retry dynamique.                                                                          |
+| [Sleeping and retrying](https://developers.cloudflare.com/workflows/build/sleeping-and-retrying/), [Step context](https://developers.cloudflare.com/workflows/build/step-context/)       | `retries.limit` compte les retries, délai fonction de `{ctx,error}`, nombres en millisecondes, `ctx.attempt` indexé à 1, catch d’un step épuisé pour finalisation.                                                            |
 | [Workflows limits](https://developers.cloudflare.com/workflows/reference/limits/), [Delivery guarantees Queues](https://developers.cloudflare.com/queues/reference/delivery-guarantees/) | ID Workflow ≤100; rétention terminale Free trois jours, Paid sept jours pour les nouvelles définitions et trente jours pour les anciennes; limites CPU; différence entre déduplication d’instance et exactly-once de l’effet. |
 
 À E0, le 2026-10-22, les sources CF officielles ont été lues directement; Context7 avait retourné `Monthly quota exceeded`, sans preuve runtime revendiquée. Pour E5, l’amendement accepté le 2026-11-06 a été exercé avec le helper privé réel dans le runtime natif : hint conservé, délai planifié et réveil sans accélération. Les preuves App/D1/Workflow et leurs limites sont décrites dans [testing](../../testing.md#notifications-email-delivery-owner); elles ne prouvent ni déploiement, ni rétention effective du compte, ni réception provider.

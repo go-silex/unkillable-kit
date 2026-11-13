@@ -25,26 +25,26 @@ Closes the structural gap behind [Roxabi/roxabi-boilerplate-cf#103](https://gith
 
 A product may inherit the kit directly or through an operator-maintained mirror. Its immediate parent is the source whose merged commit it records.
 
-Zero-edit must answer: *did this product patch kit paths since its last inherit?*  
-It must **not** answer: *is the local `upstream/main` tracking ref fetched?*
+Zero-edit must answer: _did this product patch kit paths since its last inherit?_  
+It must **not** answer: _is the local `upstream/main` tracking ref fetched?_
 
 ### Problem with the prior polarity
 
-| Prior rule | Failure |
-|------------|---------|
-| Blanket-protect `config/`, `scripts/kit/`, … | Product machine state shoved into `docs/product/` carve-outs |
-| Default base = `upstream/main` | Stale tracking ref → false FORBIDDEN dual-edit (Roxabi/roxabi-boilerplate-cf#103) |
-| CI base = `docs/product/kit-baseline` via `ZERO_EDIT_BASE_REF` | Local ≠ CI; operators skip lefthook |
+| Prior rule                                                     | Failure                                                                           |
+| -------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| Blanket-protect `config/`, `scripts/kit/`, …                   | Product machine state shoved into `docs/product/` carve-outs                      |
+| Default base = `upstream/main`                                 | Stale tracking ref → false FORBIDDEN dual-edit (Roxabi/roxabi-boilerplate-cf#103) |
+| CI base = `docs/product/kit-baseline` via `ZERO_EDIT_BASE_REF` | Local ≠ CI; operators skip lefthook                                               |
 
 Allowlist islands (`docs/product/`, `scripts/product/`) worked but forced exceptions under kit-owned trees and duplicated “what is the base?” across file + env + remote.
 
 ### Alternatives considered
 
-| Option | Verdict |
-|--------|---------|
-| **A** Kit-as-root + product islands only (`config/product/` carve-out) | Viable; rejected for long-term clarity |
-| **B** `config/kit` · `scripts/kit` · `docs/kit` | **Accepted** — path encodes ownership |
-| Thin Roxabi/roxabi-boilerplate-cf#103 fix (fallback to kit-baseline only) | Rejected as throwaway during B |
+| Option                                                                    | Verdict                                |
+| ------------------------------------------------------------------------- | -------------------------------------- |
+| **A** Kit-as-root + product islands only (`config/product/` carve-out)    | Viable; rejected for long-term clarity |
+| **B** `config/kit` · `scripts/kit` · `docs/kit`                           | **Accepted** — path encodes ownership  |
+| Thin Roxabi/roxabi-boilerplate-cf#103 fix (fallback to kit-baseline only) | Rejected as throwaway during B         |
 
 ## Decision
 
@@ -66,13 +66,13 @@ Scope note: “`*/kit`” in this ADR means those three roots only — not a mon
 
 Other ownership surfaces:
 
-| Surface | Rule |
-|---------|------|
-| `packages/` | kit |
-| `apps/example-api/` · `example-web/` · `mcp-example/` | kit |
-| `apps/<product>-*` | product |
-| `tooling/` | kit (taxonomy merge = later ADR) |
-| `tools/` | folded by [ADR-0011](./0011-tools-fold-scripts-config-polarity.md) — do not add files; executable → `scripts/kit/`, data → `config/kit/` |
+| Surface                                               | Rule                                                                                                                                     |
+| ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/`                                           | kit                                                                                                                                      |
+| `apps/example-api/` · `example-web/` · `mcp-example/` | kit                                                                                                                                      |
+| `apps/<product>-*`                                    | product                                                                                                                                  |
+| `tooling/`                                            | kit (taxonomy merge = later ADR)                                                                                                         |
+| `tools/`                                              | folded by [ADR-0011](./0011-tools-fold-scripts-config-polarity.md) — do not add files; executable → `scripts/kit/`, data → `config/kit/` |
 
 **Amendment (2026-10-01, [Roxabi/roxabi-boilerplate-cf#318](https://github.com/Roxabi/roxabi-boilerplate-cf/issues/318)) — the kit-app list is `protected_prefixes`.** The `apps/` rows above are rationale, not a list. Kit apps are exactly the `apps/<name>/` entries of `config/kit/zero-edit-zones.json` `protected_prefixes`, and zero-edit refuses any other `apps/` entry shape there. `check-zero-edit-zones`, `check-migrations-contract`, `extract-dry-run`, `check-banned-strings` and `kit-schema-sync` read that list (the shell gates through `scripts/kit/lib/kit-apps.sh`). To them, an `apps/` directory the list does not name is a product app, `apps/example-acme-api` included, and adding or retiring a kit app is one edit of the list. Not yet migrated: the product exemption registers (`check_file_length.sh`, `check_folder_size.sh`, `check-import-boundaries.ts`) still recognise a product-app path by name ([Roxabi/roxabi-boilerplate-cf#327](https://github.com/Roxabi/roxabi-boilerplate-cf/issues/327)).
 
@@ -107,32 +107,32 @@ Minimal schema:
 }
 ```
 
-| Consumer | `upstreamCommit` means |
-|----------|------------------------|
-| Product | Tip of its immediate kit or mirror parent actually merged |
-| Kit or allowlisted mirror | **No** marker (kit mode) |
+| Consumer                  | `upstreamCommit` means                                    |
+| ------------------------- | --------------------------------------------------------- |
+| Product                   | Tip of its immediate kit or mirror parent actually merged |
+| Kit or allowlisted mirror | **No** marker (kit mode)                                  |
 
 Checker:
 
 1. Reads the marker directly (local == CI).
 2. Requires full SHA, object present locally, ancestor of `HEAD`.
-3. Requires complete history (a shallow clone fails closed) and a base that does **not** descend from the commit that introduced the marker file (*Marker lineage*, below).
+3. Requires complete history (a shallow clone fails closed) and a base that does **not** descend from the commit that introduced the marker file (_Marker lineage_, below).
 4. Diffs protected paths against that commit (+ dirty tree).
 5. **Never** uses `upstream/main` as base.
 6. **Never** auto-`git fetch`.
 7. Missing history → fail with actionable message (deepen checkout), not remote fallback.
 
-**Threat model (honest):** zero-edit is a **process / CI gate** that guards against *accidental* modification of kit files in a product (including by AI agents), not a tamper-resistant boundary — a green run *attests* the consumer contract, it does not prove provenance. The marker is self-declared: a maintainer who sets `upstreamCommit` to a commit that already contains their kit-path edit empties the protected diff. Provenance attestation / parent-remote fetch stays **out of scope** (conflicts with no-auto-fetch). Mitigations: the lineage and expiry rules below, independent-agent review on marker bumps, GitHub write ACLs, dogfood.
+**Threat model (honest):** zero-edit is a **process / CI gate** that guards against _accidental_ modification of kit files in a product (including by AI agents), not a tamper-resistant boundary — a green run _attests_ the consumer contract, it does not prove provenance. The marker is self-declared: a maintainer who sets `upstreamCommit` to a commit that already contains their kit-path edit empties the protected diff. Provenance attestation / parent-remote fetch stays **out of scope** (conflicts with no-auto-fetch). Mitigations: the lineage and expiry rules below, independent-agent review on marker bumps, GitHub write ACLs, dogfood.
 
-**Marker lineage (amendment, 2026-10-03, audit RED-01).** The base must be an inherited kit/mirror tip, never a commit the product authored. Any base that hides a kit-path edit has to contain that edit, so it has to be a product commit, and every product commit descends from the commit that first added `config/product/inheritance.json`. The checker therefore refuses a base whose ancestry contains a commit that *added* the marker (`git log --full-history -m --no-renames --diff-filter=A -1 <base> -- config/product/inheritance.json`; `--full-history -m` so a merge cannot prune a side branch). This closes both realistic launders: pinning the marker to a product commit that edited a kit file, and the 2-commit delete-and-re-add (C1 drops the marker and edits a kit file, C2 re-adds the marker pinned to C1 — C1 descends from the marker's first introduction). Accepted unchanged: day-0 pin, re-inherit to a newer parent tip after a merge (the parent tip never added a product marker), and mirror children (the mirror carries `packages/feedback` and `docs/product/*` but never the marker). `stack-contract:check` applies the same rule to the base of its stack comparison. The ancestry is only readable in full history, so a shallow clone fails closed; the documented CI checkout is already `fetch-depth: 0`.
+**Marker lineage (amendment, 2026-10-03, audit RED-01).** The base must be an inherited kit/mirror tip, never a commit the product authored. Any base that hides a kit-path edit has to contain that edit, so it has to be a product commit, and every product commit descends from the commit that first added `config/product/inheritance.json`. The checker therefore refuses a base whose ancestry contains a commit that _added_ the marker (`git log --full-history -m --no-renames --diff-filter=A -1 <base> -- config/product/inheritance.json`; `--full-history -m` so a merge cannot prune a side branch). This closes both realistic launders: pinning the marker to a product commit that edited a kit file, and the 2-commit delete-and-re-add (C1 drops the marker and edits a kit file, C2 re-adds the marker pinned to C1 — C1 descends from the marker's first introduction). Accepted unchanged: day-0 pin, re-inherit to a newer parent tip after a merge (the parent tip never added a product marker), and mirror children (the mirror carries `packages/feedback` and `docs/product/*` but never the marker). `stack-contract:check` applies the same rule to the base of its stack comparison. The ancestry is only readable in full history, so a shallow clone fails closed; the documented CI checkout is already `fetch-depth: 0`.
 
 Candidates evaluated and not adopted:
 
-| Candidate | Why not |
-|---|---|
-| No deletion of the marker in history (`--diff-filter=D`) | Subsumed: a delete-and-re-add only hides an edit if the new base contains it, and that base descends from the first introduction. Adds a rule that could reject a legitimate history without closing anything more |
-| Base tree free of product-owned namespaces (`config/product/**`, apps outside the kit set) | A legitimate mirror can contain product-owned paths; tree content cannot separate a mirror from a product |
-| Base tree must not contain the marker file (previous `stack-contract` check) | Kept as a special case of the lineage rule, but alone it is bypassed by the delete-and-re-add |
+| Candidate                                                                                  | Why not                                                                                                                                                                                                            |
+| ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| No deletion of the marker in history (`--diff-filter=D`)                                   | Subsumed: a delete-and-re-add only hides an edit if the new base contains it, and that base descends from the first introduction. Adds a rule that could reject a legitimate history without closing anything more |
+| Base tree free of product-owned namespaces (`config/product/**`, apps outside the kit set) | A legitimate mirror can contain product-owned paths; tree content cannot separate a mirror from a product                                                                                                          |
+| Base tree must not contain the marker file (previous `stack-contract` check)               | Kept as a special case of the lineage rule, but alone it is bypassed by the delete-and-re-add                                                                                                                      |
 
 **Residual (accepted, not closed):** a base that predates the marker's introduction (the day-0 pin is self-declared and independently agent-reviewed, not proven), a product-authored branch forked before that introduction and merged in, history rewrite / force-push, and forged author dates. These need provenance attestation (non-goal) or GitHub ACLs.
 
@@ -142,12 +142,12 @@ The product checker requires `config/product/inheritance.json` and rejects `ZERO
 
 ### D5 — Mode detection (fail-closed)
 
-| Condition | Mode |
-|-----------|------|
-| Marker present + origin not kit-allowlisted | `product` |
-| No marker + origin allowlisted (kit **or** declared mirror) | `kit` |
-| Marker present on kit-allowlisted origin | **error** |
-| No marker + unknown / product-shaped origin | **error** (never silent kit) |
+| Condition                                                   | Mode                         |
+| ----------------------------------------------------------- | ---------------------------- |
+| Marker present + origin not kit-allowlisted                 | `product`                    |
+| No marker + origin allowlisted (kit **or** declared mirror) | `kit`                        |
+| Marker present on kit-allowlisted origin                    | **error**                    |
+| No marker + unknown / product-shaped origin                 | **error** (never silent kit) |
 
 **Allowlist SSoT:** machine list in `config/kit/zero-edit-zones.json` with at least the kit repo id. Additional mirrors are **operator-extended entries** in that file when first published, not inferred from topology. A direct product classifies once `inheritance.json` is present; a product inheriting a mirror needs that mirror's allowlist entry after inherit.
 
@@ -165,14 +165,14 @@ Same spirit for `.github/workflows/*`: unclassified workflow → fail (not silen
 
 ### D7 — Relocated SSoT paths (post-migration)
 
-| Role | Path |
-|------|------|
-| Zones + policy + kit-origin allowlist | `config/kit/zero-edit-zones.json` |
-| Exceptions template | `config/kit/zero-edit-exceptions.example.json` |
-| Exceptions (product) | `config/product/zero-edit-exceptions.json` |
-| Inheritance marker | `config/product/inheritance.json` |
-| Checker | `scripts/kit/check-zero-edit-zones.sh` |
-| Consumer contract | `docs/kit/product-consumer-contract.md` |
+| Role                                  | Path                                           |
+| ------------------------------------- | ---------------------------------------------- |
+| Zones + policy + kit-origin allowlist | `config/kit/zero-edit-zones.json`              |
+| Exceptions template                   | `config/kit/zero-edit-exceptions.example.json` |
+| Exceptions (product)                  | `config/product/zero-edit-exceptions.json`     |
+| Inheritance marker                    | `config/product/inheritance.json`              |
+| Checker                               | `scripts/kit/check-zero-edit-zones.sh`         |
+| Consumer contract                     | `docs/kit/product-consumer-contract.md`        |
 
 ### D8 — Mirror fidelity (explicit non-claim)
 
@@ -195,7 +195,6 @@ Kit mode on an allowlisted **mirror** does not prove bit-for-bit parity with kit
 - Moving `tooling/` under `scripts/kit`
 - Changing root or workflow ownership without an explicit decision
 - Product-domain features
-
 
 ## Refs
 

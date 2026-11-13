@@ -28,7 +28,7 @@ Read literally, invariant 6 binds every durable execution of every Product to Cl
 What the Kit composes today:
 
 - **Governed plan runs:** Cloudflare Workflows is the only implemented owner. `@kit/flows` drives a plan through step ports and writes its receipts inside the Workflow's steps; Cloudflare Workflows persists and resumes the run through a Workflow entrypoint ([`workflow.ts`](../../../../apps/example-api/src/flows-run/workflow.ts)).
-- **Job messages:** Cloudflare Queues and Cron ([`stack.md`](../../standards/stack.md), row *Jobs*).
+- **Job messages:** Cloudflare Queues and Cron ([`stack.md`](../../standards/stack.md), row _Jobs_).
 
 ## Decision
 
@@ -48,7 +48,6 @@ The durable owner is the general-purpose runtime that persists an execution's pr
 Kit or Product code composes on the owner at its interfaces (admission, guards) and inside its steps, where it may write and read records such as receipts, idempotency keys or audit rows. It may also call the owner's own API to deliver an event or to request a retry. Only the owner wakes an interrupted execution and re-enters it.
 
 A queue message is one step. An attempt succeeds when it does all of that step's work; it could not go on when it hits an error or a result it awaits is not ready. A request for Queue redelivery follows only an attempt that could not go on, and the supplied owner counts it against its configured retry and dead-letter policy. Workflow step retry policy remains D4; a Workflow `restart()` is not a retry.
-
 
 Hand-built durability is code outside the owner that resumes an execution from a progress record of its own, either itself (its own alarms, checkpoints or replay loops) or through the owner's API (a restart from a step that record chose). It stays hand-built in Kit code, in Product code and in a package extracted from either; extraction does not make it a general-purpose runtime.
 
@@ -76,10 +75,10 @@ Kit or Product code may define steps, conditions and retry policy on top of the 
 
 ### D5 — Kit-composed owners and the Product ADR trigger
 
-| Execution | Owner the Kit composes | Decided in |
-|---|---|---|
-| Governed plan run | Cloudflare Workflows, the only implemented adapter | [ADR-0005](./0005-flows-platform-agentic-workflows.md) D2 and its Roxabi/roxabi-boilerplate-cf#412 amendment |
-| Job message | Cloudflare Queues; Cron only triggers, and a Product's consumer sets retries and a dead-letter queue | [`stack.md`](../../standards/stack.md), row *Jobs*, for Queues and Cron; D2 for the trigger and dead-letter conditions |
+| Execution         | Owner the Kit composes                                                                               | Decided in                                                                                                             |
+| ----------------- | ---------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Governed plan run | Cloudflare Workflows, the only implemented adapter                                                   | [ADR-0005](./0005-flows-platform-agentic-workflows.md) D2 and its Roxabi/roxabi-boilerplate-cf#412 amendment           |
+| Job message       | Cloudflare Queues; Cron only triggers, and a Product's consumer sets retries and a dead-letter queue | [`stack.md`](../../standards/stack.md), row _Jobs_, for Queues and Cron; D2 for the trigger and dead-letter conditions |
 
 Another owner for governed plan runs requires a new Kit ADR. In an accepted ADR under `docs/product/`, a Product records every other pairing of a durable execution type with an owner that this table does not list; that ADR maps each of the Product's durable execution types to its owner.
 
@@ -108,12 +107,12 @@ Another owner for governed plan runs requires a new Kit ADR. In an accepted ADR 
 
 ## Alternatives rejected
 
-| Alternative | Why rejected |
-|---|---|
-| Keep Cloudflare Workflows as the only owner | A conversation on a supplied runtime would need a Workflow on top: two owners for one execution, the defect D1 forbids |
-| A closed list of exceptions to Workflows | Every new execution kind reopens the constitution; the D2 criterion covers them once |
-| A Kit-maintained allowlist of runtimes | The Kit would evaluate Product runtimes it does not compose, and the list would age with every release |
-| Kit-specified Product obligations (authentication, isolation, budget) | Product concerns in Kit text that no Kit gate can check; the non-claims name them and each Product decides them |
+| Alternative                                                           | Why rejected                                                                                                           |
+| --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Keep Cloudflare Workflows as the only owner                           | A conversation on a supplied runtime would need a Workflow on top: two owners for one execution, the defect D1 forbids |
+| A closed list of exceptions to Workflows                              | Every new execution kind reopens the constitution; the D2 criterion covers them once                                   |
+| A Kit-maintained allowlist of runtimes                                | The Kit would evaluate Product runtimes it does not compose, and the list would age with every release                 |
+| Kit-specified Product obligations (authentication, isolation, budget) | Product concerns in Kit text that no Kit gate can check; the non-claims name them and each Product decides them        |
 
 ## Refs
 

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Biome D1 safety
+
+- Keep `noPlaywrightUselessAwait` diagnostics while disabling its automatic fix: Biome 2.6.7 misidentifies D1 `first()` calls as Playwright locators and otherwise removes required awaits. Restore the fix when upstream distinguishes those calls and the real D1 staged-file proof passes.
+
 ### Wrangler runtime types
 
 - Upgrade the example Workers to Wrangler 4.159.0 and regenerate their committed runtime declarations.
@@ -129,8 +133,6 @@
 - Render localized App copy, trusted source links and the authenticated rules API link in both email formats; preserve staging policy and classify only typed local or documented structured CF errors. `sent` means transport acceptance, not recipient receipt.
 - Add five-minute maintenance and bounded retention, terminalizing pending children before Notification cascade deletion. Preserve native retention defaults without claiming effective account retention or automatic expiry from local tests.
 
-
-
 ### Tasks and Organization integrity
 
 - Add optional assignee deltas to task mutation events. Task creation and its initial assignees commit atomically; replacement and its baseline read also share one D1 batch, including rollback across insert chunks. Unchanged updates omit the event field and audit metadata excludes assignee ids (Roxabi/roxabi-boilerplate-cf#473).
@@ -150,7 +152,7 @@
 
 ### Dependency maintenance
 
-- Update shared dependencies while temporarily holding Biome at 2.5.15, the already pinned patch; align its configuration schema metadata. Kit maintainers own the hold and its removal (Roxabi/roxabi-boilerplate-cf#549). Biome features, fixes and security fixes available only in 2.6 or later are deferred; security alerts still require review. Remove the hold only after real-document GFM semantic preservation and repeated-format idempotence fixtures pass and the applicable formatting, documentation and full gates pass.
+- Upgrade Biome to 2.6.7 and remove the temporary version hold after real-document formatting proof. Two ordered lists become loose, changing rendered paragraph spacing; future tight lists with adjacent code fences can also be loosened by the staged formatter.
 - Raise the shared Zod minimum to 4.6.7, matching the already resolved version.
 - Update Happy DOM test environments to 21.0.4 or later to address GHSA-834v-8h66-3h79.
 

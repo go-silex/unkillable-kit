@@ -45,7 +45,7 @@ function onLine(line) {
 
 child.stdout.on('data', (chunk) => {
   buf += chunk.toString('utf8')
-  for (;;) {
+  while (true) {
     const idx = buf.indexOf('\n')
     if (idx < 0) break
     const line = buf.slice(0, idx)

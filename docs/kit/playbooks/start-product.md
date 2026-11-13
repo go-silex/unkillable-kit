@@ -6,13 +6,13 @@
 
 Kit SQL identity is **module id + hash**, not `example-api` `NNNN_` filenames. Normative: [ADR-0008](../architecture/adr/0008-kit-schema-identity-product-compose.md) · how-to: [`docs/kit/kit-schema-sync.md`](../kit-schema-sync.md).
 
-| Do | Do not |
-|----|--------|
-| New `apps/<product>-api` importing `@kit/*` | `cp -R apps/example-api` as happy path |
-| `bash scripts/kit/kit-schema-sync.sh --app apps/<product>-api --modules core,audit` after creating the app, for a product that mounts Better Auth ([mount contract](../product-consumer-contract.md#better-auth-mount)); `--modules core` for one that does not | Hand-copy `example-api/migrations` and then put domain SQL at 0009 |
-| Product SQL from `1000_` | Reuse kit 0009–0999 for domain |
-| Import `createBetterAuth` from `@kit/auth/factory` + tables from `@kit/auth/schema` + env helpers from `@kit/auth`, mounted per the [Better Auth mount contract](../product-consumer-contract.md#better-auth-mount) | Copy `example-api/src/lib/better-auth.ts` as the BA factory / `better-auth-schema.ts` · skip `corsAllowlist` and pass `trustedOrigins: ['*']` |
-| Existing clone: freeze history, `--adopt` (no manifest yet → core; other applied sets must be named or the command exits 1); later runs omit `--modules` | Rename applied files |
+| Do                                                                                                                                                                                                                                                              | Do not                                                                                                                                        |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| New `apps/<product>-api` importing `@kit/*`                                                                                                                                                                                                                     | `cp -R apps/example-api` as happy path                                                                                                        |
+| `bash scripts/kit/kit-schema-sync.sh --app apps/<product>-api --modules core,audit` after creating the app, for a product that mounts Better Auth ([mount contract](../product-consumer-contract.md#better-auth-mount)); `--modules core` for one that does not | Hand-copy `example-api/migrations` and then put domain SQL at 0009                                                                            |
+| Product SQL from `1000_`                                                                                                                                                                                                                                        | Reuse kit 0009–0999 for domain                                                                                                                |
+| Import `createBetterAuth` from `@kit/auth/factory` + tables from `@kit/auth/schema` + env helpers from `@kit/auth`, mounted per the [Better Auth mount contract](../product-consumer-contract.md#better-auth-mount)                                             | Copy `example-api/src/lib/better-auth.ts` as the BA factory / `better-auth-schema.ts` · skip `corsAllowlist` and pass `trustedOrigins: ['*']` |
+| Existing clone: freeze history, `--adopt` (no manifest yet → core; other applied sets must be named or the command exits 1); later runs omit `--modules`                                                                                                        | Rename applied files                                                                                                                          |
 
 **Last resort:** if you already cloned `example-api`, run `--adopt` **immediately**, then never add new domain SQL in `0001`–`0999` (frozen history stays; new domain at `1000_`).
 
@@ -26,11 +26,11 @@ Clone the **immediate** parent. This file does not name which clone is HEAD vs m
 
 For a mirrored kit, clone and pin the mirror rather than the original kit HEAD. The operator determines the parent URL.
 
-| Repo | `inheritance.json` | Why |
-|---|---|---|
-| Kit HEAD | **absent** | kit mode |
-| Mirror | **absent** | allowlisted kit mode. A marker here is a hard error. Mirror `upstream` = HEAD and **may** push for kit contribute. |
-| Product | **required** | product mode. `upstream` = immediate parent, push URL `no_push`. |
+| Repo     | `inheritance.json` | Why                                                                                                                |
+| -------- | ------------------ | ------------------------------------------------------------------------------------------------------------------ |
+| Kit HEAD | **absent**         | kit mode                                                                                                           |
+| Mirror   | **absent**         | allowlisted kit mode. A marker here is a hard error. Mirror `upstream` = HEAD and **may** push for kit contribute. |
+| Product  | **required**       | product mode. `upstream` = immediate parent, push URL `no_push`.                                                   |
 
 A product has one parent and does not add a remote to its grandparent. Kit HEAD ships `config/kit/deny-upstream-remotes.json` with `Roxabi/roxabi-boilerplate-cf`. The hook normalizes remote URLs to `owner/repo` and matches that identity exactly (HTTPS, `ssh://`, or scp-style `[user@]host:owner/repo`, with or without `.git`). Products inherit the file and do not name the grandparent. A mirror must not edit it: the edit would conflict on every HEAD sync. The product's immediate parent is already blocked by the remote name `upstream`. Pinning a HEAD SHA while the tree inherited the mirror (or the reverse) is a failed start. Mirror synchronization is an operator concern, not a product gate ([ADR-0009](../architecture/adr/0009-kit-namespace-polarity-inheritance-marker.md) D4/D8).
 
@@ -40,6 +40,7 @@ A product has one parent and does not add a remote to its grandparent. Kit HEAD 
 
 1. Create an **empty** private product repo `org/<product>`. Do not GitHub-fork this kit.
 2. Inherit history from the **immediate parent** (table above), without keeping that parent as `origin`:
+
    ```bash
    git clone <immediate-parent-url> <product>
    cd <product>
@@ -49,16 +50,19 @@ A product has one parent and does not add a remote to its grandparent. Kit HEAD 
    git push -u origin main
    gh repo set-default <org>/<product>
    ```
+
    `gh repo set-default` is required: with both remotes and no default, `gh` ranks `upstream`
    ahead of `origin`, and every `issue-triage` command then writes to the parent repo
    ([roxabi-plugins#614](https://github.com/Roxabi/roxabi-plugins/issues/614)).
    Then pin the inherited tip. Do **not** create or push a landing branch named `staging`:
+
    ```bash
    mkdir -p config/product
    printf '{\n  "version": 1,\n  "upstreamCommit": "%s"\n}\n' "$(git rev-parse upstream/main)" > config/product/inheritance.json
    git add config/product/inheritance.json
    git commit -m "chore(product): pin kit inheritance"
    ```
+
    The kit parent has no `staging` branch. Commit the marker on day-0 so `zero-edit` classifies product mode. Fill `name`, `backend.path`, `release.component`, and either `frontend.path` or a whole-block `frontend: null` (API-only; no frontend App) in the same commit or the next one — `stack-contract:check` refuses the upstream values. The guard compares those values; it does not check that a path exists on disk. Keep `frontend: null` on upgrade.
 3. `bun install` · ensure lefthook hooks.
 4. Copy env examples → gitignored local files only (`.dev.vars`, etc.).
@@ -103,20 +107,20 @@ On `git merge upstream/main`, keep those scalars, including an API-only `fronten
 
 Day-0 default for a product that mounts Better Auth is `--modules core,audit`: the throttle needs `rate_limit_buckets`, which ships in the `audit` set, and without it every non-exempt Better Auth request returns 500. A product that does not mount Better Auth stays on `--modules core`. Adding any other opt-in set is an explicit operator decision. A later run with `--modules` omitted also appends new catalog ids of sets already recorded in the manifest — do not pass the set again just to pick those up.
 
-| Default Day-0 | Opt-in (named) |
-|---|---|
+| Default Day-0                                                                                                         | Opt-in (named)                                                                                                                               |
+| --------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
 | Auth (`@kit/auth` / `createBetterAuth`), `kit-schema-sync --modules core,audit`, UI primitives, zero-edit marker, env | tasks (`@kit/tasks`), comments (`@kit/comments`), flows (`@kit/flows`), notifications (`@kit/notifications`), MCP product tools (`@kit/mcp`) |
 
 Every command below names `audit`. Keep it when mounting Better Auth or composing Notifications administration writes; omit it only when neither requires the audit tables.
 
-| Module | Package | ADR / anchor | Compose | Lives in |
-|---|---|---|---|---|
-| tasks | `@kit/tasks` | [ADR-0007](../architecture/adr/0007-tasks-comments-kernel.md) | `bash scripts/kit/kit-schema-sync.sh --app apps/<product>-api --modules core,audit,tasks` | `apps/<product>-api` |
-| comments | `@kit/comments` | [ADR-0007](../architecture/adr/0007-tasks-comments-kernel.md) | no catalog set `comments`; D1 is set `tasks` (id `tasks_comments`) — same `--modules core,audit,tasks` as above | `apps/<product>-api` |
-| flows | `@kit/flows` | [ADR-0005](../architecture/adr/0005-flows-platform-agentic-workflows.md) | `bash scripts/kit/kit-schema-sync.sh --app apps/<product>-api --modules core,audit,flows` | `apps/<product>-api` |
-| notifications | `@kit/notifications/schema`, `@kit/notifications/repos` | [ADR-0019](../architecture/adr/0019-notifications-rules-inbox-and-delivery.md) | `bash scripts/kit/kit-schema-sync.sh --app apps/<product>-api --modules core,audit,notifications`; compose `notificationsDrizzleSchema`; administration writes also require the `audit` set | `apps/<product>-api`; a schema set, not a governed Module |
-| MCP product tools | `@kit/mcp` | [`packages/mcp`](../../../packages/mcp/README.md) | no SQL set; import `createToolCatalogue` from `@kit/mcp` | the Worker that serves MCP |
-| Remote MCP AS | `@kit/mcp/hosted` | [ADR-0015](../architecture/adr/0015-mcp-remote-oauth-worker.md) | `createHostedMcpWorker`; declare the optional peers | dedicated `apps/<product>-mcp` **or** the product Worker through `fallthrough` |
+| Module            | Package                                                 | ADR / anchor                                                                   | Compose                                                                                                                                                                                     | Lives in                                                                       |
+| ----------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| tasks             | `@kit/tasks`                                            | [ADR-0007](../architecture/adr/0007-tasks-comments-kernel.md)                  | `bash scripts/kit/kit-schema-sync.sh --app apps/<product>-api --modules core,audit,tasks`                                                                                                   | `apps/<product>-api`                                                           |
+| comments          | `@kit/comments`                                         | [ADR-0007](../architecture/adr/0007-tasks-comments-kernel.md)                  | no catalog set `comments`; D1 is set `tasks` (id `tasks_comments`) — same `--modules core,audit,tasks` as above                                                                             | `apps/<product>-api`                                                           |
+| flows             | `@kit/flows`                                            | [ADR-0005](../architecture/adr/0005-flows-platform-agentic-workflows.md)       | `bash scripts/kit/kit-schema-sync.sh --app apps/<product>-api --modules core,audit,flows`                                                                                                   | `apps/<product>-api`                                                           |
+| notifications     | `@kit/notifications/schema`, `@kit/notifications/repos` | [ADR-0019](../architecture/adr/0019-notifications-rules-inbox-and-delivery.md) | `bash scripts/kit/kit-schema-sync.sh --app apps/<product>-api --modules core,audit,notifications`; compose `notificationsDrizzleSchema`; administration writes also require the `audit` set | `apps/<product>-api`; a schema set, not a governed Module                      |
+| MCP product tools | `@kit/mcp`                                              | [`packages/mcp`](../../../packages/mcp/README.md)                              | no SQL set; import `createToolCatalogue` from `@kit/mcp`                                                                                                                                    | the Worker that serves MCP                                                     |
+| Remote MCP AS     | `@kit/mcp/hosted`                                       | [ADR-0015](../architecture/adr/0015-mcp-remote-oauth-worker.md)                | `createHostedMcpWorker`; declare the optional peers                                                                                                                                         | dedicated `apps/<product>-mcp` **or** the product Worker through `fallthrough` |
 
 ### Remote MCP OAuth (compose, do not fork)
 

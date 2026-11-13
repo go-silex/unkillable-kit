@@ -59,9 +59,6 @@ updates:
         update-types:
           - major
     ignore:
-      # Temporary Markdown semantics hold; remove after the evidence in Roxabi/roxabi-boilerplate-cf#549 passes.
-      - dependency-name: "@biomejs/biome"
-        update-types: ["version-update:semver-minor", "version-update:semver-major"]
       # v9 rewrites the API (useTable + tableFeatures). Migrate via issue, not a bump.
       - dependency-name: "@tanstack/react-table"
         update-types: ["version-update:semver-major"]

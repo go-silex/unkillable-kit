@@ -183,7 +183,7 @@ export async function driveWaves(ctx: {
   const { db, load } = io
   const { runId, orgId } = io.ids
   let wave = 0
-  for (;;) {
+  while (true) {
     if (wave > taskIds.length) {
       return await failClosed(step, io, 'persist:terminal', 'DAG_STUCK')
     }

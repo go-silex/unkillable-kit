@@ -72,7 +72,7 @@ async function seedRun(db: ReturnType<typeof createMemoryDb>, runId: string, sna
 }
 
 const BINDING_DOLLAR = '$'
-const ph = (id: string) => BINDING_DOLLAR + '{{ tasks.' + id + '.output }}'
+const ph = (id: string) => `${BINDING_DOLLAR}{{ tasks.${id}.output }}`
 
 describe('redactReceiptOutput', () => {
   it('replaces sensitive text with the marker before any cap', () => {

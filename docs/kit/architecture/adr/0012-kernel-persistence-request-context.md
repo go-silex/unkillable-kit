@@ -19,7 +19,6 @@ related:
 
 # ADR-0012 — Kernel persistence + request-context stratum
 
-
 **Authority:** accepted 2026-08-24 by operator delegation on the Roxabi/roxabi-boilerplate-cf#137 goal session. Binding.
 
 **Implemented:** [Roxabi/roxabi-boilerplate-cf#142](https://github.com/Roxabi/roxabi-boilerplate-cf/issues/142) schema/repos/hono, [Roxabi/roxabi-boilerplate-cf#143](https://github.com/Roxabi/roxabi-boilerplate-cf/issues/143) `@kit/flows/run`, [Roxabi/roxabi-boilerplate-cf#144](https://github.com/Roxabi/roxabi-boilerplate-cf/issues/144) compose proof. Parent [Roxabi/roxabi-boilerplate-cf#137](https://github.com/Roxabi/roxabi-boilerplate-cf/issues/137) closed. This ADR is the decision, not the move.
@@ -57,21 +56,21 @@ The catalog `config/kit/kit-schema-modules.json` is the source of module IDs, so
 
 Evidence that forbids Option B:
 
-| | Applied `0012_flows_plans_runs.sql` | Sketch `packages/flows/migrations/0001` |
-|--|-------------------------------------|----------------------------------------|
-| Plan/run FK | Composite `(plan_id, org_id)` | Single-column `plan_id` |
-| Timestamps | Integer ms | Text |
+|             | Applied `0012_flows_plans_runs.sql` | Sketch `packages/flows/migrations/0001` |
+| ----------- | ----------------------------------- | --------------------------------------- |
+| Plan/run FK | Composite `(plan_id, org_id)`       | Single-column `plan_id`                 |
+| Timestamps  | Integer ms                          | Text                                    |
 
 `kit-schema-sync` hashes **promoted applied bytes**, never sketches.
 
 ### D2 — Schema export per capability
 
-| Export | Owns |
-|--------|------|
-| `@kit/tasks/schema` | Tasks tables |
-| `@kit/comments/schema` | Comments tables |
-| `@kit/flows/schema` | Plans / runs / related flow tables |
-| `@kit/auth/schema` | Tenancy/RBAC: orgs, memberships, modules, roles, grants, `api_keys`, `audit_events`, `rate_limit_buckets` (expand existing — **not** a new `@kit/orgs` unless file-length/folder-size forces a later ADR) |
+| Export                 | Owns                                                                                                                                                                                                      |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@kit/tasks/schema`    | Tasks tables                                                                                                                                                                                              |
+| `@kit/comments/schema` | Comments tables                                                                                                                                                                                           |
+| `@kit/flows/schema`    | Plans / runs / related flow tables                                                                                                                                                                        |
+| `@kit/auth/schema`     | Tenancy/RBAC: orgs, memberships, modules, roles, grants, `api_keys`, `audit_events`, `rate_limit_buckets` (expand existing — **not** a new `@kit/orgs` unless file-length/folder-size forces a later ADR) |
 
 **Never** declare tables in `@kit/db`.
 
@@ -121,16 +120,16 @@ INV-03 (`demo_*` org-scope) and INV-04 (`api_keys.organization_id NOT NULL`) are
 
 ## Anti-patterns
 
-| Anti | Why |
-|------|-----|
-| Promote `packages/flows/migrations/0001` (or any sketch that lost `(plan_id, org_id)`) | **S5** — weaker tenancy than applied |
-| Put kit-generic tables in `@kit/db` | Handle-only; D2 |
-| New `@kit/orgs` / `@kit/tenancy` without file-length force + ADR | D11 — expand `@kit/auth/schema` |
-| Worker org middleware imported from SPA / `@kit/auth/react` graph | D4 polarity |
-| Bind infer or leave incubating while claiming D6 met | Roxabi/roxabi-boilerplate-cf#141 out; ADR-0005 D6 |
-| Fold INV-03 / INV-04 into the mechanical promote | D7 — new catalog ids |
-| Kitchen-sink PR (Roxabi/roxabi-boilerplate-cf#142+143+144) | One concern per `/ship` |
-| Treat this ADR as the move | Decision only; Roxabi/roxabi-boilerplate-cf#142/143/144 implemented it |
+| Anti                                                                                   | Why                                                                    |
+| -------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| Promote `packages/flows/migrations/0001` (or any sketch that lost `(plan_id, org_id)`) | **S5** — weaker tenancy than applied                                   |
+| Put kit-generic tables in `@kit/db`                                                    | Handle-only; D2                                                        |
+| New `@kit/orgs` / `@kit/tenancy` without file-length force + ADR                       | D11 — expand `@kit/auth/schema`                                        |
+| Worker org middleware imported from SPA / `@kit/auth/react` graph                      | D4 polarity                                                            |
+| Bind infer or leave incubating while claiming D6 met                                   | Roxabi/roxabi-boilerplate-cf#141 out; ADR-0005 D6                      |
+| Fold INV-03 / INV-04 into the mechanical promote                                       | D7 — new catalog ids                                                   |
+| Kitchen-sink PR (Roxabi/roxabi-boilerplate-cf#142+143+144)                             | One concern per `/ship`                                                |
+| Treat this ADR as the move                                                             | Decision only; Roxabi/roxabi-boilerplate-cf#142/143/144 implemented it |
 
 ## Non-goals
 

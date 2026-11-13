@@ -10,13 +10,13 @@ Kit-owned work is under the [MIT License](docs/kit/licenses/MIT.txt), copyright 
 
 Anyone may fork or clone the public Kit and may push branches on a fork they control.
 
-| Action | Who |
-|---|---|
-| Open a public issue on the canonical repository | Anyone, while Issues stay enabled. An outsider stays limited to issues until a maintainer explicitly grants trusted write |
-| Open a pull request against the canonical repository | Write, maintain, or admin, after a maintainer sets **Collaborators only** |
-| Push or merge a canonical branch | That same write, maintain, or admin grant, or merge automation, subject to protections the repository actually enforces |
+| Action                                               | Who                                                                                                                       |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Open a public issue on the canonical repository      | Anyone, while Issues stay enabled. An outsider stays limited to issues until a maintainer explicitly grants trusted write |
+| Open a pull request against the canonical repository | Write, maintain, or admin, after a maintainer sets **Collaborators only**                                                 |
+| Push or merge a canonical branch                     | That same write, maintain, or admin grant, or merge automation, subject to protections the repository actually enforces   |
 
-The pull-request limit is a GitHub repository setting, not a rule this file can apply: **Settings → General → Features → Pull requests → Collaborators only**. In an organization repository, a collaborator is a user with the write, maintain, or admin role. There is no pull-request-only collaborator role. Granting write so someone can open a pull request also grants canonical branch push and merge, except where a protection the repository actually enforces withholds them. The pull-request tab stays visible. Issues stay enabled. This file does not turn the setting on, and a missing or later change of that setting leaves GitHub's own default in force. This file does not create branch protection or a ruleset. Write access can still bypass an unenforced process; see [testing.md](docs/kit/testing.md) § *Merge residual*.
+The pull-request limit is a GitHub repository setting, not a rule this file can apply: **Settings → General → Features → Pull requests → Collaborators only**. In an organization repository, a collaborator is a user with the write, maintain, or admin role. There is no pull-request-only collaborator role. Granting write so someone can open a pull request also grants canonical branch push and merge, except where a protection the repository actually enforces withholds them. The pull-request tab stays visible. Issues stay enabled. This file does not turn the setting on, and a missing or later change of that setting leaves GitHub's own default in force. This file does not create branch protection or a ruleset. Write access can still bypass an unenforced process; see [testing.md](docs/kit/testing.md) § _Merge residual_.
 
 Merge automation follows a current exact-head authorization receipt. Labels, including `reviewed` and `deps-automerge`, are hints, not authorization. External issue or pull-request authorship does not grant merge authority. Receipts, withdrawal, and the shared-App owner exception stay in [CI App setup](docs/kit/ci-app-setup.md). Do not copy operational inventory into a public write.
 

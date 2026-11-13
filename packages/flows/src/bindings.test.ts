@@ -11,15 +11,15 @@ import {
 import { REDACTED_OUTPUT_MARKER } from './receipts'
 
 const BINDING_DOLLAR = '$'
-const ph = (id: string) => BINDING_DOLLAR + '{{ tasks.' + id + '.output }}'
+const ph = (id: string) => `${BINDING_DOLLAR}{{ tasks.${id}.output }}`
 
 describe('WHOLE_BINDING_RE', () => {
   it('matches whole-value task output bindings only', () => {
     expect(WHOLE_BINDING_RE.test(ph('a'))).toBe(true)
     expect(WHOLE_BINDING_RE.test(ph('echo_hello'))).toBe(true)
-    expect(WHOLE_BINDING_RE.test('prefix ' + ph('a'))).toBe(false)
-    expect(WHOLE_BINDING_RE.test(BINDING_DOLLAR + '{{ tasks.a.output.foo }}')).toBe(false)
-    expect(WHOLE_BINDING_RE.test(BINDING_DOLLAR + '{{ env.X }}')).toBe(false)
+    expect(WHOLE_BINDING_RE.test(`prefix ${ph('a')}`)).toBe(false)
+    expect(WHOLE_BINDING_RE.test(`${BINDING_DOLLAR}{{ tasks.a.output.foo }}`)).toBe(false)
+    expect(WHOLE_BINDING_RE.test(`${BINDING_DOLLAR}{{ env.X }}`)).toBe(false)
   })
 })
 
@@ -36,7 +36,7 @@ describe('ARG_KEY_FORBIDDEN_RE', () => {
 describe('bindingTaskIds + walkArgsBindings', () => {
   it('collects nested whole bindings and flags partial / forbidden keys', () => {
     expect(bindingTaskIds({ text: ph('a'), nest: { x: ph('b') } })).toEqual(['a', 'b'])
-    expect(walkArgsBindings({ text: 'prefix ' + ph('a') }).map((i) => i.code)).toEqual([
+    expect(walkArgsBindings({ text: `prefix ${ph('a')}` }).map((i) => i.code)).toEqual([
       'BINDING_NOT_WHOLE',
     ])
     expect(walkArgsBindings({ api_key: 'x' }).map((i) => i.code)).toEqual(['ARG_KEY_FORBIDDEN'])

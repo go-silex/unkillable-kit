@@ -9,14 +9,14 @@ This index locates the authoritative home for each rule and the operational guid
 
 ## Authority and navigation
 
-| Home | Authority |
-|---|---|
-| [This index](./README.md) | Navigation only; it does not create policy |
-| [`AGENTS.md`](../../AGENTS.md) | Auto-loaded constitution: mission, precedence, seven invariants and hard rules |
-| [Architecture index](./architecture/index.md) | ADR authority model and complete list; each ADR frontmatter owns its status and normativity |
-| [Standards](#normative-standards-and-contracts) | Normative when named as a source of truth by the constitution or an accepted ADR |
-| [Processes and runbooks](#processes-operations-and-security) | Required operating procedure within their scope; they do not override constitution or ADRs |
-| [Playbooks](#onboarding-and-playbooks) | Ordered onboarding guidance built on the contracts |
+| Home                                                         | Authority                                                                                   |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
+| [This index](./README.md)                                    | Navigation only; it does not create policy                                                  |
+| [`AGENTS.md`](../../AGENTS.md)                               | Auto-loaded constitution: mission, precedence, seven invariants and hard rules              |
+| [Architecture index](./architecture/index.md)                | ADR authority model and complete list; each ADR frontmatter owns its status and normativity |
+| [Standards](#normative-standards-and-contracts)              | Normative when named as a source of truth by the constitution or an accepted ADR            |
+| [Processes and runbooks](#processes-operations-and-security) | Required operating procedure within their scope; they do not override constitution or ADRs  |
+| [Playbooks](#onboarding-and-playbooks)                       | Ordered onboarding guidance built on the contracts                                          |
 
 ## Normative standards and contracts
 

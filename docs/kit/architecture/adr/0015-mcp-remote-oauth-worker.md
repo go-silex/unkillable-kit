@@ -42,11 +42,11 @@ Better Auth already authenticates humans for the SPA. It is **not** an MCP autho
 
 ### D1 — Three client classes stay distinct
 
-| Class | Surface | Credential | Notes |
-|---|---|---|---|
-| Browser SPA | `example-web` → `example-api` | Better Auth `kit_session` cookie | ADR-0002 D1 |
-| Machine HTTP | `example-api` | Bearer `sk_` | Organization-bound API key |
-| Remote agent | hosted `/mcp` | **Worker-issued MCP access token** | this ADR |
+| Class        | Surface                       | Credential                         | Notes                      |
+| ------------ | ----------------------------- | ---------------------------------- | -------------------------- |
+| Browser SPA  | `example-web` → `example-api` | Better Auth `kit_session` cookie   | ADR-0002 D1                |
+| Machine HTTP | `example-api`                 | Bearer `sk_`                       | Organization-bound API key |
+| Remote agent | hosted `/mcp`                 | **Worker-issued MCP access token** | this ADR                   |
 
 Do not present a BA cookie or Google access token as MCP Bearer. Do not use `sk_` as MCP OAuth. HMAC sessions stay retired (ADR-0002 D2).
 
@@ -82,11 +82,11 @@ Only an absent or `undefined` option means omitted; any other value that is not 
 - **Token phase.** Only when `grantAdmission` is set does the shell give the provider a `tokenExchangeCallback`. Provider 1.2.4 calls it for `authorization_code` and `refresh_token` after its own checks (client identification; code or refresh-token hash and client binding; PKCE and redirect URI for a code; expiry for a refresh; resource and scope) and before it saves the OAuth grant or writes a token. The provider's own refusals come first and are unchanged: a replayed code revokes its OAuth grant natively, and a record bound to another resource is refused. The tuple is the callback's own `userId`, `grantId` and `clientId`. On `true` the shell returns nothing, so the provider issues the props, scope, audience and TTLs it would issue without the seam. Token exchange stays disabled, so no other grant type reaches the predicate.
 - **Request phase.** On `/mcp`, after the provider authenticates the bearer token and the existing identity check passes, the shell unwraps the provider-authenticated token (`ctx.auth.token`) with the public `unwrapToken` helper. The tuple is that summary's `userId`, `grantId` and client. The summary must exist, its `userId` must equal both the normalized token identity (`ctx.props`) and `ctx.auth.userId`, and its client must equal `ctx.auth.clientId`; otherwise the request is refused as for `false`, and an unwrap that throws answers as unavailable. Admission runs before `register`. Without `grantAdmission` the shell unwraps nothing.
 
-| Predicate result | `/mcp` request | Code exchange or refresh |
-|---|---|---|
-| `true` | continues unchanged to `register` | issued with the props, scope, audience and TTLs it would have without the seam |
-| `false` | `401` with a Kit-generated `invalid_token` Bearer challenge in the provider's format (`resource_metadata` naming `/.well-known/oauth-protected-resource/mcp`, `scope="mcp"`) and `Cache-Control: no-store`, zero tools; nothing revoked. Its body and other headers are not the provider's (no JSON error body, no `Pragma`) | `400` `invalid_grant`, no token: the shell throws `OAuthError('invalid_grant')`, and the provider revokes that OAuth grant and its tokens before answering |
-| throw (an `OAuthError` included), rejection or non-boolean | `503`, `Cache-Control: no-store`, no Bearer challenge, zero tools | `503` `temporarily_unavailable`, `Cache-Control: no-store`: the shell throws `OAuthError('temporarily_unavailable', { statusCode: 503 })`; no OAuth grant or token is saved, issued or revoked. Provider writes made before the callback stay, such as a `private_key_jwt` client's assertion `jti` replay marker, so a retry needs fresh valid client authentication; it can then redeem the same code (within its lifetime) or refresh token |
+| Predicate result                                           | `/mcp` request                                                                                                                                                                                                                                                                                                               | Code exchange or refresh                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `true`                                                     | continues unchanged to `register`                                                                                                                                                                                                                                                                                            | issued with the props, scope, audience and TTLs it would have without the seam                                                                                                                                                                                                                                                                                                                                                                 |
+| `false`                                                    | `401` with a Kit-generated `invalid_token` Bearer challenge in the provider's format (`resource_metadata` naming `/.well-known/oauth-protected-resource/mcp`, `scope="mcp"`) and `Cache-Control: no-store`, zero tools; nothing revoked. Its body and other headers are not the provider's (no JSON error body, no `Pragma`) | `400` `invalid_grant`, no token: the shell throws `OAuthError('invalid_grant')`, and the provider revokes that OAuth grant and its tokens before answering                                                                                                                                                                                                                                                                                     |
+| throw (an `OAuthError` included), rejection or non-boolean | `503`, `Cache-Control: no-store`, no Bearer challenge, zero tools                                                                                                                                                                                                                                                            | `503` `temporarily_unavailable`, `Cache-Control: no-store`: the shell throws `OAuthError('temporarily_unavailable', { statusCode: 503 })`; no OAuth grant or token is saved, issued or revoked. Provider writes made before the callback stay, such as a `private_key_jwt` client's assertion `jti` replay marker, so a retry needs fresh valid client authentication; it can then redeem the same code (within its lifetime) or refresh token |
 
 `false` is terminal for that OAuth grant. Its next code exchange or refresh revokes it through the provider's own `invalid_grant` path; a failed revocation is logged and still answers `invalid_grant`. The client must then authorize again, which mints a new OAuth grant that the predicate judges on its own. A predicate that cannot decide throws rather than return `false`: unavailable keeps the OAuth grant and never passes for invalid credentials. `true` widens nothing: the provider's checks and D6 still refuse what they refuse.
 
@@ -141,10 +141,10 @@ Unauthenticated `/mcp` executes **zero** tools and looks like MCP OAuth (`401` +
 
 ### D7 — Hosted whoami polarity
 
-| Path | Identity | `verified` means |
-|---|---|---|
-| stdio | `sk_` → `GET /api/me` | subject parse OK |
-| hosted HTTP | MCP token props | MCP identity present |
+| Path        | Identity              | `verified` means     |
+| ----------- | --------------------- | -------------------- |
+| stdio       | `sk_` → `GET /api/me` | subject parse OK     |
+| hosted HTTP | MCP token props       | MCP identity present |
 
 Missing hosted identity → domain status `missing_identity`, never a leaked `sk_`.
 

@@ -18,7 +18,7 @@ export function identities(batch: AdmissionBatch, start = 1): AdmissionOwnerIden
   let n = start
   const identity = (kind: 'user' | 'organization', id: string): AdmissionOwnerIdentity => ({
     ref: { orgId: batch.orgId, kind, id },
-    workflowId: 'nd-v1-' + (n++).toString(16).padStart(64, '0'),
+    workflowId: `nd-v1-${(n++).toString(16).padStart(64, '0')}`,
     admissionDeadlineAt: batch.now + 86_400_000,
   })
   return [

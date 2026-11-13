@@ -51,7 +51,7 @@ const mintFrom = (source: ToolRegistry, canWrite = true) => {
 }
 
 const BINDING_DOLLAR = '$'
-const ph = (id: string) => BINDING_DOLLAR + '{{ tasks.' + id + '.output }}'
+const ph = (id: string) => `${BINDING_DOLLAR}{{ tasks.${id}.output }}`
 
 describe('loadPlanFromYaml + dogfood fixture', () => {
   it('loads demo-echo YAML', () => {
@@ -1148,7 +1148,7 @@ describe('whole-value bindings (Roxabi/roxabi-boilerplate-cf#232)', () => {
       permits: { tools: ['echo'] },
       tasks: {
         a: { invoke: { tool: 'echo' } },
-        b: { invoke: { tool: 'echo', args: { text: 'prefix ' + ph('a') } } },
+        b: { invoke: { tool: 'echo', args: { text: `prefix ${ph('a')}` } } },
       },
     })
     const result = checkPlan(plan, grant(['echo']), registry)
