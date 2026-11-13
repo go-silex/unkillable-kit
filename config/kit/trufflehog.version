@@ -1,15 +1,15 @@
-# SSoT: local fetch (scripts/kit/trufflehog-check.sh) + CI action pin.
-# Bump version + checksums + action_sha together. Checksums from
-# https://github.com/trufflesecurity/trufflehog/releases/download/v<ver>/trufflehog_<ver>_checksums.txt
-# Dependabot version updates for the action are ignored (dependabot.yml); do not
-# land an action-only PR — it fails --assert-pin. Security PRs: close and bump here.
-version=3.97.1
-action_sha=20652fbbdefffcdaa493a5bf57ab2ac6b1db715b
-sha256_darwin_amd64=1515710bb16be5653ca9986c27ecd1a0e7536fc6e53ad46f7100992692f6a05f
-sha256_darwin_arm64=1af86cf30c1cc5c1735ec6af9292b399ec9bed3ff1b30be13fcbfd4a30ab449a
-sha256_linux_amd64=f863ea3a8d786f7d097870496c977944cce7372a2fe1e56707d965016e543ece
-sha256_linux_arm64=57bfcc0988aae3f2ef97e74abe1138cf37a8fbd84dd26299062c77a6a6b125dd
-sha256_bin_darwin_amd64=79878e05228d92d97e54a8fea214682736e80f2d7e0810040a348160972ca994
-sha256_bin_darwin_arm64=f6899e5521ff060634a9599e02215195d29d330e9a902feb3f5322eedcb7ba21
-sha256_bin_linux_amd64=591136c64476b0f3545f5863aa96c2b3a3406c1348d53a8065baf694e7a36829
-sha256_bin_linux_arm64=5a7839b1bcd7f8304946dbeceb007c1b74d52f9c1e9708ff98196ae1018d11e6
+# SSoT: verified local and CI fetch (scripts/kit/trufflehog-check.sh).
+# Bump version, archive and binary hashes, and historical action_sha together.
+# Archive checksums: https://github.com/trufflesecurity/trufflehog/releases/download/v<ver>/trufflehog_<ver>_checksums.txt
+# CI must not use the action: --assert-pin enforces the shared script's safe range walk.
+# Dependabot action version updates are ignored; handle security updates here.
+version=3.99.9
+action_sha=3bd2b5887eb0efb8fa18bfd1d296032924e4ffdc
+sha256_darwin_amd64=1f18f69a49a8cfb9d59e730bace971722dfdf79266d9b8cf71e59ac161eb19ae
+sha256_darwin_arm64=1d85e5c9c7eddbf12ae2714eb89317ba2cbbbf59be4e161e4b2ff396adbaa3a8
+sha256_linux_amd64=12050095c8063bf4d34f9f6cbce6ba9fa8d0deea9d503d0570364feba093658e
+sha256_linux_arm64=778b1913196dc9b9234e8fd366f64387efeb08c01930a1d2110dcb2ffd07e68b
+sha256_bin_darwin_amd64=0f229af3aab0f42a38a272cc636f6cf8472766c3eeeefc4dd73fc0cf7ae2bb99
+sha256_bin_darwin_arm64=32508ba6e334463d2474c5ce076d75887ec30280b7183594874f818fe0a41c50
+sha256_bin_linux_amd64=b0b8bf1e6e775496ef8f3b00b2aa04e9357fa18592e4c18c1305987645fdabea
+sha256_bin_linux_arm64=2016600ce4df8cc2fb81be13e483af62273c5a59b4923728b7632873adbb6363
