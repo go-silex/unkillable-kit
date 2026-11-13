@@ -157,6 +157,7 @@
 ### Dependency maintenance
 
 - Upgrade Biome to 2.6.7 and remove the temporary version hold after real-document formatting proof. Two ordered lists become loose, changing rendered paragraph spacing; future tight lists with adjacent code fences can also be loosened by the staged formatter.
+- Product sync: inheritors must normalize Product-owned Markdown and YAML and fix new `noComponentHookFactories` and `useWhile` errors before their full Root gate and deploy. The Kit Root proof does not establish that unchanged Product-owned files pass. Canonical formatting adds substantial source padding and reduces readability in large tables; this is an intentional migration tradeoff, alongside the two documented list-layout changes.
 - Raise the shared Zod minimum to 4.6.7, matching the already resolved version.
 - Update Happy DOM test environments to 21.0.4 or later to address GHSA-834v-8h66-3h79.
 
