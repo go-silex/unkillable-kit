@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Wrangler runtime types
+
+- Upgrade the example Workers to Wrangler 4.159.0 and regenerate their committed runtime declarations.
+
 ### Flow run persistence
 
 - Commit run mutations and status/receipt events atomically, with path-specific Organization and snapshot fences. Failed-run closure checks ownership, preserves terminal status and errors during receipt cleanup, retains malformed receipt bytes and propagates the original exception.
