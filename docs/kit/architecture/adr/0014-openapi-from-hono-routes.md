@@ -28,11 +28,11 @@ Two properties matter for a kit whose thesis is that many products compose one k
 
 ## Alternatives considered
 
-| Option | Contract source | Verdict |
-|---|---|---|
-| **A** `@hono/zod-openapi` — `OpenAPIHono` + `createRoute` | The route schema **is** the validator | **Accepted** |
-| **B** `hono-openapi` / `describeRoute` annotations | Annotation beside the handler | Rejected |
-| **C** Bespoke generator over `app.routes` + a metadata registry | Hand-declared metadata | Rejected |
+| Option                                                          | Contract source                       | Verdict      |
+| --------------------------------------------------------------- | ------------------------------------- | ------------ |
+| **A** `@hono/zod-openapi` — `OpenAPIHono` + `createRoute`       | The route schema **is** the validator | **Accepted** |
+| **B** `hono-openapi` / `describeRoute` annotations              | Annotation beside the handler         | Rejected     |
+| **C** Bespoke generator over `app.routes` + a metadata registry | Hand-declared metadata                | Rejected     |
 
 B and C share one defect: the document is a second declaration. A drift gate can only compare the document to itself, so a spec that claims `200 { item }` next to a handler returning `{ items }` stays green forever, and every new endpoint depends on a human annotating it truthfully. C additionally puts a generator in kit-owned code and forgoes ecosystem tooling.
 

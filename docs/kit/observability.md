@@ -17,11 +17,11 @@ This protects only this factory's Better Auth logger and HTTP handler paths. It 
 
 Status `option produit` in [`stack.md`](./standards/stack.md) § I: the kit ships no SDK, dependency or wiring for these.
 
-| Need | Tool | Notes |
-|------|------|--------|
-| Error tracking | Sentry (or GlitchTip) | Wire SDK only when `SENTRY_DSN` set |
-| Aggregated logs + uptime | Better Stack | Prod optional |
-| Product analytics | PostHog | Only if real product events |
+| Need                     | Tool                  | Notes                               |
+| ------------------------ | --------------------- | ----------------------------------- |
+| Error tracking           | Sentry (or GlitchTip) | Wire SDK only when `SENTRY_DSN` set |
+| Aggregated logs + uptime | Better Stack          | Prod optional                       |
+| Product analytics        | PostHog               | Only if real product events         |
 
 Web analytics (Plausible) is deferred: opt-in hub, no phone-home default; an env-gated snippet is allowed only if a public SPA enters the hub. See the [stack standard](./standards/stack.md) for deferred choices.
 

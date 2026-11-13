@@ -44,13 +44,13 @@ HMAC-signed cookies shipped first as a Workers-native interim. Issue go-silex/si
 
 ### D1 — Browser session = Better Auth only
 
-| Layer | Kit (normative) |
-|---|---|
-| Session | `createBetterAuthSessionPort` + per-request `betterAuth` instance |
-| Cookie | `kit_session` (overridable via `SESSION_COOKIE_NAME`) · HttpOnly · SameSite=Lax · Secure when not local |
+| Layer         | Kit (normative)                                                                                                                                                        |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Session       | `createBetterAuthSessionPort` + per-request `betterAuth` instance                                                                                                      |
+| Cookie        | `kit_session` (overridable via `SESSION_COOKIE_NAME`) · HttpOnly · SameSite=Lax · Secure when not local                                                                |
 | Login surface | BA handler on `/api/auth/*`, mounted per the [Better Auth mount contract](../../product-consumer-contract.md#better-auth-mount) (email/password; OAuth optional later) |
-| API keys | SHA-256 `sk_` via `hashApiKey` — **unchanged** |
-| FE contract | `credentials: 'include'` + error envelope — **unchanged** |
+| API keys      | SHA-256 `sk_` via `hashApiKey` — **unchanged**                                                                                                                         |
+| FE contract   | `credentials: 'include'` + error envelope — **unchanged**                                                                                                              |
 
 **Stable FE/API contract:**
 
@@ -61,12 +61,12 @@ HMAC-signed cookies shipped first as a Workers-native interim. Issue go-silex/si
 
 ### D2 — HMAC retired
 
-| Removed / forbidden | Notes |
-|---|---|
-| `AUTH_SESSION_ADAPTER=hmac` | Delete switch; do not document as supported |
-| `createHmacSessionPort` as kit path | Not part of the public package API |
-| Demo PBKDF2 `POST /api/auth/login` | Replaced by BA sign-in |
-| Unset adapter → hmac | N/A — no adapter enum for session stack |
+| Removed / forbidden                 | Notes                                       |
+| ----------------------------------- | ------------------------------------------- |
+| `AUTH_SESSION_ADAPTER=hmac`         | Delete switch; do not document as supported |
+| `createHmacSessionPort` as kit path | Not part of the public package API          |
+| Demo PBKDF2 `POST /api/auth/login`  | Replaced by BA sign-in                      |
+| Unset adapter → hmac                | N/A — no adapter enum for session stack     |
 
 ### D3 — SessionPort (normative)
 
@@ -96,11 +96,12 @@ The resolved `SessionPayload` also carries the verified Better Auth `sessionId` 
 
 ### D5 — Mount
 
-| Mounted | Not mounted |
-|---|---|
+| Mounted                                                                 | Not mounted              |
+| ----------------------------------------------------------------------- | ------------------------ |
 | BA `handler` on `/api/auth/*`, after organization deny and kit throttle | HMAC login/logout routes |
 
 Mounting requires the catalog's `core` and `audit` sets; `audit` provides `rate_limit_buckets`. On the raw pathname, reject every Better Auth organization route with 404, then call `throttleBetterAuthRequest`, then the handler. Pass the raw request, `clientIp` unchanged, and a callback retrieving the verified Better Auth session id with refresh disabled. Never route caller input directly to `auth.api.*` or `auth.fetch` to bypass the throttle. Better Auth's own limiter is disabled by the kit factory; missing the kit throttle leaves the mount unthrottled.
+
 ### D6 — Credential comparison (normative)
 
 Added 2026-08-09. The behaviour predates this section; the rule was implemented in
@@ -114,13 +115,13 @@ Added 2026-08-09. The behaviour predates this section; the rule was implemented 
 - **Workers-safe:** no `node:crypto`; `timingSafeEqualHex` compares fixed-length hex via
   byte-wise XOR accumulation.
 - Length mismatch returns `false` **before** the byte loop — an accepted, documented leak of
-  digest *length* only, which is a constant for a given algorithm.
+  digest _length_ only, which is a constant for a given algorithm.
 
 - **Non-goal — lookup-path timing.** D6 governs the comparison primitive only. The credential
-  *lookup* path is not constant-time and is not claimed to be: after the prefix lookup, 0 to 2
+  _lookup_ path is not constant-time and is not claimed to be: after the prefix lookup, 0 to 2
   further D1 queries run depending on the record's shape (unknown prefix / no org / inactive org
   / no membership / org-bound). Reviews must not read D6 as a lookup-path guarantee. If a lookup
-  ever distinguishes something an attacker does *not* already possess, that is a finding to fix
+  ever distinguishes something an attacker does _not_ already possess, that is a finding to fix
   at the call site — not a reason to add a ceiling nobody can hold.
 
 ### D7 — Third client class (remote MCP) is ADR-0015
@@ -205,8 +206,8 @@ prove a deployment.
 
 ## Related
 
-- [ADR-0001](./0001-primary-axis-packages-compose-apps.md) — packages compose apps  
-- [ADR-0003](./0003-multi-tenant-rbac-modules.md) — multi-tenant (BA org spine)  
+- [ADR-0001](./0001-primary-axis-packages-compose-apps.md) — packages compose apps
+- [ADR-0003](./0003-multi-tenant-rbac-modules.md) — multi-tenant (BA org spine)
 - [ADR-0015](./0015-mcp-remote-oauth-worker.md) — hosted Streamable HTTP + Worker MCP OAuth
 - `packages/auth/src/session-port.ts`, `better-auth-port.ts`, `require-auth.ts`, `cookie-name.ts`
 - `apps/example-api/src/middleware/require-auth.ts` — `findKeyRecord` (lookup path; not D6)

@@ -68,16 +68,16 @@ If you cloned the dogfood app: run `--adopt` **immediately**, then follow the ex
 
 ## Fail-closed (script)
 
-| Event | Sync |
-|-------|------|
-| Published module `id` bytes changed (catalog `kitSha256` ≠ live SQL, or recorded product sha ≠ kit) | **Fail** — kit must add a **new** id, never mutate the old one |
-| `--adopt` selected module not present (sha/header miss) | **Fail** — lists unmatched ids; does not write a partial manifest |
+| Event                                                                                                  | Sync                                                                                                                                                                 |
+| ------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Published module `id` bytes changed (catalog `kitSha256` ≠ live SQL, or recorded product sha ≠ kit)    | **Fail** — kit must add a **new** id, never mutate the old one                                                                                                       |
+| `--adopt` selected module not present (sha/header miss)                                                | **Fail** — lists unmatched ids; does not write a partial manifest                                                                                                    |
 | `--adopt`, missing manifest, or `sets` absent, and an unclaimed file matches an unselected catalog set | **Fail** — prints `run without --adopt: --modules <union>`. That command records present files and appends missing ids. `--adopt` cannot, because it does not append |
-| Manifest missing, or `modules` not an object, while a `-- kit-schema:` file exists | **Fail** — does not rebuild a core-only manifest |
-| Target resolves to `apps/example-*` | **Fail** — example-api **is** the applied SSoT |
-| Dest `NNNN_kit_<id>.sql` already exists | **Fail** |
-| Kit band `0001`–`0999` exhausted | **Fail** |
-| Explicit `--modules` omits a set still listed in `sets` that has catalog ids absent from `modules` | **Fail** — names those ids; does not write a partial selection |
+| Manifest missing, or `modules` not an object, while a `-- kit-schema:` file exists                     | **Fail** — does not rebuild a core-only manifest                                                                                                                     |
+| Target resolves to `apps/example-*`                                                                    | **Fail** — example-api **is** the applied SSoT                                                                                                                       |
+| Dest `NNNN_kit_<id>.sql` already exists                                                                | **Fail**                                                                                                                                                             |
+| Kit band `0001`–`0999` exhausted                                                                       | **Fail**                                                                                                                                                             |
+| Explicit `--modules` omits a set still listed in `sets` that has catalog ids absent from `modules`     | **Fail** — names those ids; does not write a partial selection                                                                                                       |
 
 Occupied local `NNNN` (including frozen clone domain files): skip that number and append the next free prefix **in 0001–0999**. Product `1000_` files do not occupy kit slots.
 

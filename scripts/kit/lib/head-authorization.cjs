@@ -68,7 +68,7 @@ async function listComments(github, repo, prNumber) {
   const comments = []
   let page = 1
   let last = 0
-  for (;;) {
+  while (true) {
     const response = await github.rest.issues.listComments({
       ...repo,
       issue_number: prNumber,

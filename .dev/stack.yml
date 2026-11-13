@@ -9,7 +9,7 @@ package_manager: bun
 
 docs:
   path: docs/kit
-  agent_entry: AGENTS.md        # agent instruction entrypoint (read explicitly, never imported)
+  agent_entry: AGENTS.md # agent instruction entrypoint (read explicitly, never imported)
 
 backend:
   framework: hono

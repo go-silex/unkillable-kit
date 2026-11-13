@@ -42,7 +42,7 @@ Reads use `gh`:
 
 ## Pull requests as a triage surface
 
-**PRs as a request surface: no.** A pull request is the landing surface, not an intake queue. Merge follows a current exact-head authorization receipt plus the maintained checks. The `reviewed` and `deps-automerge` labels are hints, not authorization. See [`docs/kit/testing.md`](../kit/testing.md) § *Merge residual* and [`docs/kit/ci-app-setup.md`](../kit/ci-app-setup.md).
+**PRs as a request surface: no.** A pull request is the landing surface, not an intake queue. Merge follows a current exact-head authorization receipt plus the maintained checks. The `reviewed` and `deps-automerge` labels are hints, not authorization. See [`docs/kit/testing.md`](../kit/testing.md) § _Merge residual_ and [`docs/kit/ci-app-setup.md`](../kit/ci-app-setup.md).
 
 ## When a skill says "publish to the issue tracker"
 
@@ -62,15 +62,15 @@ cannot be triaged. This table is the only list of their names and colours; creat
 repository (kit and every product). `size:` is the only source of the review tier — see
 [Tier](#tier).
 
-| Role | Label | Colour |
-|---|---|---|
-| Size / tier | `size:S` | `bfd4f2` |
+| Role        | Label         | Colour   |
+| ----------- | ------------- | -------- |
+| Size / tier | `size:S`      | `bfd4f2` |
 | Size / tier | `size:F-lite` | `fbca04` |
 | Size / tier | `size:F-full` | `d93f0b` |
-| Priority | `P0-critical` | `b60205` |
-| Priority | `P1-high` | `d93f0b` |
-| Priority | `P2-medium` | `fbca04` |
-| Priority | `P3-low` | `0e8a16` |
+| Priority    | `P0-critical` | `b60205` |
+| Priority    | `P1-high`     | `d93f0b` |
+| Priority    | `P2-medium`   | `fbca04` |
+| Priority    | `P3-low`      | `0e8a16` |
 
 ```bash
 gh label create 'size:S' --color bfd4f2 --force
@@ -92,11 +92,11 @@ external tracker — is a product surface, not this vocabulary: never use it in 
 The `size:` label is the **only** source of the review tier τ. Do not infer τ from the diff size,
 the issue title, or a spec file.
 
-| Label | τ | What it costs |
-|---|---|---|
-| `size:S` | S | No SC→Test matrix in the PR body; no decision brief. |
+| Label         | τ      | What it costs                                                                                                                                                                |
+| ------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `size:S`      | S      | No SC→Test matrix in the PR body; no decision brief.                                                                                                                         |
 | `size:F-lite` | F-lite | SC→Test matrix required in the PR body; `/feature` writes a decision brief (what, why, chosen solution, pros, cons, rejected alternatives) into the issue before publishing. |
-| `size:F-full` | F-full | Same as F-lite, with the full review panel. |
+| `size:F-full` | F-full | Same as F-lite, with the full review panel.                                                                                                                                  |
 
 No `size:` label → τ = `F-lite`, and say so out loud: a silent default is the failure
 `issue-triage` exists to prevent. The tier is derived from the body by the κ rubric in
@@ -153,13 +153,13 @@ A `Blocked by:` line in the body is not a relation.
 
 Wayfinding labels are not triage vocabulary and never replace `size:` or priority:
 
-| Wayfinding label | Colour |
-|---|---|
-| `wayfinder:map` | `5319e7` |
-| `wayfinder:research` | `c5def5` |
-| `wayfinder:grilling` | `d4c5f9` |
+| Wayfinding label      | Colour   |
+| --------------------- | -------- |
+| `wayfinder:map`       | `5319e7` |
+| `wayfinder:research`  | `c5def5` |
+| `wayfinder:grilling`  | `d4c5f9` |
 | `wayfinder:prototype` | `fef2c0` |
-| `wayfinder:task` | `e4e669` |
+| `wayfinder:task`      | `e4e669` |
 
 ```bash
 gh label create 'wayfinder:map' --color 5319e7 --force
@@ -173,7 +173,7 @@ gh label create 'wayfinder:task' --color e4e669 --force
 
 A follow-up deferred out of issue A is a **sibling** of A under their shared parent, blocked-by A
 — never a child of A. This keeps the epic's fan-out flat instead of building a nested cascade.
-Planned decomposition (epic → phase) *is* parent/child; post-hoc deferral is not.
+Planned decomposition (epic → phase) _is_ parent/child; post-hoc deferral is not.
 
 Create that sibling through `issue-triage`, with `--parent` set to A's parent (omit it when A has
 none) and `--blocked-by` set to A. Never `--parent` A.

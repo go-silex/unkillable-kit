@@ -47,4 +47,3 @@ pre-push:
     validate-full:
       skip: false
       run: bun run validate:full
-

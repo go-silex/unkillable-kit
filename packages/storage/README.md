@@ -4,13 +4,13 @@ R2 helpers for Chemin A kit apps: safe keys, prefix-enforced client, light **PUT
 
 ## Surfaces
 
-| Export | Role |
-|--------|------|
-| `joinObjectKey` / `assertObjectKey` | Path join; reject empty / `.` / `..` (no silent elision) |
-| `StorageClient` | Prefix-enforced put/get/delete/head/list/**presign** — **product path** |
-| `StorageClient.presign(signer, { parts, … })` | Preferred product presign (prefix-safe key + sign) |
-| `createPresignedUrl(signer, input)` | Low-level: key **must** sit under required `prefix` |
-| `createMockPresignSigner` | Local/CI mock (no CF account / secrets) |
+| Export                                        | Role                                                                    |
+| --------------------------------------------- | ----------------------------------------------------------------------- |
+| `joinObjectKey` / `assertObjectKey`           | Path join; reject empty / `.` / `..` (no silent elision)                |
+| `StorageClient`                               | Prefix-enforced put/get/delete/head/list/**presign** — **product path** |
+| `StorageClient.presign(signer, { parts, … })` | Preferred product presign (prefix-safe key + sign)                      |
+| `createPresignedUrl(signer, input)`           | Low-level: key **must** sit under required `prefix`                     |
+| `createMockPresignSigner`                     | Local/CI mock (no CF account / secrets)                                 |
 
 There are **no** free `putObject` / `getObject` / `deleteObject` helpers. Product object I/O
 goes through `StorageClient` so keys stay under constructor `basePrefix`.

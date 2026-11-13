@@ -57,7 +57,7 @@ async function readSmtpReply(
   decoder: TextDecoder,
   leftover: { buf: string },
 ): Promise<{ code: number; text: string }> {
-  for (;;) {
+  while (true) {
     const parsed = parseSmtpReply(leftover.buf)
     if (parsed?.complete) {
       // consume only the reply portion roughly by clearing on complete reply

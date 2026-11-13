@@ -30,10 +30,10 @@ The package is named **`@kit/tasks`**, with module id **`tasks`**. Without a sha
 
 Each capability owns its Drizzle tables and repositories, exported through `./schema` and `./repos` respectively. Apps compose them and own applied SQL, the Wrangler journal, routes and Worker bindings.
 
-| Package | Role |
-|---------|------|
-| **`@kit/tasks`** | Zod task/stage/link model, visibility, opaque scope, link rules, stage helpers, optional mutation hooks and persistence schema |
-| **`@kit/comments`** | Multi-target comments (`target_type` + `target_id`), same visibility enum and persistence schema |
+| Package             | Role                                                                                                                           |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| **`@kit/tasks`**    | Zod task/stage/link model, visibility, opaque scope, link rules, stage helpers, optional mutation hooks and persistence schema |
+| **`@kit/comments`** | Multi-target comments (`target_type` + `target_id`), same visibility enum and persistence schema                               |
 
 ### D2 — Task model (kernel)
 
@@ -69,11 +69,11 @@ Apps **must** apply filter on every list/get (object ACL after module ACL — AD
 
 ### D6 — Incubate vs promote
 
-| | |
-|--|--|
-| **Incubate** | `@kit/tasks` and `@kit/comments` remain incubating and usable by products; packages own schemas and repositories, while apps own applied SQL. |
-| **Dogfood** | Delivered in Example App: `example-api` composes task and comment persistence and routes; `example-web` uses them. Migration files are present; application to a particular database is deployment-specific. |
-| **Promote** | Requires a stable schema, a green example, and **first real product compose**. Example dogfood alone does not promote the packages. |
+|              |                                                                                                                                                                                                              |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Incubate** | `@kit/tasks` and `@kit/comments` remain incubating and usable by products; packages own schemas and repositories, while apps own applied SQL.                                                                |
+| **Dogfood**  | Delivered in Example App: `example-api` composes task and comment persistence and routes; `example-web` uses them. Migration files are present; application to a particular database is deployment-specific. |
+| **Promote**  | Requires a stable schema, a green example, and **first real product compose**. Example dogfood alone does not promote the packages.                                                                          |
 
 Package.json: mark incubating until promote. ADR presence ≠ promote (same class as flows D6).
 
@@ -95,5 +95,5 @@ Optional `TaskMutationHooks.afterMutation` only — apps own the single write pa
 
 - Product-specific task schema dumps
 - Product-specific categories and hierarchies
-- Intake approval workflow in kit  
-- Resource kind closed enum in kit  
+- Intake approval workflow in kit
+- Resource kind closed enum in kit

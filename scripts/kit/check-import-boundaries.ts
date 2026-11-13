@@ -242,7 +242,7 @@ function extractImports(content: string, file: string): ImportHit[] {
   const lines = scan.split('\n')
   const pushOnLine = (line: string, lineNo: number, re: RegExp) => {
     re.lastIndex = 0
-    for (;;) {
+    while (true) {
       const m = re.exec(line)
       if (m === null) break
       if (isInsideQuotes(line, m.index)) continue

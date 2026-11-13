@@ -32,7 +32,7 @@ This description, its commits, and any screenshot are public once the repository
 
 ## Security checklist (required)
 
-See [`docs/kit/processes/dev-process.md`](../docs/kit/processes/dev-process.md) § *Sécurité & bon usage de l’IA*.
+See [`docs/kit/processes/dev-process.md`](../docs/kit/processes/dev-process.md) § _Sécurité & bon usage de l’IA_.
 
 ### Secrets & config
 

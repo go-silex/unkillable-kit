@@ -13,10 +13,10 @@ on:
   workflow_dispatch:
     inputs:
       notice:
-        description: 'No-op — use Cloudflare Builds or laptop scripts (docs/kit/deploy-cloudflare.md)'
+        description: "No-op — use Cloudflare Builds or laptop scripts (docs/kit/deploy-cloudflare.md)"
         type: string
         required: false
-        default: 'see docs/kit/deploy-cloudflare.md'
+        default: "see docs/kit/deploy-cloudflare.md"
 
 permissions:
   contents: read

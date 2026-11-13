@@ -29,7 +29,7 @@ Chemin A kit must support multi-actor SaaS on Cloudflare (Workers · Hono · D1 
 2. **Back-office** — staff operate across granted clients.
 3. **Platform ops** — super admin configures what exists on the platform.
 4. **Modules** — features can be available platform-wide, then enabled per client.
-5. **Solo vs team client** — one person *or* many people under the same client; one data model only.
+5. **Solo vs team client** — one person _or_ many people under the same client; one data model only.
 
 This kit is the **schema SSoT**; product apps converge here.
 
@@ -64,22 +64,22 @@ operator analysis archive.
 - Multi-user client org = same tables, N memberships.
 - Organization fields (BA plugin + `additionalFields`):
 
-| Field | Values / notes |
-|---|---|
-| `id`, `name`, `slug` | BA standard |
-| `kind` | `client` \| `internal` |
-| `status` | `active` \| `suspended` \| `archived` |
+| Field                | Values / notes                        |
+| -------------------- | ------------------------------------- |
+| `id`, `name`, `slug` | BA standard                           |
+| `kind`               | `client` \| `internal`                |
+| `status`             | `active` \| `suspended` \| `archived` |
 
 ### D2 — Identity spine vs kit authz plane
 
-| Concern | Owner |
-|---|---|
-| User, session, account, OAuth providers | **Better Auth core** (+ social/OIDC plugins as needed) |
-| Organization, member, invitation tables | **Better Auth `organization` plugin** |
-| System org role on membership | **`member.role` = role_key string** |
-| Platform role (`super_admin` \| `staff`) | **Kit table `user_platform_roles`** |
-| Module catalogue + per-org enablement | **Kit tables** (not BA access-control statements) |
-| Phase B custom roles + per-module grants | **Kit tables** (shipped — see D4) |
+| Concern                                  | Owner                                                  |
+| ---------------------------------------- | ------------------------------------------------------ |
+| User, session, account, OAuth providers  | **Better Auth core** (+ social/OIDC plugins as needed) |
+| Organization, member, invitation tables  | **Better Auth `organization` plugin**                  |
+| System org role on membership            | **`member.role` = role_key string**                    |
+| Platform role (`super_admin` \| `staff`) | **Kit table `user_platform_roles`**                    |
+| Module catalogue + per-org enablement    | **Kit tables** (not BA access-control statements)      |
+| Phase B custom roles + per-module grants | **Kit tables** (shipped — see D4)                      |
 
 **Better Auth organization plugin** is still Better Auth — optional module that adds tenant tables/APIs. It is **not** a second auth product.
 
@@ -93,12 +93,12 @@ Allowlisted on `member.role`:
 owner > admin > member > reader
 ```
 
-| role_key | Intent |
-|---|---|
-| `owner` | Full org control (incl. delete org / transfer ownership rules) |
-| `admin` | Members + org modules + write business data |
-| `member` | Standard write |
-| `reader` | Read-only |
+| role_key | Intent                                                         |
+| -------- | -------------------------------------------------------------- |
+| `owner`  | Full org control (incl. delete org / transfer ownership rules) |
+| `admin`  | Members + org modules + write business data                    |
+| `member` | Standard write                                                 |
+| `reader` | Read-only                                                      |
 
 System-role seed capability matrices provide defaults; current authorization resolves per-organization role-module grants. Server rejects role strings outside the configured system and custom roles.
 
@@ -118,26 +118,26 @@ organization_role_module_grants (role_id, module_id, access: write | read | disa
 - **Empty `@kit/rbac` package forbidden** — helpers live in `@kit/auth` (pure) and/or app services until ≥2 call sites (A8).
 - **Shipped**, not planned. Evidence:
 
-| Artefact | Path |
-|---|---|
-| Tables | [`migrations/0009_organization_roles_grants.sql`](../../../../apps/example-api/migrations/0009_organization_roles_grants.sql) (go-silex/silex-boilerplate#22) |
-| Schema | [`tenancy-schema.ts`](../../../../packages/auth/src/tenancy-schema.ts) — `organizationRoles`, `organizationRoleModuleGrants` |
+| Artefact                 | Path                                                                                                                                                                                       |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Tables                   | [`migrations/0009_organization_roles_grants.sql`](../../../../apps/example-api/migrations/0009_organization_roles_grants.sql) (go-silex/silex-boilerplate#22)                              |
+| Schema                   | [`tenancy-schema.ts`](../../../../packages/auth/src/tenancy-schema.ts) — `organizationRoles`, `organizationRoleModuleGrants`                                                               |
 | Role × module resolution | [`services/org-roles.ts`](../../../../apps/example-api/src/services/org-roles.ts) — `resolveModuleAccess`, `listRolesWithGrants`; read-mostly, it lazily seeds missing system roles/grants |
-| System-role seed | [`module-grants.ts`](../../../../packages/auth/src/module-grants.ts) — `systemRoleGrantSeed` |
-| Routes | [`orgs-roles.schemas.ts`](../../../../apps/example-api/src/routes/orgs-roles.schemas.ts) — `listRoles`, `createRole`, `patchRoleGrant`, `deleteRole` |
-| Request guard | [`middleware/org-context.ts`](../../../../apps/example-api/src/middleware/org-context.ts) → `resolveModuleAccess` |
-| Authority consumer | [`services/flows-grant.ts`](../../../../apps/example-api/src/services/flows-grant.ts) — `mintGrantForOrg` |
-| Tests | [`org-roles-phase-b.test.ts`](../../../../apps/example-api/src/org-roles-phase-b.test.ts) |
+| System-role seed         | [`module-grants.ts`](../../../../packages/auth/src/module-grants.ts) — `systemRoleGrantSeed`                                                                                               |
+| Routes                   | [`orgs-roles.schemas.ts`](../../../../apps/example-api/src/routes/orgs-roles.schemas.ts) — `listRoles`, `createRole`, `patchRoleGrant`, `deleteRole`                                       |
+| Request guard            | [`middleware/org-context.ts`](../../../../apps/example-api/src/middleware/org-context.ts) → `resolveModuleAccess`                                                                          |
+| Authority consumer       | [`services/flows-grant.ts`](../../../../apps/example-api/src/services/flows-grant.ts) — `mintGrantForOrg`                                                                                  |
+| Tests                    | [`org-roles-phase-b.test.ts`](../../../../apps/example-api/src/org-roles-phase-b.test.ts)                                                                                                  |
 
 Ship order held: after BA-only (ADR-0002 A0) + A4 shells/invites.
 
 ### D5 — Platform roles
 
-| platform_role | Meaning |
-|---|---|
+| platform_role | Meaning                                                             |
+| ------------- | ------------------------------------------------------------------- |
 | `super_admin` | Platform catalogue, global config, optional cross-org support flags |
-| `staff` | Back-office shell; **data access only via org memberships** |
-| *(absent)* | Pure client (or no platform privileges) |
+| `staff`       | Back-office shell; **data access only via org memberships**         |
+| _(absent)_    | Pure client (or no platform privileges)                             |
 
 Storage: kit table (not BA user `additionalFields` client-writable):
 
@@ -185,11 +185,11 @@ organization_modules (
 )
 ```
 
-| Actor | Can |
-|---|---|
-| Super admin | Set `available`, global `config_json` |
+| Actor                | Can                                                        |
+| -------------------- | ---------------------------------------------------------- |
+| Super admin          | Set `available`, global `config_json`                      |
 | Org admin / BO admin | Set `enabled` (and later `locked`) **only if** `available` |
-| End user | Consume **effective** modules per role grants |
+| End user             | Consume **effective** modules per role grants              |
 
 **Effective access (normative):**
 
@@ -207,22 +207,22 @@ Migrate existing `kit_modules` → `platform_modules` (`enabled` → `available`
 
 ### D8 — Org context on requests
 
-| Layer | Rule |
-|---|---|
-| SPA UX | The SPA keeps its selected org client-side and sends it as the path or header below. Better Auth's active organization is unused: its `set-active` route is denied with every other organization route (D10) |
-| Authorization | **Explicit org id** preferred (path `/orgs/:orgId/...`); else validated header (`X-Org-Id`) |
-| Resolution order | path || header (no BA active-org fallback) |
-| Mismatch | **403** (never silent wrong-tenant write; fail-closed) |
-| Every data query | `WHERE organization_id = ?` fail-closed |
+| Layer                       | Rule                                                                                                                                                                                                                                                                                                                                                         |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| SPA UX                      | The SPA keeps its selected org client-side and sends it as the path or header below. Better Auth's active organization is unused: its `set-active` route is denied with every other organization route (D10)                                                                                                                                                 |
+| Authorization               | **Explicit org id** preferred (path `/orgs/:orgId/...`); else validated header (`X-Org-Id`)                                                                                                                                                                                                                                                                  |
+| Resolution order            | path                                                                                                                                                                                                                                                                                                                                                         |     | header (no BA active-org fallback) |
+| Mismatch                    | **403** (never silent wrong-tenant write; fail-closed)                                                                                                                                                                                                                                                                                                       |
+| Every data query            | `WHERE organization_id = ?` fail-closed                                                                                                                                                                                                                                                                                                                      |
 | **Kennel exemption (M-10)** | Dogfood `demo_items` / `demo_notes` / demo uploads are **subject-owned**. They MUST NOT take an `organization_id` column or `requireOrgContext` — org-gating writes while listing by subject was the D11 hole. Tenant tables (orgs, tasks, flows, comments) stay on D8. The `demo` module id stays in the catalogue/seed; it is **not** items authorization. |
 ### D9 — Super_admin support semantics
 
-| Operation | Default |
-|---|---|
-| Platform routes (catalogue, global config, list orgs) | `requirePlatformRole('super_admin')` |
-| Cross-org **read** tenant data | Opt-in per guard: `allowSuperAdmin: true` + **audit** (actor, org, action, requestId) |
-| Cross-org **write** tenant data | **Default off**; break-glass only via `allowSuperAdminWrite` on named routes + audit |
-| Staff | Never cross-org without membership |
+| Operation                                             | Default                                                                               |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| Platform routes (catalogue, global config, list orgs) | `requirePlatformRole('super_admin')`                                                  |
+| Cross-org **read** tenant data                        | Opt-in per guard: `allowSuperAdmin: true` + **audit** (actor, org, action, requestId) |
+| Cross-org **write** tenant data                       | **Default off**; break-glass only via `allowSuperAdminWrite` on named routes + audit  |
+| Staff                                                 | Never cross-org without membership                                                    |
 
 Support may diagnose with read; write is rare and explicit.
 
@@ -262,21 +262,21 @@ Protected by default; public routes explicit. Prefer **404** on cross-tenant res
 
 ### D13 — Package placement (ADR-0001)
 
-| Location | Owns |
-|---|---|
-| `@kit/auth` | SQL compose artifacts for BA org (+ kit RBAC SQL if shared); role constants; pure hierarchy helpers; thin guard factories with injected ports (**no** product `MODULE_IDS`) |
-| `apps/example-*` | Drizzle wire-up, routes, seed multi-persona, module registry, integration tests |
-| New `@kit/rbac` / `@kit/tenancy` | **No** empty package in Phase A (promote only at two call sites or superseding ADR) |
+| Location                         | Owns                                                                                                                                                                        |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@kit/auth`                      | SQL compose artifacts for BA org (+ kit RBAC SQL if shared); role constants; pure hierarchy helpers; thin guard factories with injected ports (**no** product `MODULE_IDS`) |
+| `apps/example-*`                 | Drizzle wire-up, routes, seed multi-persona, module registry, integration tests                                                                                             |
+| New `@kit/rbac` / `@kit/tenancy` | **No** empty package in Phase A (promote only at two call sites or superseding ADR)                                                                                         |
 
 ### D14 — Seed acceptance (kit demo)
 
-| Persona | platform_role | Memberships |
-|---|---|---|
-| Super admin | super_admin | optional |
-| Staff A | staff | org_acme `admin`, org_beta `member` |
-| Solo client | — | org_solo `owner` (sole member) |
-| Team owner | — | org_team `owner` |
-| Team reader | — | org_team `reader` |
+| Persona     | platform_role | Memberships                         |
+| ----------- | ------------- | ----------------------------------- |
+| Super admin | super_admin   | optional                            |
+| Staff A     | staff         | org_acme `admin`, org_beta `member` |
+| Solo client | —             | org_solo `owner` (sole member)      |
+| Team owner  | —             | org_team `owner`                    |
+| Team reader | —             | org_team `reader`                   |
 
 Modules: e.g. `feedback` available on platform; enabled on acme; disabled on beta.
 
@@ -298,14 +298,14 @@ All tabs sharing the session use one represented User, a persistent actor/target
 
 ## Phasing
 
-| Phase | Scope | Status (2026-09-18) |
-|---|---|---|
-| **A0** | Session BA-only — **HMAC retired** (ADR-0002 amend) | **Shipped** (epic B2 / go-silex/silex-boilerplate#14) |
-| **A1** | BA `organization` plugin + four roles + org `kind`/`status` | **Shipped** (go-silex/silex-boilerplate#11) |
-| **A2** | `user_platform_roles` + `platform_modules` + `organization_modules` + migrate `kit_modules` | **Shipped** (go-silex/silex-boilerplate#11) |
-| **A3** | Guards + multi-persona seed + IDOR matrix CI; org-bound API keys | **Shipped** (go-silex/silex-boilerplate#11) |
-| **A4** | Demo shells `/admin` + `/app` (S1) + kit invites UX (S2) | **S1+S2 shipped** (go-silex/silex-boilerplate#15); S3 reset still open |
-| **B** | Custom org roles + per-module write/read/disabled matrix | **Shipped** (go-silex/silex-boilerplate#22, 2026-07-31) — see D4 evidence |
+| Phase  | Scope                                                                                       | Status (2026-09-18)                                                       |
+| ------ | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| **A0** | Session BA-only — **HMAC retired** (ADR-0002 amend)                                         | **Shipped** (epic B2 / go-silex/silex-boilerplate#14)                     |
+| **A1** | BA `organization` plugin + four roles + org `kind`/`status`                                 | **Shipped** (go-silex/silex-boilerplate#11)                               |
+| **A2** | `user_platform_roles` + `platform_modules` + `organization_modules` + migrate `kit_modules` | **Shipped** (go-silex/silex-boilerplate#11)                               |
+| **A3** | Guards + multi-persona seed + IDOR matrix CI; org-bound API keys                            | **Shipped** (go-silex/silex-boilerplate#11)                               |
+| **A4** | Demo shells `/admin` + `/app` (S1) + kit invites UX (S2)                                    | **S1+S2 shipped** (go-silex/silex-boilerplate#15); S3 reset still open    |
+| **B**  | Custom org roles + per-module write/read/disabled matrix                                    | **Shipped** (go-silex/silex-boilerplate#22, 2026-07-31) — see D4 evidence |
 
 ## Consequences
 
@@ -342,8 +342,8 @@ All tabs sharing the session use one represented User, a persistent actor/target
 
 ## Related
 
-- [ADR-0001](./0001-primary-axis-packages-compose-apps.md) — packages compose apps  
-- [ADR-0002](./0002-session-hmac-interim-vs-better-auth.md) — BA-only session + `sk_` dual-path  
-- Consensus: operator archive  
+- [ADR-0001](./0001-primary-axis-packages-compose-apps.md) — packages compose apps
+- [ADR-0002](./0002-session-hmac-interim-vs-better-auth.md) — BA-only session + `sk_` dual-path
+- Consensus: operator archive
 
 - Phase A modules: `platform_modules` / `organization_modules` (legacy `kit_modules` migrated in go-silex/silex-boilerplate#11)

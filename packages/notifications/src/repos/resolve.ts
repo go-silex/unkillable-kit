@@ -33,7 +33,7 @@ function resolutionScope(data: z.infer<typeof inputSchema>, predicates?: Resolve
   const users = data.userIds ? [JSON.stringify(data.userIds)] : []
   const notificationGuard = predicates && dialect.sqlToQuery(predicates.notifications)
   const collectiveGuard = predicates && dialect.sqlToQuery(predicates.organizationDeliveries)
-  const common = 'org_id=? AND source_kind=? AND source_id=? AND resolved_at IS NULL' + typeFilter
+  const common = `org_id=? AND source_kind=? AND source_id=? AND resolved_at IS NULL${typeFilter}`
   return {
     predicate: common + userFilter + (notificationGuard ? ` AND (${notificationGuard.sql})` : ''),
     notificationParams: [...base, ...types, ...users, ...(notificationGuard?.params ?? [])],

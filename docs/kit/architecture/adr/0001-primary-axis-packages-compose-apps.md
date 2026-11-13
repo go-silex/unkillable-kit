@@ -40,6 +40,7 @@ This repository ships the Chemin A Cloudflare SaaS kit; product apps live in con
 Product-first or deployable-first organization duplicates cross-cutting capabilities; a layer-first split risks coupling unrelated domains. Platform packages instead keep reusable capabilities separate from app composition. The workspace contains packages and synthetic example apps; their presence does not prove external product adoption or deployment.
 
 ## Consequences
+
 - New CF SaaS → new apps under `apps/` in a consumer repository
 - New cross-cutting capability → package when ≥2 call sites or ADR
 - Extract dry-run: no product-share compounds under `packages/**` or `apps/example-*/**`

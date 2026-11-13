@@ -30,14 +30,14 @@ Every suppression in **`apps/`** and **`packages/`** must carry `DEBT:<slug>` af
 // @ts-expect-error legacy binding — DEBT:legacy-wrangler-env #19
 ```
 
-| Element | Rule |
-|---|---|
-| Markers scanned | `biome-ignore`, `@ts-expect-error`, `@ts-ignore` |
-| Scope | `apps/**`, `packages/**` (`.ts` / `.tsx`) — not `scripts/kit/` / `tools/` |
-| Slug | kebab-case: `[a-z0-9]+(-[a-z0-9]+)*` |
-| Separator | `— DEBT:` or `- DEBT:` (em/en dash or hyphen before `DEBT:`) |
-| Issue pin | optional `DEBT:<slug> #<N>` only (space + `#` immediately after slug) — **hard pin**: skips expiry forever until the pin is removed |
-| Prefer | remove the suppression (fix root cause) over adding DEBT |
+| Element         | Rule                                                                                                                                |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Markers scanned | `biome-ignore`, `@ts-expect-error`, `@ts-ignore`                                                                                    |
+| Scope           | `apps/**`, `packages/**` (`.ts` / `.tsx`) — not `scripts/kit/` / `tools/`                                                           |
+| Slug            | kebab-case: `[a-z0-9]+(-[a-z0-9]+)*`                                                                                                |
+| Separator       | `— DEBT:` or `- DEBT:` (em/en dash or hyphen before `DEBT:`)                                                                        |
+| Issue pin       | optional `DEBT:<slug> #<N>` only (space + `#` immediately after slug) — **hard pin**: skips expiry forever until the pin is removed |
+| Prefer          | remove the suppression (fix root cause) over adding DEBT                                                                            |
 
 **Not scanned (v1):** `// @ts-nocheck`, file-level biome config, `tools/` / `scripts/kit/` helper ignores.
 
@@ -45,11 +45,11 @@ Every suppression in **`apps/`** and **`packages/`** must carry `DEBT:<slug>` af
 
 ## Modes
 
-| Gate | Env | Default | Fail when |
-|---|---|---|---|
-| **Untagged** | `DEBT_UNTAGGED_MODE=warn\|fail` | **fail** | marker without `DEBT:<slug>` |
-| **Expiry** | `DEBT_EXPIRY_MODE=off\|warn\|fail` | **warn** | `fail` + stale; or an unpinned marker's required Git lookup cannot complete |
-| **Grace** | `DEBT_EXPIRY_MONTHS` | **6** | — |
+| Gate         | Env                                | Default  | Fail when                                                                   |
+| ------------ | ---------------------------------- | -------- | --------------------------------------------------------------------------- |
+| **Untagged** | `DEBT_UNTAGGED_MODE=warn\|fail`    | **fail** | marker without `DEBT:<slug>`                                                |
+| **Expiry**   | `DEBT_EXPIRY_MODE=off\|warn\|fail` | **warn** | `fail` + stale; or an unpinned marker's required Git lookup cannot complete |
+| **Grace**    | `DEBT_EXPIRY_MONTHS`               | **6**    | —                                                                           |
 
 ### Stale definition (expiry)
 
@@ -84,17 +84,18 @@ Wired into `validate:full` (untagged fail, expiry warn — stale debt does not b
 
 No per-slug Markdown file is required in the kit. If a slug is reused often, add a row:
 
-| Slug | Why it exists | Drain |
-|---|---|---|
-| `fastmcp-zod-boundary` | FastMCP + Zod infer mismatch | when FastMCP types stabilize |
-| `fastmcp-duck-type` | FastMCP `addTool` parameter is not assignable without a wide type | when FastMCP types stabilize |
-| `cog-gate` | gate script decision procedure; branches are the spec | [Roxabi/roxabi-boilerplate-cf#287](https://github.com/Roxabi/roxabi-boilerplate-cf/issues/287): split by responsibility, not by moving branches into a helper. Ceiling in `config/kit/debt-ceilings.json` |
-| `cog-authz` | flows authority / plan decision table | Roxabi/roxabi-boilerplate-cf#287, same rule |
-| `cog-svc` | example service or seed decision procedure | Roxabi/roxabi-boilerplate-cf#287, same rule |
-| `cog-ui` | UI composition branches | Roxabi/roxabi-boilerplate-cf#287, same rule |
-| `cog-map` | boundary mapping (client, auth middleware, email, MCP budget) | Roxabi/roxabi-boilerplate-cf#287, same rule |
-| `cog-shadcn` | shadcn chart primitive; do not hand-edit for a score | vendor bump (not Roxabi/roxabi-boilerplate-cf#287) |
-| `modal-a11y-*` | Base UI modal patterns | product design pass |
+| Slug                   | Why it exists                                                                                                  | Drain                                                                                                                                                                                                     |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `fastmcp-zod-boundary` | FastMCP + Zod infer mismatch                                                                                   | when FastMCP types stabilize                                                                                                                                                                              |
+| `fastmcp-duck-type`    | FastMCP `addTool` parameter is not assignable without a wide type                                              | when FastMCP types stabilize                                                                                                                                                                              |
+| `cog-gate`             | gate script decision procedure; branches are the spec                                                          | [Roxabi/roxabi-boilerplate-cf#287](https://github.com/Roxabi/roxabi-boilerplate-cf/issues/287): split by responsibility, not by moving branches into a helper. Ceiling in `config/kit/debt-ceilings.json` |
+| `cog-authz`            | flows authority / plan decision table                                                                          | Roxabi/roxabi-boilerplate-cf#287, same rule                                                                                                                                                               |
+| `cog-svc`              | example service or seed decision procedure                                                                     | Roxabi/roxabi-boilerplate-cf#287, same rule                                                                                                                                                               |
+| `cog-ui`               | UI composition branches                                                                                        | Roxabi/roxabi-boilerplate-cf#287, same rule                                                                                                                                                               |
+| `cog-map`              | boundary mapping (client, auth middleware, email, MCP budget)                                                  | Roxabi/roxabi-boilerplate-cf#287, same rule                                                                                                                                                               |
+| `cog-shadcn`           | shadcn chart primitive; do not hand-edit for a score                                                           | vendor bump (not Roxabi/roxabi-boilerplate-cf#287)                                                                                                                                                        |
+| `i18n-react-factory`   | Biome flags the per-catalog typed provider and hook factory definition rather than its module-scope call sites | Remove the markers when Biome stops reporting or the contract moves to a prop-threaded provider                                                                                                           |
+| `modal-a11y-*`         | Base UI modal patterns                                                                                         | product design pass                                                                                                                                                                                       |
 
 Keep the table short; prefer issue refs on the marker line.
 
@@ -129,21 +130,21 @@ Included in `quality-gates:check` next to file length.
 
 ## What this does **not** cover
 
-| Out | Why |
-|---|---|
-| Full factory debt registry + audit JSON | kit non-goal |
-| Importlinter / ACL | N/A Chemin A |
-| Silent Biome overrides in `biome.json` | separate policy |
-| Product apps outside this monorepo | consumers own gates |
+| Out                                     | Why                 |
+| --------------------------------------- | ------------------- |
+| Full factory debt registry + audit JSON | kit non-goal        |
+| Importlinter / ACL                      | N/A Chemin A        |
+| Silent Biome overrides in `biome.json`  | separate policy     |
+| Product apps outside this monorepo      | consumers own gates |
 
 ---
 
 ## Related
 
-| Doc / gate | Role |
-|---|---|
-| [`testing.md`](./testing.md) · **CP-DEBT** | control-point inventory |
+| Doc / gate                                    | Role                                                                       |
+| --------------------------------------------- | -------------------------------------------------------------------------- |
+| [`testing.md`](./testing.md) · **CP-DEBT**    | control-point inventory                                                    |
 | Historical plan `010-quality-hygiene-debt.md` | provenance retained; the historical target is no longer in this repository |
-| `scripts/kit/check-debt.ts` | untagged + expiry scanner |
-| `scripts/kit/check_folder_size.sh` | folder density |
-| kit-factory `docs/kit/debt-tracking.md` | upstream inspiration |
+| `scripts/kit/check-debt.ts`                   | untagged + expiry scanner                                                  |
+| `scripts/kit/check_folder_size.sh`            | folder density                                                             |
+| kit-factory `docs/kit/debt-tracking.md`       | upstream inspiration                                                       |

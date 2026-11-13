@@ -4,7 +4,7 @@ This repository is the extractible Cloudflare Chemin A kit: shared packages, exa
 
 ## Mission and precedence
 
-The mission is **kit only**. Product domain, company-specific workflows and the *Company OS+++* narrative belong to product repositories; they are not a second mission for this monorepo.
+The mission is **kit only**. Product domain, company-specific workflows and the _Company OS+++_ narrative belong to product repositories; they are not a second mission for this monorepo.
 
 **Conflict rule:** when kit extractibility and platform direction disagree, **developer JTBD + the root machine gate + [ADR-0001](docs/kit/architecture/adr/0001-primary-axis-packages-compose-apps.md) win**. Directional prose is not an implementation backlog without an issue or accepted ADR.
 
@@ -17,20 +17,20 @@ Authority descends in this order:
 
 ## Direction — multi-tenant capability kernel
 
-| Language | Meaning |
-|---|---|
-| **Kit, normative** | A multi-tenant capability kernel: `@kit/*` packages composed by independent product deploys |
-| **Product narrative, non-normative** | *Company OS+++* is a possible product story, never the kit ambition or a reason to add product domain here |
+| Language                             | Meaning                                                                                                    |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| **Kit, normative**                   | A multi-tenant capability kernel: `@kit/*` packages composed by independent product deploys                |
+| **Product narrative, non-normative** | _Company OS+++_ is a possible product story, never the kit ambition or a reason to add product domain here |
 
 The kernel grows through evidence-gated capability layers:
 
 Detailed JTBD, dogfood modes, anti-isomorphism tests and promotion priorities live in [`docs/kit/architecture/platform-direction.md`](docs/kit/architecture/platform-direction.md).
 
-| Layer | Kit responsibility | Product responsibility | Promotion gate |
-|---|---|---|---|
-| **SaaS** | auth, core, db, ui, storage, email, i18n and types | modules, routes, seed and domain | ADR-0001 + [ADR-0003](docs/kit/architecture/adr/0003-multi-tenant-rbac-modules.md) |
-| **Workflows** | governed plan primitives and shared runtime contracts | plans, tools, bindings and product wire | [ADR-0005](docs/kit/architecture/adr/0005-flows-platform-agentic-workflows.md) evidence gates |
-| **Agents** | shared registry/MCP conventions only after repeated use | prompts, product tools and optional code mode | after durable workflow proof and a second consumer |
+| Layer         | Kit responsibility                                      | Product responsibility                        | Promotion gate                                                                                |
+| ------------- | ------------------------------------------------------- | --------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| **SaaS**      | auth, core, db, ui, storage, email, i18n and types      | modules, routes, seed and domain              | ADR-0001 + [ADR-0003](docs/kit/architecture/adr/0003-multi-tenant-rbac-modules.md)            |
+| **Workflows** | governed plan primitives and shared runtime contracts   | plans, tools, bindings and product wire       | [ADR-0005](docs/kit/architecture/adr/0005-flows-platform-agentic-workflows.md) evidence gates |
+| **Agents**    | shared registry/MCP conventions only after repeated use | prompts, product tools and optional code mode | after durable workflow proof and a second consumer                                            |
 
 `example-*` proves kit composition synthetically. A zero-edit product attests the consumer contract: the gate guards against accidental divergence from the inherited kit tip, it is not tamper-proof provenance. Only a real external product deployment can prove the platform JTBD; examples alone cannot.
 
@@ -53,10 +53,10 @@ Detailed JTBD, dogfood modes, anti-isomorphism tests and promotion priorities li
 
 ## Kit and product boundaries
 
-| Kit owns | Product owns |
-|---|---|
+| Kit owns                                                                                                             | Product owns                                                                                              |
+| -------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
 | `packages/*`, `apps/example-*`, `apps/mcp-example`, root configuration, kit scripts/config, CI and kit documentation | New `apps/<product>-*`, product domain, product plans/prompts, product configuration and `docs/product/*` |
-| Generic capability contracts promoted by two call sites or an accepted ADR | Product-specific schemas, routes, copy, branding and deployment bindings |
+| Generic capability contracts promoted by two call sites or an accepted ADR                                           | Product-specific schemas, routes, copy, branding and deployment bindings                                  |
 
 Packages never import apps. Product domain never enters `packages/*` or `apps/example-*`. Do not create empty packages for anticipated use, ambient connector registries, unauthenticated approval events, shell/exec tools or code mode as kit defaults.
 
@@ -90,21 +90,21 @@ Detailed security and agent process lives in [`docs/kit/processes/dev-process.md
 
 The root `package.json` script `validate:full` is the single source of truth for the kit gate; do not copy its internal step list into documentation. Run the applicable root gate before a push, and treat CI as a guardrail rather than the primary debugging loop. [`docs/kit/testing.md`](docs/kit/testing.md) owns the testing doctrine, CP inventory and non-claims.
 
-On GitHub **Free private**, merge-on-green is **process**, not branch protection: write access can merge a PR or push `main` without an authorization receipt and without green checks. The workflow validates receipts for its own merges; it does not constrain other writers. Residual: [`docs/kit/testing.md`](docs/kit/testing.md) § *Merge residual*.
+On GitHub **Free private**, merge-on-green is **process**, not branch protection: write access can merge a PR or push `main` without an authorization receipt and without green checks. The workflow validates receipts for its own merges; it does not constrain other writers. Residual: [`docs/kit/testing.md`](docs/kit/testing.md) § _Merge residual_.
 
 ## Conditional reading
 
-| Trigger | Read |
-|---|---|
-| Naming a concept, or wording docs, reviews and commits | [`GLOSSARY.md`](GLOSSARY.md) — the glossary governs prose and renames nothing |
-| Any kit documentation or authority question | [`docs/kit/README.md`](docs/kit/README.md) |
-| Creating or editing a GitHub issue, pull request, or comment | [`CONTRIBUTING.md`](CONTRIBUTING.md#public-safe-publication), then the writer in [`docs/agents/issue-tracker.md`](docs/agents/issue-tracker.md) |
-| Stack, package boundary, frontend, auth, errors, i18n or observability choice | [`docs/kit/standards/stack.md`](docs/kit/standards/stack.md) |
-| Platform direction, architecture change or ADR status | [`docs/kit/architecture/platform-direction.md`](docs/kit/architecture/platform-direction.md), [`docs/kit/architecture/index.md`](docs/kit/architecture/index.md) and the relevant ADR |
-| Tests, gates, coverage or verification claim | [`docs/kit/testing.md`](docs/kit/testing.md) |
-| Security-sensitive or AI-assisted development | [`docs/kit/processes/dev-process.md`](docs/kit/processes/dev-process.md) |
-| Product consumer, this clone's role, upstream sync, zero-edit or schema composition | [`docs/kit/product-consumer-contract.md`](docs/kit/product-consumer-contract.md) and [`docs/kit/kit-schema-sync.md`](docs/kit/kit-schema-sync.md) |
-| New product onboarding | [`docs/kit/playbooks/start-product.md`](docs/kit/playbooks/start-product.md) |
-| Environment or Cloudflare deploy | [`docs/kit/environments.md`](docs/kit/environments.md) and [`docs/kit/deploy-cloudflare.md`](docs/kit/deploy-cloudflare.md) |
-| Email transport | [`docs/kit/email-cf-runbook.md`](docs/kit/email-cf-runbook.md) and [ADR-0004](docs/kit/architecture/adr/0004-email-transport-cf-default.md) |
-| UI package work | [`docs/kit/ui-kit.md`](docs/kit/ui-kit.md) |
+| Trigger                                                                             | Read                                                                                                                                                                                  |
+| ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Naming a concept, or wording docs, reviews and commits                              | [`GLOSSARY.md`](GLOSSARY.md) — the glossary governs prose and renames nothing                                                                                                         |
+| Any kit documentation or authority question                                         | [`docs/kit/README.md`](docs/kit/README.md)                                                                                                                                            |
+| Creating or editing a GitHub issue, pull request, or comment                        | [`CONTRIBUTING.md`](CONTRIBUTING.md#public-safe-publication), then the writer in [`docs/agents/issue-tracker.md`](docs/agents/issue-tracker.md)                                       |
+| Stack, package boundary, frontend, auth, errors, i18n or observability choice       | [`docs/kit/standards/stack.md`](docs/kit/standards/stack.md)                                                                                                                          |
+| Platform direction, architecture change or ADR status                               | [`docs/kit/architecture/platform-direction.md`](docs/kit/architecture/platform-direction.md), [`docs/kit/architecture/index.md`](docs/kit/architecture/index.md) and the relevant ADR |
+| Tests, gates, coverage or verification claim                                        | [`docs/kit/testing.md`](docs/kit/testing.md)                                                                                                                                          |
+| Security-sensitive or AI-assisted development                                       | [`docs/kit/processes/dev-process.md`](docs/kit/processes/dev-process.md)                                                                                                              |
+| Product consumer, this clone's role, upstream sync, zero-edit or schema composition | [`docs/kit/product-consumer-contract.md`](docs/kit/product-consumer-contract.md) and [`docs/kit/kit-schema-sync.md`](docs/kit/kit-schema-sync.md)                                     |
+| New product onboarding                                                              | [`docs/kit/playbooks/start-product.md`](docs/kit/playbooks/start-product.md)                                                                                                          |
+| Environment or Cloudflare deploy                                                    | [`docs/kit/environments.md`](docs/kit/environments.md) and [`docs/kit/deploy-cloudflare.md`](docs/kit/deploy-cloudflare.md)                                                           |
+| Email transport                                                                     | [`docs/kit/email-cf-runbook.md`](docs/kit/email-cf-runbook.md) and [ADR-0004](docs/kit/architecture/adr/0004-email-transport-cf-default.md)                                           |
+| UI package work                                                                     | [`docs/kit/ui-kit.md`](docs/kit/ui-kit.md)                                                                                                                                            |

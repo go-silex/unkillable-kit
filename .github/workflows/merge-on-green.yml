@@ -12,7 +12,7 @@ on:
     branches: [main, staging]
   workflow_run:
     # Reserved gate name; ordered exclusion requires hosted qualification.
-    workflows: ['**', '!Merge on Green']
+    workflows: ["**", "!Merge on Green"]
     types: [completed]
   status:
   push:

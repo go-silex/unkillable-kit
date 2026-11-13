@@ -10,13 +10,13 @@ Repository administrators, App managers, configured human operators, and trusted
 2. Set repository Actions variable `CI_APP_ID` to the App's Client ID for token minting. Record the same App's **numeric App ID**, distinct from the Client ID, and its **numeric bot user ID** from GitHub. Obtain the target repository's immutable numeric ID and the numeric GitHub user IDs of trusted human operators from GitHub, not from display names.
 3. Set the following repository Actions variables. The operator list is a JSON array of numeric IDs, not logins or strings. On Free private repositories use repository-level values rather than relying on organization-level Actions values.
 
-   | Variable | Value |
-   |---|---|
-   | `HEAD_AUTH_REPOSITORY_ID` | Target repository's numeric ID |
-   | `HEAD_AUTH_OPERATOR_IDS` | JSON array of trusted human numeric user IDs |
-   | `HEAD_AUTH_APP_ID` | Numeric ID of the installed CI App |
-   | `HEAD_AUTH_BOT_USER_ID` | Numeric user ID of that App's bot |
-   | `CI_APP_ID` | App Client ID used to mint tokens |
+   | Variable                  | Value                                        |
+   | ------------------------- | -------------------------------------------- |
+   | `HEAD_AUTH_REPOSITORY_ID` | Target repository's numeric ID               |
+   | `HEAD_AUTH_OPERATOR_IDS`  | JSON array of trusted human numeric user IDs |
+   | `HEAD_AUTH_APP_ID`        | Numeric ID of the installed CI App           |
+   | `HEAD_AUTH_BOT_USER_ID`   | Numeric user ID of that App's bot            |
+   | `CI_APP_ID`               | App Client ID used to mint tokens            |
 
 4. Grant the installed App repository **Contents: read and write**, **Workflows: read and write**, and **Pull requests: read and write**; GitHub supplies Metadata read. The merge token requests `contents: write` and `workflows: write` so it can merge workflow-pin changes. The separate PR comment/label publication token requests `pull-requests: write`, not `issues: write`. Gate reads use a separate read-only `GITHUB_TOKEN`; the App's union of permissions does not mean every minted token receives that union. Other inherited consumers may require additional permissions, such as Dependabot alerts read for the optional alert workflow.
 5. Confirm the implementation is present on the default branch and the effective variables and secret are available to the intended workflows. An absent `CI_APP_ID` disables automated writes: a complete valid authorization policy permits read-only merge evaluation, while an absent policy skips evaluation. An operator must perform a separately authorized manual merge. A nonempty ID with a missing key is a configuration failure, not inactive mode. Confirm an actual mint only in a separately authorized operational exercise: dispatch may also merge eligible PRs.
@@ -63,12 +63,12 @@ The completion filter is intended to cover arbitrary workflow names while exclud
 
 ## Workflow consumers and operations
 
-| Workflow | Role |
-|---|---|
-| `merge-on-green.yml` | Evaluates the exact receipt and current checks; scoped App token performs the merge |
-| `dependabot-automerge.yml` | Withdraws, captures and evaluates an immutable head/base, then publishes only an allowed machine receipt |
-| `deploy-gate.yml` | Uses the CI App for a separately decided deploy-branch promotion |
-| `dependabot-alert-slack.yml` | Optional alerts; may require Dependabot alerts read |
+| Workflow                     | Role                                                                                                     |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `merge-on-green.yml`         | Evaluates the exact receipt and current checks; scoped App token performs the merge                      |
+| `dependabot-automerge.yml`   | Withdraws, captures and evaluates an immutable head/base, then publishes only an allowed machine receipt |
+| `deploy-gate.yml`            | Uses the CI App for a separately decided deploy-branch promotion                                         |
+| `dependabot-alert-slack.yml` | Optional alerts; may require Dependabot alerts read                                                      |
 
 For a new Product, follow [the consumer contract](./product-consumer-contract.md) and [start-product playbook](./playbooks/start-product.md); configure the recommended target-only App, or an explicitly approved shared installation, with repository-level credentials rather than editing inherited Kit workflows. For rotation, generate a new key for that App, update every intended reader in the approved scope, verify the new mints under separately authorized conditions, then revoke the old key. A partial or unverified rotation is not complete.
 

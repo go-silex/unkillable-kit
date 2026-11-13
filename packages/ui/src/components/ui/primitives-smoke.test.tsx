@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react'
+import { fr } from 'react-day-picker/locale'
 import { describe, expect, it } from 'vitest'
 import { Alert, AlertDescription, AlertTitle } from './alert'
 import { Badge } from './badge'
@@ -86,6 +87,17 @@ describe('new shadcn primitives smoke', () => {
       </Select>,
     )
     expect(screen.getByLabelText('pick')).toBeInTheDocument()
+  })
+
+  it('preserves calendar day identity and locale on parent rerender', () => {
+    const month = new Date(2025, 0, 15)
+    const view = render(<Calendar mode="single" month={month} locale={fr} />)
+    const day = view.container.querySelector<HTMLButtonElement>('[data-day="15/01/2025"]')
+    expect(day).not.toBeNull()
+    day?.focus()
+    view.rerender(<Calendar mode="single" month={month} locale={fr} />)
+    expect(view.container.querySelector('[data-day="15/01/2025"]')).toBe(day)
+    expect(day).toHaveFocus()
   })
 
   it('renders Calendar + DatePicker + Popover + Combobox chips shell', () => {

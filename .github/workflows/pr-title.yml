@@ -40,7 +40,7 @@ jobs:
           # commitlint.config.cjs and `bun run doc:check`.
           disallowScopes: |
             .*#[0-9]+.*
-          subjectPattern: '^(?!.*(?<![A-Za-z0-9_])#[0-9]).+$'
+          subjectPattern: "^(?!.*(?<![A-Za-z0-9_])#[0-9]).+$"
           subjectPatternError: "PR title must have a non-empty description after the type/scope prefix and no bare #N issue reference (write owner/repo#N in the PR body, never in the title)."
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

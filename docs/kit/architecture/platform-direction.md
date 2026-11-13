@@ -21,11 +21,11 @@ Mark the platform JTBD met only with linked evidence for D2, D3 and the second c
 
 ## Capability sequence
 
-| Layer | Kit | Product | Gate |
-|---|---|---|---|
-| SaaS | Auth, core, database, UI, storage, email, i18n and types | Modules, routes, seed and domain | [ADR-0001](./adr/0001-primary-axis-packages-compose-apps.md), [ADR-0003](./adr/0003-multi-tenant-rbac-modules.md) |
-| Workflows | `@kit/flows`; console stays in the example until a second consumer justifies promotion | Plans, tools, Workflows binding and database wiring | [ADR-0005](./adr/0005-flows-platform-agentic-workflows.md) D6 |
-| Agents | MCP conventions; shared registry or loop only with repeated use | Product tools, MCP server and optional code mode | After durable workflow proof and a second call site; no speculative `@kit/agents` |
+| Layer     | Kit                                                                                    | Product                                             | Gate                                                                                                              |
+| --------- | -------------------------------------------------------------------------------------- | --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| SaaS      | Auth, core, database, UI, storage, email, i18n and types                               | Modules, routes, seed and domain                    | [ADR-0001](./adr/0001-primary-axis-packages-compose-apps.md), [ADR-0003](./adr/0003-multi-tenant-rbac-modules.md) |
+| Workflows | `@kit/flows`; console stays in the example until a second consumer justifies promotion | Plans, tools, Workflows binding and database wiring | [ADR-0005](./adr/0005-flows-platform-agentic-workflows.md) D6                                                     |
+| Agents    | MCP conventions; shared registry or loop only with repeated use                        | Product tools, MCP server and optional code mode    | After durable workflow proof and a second call site; no speculative `@kit/agents`                                 |
 
 The kit's green developer path wins over platform growth. Flows and tasks/comments incubate under their ADRs; [ADR-0007](./adr/0007-tasks-comments-kernel.md) governs tasks and comments. Shared MCP/flows registry types, if promoted, replace both existing factories rather than adding a third. Agent loops and code mode require evidence and an appropriate decision before becoming kit scope.
 

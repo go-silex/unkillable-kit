@@ -24,11 +24,11 @@ AGENTS freeze listed Resend and/or **Cloudflare Email** for prod. Chemin A is Wo
 
 ### D1 — Transport matrix
 
-| Env | Transport | Notes |
-|---|---|---|
-| **local** | `log` (Worker) and/or SMTP → **Mailpit** (Node scripts / optional) | Never real customer inbox |
-| **staging** | **CF Email** or opted-in Resend (real send) | Recipient allowlist, From-domain pin and staging subject prefix |
-| **prod** | **Cloudflare Email Sending** via Worker binding | Default · optional allowlist pin |
+| Env         | Transport                                                          | Notes                                                           |
+| ----------- | ------------------------------------------------------------------ | --------------------------------------------------------------- |
+| **local**   | `log` (Worker) and/or SMTP → **Mailpit** (Node scripts / optional) | Never real customer inbox                                       |
+| **staging** | **CF Email** or opted-in Resend (real send)                        | Recipient allowlist, From-domain pin and staging subject prefix |
+| **prod**    | **Cloudflare Email Sending** via Worker binding                    | Default · optional allowlist pin                                |
 
 Resend remains an **escape hatch** (`EMAIL_TRANSPORT=resend`) if a product cannot use CF Email — not the kit default.
 
@@ -64,12 +64,12 @@ EMAIL_FROM_DOMAIN=example.com              # optional From pin (staging default)
 
 Staging sends **real** mail (client + internal QA), but must not spray arbitrary addresses from DB dumps.
 
-| Rule | Staging (`cf`\|`resend`) | Production |
-|---|---|---|
-| `EMAIL_ALLOW_DOMAINS` | **Required** non-empty · exact match on recipient domain | Optional; when set, enforced |
-| `EMAIL_FROM` | Must match `EMAIL_FROM_DOMAIN`; defaults to `example.com` when unset | Product onboarded domain; optional `EMAIL_FROM_DOMAIN` pin |
-| Unknown `to` domain | Fail closed at send — **no** provider call | Send (unless allowlist set) |
-| Subject | Forced prefix **`[TEST STAGING]`** (idempotent) | Unchanged |
+| Rule                  | Staging (`cf`\|`resend`)                                             | Production                                                 |
+| --------------------- | -------------------------------------------------------------------- | ---------------------------------------------------------- |
+| `EMAIL_ALLOW_DOMAINS` | **Required** non-empty · exact match on recipient domain             | Optional; when set, enforced                               |
+| `EMAIL_FROM`          | Must match `EMAIL_FROM_DOMAIN`; defaults to `example.com` when unset | Product onboarded domain; optional `EMAIL_FROM_DOMAIN` pin |
+| Unknown `to` domain   | Fail closed at send — **no** provider call                           | Send (unless allowlist set)                                |
+| Subject               | Forced prefix **`[TEST STAGING]`** (idempotent)                      | Unchanged                                                  |
 
 Intent: ops allowlists each client test domain and the team domain, pins the staging From identity, and makes subjects distinguishable from production.
 
@@ -98,6 +98,6 @@ Intent: ops allowlists each client test domain and the team domain, pins the sta
 
 ## Related
 
-- [ADR-0002](./0002-session-hmac-interim-vs-better-auth.md) — BA session (reset/invites consumers)  
-- `packages/email` · `docker-compose.yml` Mailpit  
+- [ADR-0002](./0002-session-hmac-interim-vs-better-auth.md) — BA session (reset/invites consumers)
+- `packages/email` · `docker-compose.yml` Mailpit
 - Cloudflare Email Service docs / skill `cloudflare-email-service`

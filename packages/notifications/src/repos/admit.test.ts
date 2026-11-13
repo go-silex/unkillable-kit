@@ -67,7 +67,7 @@ describe('atomic notification admission', () => {
         {
           id: 'n2',
           userId: 'alice',
-          deliveries: deliveries.map((d) => ({ ...d, id: d.id + 'new' })),
+          deliveries: deliveries.map((d) => ({ ...d, id: `${d.id}new` })),
         },
       ],
     })
