@@ -27,7 +27,7 @@
   },
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",
-    "better-sqlite3": "^13.0.2",
+    "better-sqlite3": "^13.1.1",
     "miniflare": "5.20260925.0-alpha",
     "vitest": "^5.1.0"
   }
