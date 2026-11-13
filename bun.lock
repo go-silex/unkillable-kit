@@ -37,7 +37,7 @@
         "@kit/types": "workspace:*",
         "better-auth": "^1.7.18",
         "drizzle-orm": "^0.45.4",
-        "hono": "^4.13.17",
+        "hono": "^4.13.18",
         "zod": "^4.6.7",
       },
       "devDependencies": {
@@ -134,7 +134,7 @@
         "better-sqlite3": "^13.0.2",
         "drizzle-orm": "^0.45.4",
         "happy-dom": "^21.0.4",
-        "hono": "^4.13.17",
+        "hono": "^4.13.18",
         "react": "^19.3.1",
         "react-dom": "^19.3.1",
         "vite": "^8.3.7",
@@ -1387,7 +1387,7 @@
 
     "hasown": ["hasown@2.0.4", "", { "dependencies": { "function-bind": "^1.1.2" } }, "sha512-T2UbfbBEF32wiepXIsMlTW9+dDYC6wMh/t/vYA4tuOMKqWz/n3vr1NFSxQiyP+zk2mXsoMA/i/7qV6LKut1t1A=="],
 
-    "hono": ["hono@4.13.17", "", {}, "sha512-vZIcbkvjOR5hHRWERbGkr8fGfF0GGM1ooYkuH448iO3b2AdVEr3AXZSw4Z3Kn+1L5z0CVoVeyV29VGYmFh05kQ=="],
+    "hono": ["hono@4.13.18", "", {}, "sha512-H9q/E1XizaWstJxUW881dmLxEj+t/TrGGnyxINkm4+sK0qUwsMtFdo2BWI9Vs3cIS19MU6b6iCijoUoEf4f3DA=="],
 
     "http-assert": ["http-assert@1.5.0", "", { "dependencies": { "deep-equal": "~1.0.1", "http-errors": "~1.8.0" } }, "sha512-uPpH7OKX4H25hBmU6G1jWNaqJGpTXxey+YOUizJUAgu0AjLUeC8D73hTrhvDS5D+GJN1DN1+hhc/eF/wpxtp0w=="],
 
