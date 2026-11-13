@@ -94,10 +94,10 @@ updates:
           - major
     ignore:
       # SSoT is config/kit/trufflehog.version (version + checksums + action_sha).
-      # Dependabot only rewrites secret-scan.yml → `--assert-pin` red (Roxabi/roxabi-boilerplate-cf#83).
-      # Bump: update the pin file and both `uses:` lines together (Roxabi/roxabi-boilerplate-cf#170).
-      # Security updates are not covered by ignore — those PRs fail the same
-      # pin; close and bump SSoT. Alerts stay in the Security tab.
+      # CI uses the shared script, and --assert-pin requires zero action uses to preserve
+      # its introduced-commit range walk. Bump version, archive and binary hashes,
+      # historical action_sha, and workflow annotation together.
+      # Security updates are not covered by ignore; handle them via the SSoT.
       - dependency-name: "trufflesecurity/trufflehog"
         update-types:
           - "version-update:semver-major"
