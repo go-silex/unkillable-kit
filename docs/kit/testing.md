@@ -165,20 +165,15 @@ scanned — full-history job dropped (budget). Force-push on the current ref fal
 full scan of that run. `sk_<48hex>Z` is detected, `sk_<49hex>` is not. Rationale + regex:
 [`scripts/kit/trufflehog-detectors.yaml`](../../scripts/kit/trufflehog-detectors.yaml).
 
-**Where local-first does not reach.** The scan is the one gate whose local and CI forms are not
-the same command: locally `scripts/kit/trufflehog-check.sh` runs a **repo-pinned** binary
+**Shared local and CI scan.** `scripts/kit/trufflehog-check.sh` runs a **repo-pinned** binary
 (`.cache/trufflehog/<ver>/`, never `PATH`) and passes `--no-update` on every scan, since without it
-TruffleHog replaces its own executable with the latest release (Roxabi/roxabi-boilerplate-cf#261). CI goes through the
-TruffleHog **action**, which prepends `--fail --no-update --github-actions` of its own.
-An argument that is valid locally can therefore be rejected in CI — measured: adding `--fail` to
-`extra_args` duplicates the injected one and TruffleHog exits **1** with
-`error: flag 'fail' cannot be repeated`, before scanning anything. A green `validate:full`
-cannot cover this, so changes to the scan workflows are verified by replaying the action's exact
-argument vector against a fixture, not by the local gate.
+TruffleHog replaces its own executable with the latest release (Roxabi/roxabi-boilerplate-cf#261).
+CI invokes the same script with `--commits-only` and explicit range inputs. It must not use the
+TruffleHog action: its base/head walk can miss introduced commits. The script checks that no action
+`uses:` line is present and materializes each introduced commit's patch for both scanner passes.
 
-Note the consequence for reading failures: on this job **exit 183 means findings**, exit 1 means
-the scan did not run. A step that fails identically on every commit is not a strict gate, it is
-noise that gets muted — which is the same fail-open ending by a different route.
+The shared script returns exit 183 when either scanner pass fails, whether from findings or an
+execution error. Inspect the scan output to distinguish them; earlier setup errors can exit 1.
 
 **Publication text review.** The selected control is semantic review of every final outgoing title, body and comment part, with existing-tool scanning as an additional best-effort check. TruffleHog and Gitleaks may silently skip text classified as a file format; a clean exit is not complete-byte coverage or a confidentiality proof. No mandatory publisher gate, native adapter, scanner provisioning command or new scanner dependency is provided. The TruffleHog commit/staged gate above remains unchanged.
 

@@ -128,11 +128,11 @@ See [notification runtime evidence and non-claims](testing.md#notifications-emai
 
 ## Local dogfood
 
-| Path           | How                                                                                    |
-| -------------- | -------------------------------------------------------------------------------------- |
-| **Worker log** | Default: inspect console JSON `transport:"log"` (redacted body)                        |
-| **Mailpit**    | Node scripts via `@kit/email/server` + compose SMTP — not the Worker bundle            |
-| **CF remote**  | Optional `remote: true` on binding in local wrangler for proxied real sends (ops only) |
+| Path           | How                                                                                          |
+| -------------- | -------------------------------------------------------------------------------------------- |
+| **Worker log** | Default: inspect console JSON `transport:"log"` (redacted body)                              |
+| **Mailpit**    | Node scripts via `@kit/email/server` + compose SMTP (Mailpit 1.33.1) — not the Worker bundle |
+| **CF remote**  | Optional `remote: true` on binding in local wrangler for proxied real sends (ops only)       |
 
 Reset E2E: `docs/kit/testing.md` § password reset.  
 Invite E2E: `docs/kit/testing.md` § org invites.
