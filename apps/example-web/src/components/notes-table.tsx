@@ -27,24 +27,24 @@ import {
 import {
   type ColumnFiltersState,
   createColumnHelper,
-  flexRender,
-  getCoreRowModel,
-  getFilteredRowModel,
-  getSortedRowModel,
-  type SortingState,
-  useReactTable,
+  FlexRender,
+  useTable,
 } from '@tanstack/react-table'
 import { Plus, Trash2 } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { apiErrorToMessage } from '../lib/api'
 import { useLocale } from '../lib/locale'
 import type { Note, NotesQuery } from '../lib/notes'
+import { type ListTableFeatures, listTableFeatures } from './list-table'
 import { SafeMarkdown } from './safe-markdown'
 import { SortableTableHead } from './sortable-table-head'
 
 type BodyFilter = 'all' | 'with' | 'empty'
 
-const col = createColumnHelper<Note>()
+const col = createColumnHelper<ListTableFeatures, Note>()
+
+/** Stable fallback: a fresh `[]` on every render would invalidate the table's row models. */
+const NO_NOTES: Note[] = []
 
 export function NotesTable({
   notes,
@@ -56,63 +56,63 @@ export function NotesTable({
   onCreate: () => void
 }) {
   const { m } = useLocale()
-  const [sorting, setSorting] = useState<SortingState>([])
   const [globalFilter, setGlobalFilter] = useState('')
   const [bodyFilter, setBodyFilter] = useState<BodyFilter>('all')
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([])
 
-  const data = notes.data?.notes ?? []
+  const data = notes.data?.notes ?? NO_NOTES
 
   const columns = useMemo(
-    () => [
-      col.accessor('title', {
-        header: m.title,
-        enableSorting: true,
-        filterFn: 'includesString',
-        cell: (info) => <span className="font-medium">{info.getValue()}</span>,
-      }),
-      col.accessor('body', {
-        header: m.body,
-        enableSorting: true,
-        // Custom filter for empty / with body
-        filterFn: (row, _id, value: BodyFilter) => {
-          if (!value || value === 'all') return true
-          const body = (row.getValue('body') as string | undefined)?.trim() ?? ''
-          if (value === 'with') return body.length > 0
-          if (value === 'empty') return body.length === 0
-          return true
-        },
-        cell: (info) => {
-          const body = info.getValue()
-          if (!body?.trim()) {
-            return <span className="text-muted-foreground">—</span>
-          }
-          return (
-            <div className="prose prose-sm dark:prose-invert line-clamp-3 max-w-md text-muted-foreground [&_p]:m-0">
-              <SafeMarkdown>{body}</SafeMarkdown>
+    () =>
+      col.columns([
+        col.accessor('title', {
+          header: m.title,
+          enableSorting: true,
+          filterFn: 'includesString',
+          cell: (info) => <span className="font-medium">{info.getValue()}</span>,
+        }),
+        col.accessor('body', {
+          header: m.body,
+          enableSorting: true,
+          // Custom filter for empty / with body
+          filterFn: (row, _id, value: BodyFilter) => {
+            if (!value || value === 'all') return true
+            const body = (row.getValue('body') as string | undefined)?.trim() ?? ''
+            if (value === 'with') return body.length > 0
+            if (value === 'empty') return body.length === 0
+            return true
+          },
+          cell: (info) => {
+            const body = info.getValue()
+            if (!body?.trim()) {
+              return <span className="text-muted-foreground">—</span>
+            }
+            return (
+              <div className="prose prose-sm dark:prose-invert line-clamp-3 max-w-md text-muted-foreground [&_p]:m-0">
+                <SafeMarkdown>{body}</SafeMarkdown>
+              </div>
+            )
+          },
+        }),
+        col.display({
+          id: 'actions',
+          enableSorting: false,
+          header: () => null,
+          cell: ({ row }) => (
+            <div className="text-right">
+              <Button
+                type="button"
+                size="icon-sm"
+                variant="ghost"
+                aria-label={m.delete}
+                onClick={() => onDelete(row.original)}
+              >
+                <Trash2 className="text-destructive" />
+              </Button>
             </div>
-          )
-        },
-      }),
-      col.display({
-        id: 'actions',
-        enableSorting: false,
-        header: () => null,
-        cell: ({ row }) => (
-          <div className="text-right">
-            <Button
-              type="button"
-              size="icon-sm"
-              variant="ghost"
-              aria-label={m.delete}
-              onClick={() => onDelete(row.original)}
-            >
-              <Trash2 className="text-destructive" />
-            </Button>
-          </div>
-        ),
-      }),
-    ],
+          ),
+        }),
+      ]),
     [m.title, m.body, m.delete, onDelete],
   )
 
@@ -125,20 +125,17 @@ export function NotesTable({
     [m.tableFilterAll, m.tableFilterWithBody, m.tableFilterEmptyBody],
   )
 
-  const table = useReactTable({
+  // Sorting stays table-owned; the search box and body select own their filter slices.
+  const table = useTable({
+    features: listTableFeatures,
     data,
     columns,
     state: {
-      sorting,
       globalFilter,
       columnFilters,
     },
-    onSortingChange: setSorting,
     onGlobalFilterChange: setGlobalFilter,
     onColumnFiltersChange: setColumnFilters,
-    getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
     globalFilterFn: 'includesString',
   })
 
@@ -247,9 +244,9 @@ export function NotesTable({
             <TableBody>
               {rows.map((row) => (
                 <TableRow key={row.id}>
-                  {row.getVisibleCells().map((cell) => (
+                  {row.getAllCells().map((cell) => (
                     <TableCell key={cell.id}>
-                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                      <FlexRender cell={cell} />
                     </TableCell>
                   ))}
                 </TableRow>

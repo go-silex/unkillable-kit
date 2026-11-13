@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### TanStack Table v9
+
+- Migrate the Example App notes list and design-system table demo from `@tanstack/react-table` 8.21.3 to 9.3.1 with `useTable`, `FlexRender` and one explicit `listTableFeatures` set (sorting, column and global filtering), without the deprecated `useLegacyTable` bridge. Sorting is table-owned; the search and filter controls keep owning their filter state.
+- String columns now sort with TanStack's corrected automatic choice: case-insensitive `text`, or natural `alphanumeric` when sampled values contain digits. Version 8 sampled only rows after the tenth, so lists of ten rows or fewer compared raw strings.
+- Remove the Dependabot semver-major hold for `@tanstack/react-table`.
+
 ### Bun runtime
 
 - Upgrade the root Bun pin to 1.4.4. Before this change reaches the Kit deploy branch, update `BUN_VERSION` on each showcase Workers Builds and Pages project as described in [the deploy runbook](docs/kit/deploy-cloudflare.md#4b-bun-and-node-versions).
