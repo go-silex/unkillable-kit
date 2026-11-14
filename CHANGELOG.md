@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Product bootstrap
+
+- Add `create-product` for fresh dedicated clones: local Product remotes, inheritance, starter Apps and Product CI wiring, with normal-hook commits and validation. Repository creation, first push and deployment remain operator actions.
+- Split operator onboarding from the day-0 generator playbook. The fixture-only `--skip-gh-default` path explicitly leaves the GitHub CLI default repository unconfigured.
+
 ### Product kit upgrades
 
 - Provide `bun run kit-upgrade` for the documented product-clone merge procedure, with a read-only `--check` mode and a hermetic regression test.
