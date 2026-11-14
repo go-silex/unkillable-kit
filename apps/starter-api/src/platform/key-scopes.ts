@@ -14,9 +14,7 @@ const keyScopeRoutes: ReadonlyArray<{ method: string; path: string; scope: ApiKe
 export const keyScopeGate: MiddlewareHandler<AppEnv> = async (c, next) => {
   if (!parseBearer(c.req.header('authorization'))) return next()
   await requireAuth(c, async () => {
-    const routes = matchedRoutes(c).filter(
-      (route) => route.path !== '*' && (route.method === c.req.method || route.method === 'ALL'),
-    )
+    const routes = matchedRoutes(c).filter((route) => route.method === c.req.method)
     if (
       !routes.length ||
       routes.some((route) => {
