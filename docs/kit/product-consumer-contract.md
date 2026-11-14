@@ -404,6 +404,8 @@ The independent-history cases in `scripts/kit/dogfood-zero-edit.sh` exercise syn
 bun run zero-edit
 ```
 
+The inherited root gate still runs its live current-tree checks in Product mode. Its gate-tooling self-tests normally skip in a Product clone because the tooling is inherited unchanged; a zero-edit exception covering a tooling input selects `validate:tooling`, and uncertain selection runs it conservatively. This exception does not authorize a protected edit by itself. The shared `bun.lock` is not protected: Product lock changes can affect inherited tooling without an exception, so run `bun run validate:tooling` explicitly when needed. It does not replace Product app validation. Local and CI selection and its limits are documented in [testing.md](./testing.md#ops-model--local-first-ci-guardrail).
+
 Do **not** dual-edit kit `ci.yml` for this — the pattern lives in the kit.  
 Do **not** rely on org secrets to fetch private `upstream` solely for zero-edit when the kit tip is already in product history after merge.  
 Do **not** use `upstream/main` as the zero-edit base (stale tracking refs ≠ dual-edit — Roxabi/roxabi-boilerplate-cf#103).

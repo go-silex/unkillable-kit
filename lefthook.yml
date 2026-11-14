@@ -47,3 +47,13 @@ pre-push:
     validate-full:
       skip: false
       run: bun run validate:full
+    validate-tooling:
+      skip: false
+      run: |
+        status=0
+        bun scripts/kit/select-tooling.ts || status=$?
+        if [ "$status" -eq 0 ]; then
+          bun run validate:tooling
+        elif [ "$status" -ne 1 ]; then
+          exit "$status"
+        fi

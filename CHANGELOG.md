@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Scoped tooling self-tests
+
+- Separate gate-tooling self-tests into `validate:tooling`; keep live tree checks in `validate:full`. Pre-push and CI select the tooling lane for Kit tooling changes, conservatively run it on uncertain selection, and run it on Kit pushes to `main`.
+- Product clones normally skip inherited tooling self-tests; a zero-edit exception covering a tooling input selects them. The CI tooling job always validates selection; its checkout, install and test steps may skip, but the aggregate requires the job to succeed with valid selection. Product validation and secret scanning remain separate.
+
 ### Product kit upgrades
 
 - Provide `bun run kit-upgrade` for the documented product-clone merge procedure, with a read-only `--check` mode and a hermetic regression test.
