@@ -1,3 +1,7 @@
+import { isLoopbackHostname } from '../loopback-host'
+
+export { isLoopbackHostname } from '../loopback-host'
+
 /** Access token lifetime (~8h). Refresh TTL is a caller parameter, not a package default. */
 export const ACCESS_TOKEN_TTL_SECONDS = 8 * 60 * 60
 
@@ -9,11 +13,6 @@ export const REGISTER_PATH = '/register'
 export const MCP_PATH = '/mcp'
 
 const RESERVED_EXACT = new Set([AUTHORIZE_PATH, TOKEN_PATH, REGISTER_PATH])
-
-export function isLoopbackHostname(host: string): boolean {
-  const h = host.toLowerCase()
-  return h === 'localhost' || h === '127.0.0.1' || h === '::1' || h === '[::1]'
-}
 
 function isProductionShaped(env: { ENVIRONMENT?: string }, url: URL): boolean {
   const name = env.ENVIRONMENT?.trim().toLowerCase()

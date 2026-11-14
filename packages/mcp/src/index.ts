@@ -9,6 +9,7 @@
 import { parseBearer } from '@kit/auth'
 import type { WhoamiStatus } from './agentWire'
 import type { McpIdentity } from './identity'
+import { isLoopbackHostname } from './loopback-host'
 import { meResponseSchema } from './schemas'
 
 export {
@@ -109,11 +110,6 @@ export type WhoamiOptions = {
 
 const DEFAULT_ALLOWED_HOSTS = ['localhost', '127.0.0.1', '::1', '[::1]']
 
-function isLoopbackHost(host: string): boolean {
-  const h = host.toLowerCase()
-  return h === 'localhost' || h === '127.0.0.1' || h === '::1' || h === '[::1]'
-}
-
 function isAllowedApiBase(apiBaseUrl: string, allowedHosts: string[]): URL | null {
   let url: URL
   try {
@@ -147,7 +143,7 @@ export async function handleWhoami(
   }
 
   const allowed = opts?.allowedHosts ?? DEFAULT_ALLOWED_HOSTS
-  if (allowed.some((h) => !isLoopbackHost(h)) && !opts?.allowNonLocalHosts) {
+  if (allowed.some((h) => !isLoopbackHostname(h)) && !opts?.allowNonLocalHosts) {
     return { keyPresent: true, verified: false, subject: null, status: 'bad_config' }
   }
   const url = isAllowedApiBase(base, allowed)
