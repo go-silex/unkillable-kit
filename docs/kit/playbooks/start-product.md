@@ -39,42 +39,26 @@ A product has one parent and does not add a remote to its grandparent. Kit HEAD 
 **Product bootstrap uses an independent repository, not the GitHub Fork button.** This is a Product topology rule, not a restriction on copying or forking the public MIT-licensed Kit; contribution permissions are in [CONTRIBUTING](../../../CONTRIBUTING.md). Polarity gates are separate: `deny-upstream` is a no-op only when `config/product/inheritance.json` is absent; `zero-edit` is product-mode whenever that marker exists and origin is **not** in `kit_origin_allowlist`. A fork named `org/<product>` plus the marker works, but remains coupled to the GitHub fork network. A fork that keeps a Kit slug without a marker fails closed (`cannot classify`). Start a Product from an empty repository so its visibility, deletion and PR destination remain independent of the Kit.
 
 1. Create an **empty** private product repo `org/<product>`. Do not GitHub-fork this kit.
-2. Inherit history from the **immediate parent** (table above), without keeping that parent as `origin`:
+2. Clone the **immediate parent** into a fresh, dedicated directory, then run the [day-0 generator](./create-product-day0.md). It rewrites local remotes, configures the local `gh` default, pins inheritance, creates Apps and commits the setup. Do not use a linked worktree or the Kit checkout.
 
    ```bash
    git clone <immediate-parent-url> <product>
    cd <product>
-   git remote rename origin upstream
-   git remote add origin <product-repo-url>
-   git remote set-url --push upstream no_push
-   git push -u origin main
-   gh repo set-default <org>/<product>
+   bash scripts/kit/create-product.sh <product> --origin <org>/<product> --accept-parent-origin --commit
    ```
 
-   `gh repo set-default` is required: with both remotes and no default, `gh` ranks `upstream`
-   ahead of `origin`, and every `issue-triage` command then writes to the parent repo
-   ([roxabi-plugins#614](https://github.com/Roxabi/roxabi-plugins/issues/614)).
-   Then pin the inherited tip. Do **not** create or push a landing branch named `staging`:
-
-   ```bash
-   mkdir -p config/product
-   printf '{\n  "version": 1,\n  "upstreamCommit": "%s"\n}\n' "$(git rev-parse upstream/main)" > config/product/inheritance.json
-   git add config/product/inheritance.json
-   git commit -m "chore(product): pin kit inheritance"
-   ```
-
-   The kit parent has no `staging` branch. Commit the marker on day-0 so `zero-edit` classifies product mode. Fill `name`, `backend.path`, `release.component`, and either `frontend.path` or a whole-block `frontend: null` (API-only; no frontend App) in the same commit or the next one — `stack-contract:check` refuses the upstream values. The guard compares those values; it does not check that a path exists on disk. Keep `frontend: null` on upgrade.
-3. `bun install` · ensure lefthook hooks.
+   After successful local validation, the operator pushes `main` with `git push -u origin main`. Do **not** create or push a landing branch named `staging`.
+3. The generator installs dependencies and runs normal commit hooks. Resolve any hook failure without bypassing it.
 4. Copy env examples → gitignored local files only (`.dev.vars`, etc.).
    Public sign-up is **off** unless you set `ALLOW_PUBLIC_SIGNUP=true` (then SPA `/sign-up` appears). Leave unset for invite/admin-only.
    `CORS_ORIGINS` is required outside `development|test` (never `*` / `null`; localhost default is local-only).
 5. **CI App for merge-on-green:** configure the recommended target-only GitHub App, or an explicitly approved [shared-App owner exception](../ci-app-setup.md#shared-app-owner-exception), with repository-level `CI_APP_PRIVATE_KEY`, `CI_APP_ID` and all four numeric-identity `HEAD_AUTH_*` variables per [CI App setup](../ci-app-setup.md#trust-and-setup). On GitHub Free private, org-level Actions values do not reach private repos. If the App is verified inactive, use separately authorized manual merges; a missing key or unreadable configuration is not inactive mode.
    Run `issue-triage init` on the product repo, after `gh repo set-default <org>/<product>` (step 2): `gh` ranks a remote named `upstream` ahead of `origin`, and without the default, init writes to the parent repo while printing `writes: 0`. It keeps the inherited contract (`contract: keep-existing`, byte-identical, so `zero-edit` stays green) and creates the seven triage labels (`size:*`, `P0-critical`…`P3-low`) from [`docs/agents/issue-tracker.md`](../../agents/issue-tracker.md) § Labels. Run `--dry-run` first and require two things: `repo: <org>/<product>`, and `relabel issues: 0` — a non-zero count means init will rewrite existing issue labels (`size:m` → `size:F-lite`, `priority:*` → `P*-*`, and it removes `ready-for-agent`), so stop if that family belongs to the product. Colours apply only to labels init creates; the `--force` block in § Labels fixes existing ones. `issue-triage` refuses a label the repo does not carry, and `dev-review` reads the review tier only from `size:`. The contract file itself is inherited unchanged (kit surface: `tool_mandated_paths` + `protected_files`); product additions go to `docs/product/issue-tracker.md`. `/feature init` leaves it untouched too. Repo resolution is tracked upstream: [roxabi-plugins#614](https://github.com/Roxabi/roxabi-plugins/issues/614).
 6. Choose the Product's terms in the root `LICENSE` ([Zones](../product-consumer-contract.md#zones)), then add product apps only under `apps/<product>-*`.
-   Stage each Product App `package.json`, then run `node scripts/kit/configure-product-dependabot.cjs` and `bun run zero-edit`; commit the generated `.github/dependabot.yml` with the setup. The [bounded Product scan](../product-consumer-contract.md#product-dependabot-configuration) is the only content-based customization at this protected path. Kit manifests and inherited workflow pins update upstream first; App-only scanning does not prove isolation of Bun workspace mutations or shared-lock support. Review the whole `bun.lock` and use the documented manual route if the robot cannot produce a conforming diff. Keep Dependabot alerts enabled; Bun has no native security-update PRs.
-7. When `apps/<product>-api` exists: `bash scripts/kit/kit-schema-sync.sh --app apps/<product>-api`. Fresh Products get `core,audit`; the throttle needs `audit`. Existing manifests retain their recorded selection. Named opt-in: [Core vs opt-in](#core-vs-opt-in). Last-resort clones: `--adopt` immediately (fail-closed if copied bytes drifted, or if an applied file matches an unselected set). Do not hand-copy `apps/example-api/migrations`. Product domain SQL starts at `1000_`.
+   The generator stages Product App manifests and configures Dependabot. For later Apps, stage each `package.json`, run `node scripts/kit/configure-product-dependabot.cjs` and `bun run zero-edit`, and commit the resulting `.github/dependabot.yml`. The [bounded Product scan](../product-consumer-contract.md#product-dependabot-configuration) is the only content-based customization at this protected path. Kit manifests and inherited workflow pins update upstream first; App-only scanning does not prove isolation of Bun workspace mutations or shared-lock support. Review the whole `bun.lock` and use the documented manual route if the robot cannot produce a conforming diff. Keep Dependabot alerts enabled; Bun has no native security-update PRs.
+7. The generator syncs `core,audit` to the Product API. Later, run `bash scripts/kit/kit-schema-sync.sh --app apps/<product>-api` to retain its recorded selection. Named opt-in: [Core vs opt-in](#core-vs-opt-in). Last-resort clones: `--adopt` immediately (fail-closed if copied bytes drifted, or if an applied file matches an unselected set). Do not hand-copy `apps/example-api/migrations`. Product domain SQL starts at `1000_`.
 8. Auth: `createBetterAuth` from `@kit/auth/factory` (per-request factory, magic-link + reset EmailPort, optional `onFirstSession`). Mount it per the [Better Auth mount contract](../product-consumer-contract.md#better-auth-mount); step 7 already synced its schema sets. Env helpers (`getBetterAuthSecret`, `assertBetterAuthConfigured`, `allowPublicSignup`) from `@kit/auth`. Tables: `@kit/auth/schema`. SPA forgot/reset/change-password forms from `@kit/auth/react` (app owns routes, chrome, catalogs). See `example-api/src/lib/better-auth.ts` only as a **thin Env adapter**, not the factory. Never import `@kit/auth/react` from a Worker.
-9. Keep `bun run validate:full` green (kit bar). Wire product-validate when product apps exist ([`docs/kit/templates/`](../templates/)).
+9. Keep `bun run validate:full` and `bash scripts/product/validate.sh` green. The generator wires product validation from the [templates](../templates/).
 10. Cloudflare: copy `config/kit/deploy.cf.example.toml` → `config/kit/deploy.cf.local.toml` (gitignored), fill **account id** + zone/hosts. Planes / `[env.staging]` / `[env.production]` / cookies: [`docs/kit/environments.md`](../environments.md). Showcase CD commands (kit HEAD only): [`docs/kit/deploy-cloudflare.md`](../deploy-cloudflare.md). Account is never assumed by the kit. Connect the product's Workers Builds / Pages with production branch **`deploy/main`** (and `deploy/staging` for the staging projects), never `main`/`staging`: the inherited Deploy gate moves them only after CI is green. Commit `config/product/deploy-gate.json` listing your product workflows, then follow the cutover order ([deploy-cloudflare.md](../deploy-cloudflare.md) § Cutover, [environments.md](../environments.md) §4).
 11. UI locales: `apps/<product>-web` `createI18n({ defaultLocale, catalogs })`. **Catalog keys are the locale policy.** One locale → `LocaleSwitcher` is hidden (no FR/EN chrome). Kit `example-web` dogs FR+EN; do not patch it.
 
