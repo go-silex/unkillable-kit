@@ -2,8 +2,10 @@
 # Deliberately separate from validate:full: the generator itself runs that gate.
 # Optional: --real-origin owner/repo proves gh against an existing accessible repo.
 set -euo pipefail
-unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GITHUB_REPOSITORY 2>/dev/null || true
+unset GITHUB_REPOSITORY 2>/dev/null || true
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+# shellcheck source=lib/hermetic-git.sh
+source "$ROOT/scripts/kit/lib/hermetic-git.sh"
 real_origin=""
 if [[ $# -gt 0 ]]; then
   [[ $# -eq 2 && "$1" == --real-origin && "$2" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || {

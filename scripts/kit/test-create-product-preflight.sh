@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Finite, write-free refusal tests. No generated Product runs the root gate here.
 set -euo pipefail
-unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR 2>/dev/null || true
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+# shellcheck source=lib/hermetic-git.sh
+source "$ROOT/scripts/kit/lib/hermetic-git.sh"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 export GIT_AUTHOR_NAME=Fixture GIT_AUTHOR_EMAIL=fixture@example.invalid
