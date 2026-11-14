@@ -64,15 +64,15 @@ Règles dures pour tout agent (humain qui drive l’IA) :
 
 **SSoT tests :** [`docs/kit/testing.md`](../testing.md) — tests efficaces + ownership axial + inventaire CP-\*.
 
-**Doctrine ops :** la **validation locale (pre-push) est le vrai gate**. La CI GitHub est un **garde-fou** (hooks skippés, machine sale) — un push ne doit partir **que** si `validate:full` est vert en local. CI rouge = incident process, pas le flux normal de debug.
+**Doctrine ops :** la **validation locale (pre-push) est le vrai gate**. La CI GitHub est un **garde-fou** (hooks skippés, machine sale) — un push ne part que si `validate:full` et, lorsqu'applicable, la suite `validate:tooling` sont vertes en local. CI rouge = incident process, pas le flux normal de debug.
 
 ```text
 pre-commit (Lefthook) → Biome format/lint (staged)
          ↓
-pre-push (Lefthook)   → bun run validate:full
-                        (SSoT: root package.json `validate:full` — do not copy the step list here)
+pre-push (Lefthook)   → bun run validate:full + self-tests tooling selon sélection
+                        (SSoT commandes : root package.json ; sélection : testing.md)
          ↓
-PR CI                 → même suite (garde-fou) · secret scan
+PR CI                 → mêmes gates applicables (garde-fou) · secret scan
          ↓
 option                → review AI (signal, pas merge auto)
          ↓

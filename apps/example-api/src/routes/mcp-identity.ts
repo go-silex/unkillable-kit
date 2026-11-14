@@ -1,5 +1,6 @@
 import { createRoute, OpenAPIHono, z } from '@hono/zod-openapi'
 import { createBetterAuthSessionPort } from '@kit/auth'
+import { isAccountActive } from '@kit/auth/repos/account-state'
 import { AppError } from '@kit/core'
 import { authErrorResponses, invalidRequest, validationErrorResponse } from '../lib/openapi'
 import { corsAllowlist, sessionCookieNameFromEnv } from '../lib/session-env'
@@ -56,6 +57,7 @@ mcpIdentityRoutes.openapi(startTicket, async (c) => {
   const sessions = createBetterAuthSessionPort({
     cookieName: sessionCookieNameFromEnv(c.env),
     getAuth: () => auth,
+    isAccountActive: (userId) => isAccountActive(c.get('db')!, userId),
   })
   const session = await sessions.resolveSession({ headers: c.req.raw.headers })
   if (!session?.sub) {
@@ -98,6 +100,11 @@ mcpIdentityRoutes.openapi(
     const identity = await redeemIdentityTicket(ticket)
     if (!identity) {
       throw AppError.unauthorized('Invalid or expired identity ticket')
+    }
+    try {
+      if (!(await isAccountActive(c.get('db')!, identity.userId))) throw AppError.unauthorized()
+    } catch {
+      throw AppError.unauthorized()
     }
     return c.json({
       userId: identity.userId,

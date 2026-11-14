@@ -7,6 +7,11 @@
 - Add `create-product` for fresh dedicated clones: local Product remotes, inheritance, starter Apps and Product CI wiring, with normal-hook commits and validation. Repository creation, first push and deployment remain operator actions.
 - Split operator onboarding from the day-0 generator playbook. The fixture-only `--skip-gh-default` path explicitly leaves the GitHub CLI default repository unconfigured.
 
+### Scoped tooling self-tests
+
+- Separate gate-tooling self-tests into `validate:tooling`; keep live tree checks in `validate:full`. Pre-push and CI select the tooling lane for Kit tooling changes, conservatively run it on uncertain selection, and run it on Kit pushes to `main`. Local selection respects actual push destinations and revisions.
+- Product clones may skip inherited tooling self-tests after context validation; a tooling zero-edit exception or Product configuration, manifest or shared `bun.lock` change selects them. The CI tooling job always validates selection; its checkout, install and test steps may skip, but the aggregate requires the job to succeed with valid selection. Product validation and secret scanning remain separate.
+
 ### Product kit upgrades
 
 - Provide `bun run kit-upgrade` for the documented product-clone merge procedure, with a read-only `--check` mode and a hermetic regression test.
@@ -19,6 +24,11 @@
 
 - Route agents in product clones to `docs/product/AGENTS.md`.
 - Route agents working inside a package or app to its `README.md` when present, in every clone.
+
+### Disabled accounts
+
+- Disabled Users cannot authenticate with sessions or Organization-bound API keys. Disabling revokes existing sessions; enabling requires a new sign-in. Inheriting Products must sync the Kit schema and apply the new migration before deploying: a missing account-state column causes authentication to fail closed.
+- Hosted MCP Apps must bind `DB` to the same authentication database as the API. The hosted shell checks live User state for identity, OAuth exchanges and requests; this is required independently of optional grant admission.
 
 ### Biome D1 safety
 
@@ -53,6 +63,10 @@
 ### Flow run persistence
 
 - Commit run mutations and status/receipt events atomically, with path-specific Organization and snapshot fences. Failed-run closure checks ownership, preserves terminal status and errors during receipt cleanup, retains malformed receipt bytes and propagates the original exception.
+
+### ADR design notes
+
+- Move unimplemented notification destination routes, Slack schema tables and implementation specifications from binding ADRs into non-normative design notes; accepted decisions remain binding.
 
 ### API-only stack contract
 
