@@ -17,36 +17,16 @@ Authority descends in this order:
 
 ## Direction — multi-tenant capability kernel
 
-| Language                             | Meaning                                                                                                    |
-| ------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
-| **Kit, normative**                   | A multi-tenant capability kernel: `@kit/*` packages composed by independent product deploys                |
-| **Product narrative, non-normative** | _Company OS+++_ is a possible product story, never the kit ambition or a reason to add product domain here |
+The Kit is a multi-tenant capability kernel: `@kit/*` packages composed by independent product deploys. _Company OS+++_ is a possible product story, non-normative and never the kit ambition or a reason to add product domain here.
 
-The kernel grows through evidence-gated capability layers:
-
-Detailed JTBD, dogfood modes, anti-isomorphism tests and promotion priorities live in [`docs/kit/architecture/platform-direction.md`](docs/kit/architecture/platform-direction.md).
-
-| Layer         | Kit responsibility                                      | Product responsibility                        | Promotion gate                                                                                |
-| ------------- | ------------------------------------------------------- | --------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| **SaaS**      | auth, core, db, ui, storage, email, i18n and types      | modules, routes, seed and domain              | ADR-0001 + [ADR-0003](docs/kit/architecture/adr/0003-multi-tenant-rbac-modules.md)            |
-| **Workflows** | governed plan primitives and shared runtime contracts   | plans, tools, bindings and product wire       | [ADR-0005](docs/kit/architecture/adr/0005-flows-platform-agentic-workflows.md) evidence gates |
-| **Agents**    | shared registry/MCP conventions only after repeated use | prompts, product tools and optional code mode | after durable workflow proof and a second consumer                                            |
-
-`example-*` proves kit composition synthetically. A zero-edit product attests the consumer contract: the gate guards against accidental divergence from the inherited kit tip, it is not tamper-proof provenance. Only a real external product deployment can prove the platform JTBD; examples alone cannot.
-
-### Isolation model
-
-- One product deploy owns its Worker bindings, databases and secrets.
-- `organization` is the tenant boundary; users, agents and runs remain actors inside organization grants.
-- A run executes an immutable snapshot so live edits cannot change in-flight authority.
-- No actor receives privilege merely because it is an agent.
+See [`docs/kit/architecture/platform-direction.md`](docs/kit/architecture/platform-direction.md) for direction and evidence.
 
 ## Seven invariants
 
 1. **Grants = sole max power** — plan/MCP permits may only **narrow** ; never expand.
 2. **Runner executes snapshot only** — live plan edits do not re-arm in-flight runs.
-3. **Grant provenance** — **never** mint from client, plan body, or agent self-description. Kit-owned via `mintCapabilityGrant` in `@kit/flows`, fed by org module policy facts. The ceiling is the registry tools **declared** `grantClass: 'mintable'` (undeclared class = refused at construction); `checkPlan` re-verifies it (`TOOL_NOT_GRANTABLE`) and `createRunSnapshot` seals **only** the minted grant and a kit-built registry (`GRANT_NOT_MINTED` / `REGISTRY_NOT_KIT_BUILT`) — conformity cannot cover `allowsInfer`.
-4. **Default-deny ambient authority** — empty/absent permits + effectful tools = fail-closed. An `approve` step continues only on an org+run+task D1 row with decision=approved written by the principal-bound route; a Workflow event only wakes; without an approval the task fails only via its own expired row at the deadline or after 8 wakes with no row, a rejected row, or a missing wait port.
+3. **Grant provenance** — **never** mint from client, plan body, or agent self-description. Only the Kit mints grants, from org module policy facts. See [ADR-0005](docs/kit/architecture/adr/0005-flows-platform-agentic-workflows.md) and the [flows documentation](packages/flows/README.md) for enforcement mechanics.
+4. **Default-deny ambient authority** — empty/absent permits + effectful tools = fail-closed. An `approve` step continues only with approval for its organization, run and task written by the principal-bound route; a Workflow event only wakes. See [ADR-0005](docs/kit/architecture/adr/0005-flows-platform-agentic-workflows.md) and the [flows documentation](packages/flows/README.md) for enforcement mechanics.
 5. **Isolation fields mandatory** — every plan/run/agent tool call is org-scoped ; no cross-org ambient registry.
 6. **Product domain never under** `packages/**` · **one durable owner per durable execution**, supplied by a general-purpose runtime; no hand-built durability and no two owners for one execution ([ADR-0018](docs/kit/architecture/adr/0018-durable-execution-ownership.md), criterion in D2).
 7. **Agents tools = registry ∩ grants** — **unbuilt** until the agents layer. Dual-auth session \| `sk_` **org-bound** is the intended surface. `@kit/mcp` `effect`/`auth` in `packages/mcp/src/catalogue.ts` are **NEVER authorization** (convention only) — unlike flows `grantClass` (invariant 3), which is live today.

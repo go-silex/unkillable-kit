@@ -52,6 +52,10 @@
 - Default-ref automation rejects partial or malformed supplied policy, including when the App is disabled. Active setup errors remain failures, and active exact-head receipt checks and token scopes are unchanged.
 - Return before loading the adapter on unprivileged `pull_request` events so consumers can inherit from a default branch that predates it; no new adapter export or fallback is required.
 
+### Agent constitution
+
+- Keep the direction and grant/approval invariants concise while retaining their detailed mechanics in the platform direction and flows references inherited by Product repositories.
+
 ### Zod Worker entry initialization
 
 - Correct Zod 4.6.7 metadata only: set `sideEffects` to `true` in the nested `v4/package.json` and `v4/classic/package.json` to preserve initialization across static `zod/v4` and dynamic root imports (Roxabi/roxabi-boilerplate-cf#585). The compiler itself is not fixed.
