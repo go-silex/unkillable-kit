@@ -50,6 +50,7 @@ describe('legacy Better Auth 1.6 account after additive 1.7 migration', () => {
     await env.DB.exec(
       readFileSync(join(__dirname, '../migrations/0014_better_auth_1_7_additive.sql'), 'utf8'),
     )
+    await env.DB.exec(readFileSync(join(__dirname, '../migrations/0025_account_state.sql'), 'utf8'))
 
     const row = (await env.DB.prepare(
       `SELECT issuer, account_id AS accountId FROM account WHERE id = 'acc_legacy'`,

@@ -13,6 +13,7 @@ related:
   - docs/kit/standards/stack.md
   - docs/kit/product-consumer-contract.md
   - 'Roxabi/roxabi-boilerplate-cf#412'
+summary: 'One durable owner per durable execution'
 ---
 
 # ADR-0018 — One durable owner per durable execution

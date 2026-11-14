@@ -102,6 +102,11 @@ Escape hatch : Postgres/Hyperdrive si un app dépasse D1 — documenté, pas def
 | API keys machine              | `sk_…` hash en D1, **per-user**                                                                                                                      | kit   | livré  | `@kit/auth`                |
 | Guards (kit)                  | Hono middleware dual-path `requireAuth` (Bearer **ou** cookie) dans `example-api`                                                                    | kit   | livré  |                            |
 
+Le statut actif du User est vérifié à chaque résolution de session ou de clé :
+une clé est régie par son User propriétaire, pas par un état global de l'Organization.
+La désactivation révoque les sessions existantes ; une réactivation exige une nouvelle connexion.
+Le Product décide qui peut modifier cet état et applique la migration de schéma correspondante.
+
 #### Cookies (obligatoire — sessions UI)
 
 | Règle        | Détail                                                                                                 |

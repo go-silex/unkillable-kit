@@ -5,7 +5,14 @@ import { requireOrgContext } from './middleware/org-context'
 import { requireAuth } from './middleware/require-auth'
 import { TENANCY_PASSWORD } from './seed/tenancy-data'
 import { mintApiKey } from './services/auth'
-import { bearerHeaders, createSeededDemoApi, loginCookie, sessionHeaders } from './test/api-fixture'
+import {
+  bearerHeaders,
+  createApiTestContext,
+  createSeededDemoApi,
+  loginCookie,
+  seedDemoEnv,
+  sessionHeaders,
+} from './test/api-fixture'
 
 async function setup() {
   return createSeededDemoApi({ seed: { notes: false, environment: 'test' } })
@@ -92,13 +99,14 @@ describe('organization authorization HTTP regressions', () => {
   })
 
   it('rejects a real legacy unbound key after it previously authenticated', async () => {
-    const { app, env, db } = await createSeededDemoApi({
-      env: { through: '0014_better_auth_1_7_additive.sql' },
-      seed: { notes: false, environment: 'test' },
+    const { app, env, db } = createApiTestContext({
+      through: '0014_better_auth_1_7_additive.sql',
     })
+    await env.DB.exec('ALTER TABLE "user" ADD COLUMN "disabled" integer NOT NULL DEFAULT 0')
     await env.DB.exec(
       "ALTER TABLE api_keys ADD COLUMN scopes TEXT NOT NULL DEFAULT 'read,write,admin'",
     )
+    await seedDemoEnv(env, { notes: false, environment: 'test' })
     const minted = await mintApiKey(db, 'user_staff', {
       organizationId: 'org_acme',
       scopes: ['read', 'write', 'admin'],

@@ -1,5 +1,6 @@
 import { AppError } from '@kit/core'
 import { type BetterAuthLike, createBetterAuthSessionPort } from '../better-auth-port'
+import { isAccountActive } from '../repos/account-state'
 import type { KitRepoDb } from '../repos/db-type'
 import { findActiveOrgApiKeyByPrefix } from '../repos/keys'
 import { createRequireAuth, type RequireAuthContext } from '../require-auth'
@@ -21,8 +22,13 @@ export function createKitRequireAuth<C extends KitRequireAuthContext>(
       throw AppError.internal('betterAuth not bound — withBetterAuth middleware required')
     }
     return {
-      sessions: createBetterAuthSessionPort({ cookieName: cookieName(c), getAuth: () => auth }),
+      sessions: createBetterAuthSessionPort({
+        cookieName: cookieName(c),
+        getAuth: () => auth,
+        isAccountActive: (userId) => isAccountActive(db, userId),
+      }),
       findApiKeyByPrefix: (prefix) => findActiveOrgApiKeyByPrefix(db, prefix),
+      isAccountActive: (userId) => isAccountActive(db, userId),
     }
   })
 }

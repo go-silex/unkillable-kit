@@ -15,6 +15,11 @@
 - Route agents in product clones to `docs/product/AGENTS.md`.
 - Route agents working inside a package or app to its `README.md` when present, in every clone.
 
+### Disabled accounts
+
+- Disabled Users cannot authenticate with sessions or Organization-bound API keys. Disabling revokes existing sessions; enabling requires a new sign-in. Inheriting Products must sync the Kit schema and apply the new migration before deploying: a missing account-state column causes authentication to fail closed.
+- Hosted MCP Apps must bind `DB` to the same authentication database as the API. The hosted shell checks live User state for identity, OAuth exchanges and requests; this is required independently of optional grant admission.
+
 ### Biome D1 safety
 
 - Keep `noPlaywrightUselessAwait` diagnostics while disabling its automatic fix: Biome 2.6.7 misidentifies D1 `first()` calls as Playwright locators and otherwise removes required awaits. Restore the fix when upstream distinguishes those calls and the real D1 staged-file proof passes.
@@ -45,6 +50,10 @@
 
 - Upgrade the example Workers to Wrangler 4.159.0 and regenerate their committed runtime declarations.
 
+### ADR index generation
+
+- Generate the decision index from ADR summaries and authority metadata; check it for drift during documentation validation.
+
 ### Flow run persistence
 
 - Commit run mutations and status/receipt events atomically, with path-specific Organization and snapshot fences. Failed-run closure checks ownership, preserves terminal status and errors during receipt cleanup, retains malformed receipt bytes and propagates the original exception.
@@ -61,6 +70,10 @@
 - Exercise the candidate's root gate before the reader clone creates `origin/main`, so local preparation covers the first-push context rather than only transport-clone validation.
 - Distinguish private and already-public Products: a public consumer may publish a transition only after the Kit exposure checkpoint, without introducing private-only Kit ancestry.
 - Carry the Kit's MIT notice with all inherited Kit material in the protected `docs/kit/licenses/MIT.txt`, a byte-identical copy of the root `LICENSE`, and remove the root `package.json` license field so no protected root file declares a Product's terms. A Product's root `LICENSE` stays Product-owned and unprotected: the independent-history join and every later upgrade merge restore its pre-merge presence and bytes before committing, even when they match the Kit's notice, and a change of Product terms is the Product's own reviewed commit. The Kit notices state only the Kit's terms.
+
+### Worktree setup lockfile
+
+- Check committed lockfile normalization offline in the lock-integrity gate, and fail worktree setup if its install changes `bun.lock`.
 
 ### Inactive CI App workflows
 

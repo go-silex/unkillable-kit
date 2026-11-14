@@ -10,6 +10,7 @@ related:
   - docs/kit/architecture/adr/0009-kit-namespace-polarity-inheritance-marker.md
   - docs/kit/product-consumer-contract.md
   - config/kit/zero-edit-zones.json
+summary: 'Root and GitHub workflow ownership'
 ---
 
 # ADR-0013 — Root and GitHub workflow ownership (resolves ADR-0009 D3)

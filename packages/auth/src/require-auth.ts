@@ -51,6 +51,7 @@ export type DualAuthPorts = {
   headers?: Headers
   /** Required — apps inject createBetterAuthSessionPort (ADR-0002 BA-only). */
   sessions: SessionPort
+  isAccountActive: (subject: string) => Promise<boolean>
   findApiKeyByPrefix: (prefix: string) => Promise<ApiKeyRecord | null>
 }
 
@@ -62,6 +63,16 @@ export function normalizeApiKeyOrganizationId(value: string | null | undefined):
   if (value == null) return null
   const trimmed = value.trim()
   return trimmed.length > 0 ? trimmed : null
+}
+
+async function requireActiveAccount(ports: DualAuthPorts, subject: string): Promise<void> {
+  let active: boolean
+  try {
+    active = await ports.isAccountActive(subject)
+  } catch {
+    throw AppError.unauthorized()
+  }
+  if (active !== true) throw AppError.unauthorized()
 }
 
 /**
@@ -92,6 +103,7 @@ export async function resolveDualAuth(
     if (!organizationId) {
       throw AppError.unauthorized()
     }
+    await requireActiveAccount(ports, row.subject)
     return {
       subject: row.subject,
       method: 'api_key',

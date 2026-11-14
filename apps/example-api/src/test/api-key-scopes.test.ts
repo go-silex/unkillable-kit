@@ -201,7 +201,7 @@ describe('API key scopes over HTTP', () => {
 describe('legacy API key scope migration', () => {
   it('backfills existing keys with all three independent scopes', async () => {
     const { app, env } = await createSeededDemoApi({
-      env: { through: '0024_impersonation.sql' },
+      env: { through: '0025_account_state.sql' },
       seed: { notes: true, environment: 'test' },
     })
     const key = generateApiKey()
@@ -211,7 +211,7 @@ describe('legacy API key scope migration', () => {
       .bind('legacy', await hashApiKey(key), apiKeyPrefix(key), 'user_staff', ORG, 1)
       .run()
     const migrations = join(dirname(fileURLToPath(import.meta.url)), '../../migrations')
-    await env.DB.exec(readFileSync(join(migrations, '0025_api_keys_scopes.sql'), 'utf8'))
+    await env.DB.exec(readFileSync(join(migrations, '0026_api_keys_scopes.sql'), 'utf8'))
     const row = await env.DB.prepare('SELECT scopes FROM api_keys WHERE id = ?')
       .bind('legacy')
       .first()

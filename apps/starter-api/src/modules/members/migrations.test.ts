@@ -4,7 +4,7 @@ import Database from 'better-sqlite3'
 import { describe, expect, it, onTestFinished } from 'vitest'
 
 const directory = fileURLToPath(new URL('../../../migrations/', import.meta.url))
-const scopeMigration = '0013_kit_api_keys_scopes.sql'
+const scopeMigration = '0014_kit_api_keys_scopes.sql'
 
 function database() {
   const sqlite = new Database(':memory:')

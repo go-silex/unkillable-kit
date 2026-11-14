@@ -21,6 +21,7 @@ export type BetterAuthLike = {
 
 export type CreateBetterAuthSessionPortOpts = {
   getAuth: () => BetterAuthLike | Promise<BetterAuthLike>
+  isAccountActive: (subject: string) => Promise<boolean>
   cookieName?: string
 }
 
@@ -71,6 +72,7 @@ export function createBetterAuthSessionPort(opts: CreateBetterAuthSessionPortOpt
         const exp = expFromSession(session.session?.expiresAt)
         if (exp == null) return null
         if (exp < Math.floor(Date.now() / 1000)) return null
+        if ((await opts.isAccountActive(session.user.id)) !== true) return null
         return {
           sub: session.user.id,
           sessionId: session.session.id,

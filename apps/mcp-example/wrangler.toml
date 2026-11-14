@@ -19,6 +19,11 @@ compatibility_flags = ["nodejs_compat", "global_fetch_strictly_public"]
 binding = "OAUTH_KV"
 id = "local-mcp-oauth-kv"
 
+[[d1_databases]]
+binding = "DB"
+database_name = "example-api-local"
+database_id = "local-example-api"
+
 # Workers Logs (docs/kit/observability.md).
 [observability]
 enabled = true

@@ -155,6 +155,81 @@ describe('starter HTTP composition', () => {
         .get(profile.subject),
     ).toEqual({ count: 1 })
   })
+  it('enforces disabled account state for existing sessions and organization-bound keys', async () => {
+    const { sqlite, env, request, post } = fixture()
+    const signup = await post('/api/auth/sign-up/email', credentials)
+    expect(signup.status).toBeLessThan(400)
+    const cookie = signup.headers.get('set-cookie')!.split(';')[0]!
+    const profileResponse = await request('/api/me', { headers: { cookie } })
+    expect(profileResponse.status).toBe(200)
+    const profile = (await profileResponse.json()) as { subject: string }
+
+    sqlite
+      .prepare(
+        "INSERT INTO organization (id, name, slug, created_at, kind, status) VALUES (?, ?, ?, ?, 'client', 'active')",
+      )
+      .run('org-a', 'A', 'a', Date.now())
+    sqlite
+      .prepare(
+        "INSERT INTO member (id, organization_id, user_id, role, created_at) VALUES (?, ?, ?, 'member', ?)",
+      )
+      .run('member-a', 'org-a', profile.subject, Date.now())
+    const keyHeaders: Record<string, Record<string, string>> = {}
+    for (const [id, scopes] of [
+      ['read', 'read'],
+      ['write', 'write'],
+      ['unscoped', ''],
+      ['malformed', 'read,unknown'],
+    ] as const) {
+      const key = generateApiKey()
+      await insertApiKey(createDb(env.DB, schema), {
+        id: `key-${id}`,
+        keyHash: await hashApiKey(key),
+        keyPrefix: apiKeyPrefix(key),
+        subject: profile.subject,
+        organizationId: 'org-a',
+        scopes,
+        createdAt: Date.now(),
+      })
+      keyHeaders[id] = { authorization: `Bearer ${key}` }
+    }
+    const sessionHeaders: Record<string, string> = { cookie }
+    const memberPath = '/api/orgs/org-a/members'
+    for (const headers of [sessionHeaders, keyHeaders.read!]) {
+      expect((await request('/api/me', { headers })).status).toBe(200)
+      expect((await request(memberPath, { headers })).status).toBe(200)
+    }
+    for (const headers of [keyHeaders.write!, keyHeaders.unscoped!, keyHeaders.malformed!]) {
+      expect((await request('/api/me', { headers })).status).toBe(403)
+      expect((await request(memberPath, { headers })).status).toBe(403)
+    }
+    expect((await request('/api/auth/get-session', { headers: sessionHeaders })).status).toBe(200)
+
+    // Keep the existing session to exercise the per-request guard independently of revocation.
+    sqlite.prepare('UPDATE user SET disabled = 1 WHERE id = ?').run(profile.subject)
+    for (const headers of [sessionHeaders, ...Object.values(keyHeaders)]) {
+      expect((await request('/api/me', { headers })).status).toBe(401)
+      expect((await request(memberPath, { headers })).status).toBe(401)
+    }
+    expect((await request('/api/auth/get-session', { headers: sessionHeaders })).status).toBe(401)
+    const deniedSignin = await post('/api/auth/sign-in/email', credentials)
+    expect(deniedSignin.status).toBeGreaterThanOrEqual(400)
+    expect(deniedSignin.headers.get('set-cookie')).toBeNull()
+
+    sqlite.prepare('UPDATE user SET disabled = 0 WHERE id = ?').run(profile.subject)
+    for (const headers of [sessionHeaders, keyHeaders.read!]) {
+      expect((await request('/api/me', { headers })).status).toBe(200)
+      expect((await request(memberPath, { headers })).status).toBe(200)
+    }
+    for (const headers of [keyHeaders.write!, keyHeaders.unscoped!, keyHeaders.malformed!]) {
+      expect((await request('/api/me', { headers })).status).toBe(403)
+      expect((await request(memberPath, { headers })).status).toBe(403)
+    }
+    expect((await request('/api/auth/get-session', { headers: sessionHeaders })).status).toBe(200)
+    const signin = await post('/api/auth/sign-in/email', credentials)
+    expect(signin.status).toBeLessThan(400)
+    expect(signin.headers.get('set-cookie')).not.toBeNull()
+  })
   it('denies unauthenticated requests and signup unless explicitly enabled', async () => {
     const { request, post } = fixture(false)
     const allowed = await request('/health', { headers: { origin } })
