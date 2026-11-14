@@ -22,7 +22,6 @@ while (($#)); do
   esac
 done
 [[ "$name" =~ ^[a-z][a-z0-9-]{0,38}$ && "$name" != *- ]] || die 'name must be a lowercase slug without edge hyphens (maximum 39 characters)'
-case "$name" in example|starter|mcp-example) die 'reserved name' ;; esac
 [[ "$product_origin" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ && "$product_origin" != */. && "$product_origin" != */.. && "$product_origin" != .* ]] || die '--origin must be owner/repo'
 ((accept)) || die '--accept-parent-origin is required for a dedicated clone'
 ((commit)) || die '--commit is required for the two local commits'
@@ -55,7 +54,22 @@ const allowed = zones.kit_origin_allowlist.map(x => x.toLowerCase())
 if (!allowed.includes(process.argv[2].toLowerCase()) || allowed.includes(process.argv[3].toLowerCase())) process.exit(1)
 NODE
 [[ -z "$(git config --local --get-regexp '^remote\..*\.gh-resolved$' || true)" ]] || die 'existing gh default configuration is not a fresh clone'
-for path in "apps/$name-api" "apps/$name-web" "apps/$name-mcp" config/product/inheritance.json scripts/product/validate.sh .github/workflows/product-ci.yml config/product/deploy-gate.json docs/product/AGENTS.md config/product/coverage-order.txt; do
+app_paths=("apps/$name-api")
+if ((web)); then app_paths+=("apps/$name-web"); fi
+if ((mcp)); then app_paths+=("apps/$name-mcp"); fi
+node - "${app_paths[@]}" <<'NODE' || die 'generated App overlaps a protected Kit path'
+const zones = require('./config/kit/zero-edit-zones.json')
+const roots = [...zones.protected_prefixes, ...zones.protected_files].map(p => p.replace(/\/+$/, ''))
+for (const app of process.argv.slice(2)) {
+  for (const root of roots) {
+    if (app === root || app.startsWith(`${root}/`) || root.startsWith(`${app}/`)) {
+      console.error(`create-product: ${app} overlaps protected path ${root}`)
+      process.exit(1)
+    }
+  }
+}
+NODE
+for path in "${app_paths[@]}" config/product/inheritance.json scripts/product/validate.sh .github/workflows/product-ci.yml config/product/deploy-gate.json docs/product/AGENTS.md config/product/coverage-order.txt; do
   [[ ! -e "$path" && ! -L "$path" ]] || die "destination already exists: $path"
 done
 [[ -d apps/starter-api && -f apps/starter-api/package.json ]] || die 'API starter missing'

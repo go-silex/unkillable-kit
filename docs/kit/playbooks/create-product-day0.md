@@ -7,11 +7,11 @@ bash scripts/kit/create-product.sh <name> \
   --origin <owner>/<repo> --accept-parent-origin --commit [--web] [--mcp] [--skip-gh-default]
 ```
 
-`<name>` is a lowercase slug beginning with a letter, at most 39 characters, using letters, digits and hyphens, with no trailing hyphen. `example`, `starter` and `mcp-example` are reserved. `--origin` identifies the Product, not an allowlisted Kit parent. `--accept-parent-origin` explicitly authorizes treating the current parent origin as a disposable clone; `--commit` authorizes two local commits with normal hooks and the existing Git identity. `--web` adds a web App. `--mcp` adds a Product-owned stdio App using `@kit/mcp` and `fastmcp`, with ping and whoami; hosted OAuth is a separate [composition decision](./start-product.md#core-vs-opt-in).
+`<name>` is a lowercase slug beginning with a letter, at most 39 characters, using letters, digits and hyphens, with no trailing hyphen. `--origin` identifies the Product, not an allowlisted Kit parent. `--accept-parent-origin` explicitly authorizes treating the current parent origin as a disposable clone; `--commit` authorizes two local commits with normal hooks and the existing Git identity. `--web` adds a web App. `--mcp` adds a Product-owned stdio App using `@kit/mcp` and `fastmcp`, with ping and whoami; hosted OAuth is a separate [composition decision](./start-product.md#core-vs-opt-in).
 
 ## Preflight
 
-Run at the clone root, with a clean tree, no merge in progress, and a single independent worktree: the Git directory and common directory must coincide and `git worktree list --porcelain` must list only that worktree. The only remote must be `origin`, pointing to an allowlisted immediate parent. The inheritance marker and generated destinations must not already exist; required starters must be present. The generator refuses an already-rewired Product and does not resume partial runs. Preflight failures leave the clone untouched.
+Run at the clone root, with a clean tree, no merge in progress, and a single independent worktree: the Git directory and common directory must coincide and `git worktree list --porcelain` must list only that worktree. The only remote must be `origin`, pointing to an allowlisted immediate parent. The inheritance marker and generated destinations must not already exist; required starters must be present. Generated paths for the selected options are checked against the canonical protected-zone inventory at path-component boundaries. The generator refuses an already-rewired Product and does not resume partial runs. Preflight failures leave the clone untouched.
 
 ## Generated setup
 
