@@ -131,7 +131,6 @@ describe('disabled accounts over HTTP', () => {
         ALLOW_PUBLIC_SIGNUP: 'false',
         ENVIRONMENT: 'test',
         CORS_ORIGINS: TEST_ORIGIN,
-        EMAIL_TRANSPORT: 'log',
       },
       seed: { notes: false, environment: 'test' },
     })
