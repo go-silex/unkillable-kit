@@ -1,6 +1,6 @@
 import { AppError } from '@kit/core'
 import type { EmailPort } from '@kit/email'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, expectTypeOf, it, vi } from 'vitest'
 import { MAGIC_LINK_EXPIRES_IN_SEC, RESET_PASSWORD_TOKEN_EXPIRES_IN_SEC } from './auth-email'
 import { getBetterAuthSecret } from './better-auth-env'
 import { createBetterAuth } from './better-auth-factory'
@@ -180,13 +180,18 @@ describe('createBetterAuth', () => {
       trustedOrigins: [],
     }
     const emailPort = { send: vi.fn(async () => ({ ok: true, transport: 'log' })) }
-    const complete: Parameters<typeof createBetterAuth>[0] = { ...base, emailPort, emailConfig }
-    const absent: Parameters<typeof createBetterAuth>[0] = base
-    // @ts-expect-error a port requires its configuration
-    const missingConfig: Parameters<typeof createBetterAuth>[0] = { ...base, emailPort }
-    // @ts-expect-error configuration requires its port
-    const missingPort: Parameters<typeof createBetterAuth>[0] = { ...base, emailConfig }
-    expect([complete, absent, missingConfig, missingPort]).toHaveLength(4)
+    type Options = Parameters<typeof createBetterAuth>[0]
+    type Base = typeof base
+    type Port = typeof emailPort
+    type Config = typeof emailConfig
+    expectTypeOf<Base extends Options ? true : false>().toEqualTypeOf<true>()
+    expectTypeOf<
+      Base & { emailPort: Port; emailConfig: Config } extends Options ? true : false
+    >().toEqualTypeOf<true>()
+    expectTypeOf<Base & { emailPort: Port } extends Options ? true : false>().toEqualTypeOf<false>()
+    expectTypeOf<
+      Base & { emailConfig: Config } extends Options ? true : false
+    >().toEqualTypeOf<false>()
   })
 
   it('uses the recipient locale resolver in both handlers', async () => {
