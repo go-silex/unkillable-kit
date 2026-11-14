@@ -20,10 +20,9 @@ This index identifies the architectural authority of every decision record. ADR 
 
 Each ADR's YAML frontmatter is the sole home of its status, normativity and axial marker. Reading a
 row: a trailing `(<status>)` names the ADR's status, and a row without one is accepted.
-`bun run doc:check` checks this file and the ADR frontmatter. The header of
-[`check-adr-frontmatter.ts`](../../../scripts/kit/check-adr-frontmatter.ts) describes the rules,
-and CP-DOC-HYGIENE in [`testing.md`](../testing.md) says what the check does and does not claim.
+The table is generated from each ADR's `summary` and status; regenerate it with `bun run adr:index`, and check it with `bun run doc:check`.
 
+<!-- ADR-INDEX:START -->
 | ADR                                                                    | Decision                                                                    |
 | ---------------------------------------------------------------------- | --------------------------------------------------------------------------- |
 | [ADR-0001](./adr/0001-primary-axis-packages-compose-apps.md)           | Platform packages compose deployable apps                                   |
@@ -45,6 +44,7 @@ and CP-DOC-HYGIENE in [`testing.md`](../testing.md) says what the check does and
 | [ADR-0019](./adr/0019-notifications-rules-inbox-and-delivery.md)       | Notifications: rules, Inbox, persistence and producer contracts             |
 | [ADR-0020](./adr/0020-notification-delivery-ownership.md)              | Stable-ID Workflow ownership for notification Delivery; Queue demo boundary |
 | [ADR-0021](./adr/0021-slack-installations-and-notification-channel.md) | Slack installations, User links and notification Channel                    |
+<!-- ADR-INDEX:END -->
 
 ## Reading an ADR
 

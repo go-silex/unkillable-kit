@@ -15,6 +15,7 @@ related:
   - 'Roxabi/roxabi-boilerplate-cf#142'
   - 'Roxabi/roxabi-boilerplate-cf#143'
   - 'Roxabi/roxabi-boilerplate-cf#144'
+summary: 'Applied SQL + `@kit/auth/hono` are the persist/request-context kernel'
 ---
 
 # ADR-0012 — Kernel persistence + request-context stratum

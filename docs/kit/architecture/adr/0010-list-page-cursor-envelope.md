@@ -7,6 +7,7 @@ axial: false
 related:
   - docs/kit/architecture/adr/0001-primary-axis-packages-compose-apps.md
   - docs/kit/ui-kit.md
+summary: 'Shared list-page cursor envelope'
 ---
 
 # ADR-0010 — List page cursor envelope

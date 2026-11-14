@@ -29,6 +29,10 @@
 
 - Upgrade the example Workers to Wrangler 4.159.0 and regenerate their committed runtime declarations.
 
+### ADR index generation
+
+- Generate the decision index from ADR summaries and authority metadata; check it for drift during documentation validation.
+
 ### Flow run persistence
 
 - Commit run mutations and status/receipt events atomically, with path-specific Organization and snapshot fences. Failed-run closure checks ownership, preserves terminal status and errors during receipt cleanup, retains malformed receipt bytes and propagates the original exception.

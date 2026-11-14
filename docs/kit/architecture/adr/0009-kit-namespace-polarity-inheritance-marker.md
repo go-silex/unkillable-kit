@@ -11,6 +11,7 @@ related:
   - docs/kit/architecture/adr/0013-root-github-workflow-ownership.md
   - docs/kit/product-consumer-contract.md
   - config/kit/zero-edit-zones.json
+summary: 'Kit/product namespace polarity and inheritance marker'
 ---
 
 # ADR-0009 — Kit namespace polarity (`*/kit`) + inheritance marker SSoT

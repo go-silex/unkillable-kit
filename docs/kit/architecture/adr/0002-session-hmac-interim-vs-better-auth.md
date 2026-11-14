@@ -25,6 +25,7 @@ related:
   - docs/kit/architecture/adr/0003-multi-tenant-rbac-modules.md
   - docs/kit/architecture/adr/0015-mcp-remote-oauth-worker.md
   - GitHub epic go-silex/silex-boilerplate#14 (B2 HMAC cut)
+summary: 'Better Auth browser sessions + Bearer `sk_` dual path'
 ---
 
 # ADR-0002 — SessionPort: Better Auth only + Bearer `sk_` dual-path
