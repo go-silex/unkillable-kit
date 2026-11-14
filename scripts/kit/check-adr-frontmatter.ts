@@ -99,9 +99,19 @@ function render(adrs: Adr[]): string {
   const rows = adrs.map((adr) => {
     const title = adr.summary.replaceAll('|', '\\|')
     const status = adr.status === 'accepted' ? '' : ` (${adr.status})`
-    return `| [ADR-${adr.number}](./adr/${adr.name}) | ${title}${status} |`
+    return [`[ADR-${adr.number}](./adr/${adr.name})`, `${title}${status}`]
   })
-  return [start, '| ADR | Decision |', '| --- | --- |', ...rows, end].join('\n')
+  const width = Math.max(3, ...rows.map((row) => row[0]?.length ?? 0))
+  const decisionWidth = Math.max(8, ...rows.map((row) => row[1]?.length ?? 0))
+  const row = (first: string, second: string): string =>
+    `| ${first.padEnd(width)} | ${second.padEnd(decisionWidth)} |`
+  return [
+    start,
+    row('ADR', 'Decision'),
+    row('-'.repeat(width), '-'.repeat(decisionWidth)),
+    ...rows.map(([first = '', second = '']) => row(first, second)),
+    end,
+  ].join('\n')
 }
 
 function main(): void {
