@@ -8,6 +8,8 @@ This direction is subordinate to the mission, precedence and seven invariants in
 - **Platform JTBD:** a product composes the multi-tenant kernel, an organization runs a governed plan, and a second product composes the runner without forking it. Examples, pure flows and MCP alone do not establish this claim.
 - **Dogfood:** `example-*` is synthetic; a zero-edit product tests the [consumer contract](../product-consumer-contract.md); only a real external product deployment can demonstrate the platform JTBD.
 
+A zero-edit product attests the consumer contract: the gate guards against accidental divergence from the inherited kit tip, it is not tamper-proof provenance.
+
 ### Platform proof
 
 The platform JTBD is **not met**: the tenant shell is partial, governed execution on a named product tenant is not proven, and a second product composition is not proven. The example durable run path and approval route do not waive these requirements. D1 is met only when its gates are green.

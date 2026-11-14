@@ -3,7 +3,7 @@ title: 'ADR-0008 — Kit schema identity is module id + hash, not example-api NN
 status: accepted
 normative: true
 date: 2026-08-19
-amended: 2026-10-06
+amended: 2026-11-14
 axial: false
 related:
   - docs/kit/architecture/adr/0001-primary-axis-packages-compose-apps.md
@@ -73,6 +73,8 @@ Manifest JSON keys (sync script): `modules.<id>.kitSha256`, `modules.<id>.produc
 `@kit/auth` does **not** export `./migrations/*`. The product apply path is `kit-schema-sync` (catalog) into `apps/<product>-api/migrations`.
 
 ### D4 — Sync is append-only
+
+**Amendment (2026-11-14):** The fresh default is now `core,audit`, recorded in the new manifest. For an existing manifest, omitted `--modules` remains `core` plus recorded sets, including sets derived once from legacy manifests without `sets`; it does not silently add `audit`. Explicit selections are unchanged. The historical default and opt-in descriptions below describe the original decision; this amendment supersedes them for fresh Products. `audit` owns `rate_limit_buckets`, required by a mounted Better Auth throttle.
 
 The catalog defines the `core` set, including `0014_better_auth_1_7_additive` and `0015_api_keys_org_not_null`. Omitted `--modules` selects `core` plus the product manifest `sets` array. Explicit `--modules` and `--adopt` record selected sets; when `sets` is absent it is migrated once from recorded ids and canonical headers. An explicit list omitting a recorded set fails if catalog ids in that set are missing from `modules`, naming those ids. Delete the set from `sets` to opt out. `--adopt` fails closed when an unclaimed file matches an unselected set.
 
