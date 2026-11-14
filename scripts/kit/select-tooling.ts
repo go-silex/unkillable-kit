@@ -120,9 +120,9 @@ function select(args: string[]): boolean {
       env: { ...process.env, ROOT: root, EXTRACT_MODE: '', EXTRACT_HARNESS_SENTINEL: '' },
     },
   ).trim()
-  if (/^mode=product identity=/.test(identity)) return productNeedsLane()
-  if (!/^mode=kit identity=/.test(identity)) throw new Error('unknown tree identity')
-  if (mainPush) return true
+  const product = /^mode=product identity=/.test(identity)
+  if (!/^mode=(?:product|kit) identity=/.test(identity)) throw new Error('unknown tree identity')
+  if (mainPush && !product) return true
   if (Boolean(base) !== Boolean(head)) throw new Error('base and head must be supplied together')
   if (base && !(/^[0-9a-f]{40}$/.test(base) && /^[0-9a-f]{40}$/.test(head)))
     throw new Error('explicit revisions must be full commit SHAs')
@@ -142,18 +142,71 @@ function select(args: string[]): boolean {
     ...git(['diff', '--no-renames', '--name-only', '-z', 'HEAD', '--']).split('\0'),
     ...git(['ls-files', '--others', '--exclude-standard', '-z']).split('\0'),
   ].filter(Boolean)
+  if (product) return paths.includes('bun.lock') || productNeedsLane()
   return paths.some((path) => isToolingInput(path) || testReferences(path))
+}
+
+class NonHeadPush extends Error {}
+
+function parsePushUpdates(input: string): string[][] {
+  const lines = input.trim().split('\n').filter(Boolean)
+  if (lines.length === 0) throw new Error('missing push updates')
+  const updates: string[][] = []
+  const checkout = git(['rev-parse', '--verify', 'HEAD^{commit}']).trim()
+  for (const line of lines) {
+    const parts = line.split(' ')
+    if (
+      parts.length !== 4 ||
+      !parts[0] ||
+      !parts[2].startsWith('refs/') ||
+      !/^[0-9a-f]{40}$/.test(parts[1]) ||
+      !/^[0-9a-f]{40}$/.test(parts[3])
+    )
+      throw new Error('malformed push update')
+    const local = parts[1]
+    if (!/^0{40}$/.test(local) && local !== checkout)
+      throw new NonHeadPush('pushed commit is not the checked-out HEAD')
+    updates.push(parts)
+  }
+  return updates
+}
+
+function selectPush(input: string): boolean {
+  const updates = parsePushUpdates(input)
+  let run = false
+  for (const [, local, destination, remote] of updates) {
+    if (/^0{40}$/.test(local)) {
+      run = true
+      continue
+    }
+    if (!/^0{40}$/.test(remote)) git(['cat-file', '-e', `${remote}^{commit}`])
+    const defaultRef = git(['symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD']).trim()
+    const base = git(['rev-parse', '--verify', '--end-of-options', `${defaultRef}^{commit}`]).trim()
+    const args = ['--base', base, '--head', local]
+    if (destination === 'refs/heads/main') args.push('--kit-main-push')
+    if (select(args)) run = true
+  }
+  return run
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
-    const run = select(process.argv.slice(2))
+    const args = process.argv.slice(2)
+    const run =
+      args.length === 1 && args[0] === '--pre-push'
+        ? selectPush(readFileSync(0, 'utf8'))
+        : select(args)
     console.log(`tooling lane: ${run ? 'run' : 'skip'}`)
     process.exitCode = run ? 0 : 1
   } catch (error) {
-    console.error(
-      `tooling lane: run (selection failed: ${error instanceof Error ? error.message : String(error)})`,
-    )
-    process.exitCode = 0
+    if (error instanceof NonHeadPush) {
+      console.error(`tooling lane: refusing push (${error.message})`)
+      process.exitCode = 2
+    } else {
+      console.error(
+        `tooling lane: run (selection failed: ${error instanceof Error ? error.message : String(error)})`,
+      )
+      process.exitCode = 0
+    }
   }
 }

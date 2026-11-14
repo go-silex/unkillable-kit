@@ -56,6 +56,15 @@ function select(...args: string[]): number | null {
   assert.equal(child.signal, null, child.stderr)
   return child.status
 }
+function push(input: string): number | null {
+  const child = spawnSync(
+    process.execPath,
+    [join(root, 'scripts/kit/select-tooling.ts'), '--pre-push'],
+    { cwd: root, env, encoding: 'utf8', input },
+  )
+  assert.equal(child.signal, null, child.stderr)
+  return child.status
+}
 try {
   mkdirSync(join(root, 'scripts/kit'), { recursive: true })
   for (const name of ['select-tooling.ts', 'resolve-tree-identity.mjs'])
@@ -79,6 +88,21 @@ try {
   put('apps/example-web/src/page.ts', 'app change')
   head = commit('app only')
   assert.equal(select('--base', base, '--head', head), 1, 'app-only change skips')
+  git('update-ref', 'refs/remotes/origin/main', base)
+  git('symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main')
+  const update = (local: string, destination: string, remote: string) =>
+    `refs/heads/topic ${local} ${destination} ${remote}\n`
+  assert.equal(push(update(head, 'refs/heads/topic', base)), 1, 'local app-only push skips')
+  assert.equal(push(update(head, 'refs/heads/topic', '0'.repeat(40))), 1, 'new feature skips')
+  assert.equal(push(update(head, 'refs/heads/main', base)), 0, 'local main push runs')
+  assert.equal(push(update(base, 'refs/heads/main', head)), 2, 'non-HEAD push is refused')
+  assert.equal(
+    push(update(head, 'refs/heads/topic', base) + update(head, 'refs/heads/main', base)),
+    0,
+    'multiple updates include main',
+  )
+  assert.equal(push(''), 0, 'missing push context runs')
+  git('symbolic-ref', '--delete', 'refs/remotes/origin/HEAD')
   const tree = git('rev-parse', `${head}^{tree}`)
   const unrelated = execFileSync(
     'git',
@@ -127,6 +151,13 @@ try {
     head = commit(path)
     assert.equal(select('--base', previous, '--head', head), 0, path)
   }
+  git('symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main')
+  assert.equal(
+    push(update(head, 'refs/heads/topic', head)),
+    0,
+    'feature push compares against default, not destination',
+  )
+  git('symbolic-ref', '--delete', 'refs/remotes/origin/HEAD')
   const selectorPath = join(root, 'scripts/kit/select-tooling.ts')
   const selector = readFileSync(selectorPath, 'utf8')
   writeFileSync(selectorPath, `${selector}\n// selector mutation\n`)
@@ -148,27 +179,44 @@ try {
   assert.equal(select('--base', beforeInput, '--head', head), 0, 'uncovered test input runs')
   git('remote', 'set-url', 'origin', 'product')
   put('config/product/inheritance.json', JSON.stringify({ upstreamCommit: base }))
-  commit('product')
-  assert.equal(select('--kit-main-push'), 1, 'product main skips')
+  const productBase = head
+  head = commit('product')
+  assert.equal(
+    select('--base', productBase, '--head', head, '--kit-main-push'),
+    1,
+    'product main skips',
+  )
+  assert.equal(push(update(productBase, 'refs/heads/topic', head)), 2, 'product non-HEAD refused')
+  assert.equal(select('--base', 'invalid', '--head', head), 0, 'product invalid base runs')
+  writeFileSync(join(root, '.git/shallow'), `${base}\n`)
+  assert.equal(select('--base', productBase, '--head', head), 0, 'product shallow clone runs')
+  rmSync(join(root, '.git/shallow'))
+  put('bun.lock', 'dirty lock')
+  assert.equal(select('--base', productBase, '--head', head), 0, 'product dirty lock runs')
+  put('bun.lock', 'committed lock')
+  const beforeLock = head
+  head = commit('product lock')
+  assert.equal(select('--base', beforeLock, '--head', head), 0, 'product committed lock runs')
+  const productArgs = ['--base', head, '--head', head]
   put(
     'config/product/zero-edit-exceptions.json',
     JSON.stringify({ version: 1, exceptions: [{ path: 'packages/core/src/unrelated.ts' }] }),
   )
-  assert.equal(select(), 1, 'unrelated product exception skips')
+  assert.equal(select(...productArgs), 1, 'unrelated product exception skips')
   put(
     'config/product/zero-edit-exceptions.json',
     JSON.stringify({ version: 1, exceptions: [{ path: 'scripts/kit/helper.sh' }] }),
   )
-  assert.equal(select(), 0, 'tooling exception runs')
+  assert.equal(select(...productArgs), 0, 'tooling exception runs')
   put(
     'config/product/zero-edit-exceptions.json',
     JSON.stringify({ version: 1, exceptions: [{ path: 'scripts' }] }),
   )
-  assert.equal(select(), 0, 'ancestor exception runs')
+  assert.equal(select(...productArgs), 0, 'ancestor exception runs')
   put('config/product/zero-edit-exceptions.json', '{')
-  assert.equal(select(), 0, 'malformed exception runs')
+  assert.equal(select(...productArgs), 0, 'malformed exception runs')
   put('config/product/inheritance.json', '{')
-  assert.equal(select(), 0, 'unknown identity runs')
+  assert.equal(select(...productArgs), 0, 'unknown identity runs')
   console.log('tooling selector self-tests passed')
 } finally {
   rmSync(root, { recursive: true, force: true })
