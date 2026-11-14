@@ -15,6 +15,11 @@
 - Route agents in product clones to `docs/product/AGENTS.md`.
 - Route agents working inside a package or app to its `README.md` when present, in every clone.
 
+### Disabled accounts
+
+- Disabled Users cannot authenticate with sessions or Organization-bound API keys. Disabling revokes existing sessions; enabling requires a new sign-in. Inheriting Products must sync the Kit schema and apply the new migration before deploying: a missing account-state column causes authentication to fail closed.
+- Hosted MCP Apps must bind `DB` to the same authentication database as the API. The hosted shell checks live User state for identity, OAuth exchanges and requests; this is required independently of optional grant admission.
+
 ### Biome D1 safety
 
 - Keep `noPlaywrightUselessAwait` diagnostics while disabling its automatic fix: Biome 2.6.7 misidentifies D1 `first()` calls as Playwright locators and otherwise removes required awaits. Restore the fix when upstream distinguishes those calls and the real D1 staged-file proof passes.

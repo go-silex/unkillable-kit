@@ -1,4 +1,5 @@
 import { createBetterAuthSessionPort } from '@kit/auth'
+import { isAccountActive } from '@kit/auth/repos/account-state'
 import type { ImpersonationSession } from '@kit/auth/repos/impersonation'
 import { findImpersonationSession, recordImpersonationRequest } from '@kit/auth/repos/impersonation'
 import * as orgsRepo from '@kit/auth/repos/orgs'
@@ -81,6 +82,11 @@ async function handleDelegation(
   if (/^\s*Bearer\b/i.test(c.req.header('authorization') ?? ''))
     throw AppError.forbidden('Bearer credentials cannot be combined with impersonation')
   if (row.actorUserId !== actor) throw AppError.unauthorized()
+  try {
+    if (!(await isAccountActive(db, row.subjectUserId))) throw AppError.unauthorized()
+  } catch {
+    throw AppError.unauthorized()
+  }
   c.set('actorSubject', actor)
   c.set('sessionId', row.sessionId)
   c.set('impersonationRow', row)
@@ -123,6 +129,7 @@ export const impersonationGate: MiddlewareHandler<AppEnv> = async (c, next) => {
   const session = await createBetterAuthSessionPort({
     getAuth: () => auth,
     cookieName: sessionCookieNameFromEnv(c.env),
+    isAccountActive: (userId) => isAccountActive(db, userId),
   }).resolveSession({ headers })
   if (!session) {
     assertUnattachedFence(c)

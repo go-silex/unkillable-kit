@@ -6,6 +6,7 @@ import {
 } from '@cloudflare/workers-oauth-provider'
 import { EdgeFastMCP } from 'fastmcp/edge'
 import type { McpIdentity } from '../identity'
+import { accountAdmissionResponse, accountIsActive } from './account-admission'
 import { handleAuthorize } from './authorize'
 import {
   type ConsentPolicy,
@@ -200,9 +201,10 @@ export function createHostedMcpWorker<Env extends HostedMcpEnv>(
   if (grantAdmission !== undefined && typeof grantAdmission !== 'function') {
     throw new TypeError('grantAdmission must be a function')
   }
-  const admissionOptions = grantAdmission
-    ? { tokenExchangeCallback: tokenAdmission(grantAdmission) }
-    : {}
+  const admission: Admission<Env> = async (input, env) => {
+    if (!(await accountIsActive(input.userId, env))) return false
+    return grantAdmission ? grantAdmission(input, env) : true
+  }
   const ttl = opts.refreshTokenTTL
   // The provider checks this when built, per request, where a bad value would fail every route.
   if (ttl !== undefined && ttl !== 0 && !(Number.isInteger(ttl) && ttl >= KV_MIN_TTL_SECONDS)) {
@@ -215,10 +217,8 @@ export function createHostedMcpWorker<Env extends HostedMcpEnv>(
     async fetch(request: Request, env: Env, ctx: ExecutionContext) {
       const identity = normalizeIdentity(ctx.props)
       if (!identity) return new Response('Unauthorized', { status: 401 })
-      if (grantAdmission) {
-        const outcome = await admitRequest(grantAdmission, identity, env, ctx)
-        if (outcome !== 'allow') return admissionResponse(outcome, request)
-      }
+      const outcome = await admitRequest(admission, identity, env, ctx)
+      if (outcome !== 'allow') return admissionResponse(outcome, request)
       const server = new EdgeFastMCP({
         name: opts.name,
         version: opts.version ?? '0.0.1',
@@ -237,6 +237,7 @@ export function createHostedMcpWorker<Env extends HostedMcpEnv>(
         const callerEnv = stripOauthHelper(env)
         return handleAuthorize(request, env, {
           identityPort: identityPortFor(opts.identityPort, callerEnv),
+          accountAdmission: (userId) => accountAdmissionResponse(userId, callerEnv),
           apiBaseUrl: opts.apiBaseUrl(callerEnv, request),
           consent,
           ...(consentPresentation ? { consentPresentation } : {}),
@@ -281,7 +282,7 @@ export function createHostedMcpWorker<Env extends HostedMcpEnv>(
         // Custom-scheme apps stay a consent-page redirect class (ADR-0015 D5); remote http never is.
         allowPrivateUseRedirectUris: true,
         allowTokenExchangeGrant: false,
-        ...admissionOptions,
+        tokenExchangeCallback: tokenAdmission(admission),
         clientIdMetadataDocumentEnabled: true,
         scopesSupported: [MCP_SCOPE],
         requiredScopes: [MCP_SCOPE],

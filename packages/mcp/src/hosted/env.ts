@@ -2,6 +2,8 @@ import type { McpIdentityPort } from '../identity'
 
 export type HostedMcpEnv = {
   OAUTH_KV: KVNamespace
+  /** The same D1 database used by the product's Better Auth user table. */
+  DB: D1Database
   /** Set it on every deployed compose: `production` / `staging` close DCR and demo auto-approve. */
   ENVIRONMENT?: string
   /**

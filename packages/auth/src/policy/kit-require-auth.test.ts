@@ -3,10 +3,12 @@ import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import { describe, expect, it, vi } from 'vitest'
 import type { BetterAuthLike } from '../better-auth-port'
 import { generateApiKey } from '../keys'
+import { isAccountActive } from '../repos/account-state'
 import type { KitRepoDb } from '../repos/db-type'
 import { findActiveOrgApiKeyByPrefix } from '../repos/keys'
 import { createKitRequireAuth } from './kit-require-auth'
 
+vi.mock('../repos/account-state', () => ({ isAccountActive: vi.fn(async () => true) }))
 vi.mock('../repos/keys', () => ({ findActiveOrgApiKeyByPrefix: vi.fn(async () => null) }))
 
 type Env = {
@@ -68,6 +70,14 @@ describe('createKitRequireAuth', () => {
       method: 'session',
       session: 'session-1',
     })
+  })
+
+  it('rejects a disabled session subject', async () => {
+    vi.mocked(isAccountActive).mockResolvedValueOnce(false)
+    const response = await app({ db: true, auth: true }).request('/protected', {
+      headers: { cookie: 'test.session=value' },
+    })
+    expect(response.status).toBe(401)
   })
 
   it('uses organization-bound lookup for bearer credentials', async () => {

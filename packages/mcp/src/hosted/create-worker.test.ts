@@ -97,7 +97,10 @@ function ctx(): ExecutionContext {
 }
 
 function env(kv: MemoryKv, extra?: Partial<HostedMcpEnv>): HostedMcpEnv {
-  return { OAUTH_KV: kv as unknown as KVNamespace, ...extra }
+  const DB = {
+    prepare: () => ({ bind: () => ({ raw: async () => [[0]] }) }),
+  } as unknown as D1Database
+  return { OAUTH_KV: kv as unknown as KVNamespace, DB, ...extra }
 }
 
 /** A deploy serving `origin`: a loopback development host serves itself, PUBLIC is configured. */
