@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# KIT_UPGRADE_BUN overrides bun for the hermetic self-test only.
+# KIT_UPGRADE_BUN and KIT_UPGRADE_HARNESS_SENTINEL are for the hermetic self-test only.
 set -euo pipefail
 export GIT_OPTIONAL_LOCKS=0
 trap 'echo "stop: inspect the error and resume manually as documented in Pulling kit upgrades; do not restart an open merge" >&2' ERR
@@ -12,6 +12,10 @@ elif [[ $# != 0 ]]; then
   echo 'usage: kit-upgrade.sh [--check]' >&2
   exit 2
 fi
+if [[ -n ${KIT_UPGRADE_BUN:-} && ( -z ${KIT_UPGRADE_HARNESS_SENTINEL:-} || ! -f ${KIT_UPGRADE_HARNESS_SENTINEL} ) ]]; then
+  echo 'stop: KIT_UPGRADE_BUN requires a test harness sentinel' >&2
+  exit 1
+fi
 if [[ $(node scripts/kit/resolve-tree-identity.mjs) != 'mode=product '* ]]; then
   echo 'stop: kit-upgrade requires a product clone' >&2
   exit 1
@@ -23,10 +27,12 @@ fi
 if ! $check; then
   git fetch upstream
 fi
-if git diff -U0 HEAD upstream/main -- package.json | grep -q '^+.*"packageManager"'; then
+package_diff=$(git diff -U0 HEAD upstream/main -- package.json)
+if grep -q '^+.*"packageManager"' <<<"$package_diff"; then
   echo "packageManager moves: set BUN_VERSION on each Workers Builds / Pages project just before this reaches its deploy/<branch> source branch (row 'Kit bumps packageManager')" >&2
 fi
-if git diff -U0 HEAD upstream/main -- .github/workflows | grep -q '^+.*create-github-app-token@'; then
+workflow_diff=$(git diff -U0 HEAD upstream/main -- .github/workflows)
+if grep -q '^+.*create-github-app-token@' <<<"$workflow_diff"; then
   echo "stop: this range bumps actions/create-github-app-token; establish the effective CI_APP_ID mode first (row 'Kit bumps actions/create-github-app-token')" >&2
   exit 1
 fi
@@ -64,4 +70,7 @@ if ! git diff --quiet upstream/main -- .github/dependabot.yml; then
     git commit -m 'chore(deps): refresh Product Dependabot scan'
   fi
 fi
-"$bun_cmd" run zero-edit
+if ! "$bun_cmd" run zero-edit; then
+  echo 'stop: merge is committed; resolve zero-edit findings or intentionally refresh exceptions as documented' >&2
+  exit 1
+fi
