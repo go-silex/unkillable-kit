@@ -404,7 +404,7 @@ The independent-history cases in `scripts/kit/dogfood-zero-edit.sh` exercise syn
 bun run zero-edit
 ```
 
-The inherited root gate still runs its live current-tree checks in Product mode. After validating context, its gate-tooling self-tests normally skip in a Product clone because the tooling is inherited unchanged. A zero-edit exception covering a tooling input or a change to the shared, unprotected `bun.lock` selects `validate:tooling`; uncertain context runs it conservatively. An exception does not authorize a protected edit by itself. Run `bun run validate:tooling` explicitly when needed; it does not replace Product app validation. Local and CI selection and its limits are documented in [testing.md](./testing.md#ops-model--local-first-ci-guardrail).
+The inherited root gate still runs its live current-tree checks in Product mode. After validating context, its gate-tooling self-tests may skip in a Product clone. A zero-edit exception covering a tooling input or changes to Product configuration, manifests or the shared, unprotected `bun.lock` select `validate:tooling`; uncertain context runs it conservatively. An exception does not authorize a protected edit by itself. Run `bun run validate:tooling` explicitly when needed; it does not replace Product app validation. Local and CI selection and its limits are documented in [testing.md](./testing.md#ops-model--local-first-ci-guardrail).
 
 Do **not** dual-edit kit `ci.yml` for this — the pattern lives in the kit.  
 Do **not** rely on org secrets to fetch private `upstream` solely for zero-edit when the kit tip is already in product history after merge.  
