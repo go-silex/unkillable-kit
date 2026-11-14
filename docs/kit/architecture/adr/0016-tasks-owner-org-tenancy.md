@@ -13,6 +13,7 @@ related:
   - apps/example-api/migrations/0019_tasks_org_fk_contract.sql
   - apps/example-api/migrations/0020_tasks_stage_org_guard.sql
   - packages/tasks/src/repos.ts
+summary: 'Tasks owner-org tenancy'
 ---
 
 # ADR-0016 — Tasks owner-Organization tenancy: implementation and rollout

@@ -55,6 +55,8 @@ This index locates the authoritative home for each rule and the operational guid
 - [ADR-0019 — notification rules, Inbox and producer contracts](./architecture/adr/0019-notifications-rules-inbox-and-delivery.md).
 - [ADR-0020 — Workflow-owned Delivery and Queue demo boundary](./architecture/adr/0020-notification-delivery-ownership.md).
 - [ADR-0021 — Slack installations and notification Channel](./architecture/adr/0021-slack-installations-and-notification-channel.md).
+- [ADR-0022 — minimal starter Apps](./architecture/adr/0022-minimal-starter-apps.md).
+- Non-normative design notes: [ADR-0019](./architecture/design-notes/0019-notifications.md), [ADR-0021](./architecture/design-notes/0021-slack.md).
 
 ## Processes, operations and security
 
@@ -68,6 +70,7 @@ This index locates the authoritative home for each rule and the operational guid
 ## Onboarding and playbooks
 
 - [Start a product](./playbooks/start-product.md) — create a zero-edit consumer of the kit.
+- [Create a Product: day 0](./playbooks/create-product-day0.md) — generate Apps, local remotes and Product wiring in a dedicated clone.
 
 ## Consumer templates
 

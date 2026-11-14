@@ -44,6 +44,8 @@ seed_ok() {
 {
   "scripts": {
     "validate:full": "bun run scripts/kit/root-gate.ts uniquely-zz-gate lint typecheck banlist zod-major ts-major import-boundary test:kit-schema-sync wrangler-migrations:check test:wrangler-migrations zero-edit extract-dry-run test:coverage",
+    "validate:tooling": "bun run scripts/kit/root-gate.ts tooling-one tooling-two tooling-three",
+    "tooling-one": "true", "tooling-two": "true", "tooling-three": "true",
     "uniquely-zz-gate": "true", "lint": "true", "typecheck": "true", "banlist": "true",
     "zod-major": "true", "ts-major": "true", "import-boundary": "true",
     "test:kit-schema-sync": "true", "wrangler-migrations:check": "true",
@@ -78,6 +80,10 @@ pre-push:
   commands:
     validate-full:
       run: bun run validate:full
+    validate-tooling:
+      run: |
+        bun scripts/kit/select-tooling.ts
+        bun run validate:tooling
 EOF
 }
 
@@ -116,6 +122,10 @@ pre-push:
   commands:
     validate-full:
       run: bun run validate:full
+    validate-tooling:
+      run: |
+        bun scripts/kit/select-tooling.ts
+        bun run validate:tooling
 EOF
 assert_exit "wrapped middot inventory → 1" 1 "${BAD_WRAP}"
 
@@ -148,6 +158,10 @@ pre-push:
   commands:
     validate-full:
       run: bun run lint && bun run typecheck && bun run ts-major && bun run import-boundary
+    validate-tooling:
+      run: |
+        bun scripts/kit/select-tooling.ts
+        bun run validate:tooling
 EOF
 assert_exit "lefthook copies inner steps → 1" 1 "${BAD_LH}"
 
@@ -158,6 +172,10 @@ pre-push:
   commands:
     validate-full:
       run: bun run validate:full -- --plan
+    validate-tooling:
+      run: |
+        bun scripts/kit/select-tooling.ts
+        bun run validate:tooling
 EOF
 assert_exit "lefthook plan is not full execution → 1" 1 "${PLAN_LH}"
 
@@ -169,6 +187,8 @@ jobs:
   quality:
     steps:
       - run: bun run validate:full -- --plan
+      - run: bun scripts/kit/select-tooling.ts
+      - run: bun run validate:tooling
 EOF
 assert_exit "ci plan is not full execution → 1" 1 "${PLAN_CI}"
 
@@ -180,6 +200,8 @@ jobs:
   quality:
     steps:
       - run: bun run validate:full -- --ci-group core --receipt /tmp/root-core.json
+      - run: bun scripts/kit/select-tooling.ts
+      - run: bun run validate:tooling
 EOF
 assert_exit "ci partial group is not full execution → 1" 1 "${PARTIAL_CI}"
 
@@ -191,6 +213,8 @@ jobs:
   quality:
     steps:
       - run: echo "bun run validate:full"
+      - run: bun scripts/kit/select-tooling.ts
+      - run: bun run validate:tooling
 EOF
 assert_exit "ci echo substring is not invoke by name → 1" 1 "${BAD_CI}"
 
@@ -213,8 +237,78 @@ jobs:
   quality:
     steps:
       - run: bun run validate:full
+      - run: bun scripts/kit/select-tooling.ts
+      - run: bun run validate:tooling
 EOF
 assert_exit "ci run: bun run validate:full → 0" 0 "${OK_CI}"
+
+BAD_TOOLING_LIST="${TMP}/bad-tooling-list"
+seed_ok "${BAD_TOOLING_LIST}"
+echo 'validate:tooling = tooling-one · tooling-two · tooling-three' >"${BAD_TOOLING_LIST}/AGENTS.md"
+assert_exit "tooling inventory copied to docs → 1" 1 "${BAD_TOOLING_LIST}"
+
+BAD_TOOLING_WRAP="${TMP}/bad-tooling-wrap"
+seed_ok "${BAD_TOOLING_WRAP}"
+cat >"${BAD_TOOLING_WRAP}/docs/kit/testing.md" <<'EOF'
+validate:tooling = tooling-one · tooling-two ·
+  tooling-three
+EOF
+assert_exit "wrapped tooling inventory → 1" 1 "${BAD_TOOLING_WRAP}"
+
+BAD_TOOLING_RECIPE="${TMP}/bad-tooling-recipe"
+seed_ok "${BAD_TOOLING_RECIPE}"
+TREE="${BAD_TOOLING_RECIPE}" bun -e 'const p = `${process.env.TREE}/package.json`; const j = await Bun.file(p).json(); j.scripts["validate:tooling"] += " validate:tooling"; await Bun.write(p, JSON.stringify(j))'
+assert_exit "recursive tooling recipe → 1" 1 "${BAD_TOOLING_RECIPE}"
+
+MISSING_TOOLING_HOOK="${TMP}/missing-tooling-hook"
+seed_ok "${MISSING_TOOLING_HOOK}"
+cat >"${MISSING_TOOLING_HOOK}/lefthook.yml" <<'EOF'
+pre-push:
+  commands:
+    validate-full:
+      run: bun run validate:full
+    select:
+      run: bun scripts/kit/select-tooling.ts
+    # bun run validate:tooling
+EOF
+assert_exit "missing tooling hook invocation → 1" 1 "${MISSING_TOOLING_HOOK}"
+
+MISSING_TOOLING_CI="${TMP}/missing-tooling-ci"
+seed_ok "${MISSING_TOOLING_CI}"
+mkdir -p "${MISSING_TOOLING_CI}/.github/workflows"
+cat >"${MISSING_TOOLING_CI}/.github/workflows/ci.yml" <<'EOF'
+jobs:
+  quality:
+    steps:
+      - run: bun run validate:full
+      - run: bun scripts/kit/select-tooling.ts
+      - run: echo "bun run validate:tooling"
+EOF
+assert_exit "missing tooling ci invocation → 1" 1 "${MISSING_TOOLING_CI}"
+
+MISSING_SELECTOR_HOOK="${TMP}/missing-selector-hook"
+seed_ok "${MISSING_SELECTOR_HOOK}"
+cat >"${MISSING_SELECTOR_HOOK}/lefthook.yml" <<'EOF'
+pre-push:
+  commands:
+    full:
+      run: bun run validate:full
+    tooling:
+      run: bun run validate:tooling
+EOF
+assert_exit "missing hook selector → 1" 1 "${MISSING_SELECTOR_HOOK}"
+
+MISSING_SELECTOR_CI="${TMP}/missing-selector-ci"
+seed_ok "${MISSING_SELECTOR_CI}"
+mkdir -p "${MISSING_SELECTOR_CI}/.github/workflows"
+cat >"${MISSING_SELECTOR_CI}/.github/workflows/ci.yml" <<'EOF'
+jobs:
+  quality:
+    steps:
+      - run: bun run validate:full
+      - run: bun run validate:tooling
+EOF
+assert_exit "missing ci selector → 1" 1 "${MISSING_SELECTOR_CI}"
 
 MISSING_DOCS="${TMP}/missing-docs"
 seed_ok "${MISSING_DOCS}"

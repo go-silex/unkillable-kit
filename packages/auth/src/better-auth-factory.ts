@@ -5,10 +5,11 @@
 import type { KitD1Database } from '@kit/db'
 import { betterAuth } from 'better-auth'
 import { drizzleAdapter } from 'better-auth/adapters/drizzle'
-import { isAPIError } from 'better-auth/api'
+import { APIError, isAPIError } from 'better-auth/api'
 import { magicLink } from 'better-auth/plugins'
 import { drizzle } from 'drizzle-orm/d1'
 import {
+  type AuthEmailConfig,
   type AuthEmailPort,
   MAGIC_LINK_EXPIRES_IN_SEC,
   RESET_PASSWORD_TOKEN_EXPIRES_IN_SEC,
@@ -27,6 +28,8 @@ import { sessionCookieName } from './cookie-name'
 import { createFirstSessionAfterHook, type FirstSessionHandler } from './first-session-hook'
 import { logBetterAuthEvent } from './logging/better-auth-logger'
 import { createKitOrganizationPlugin } from './org-plugin'
+import { createSessionAccountGuard, InactiveSessionError } from './policy/better-auth-session-guard'
+import { isAccountActive } from './repos/account-state'
 import { hashVerificationIdentifier } from './verification-identifier'
 
 /**
@@ -54,8 +57,6 @@ export type CreateBetterAuthOpts = {
    * self-allowlist. Default false: pin `baseURL` origin into the allowlist.
    */
   requestDerivedBaseURL?: boolean
-  /** When set, registers magic-link + password-reset send. Omit for password-only peers. */
-  emailPort?: AuthEmailPort
   schema?: BetterAuthTables
   cookieName?: string
   useSecureCookies?: boolean
@@ -66,6 +67,18 @@ export type CreateBetterAuthOpts = {
   resetPasswordTokenExpiresIn?: number
   /** Only for explicit development|test placeholders — never production. */
   allowKitPlaceholderSecret?: boolean
+} & (
+  | { emailPort: AuthEmailPort; emailConfig: AuthEmailConfig }
+  | { emailPort?: never; emailConfig?: never }
+)
+
+function assertEmailConfig(emailPort?: AuthEmailPort, emailConfig?: AuthEmailConfig): void {
+  if (emailPort && !emailConfig) {
+    throw new Error('emailConfig is required when emailPort is configured')
+  }
+  if (emailConfig && !emailPort) {
+    throw new Error('emailPort is required when emailConfig is configured')
+  }
 }
 
 export function createBetterAuth(opts: CreateBetterAuthOpts): KitBetterAuth {
@@ -85,6 +98,8 @@ export function createBetterAuth(opts: CreateBetterAuthOpts): KitBetterAuth {
   const secure = opts.useSecureCookies ?? true
   const publicSignup = opts.allowPublicSignup ?? false
   const emailPort = opts.emailPort
+  const emailConfig = opts.emailConfig
+  assertEmailConfig(emailPort, emailConfig)
   const linkOrigins = new Set<string>(trustedOrigins)
   let base: URL
   try {
@@ -118,9 +133,21 @@ export function createBetterAuth(opts: CreateBetterAuthOpts): KitBetterAuth {
       provider: 'sqlite',
       schema,
     }),
+    hooks: { before: createSessionAccountGuard(db, schema) },
     databaseHooks: {
       session: {
         create: {
+          before: async (session) => {
+            let active = false
+            try {
+              active = await isAccountActive(db, session.userId, schema.user)
+            } catch {
+              // An unreadable account state must never issue a session.
+            }
+            if (!active) {
+              throw new APIError('UNAUTHORIZED', { message: 'Invalid email or password' })
+            }
+          },
           after: createFirstSessionAfterHook(opts.onFirstSession),
         },
       },
@@ -132,23 +159,28 @@ export function createBetterAuth(opts: CreateBetterAuthOpts): KitBetterAuth {
       revokeSessionsOnPasswordReset: true,
       resetPasswordTokenExpiresIn:
         opts.resetPasswordTokenExpiresIn ?? RESET_PASSWORD_TOKEN_EXPIRES_IN_SEC,
-      ...(emailPort
+      ...(emailPort && emailConfig
         ? {
             sendResetPassword: async ({ user, url }) => {
-              await sendResetPasswordMail(emailPort, { email: user.email, url, ...tokenHref })
+              await sendResetPasswordMail(emailPort, {
+                email: user.email,
+                url,
+                emailConfig,
+                ...tokenHref,
+              })
             },
           }
         : {}),
     },
     plugins: [
       createKitOrganizationPlugin(),
-      ...(emailPort
+      ...(emailPort && emailConfig
         ? [
             magicLink({
               expiresIn: opts.magicLinkExpiresIn ?? MAGIC_LINK_EXPIRES_IN_SEC,
               disableSignUp: !publicSignup,
               sendMagicLink: async ({ email, url }) => {
-                await sendMagicLinkMail(emailPort, { email, url, ...tokenHref })
+                await sendMagicLinkMail(emailPort, { email, url, emailConfig, ...tokenHref })
               },
             }),
           ]
@@ -184,6 +216,25 @@ export function createBetterAuth(opts: CreateBetterAuthOpts): KitBetterAuth {
       return new Response(null, { status: 500, statusText: 'Internal Server Error' })
     }
   }
+  auth.api.getSession = new Proxy(auth.api.getSession, {
+    async apply(target, thisArg, args) {
+      try {
+        return await Reflect.apply(target, thisArg, args)
+      } catch (error) {
+        const options = args[0] as
+          | { asResponse?: boolean; returnHeaders?: boolean; returnStatus?: boolean }
+          | undefined
+        if (
+          error instanceof InactiveSessionError &&
+          !options?.asResponse &&
+          !options?.returnHeaders &&
+          !options?.returnStatus
+        )
+          return null
+        throw error
+      }
+    },
+  })
   auth.handler = safeHandler
   auth.fetch = safeHandler
   return auth

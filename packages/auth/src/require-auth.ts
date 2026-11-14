@@ -3,6 +3,22 @@ import { apiKeyPrefix, parseBearer, verifyApiKey } from './keys'
 import type { SessionPort } from './session-port'
 
 export type AuthMethod = 'session' | 'api_key'
+export type ApiKeyScope = 'read' | 'write' | 'admin'
+
+/** Unknown or malformed stored values grant no scopes. */
+export function parseApiKeyScopes(value: string): ApiKeyScope[] {
+  if (typeof value !== 'string' || !value) return []
+  const scopes = value.split(',')
+  if (scopes.some((scope) => scope !== 'read' && scope !== 'write' && scope !== 'admin')) {
+    return []
+  }
+  return scopes as ApiKeyScope[]
+}
+
+/** API-key scopes narrow access independently; sessions remain governed by existing policy. */
+export function allowsApiKeyScope(identity: AuthIdentity, requiredScope: ApiKeyScope): boolean {
+  return identity.method === 'session' || identity.scopes.includes(requiredScope)
+}
 
 export type SessionAuthIdentity = {
   subject: string
@@ -15,6 +31,7 @@ export type ApiKeyAuthIdentity = {
   subject: string
   method: 'api_key'
   organizationId: string
+  scopes: ApiKeyScope[]
 }
 
 export type AuthIdentity = SessionAuthIdentity | ApiKeyAuthIdentity
@@ -26,6 +43,7 @@ export type ApiKeyRecord = {
   revokedAt: number | null
   expiresAt: number | null
   organizationId?: string | null
+  scopes: string
 }
 
 export type DualAuthPorts = {
@@ -33,6 +51,7 @@ export type DualAuthPorts = {
   headers?: Headers
   /** Required — apps inject createBetterAuthSessionPort (ADR-0002 BA-only). */
   sessions: SessionPort
+  isAccountActive: (subject: string) => Promise<boolean>
   findApiKeyByPrefix: (prefix: string) => Promise<ApiKeyRecord | null>
 }
 
@@ -44,6 +63,16 @@ export function normalizeApiKeyOrganizationId(value: string | null | undefined):
   if (value == null) return null
   const trimmed = value.trim()
   return trimmed.length > 0 ? trimmed : null
+}
+
+async function requireActiveAccount(ports: DualAuthPorts, subject: string): Promise<void> {
+  let active: boolean
+  try {
+    active = await ports.isAccountActive(subject)
+  } catch {
+    throw AppError.unauthorized()
+  }
+  if (active !== true) throw AppError.unauthorized()
 }
 
 /**
@@ -74,10 +103,12 @@ export async function resolveDualAuth(
     if (!organizationId) {
       throw AppError.unauthorized()
     }
+    await requireActiveAccount(ports, row.subject)
     return {
       subject: row.subject,
       method: 'api_key',
       organizationId,
+      scopes: parseApiKeyScopes(row.scopes),
     }
   }
 
@@ -96,7 +127,10 @@ export type RequireAuthContext = {
     /** Hono raw Request — used to forward Headers to BA getSession. */
     raw?: { headers: Headers }
   }
-  set: (key: 'subject' | 'authMethod' | 'keyOrganizationId' | 'sessionId', value: string) => void
+  set: (
+    key: 'subject' | 'authMethod' | 'keyOrganizationId' | 'sessionId' | 'keyScopes',
+    value: string | ApiKeyScope[],
+  ) => void
 }
 
 export function createRequireAuth<C extends RequireAuthContext>(
@@ -116,6 +150,7 @@ export function createRequireAuth<C extends RequireAuthContext>(
     c.set('authMethod', auth.method)
     if (auth.method === 'api_key') {
       c.set('keyOrganizationId', auth.organizationId)
+      c.set('keyScopes', auth.scopes)
     } else {
       c.set('sessionId', auth.sessionId)
     }

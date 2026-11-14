@@ -58,6 +58,7 @@ git diff --quiet HEAD -- LICENSE
 printf '{\n  "version": 1,\n  "upstreamCommit": "%s"\n}\n' "$(git rev-parse upstream/main)" > config/product/inheritance.json
 bun_cmd=${KIT_UPGRADE_BUN:-bun}
 "$bun_cmd" install
+git add bun.lock
 if ! "$bun_cmd" run lock-ranges:check; then
   echo 'stop: merge remains open; resolve lock-ranges findings by owner and resume as documented in Pulling kit upgrades' >&2
   exit 1

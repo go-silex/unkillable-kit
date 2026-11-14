@@ -320,7 +320,7 @@ describe('createApp dual auth + D1 + R2 (happy path)', () => {
       {
         method: 'POST',
         headers: sessionHeaders(cookie, undefined, ORIGIN),
-        body: JSON.stringify({ organizationId: org.id }),
+        body: JSON.stringify({ organizationId: org.id, scopes: ['read', 'write', 'admin'] }),
       },
       env,
     )
@@ -414,7 +414,11 @@ describe('createApp dual auth + D1 + R2 (happy path)', () => {
     await seedTenancyDemo(db, { environment: 'test', force: true }, hashFixtureCredential)
 
     // positive control: the same key, unexpired, authenticates
-    const live = await mintApiKey(db, 'user_staff', { organizationId: 'org_acme', name: 'live' })
+    const live = await mintApiKey(db, 'user_staff', {
+      organizationId: 'org_acme',
+      name: 'live',
+      scopes: ['read', 'write', 'admin'],
+    })
     const okRes = await app.request(
       '/api/me',
       { headers: { authorization: `Bearer ${live.key}` } },
@@ -426,6 +430,7 @@ describe('createApp dual auth + D1 + R2 (happy path)', () => {
       organizationId: 'org_acme',
       expiresAt: Date.now() - 1000,
       name: 'old',
+      scopes: ['read', 'write', 'admin'],
     })
     const res = await app.request(
       '/api/me',
@@ -446,9 +451,9 @@ describe('createApp dual auth + D1 + R2 (happy path)', () => {
 
     // No opt-in flag: omitting the organization is refused by the service itself, so a new
     // call site cannot recreate the subject-global key state D11 forbids.
-    await expect(mintApiKey(db, 'user_staff', { name: 'no-org' })).rejects.toThrow(
-      /organizationId is required/i,
-    )
+    await expect(
+      mintApiKey(db, 'user_staff', { name: 'no-org', scopes: ['read', 'write', 'admin'] }),
+    ).rejects.toThrow(/organizationId is required/i)
   })
 
   it('cookie mutations require trusted Origin', async () => {
@@ -640,7 +645,7 @@ describe('createApp dual auth + D1 + R2 (happy path)', () => {
       {
         method: 'POST',
         headers: { cookie, 'content-type': 'application/json', Origin: 'http://localhost:5173' },
-        body: JSON.stringify({ organizationId: org.id }),
+        body: JSON.stringify({ organizationId: org.id, scopes: ['read', 'write', 'admin'] }),
       },
       env,
     )
@@ -859,7 +864,11 @@ describe('createApp dual auth + D1 + R2 (happy path)', () => {
     }
     const blocked = await app.request(
       '/api/keys',
-      { method: 'POST', headers: sessionHeaders(cookie, undefined, ORIGIN), body: '{}' },
+      {
+        method: 'POST',
+        headers: sessionHeaders(cookie, undefined, ORIGIN),
+        body: JSON.stringify({ scopes: ['read', 'write', 'admin'] }),
+      },
       env,
     )
     expect(blocked.status).toBe(429)
@@ -1033,7 +1042,7 @@ describe('createApp dual auth + D1 + R2 (happy path)', () => {
       {
         method: 'POST',
         headers: sessionHeaders(cookie, undefined, ORIGIN),
-        body: JSON.stringify({ organizationId: 'org_acme' }),
+        body: JSON.stringify({ organizationId: 'org_acme', scopes: ['read', 'write', 'admin'] }),
       },
       env,
     )

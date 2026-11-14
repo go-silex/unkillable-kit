@@ -53,7 +53,10 @@ describe('impersonation security boundaries', () => {
   it('denies credential, security, durable flow and personal surfaces even with a valid fence', async () => {
     const { app, env, db, actor, request, id } = await setup()
     const other = await loginCookie(app, env, 'staff@kit.local', TENANCY_PASSWORD)
-    const minted = await request(other, '/api/keys', 'POST', { name: 'separate session key' })
+    const minted = await request(other, '/api/keys', 'POST', {
+      name: 'separate session key',
+      scopes: ['read', 'write', 'admin'],
+    })
     expect(minted.status).toBe(200)
     const { key } = (await minted.json()) as { key: string }
     const keysBefore = await db.select().from(apiKeys)
@@ -92,7 +95,10 @@ describe('impersonation security boundaries', () => {
   it('rejects a retired context fence even with a valid bearer and no valid cookie', async () => {
     const { app, env, db, actor, request, id } = await setup()
     const other = await loginCookie(app, env, 'staff@kit.local', TENANCY_PASSWORD)
-    const minted = await request(other, '/api/keys', 'POST', { name: 'fence regression' })
+    const minted = await request(other, '/api/keys', 'POST', {
+      name: 'fence regression',
+      scopes: ['read', 'write', 'admin'],
+    })
     expect(minted.status).toBe(200)
     const { key } = (await minted.json()) as { key: string }
     expect(

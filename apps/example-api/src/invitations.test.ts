@@ -1,14 +1,16 @@
 import { baUser } from '@kit/auth/schema'
 import { createDb } from '@kit/db'
 import { eq } from 'drizzle-orm'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { createApp } from './app'
 import { schema } from './db/schema'
+import { emailConfig, emailTemplateOptions } from './lib/email-config'
 
 import { seedDemoDatabase } from './seed/seed-db'
 import { TENANCY_PASSWORD } from './seed/tenancy-data'
 import { createSeededDemoApi, loginCookie, sessionHeaders } from './test/api-fixture'
 import { hashFixtureCredential } from './test/fixture-credential'
+import { captureMail } from './test/mail-capture'
 import { createMemoryEnv } from './test/memory-env'
 
 const ORIGIN = 'http://localhost:5173'
@@ -26,6 +28,51 @@ async function seedEnv() {
 }
 
 describe('org invitations (B3 S2)', () => {
+  it.each(['de', 'FR', 'fr-FR', '__proto__', '', null, undefined])(
+    'falls back for unsupported recipient locale %s in invitation and welcome emails',
+    async (preference) => {
+      const { app, env } = await seedEnv()
+      const mail = captureMail()
+      const locale = vi.spyOn(emailConfig, 'resolveRecipientLocale').mockReturnValue(preference)
+      onTestFinished(() => locale.mockRestore())
+      const cookie = await loginCookie(app, env, 'team-owner@kit.local', TENANCY_PASSWORD, ORIGIN)
+      for (const email of ['solo@kit.local', 'new-invite@kit.local']) {
+        const response = await app.request(
+          '/api/orgs/org_team/invitations',
+          {
+            method: 'POST',
+            headers: sessionHeaders(cookie, undefined, ORIGIN),
+            body: JSON.stringify({ email, role: 'member' }),
+          },
+          env,
+        )
+        expect(response.status).toBe(201)
+      }
+      expect(mail.message('solo@kit.local').subject).toMatch(
+        /^Invitation à rejoindre .* — Kit Kit$/,
+      )
+      expect(mail.message('solo@kit.local').text).toContain('Accepter l’invitation')
+      expect(mail.message('new-invite@kit.local').subject).toBe(
+        'Bienvenue — créez votre mot de passe — Kit Kit',
+      )
+      expect(mail.message('new-invite@kit.local').text).toContain('Un compte a été créé')
+    },
+  )
+
+  it('uses the configured fallback for invalid preferences', async () => {
+    const fallback = emailConfig.fallbackLocale
+    emailConfig.fallbackLocale = 'en'
+    const locale = vi.spyOn(emailConfig, 'resolveRecipientLocale').mockReturnValue('__proto__')
+    onTestFinished(() => {
+      emailConfig.fallbackLocale = fallback
+      locale.mockRestore()
+    })
+    expect(await emailTemplateOptions('recipient@kit.local')).toEqual({
+      productName: 'Kit Kit',
+      locale: 'en',
+    })
+  })
+
   it('S3: invite unknown email creates BA user shell + pending invite', async () => {
     const app = createApp()
     const env = createMemoryEnv({
@@ -253,7 +300,7 @@ describe('org invitations (B3 S2)', () => {
       {
         method: 'POST',
         headers: sessionHeaders(cookie, undefined, ORIGIN),
-        body: JSON.stringify({ organizationId: 'org_team' }),
+        body: JSON.stringify({ organizationId: 'org_team', scopes: ['read', 'write', 'admin'] }),
       },
       env,
     )

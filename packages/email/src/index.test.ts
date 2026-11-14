@@ -49,6 +49,8 @@ describe('buildInviteEmailText', () => {
   it('builds subject with org name (header scrub is EmailPort responsibility)', () => {
     const m = buildInviteEmailText({
       to: 'a@b.c',
+      locale: 'en',
+      productName: 'Example',
       orgName: 'Acme',
       acceptUrl: 'http://localhost:5173/invite/accept?invitationId=inv_x',
       expiresAt: new Date('2030-01-01T00:00:00.000Z'),
@@ -64,6 +66,8 @@ describe('buildMagicLinkEmailText', () => {
   it('builds subject and text with magic URL', () => {
     const m = buildMagicLinkEmailText({
       to: 'a@b.c',
+      locale: 'en',
+      productName: 'Example',
       magicUrl: 'http://localhost:8787/api/auth/magic-link/verify?token=abc',
       expiresHint: 'about 5 minutes',
       allowedOrigins: [],
@@ -79,6 +83,8 @@ describe('buildMagicLinkEmailText', () => {
     expect(() =>
       buildMagicLinkEmailText({
         to: 'a@b.c',
+        locale: 'en',
+        productName: 'Example',
         magicUrl: 'javascript:alert(1)',
         allowedOrigins: [],
       }),

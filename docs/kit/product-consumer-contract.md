@@ -406,6 +406,8 @@ The independent-history cases in `scripts/kit/dogfood-zero-edit.sh` exercise syn
 bun run zero-edit
 ```
 
+The inherited root gate still runs its live current-tree checks in Product mode. After validating context, its gate-tooling self-tests may skip in a Product clone. A zero-edit exception covering a tooling input or changes to Product configuration, manifests or the shared, unprotected `bun.lock` select `validate:tooling`; uncertain context runs it conservatively. An exception does not authorize a protected edit by itself. Run `bun run validate:tooling` explicitly when needed; it does not replace Product app validation. Local and CI selection and its limits are documented in [testing.md](./testing.md#ops-model--local-first-ci-guardrail).
+
 Do **not** dual-edit kit `ci.yml` for this — the pattern lives in the kit.  
 Do **not** rely on org secrets to fetch private `upstream` solely for zero-edit when the kit tip is already in product history after merge.  
 Do **not** use `upstream/main` as the zero-edit base (stale tracking refs ≠ dual-edit — Roxabi/roxabi-boilerplate-cf#103).
@@ -568,7 +570,7 @@ The script runs only in a clean product clone, refuses an in-progress merge, and
 
 1. Fetch `upstream`, report a `packageManager` move, and stop before merging a new `actions/create-github-app-token` pin; exit if already current.
 2. Merge without committing (resolve conflicts only if Product violated zones), restore the pre-merge root `LICENSE` presence and bytes, and record the incoming tip in the inheritance marker.
-3. Install dependencies (this does not re-check versions the merge kept) and check lock ranges; a failure leaves the merge open for owner-directed repair.
+3. Install dependencies (this does not re-check versions the merge kept), stage `bun.lock`, and check the staged merge tree's lock ranges and normalization; a failure leaves the merge open for owner-directed repair.
 4. Commit the merge, refresh the Product Dependabot scan in a separate commit if needed, and run `zero-edit`, which must stay green or have exceptions refreshed intentionally.
 
 For a new token pin, merge conflict, lock-ranges resume, or independent-lineage join, run the lines of `scripts/kit/kit-upgrade.sh` by hand from `git merge --no-ff --no-commit` onward as applicable, including its `LICENSE` lines.
@@ -579,7 +581,7 @@ A clone whose pin predates this script performs its first upgrade with the previ
 A range that sets a new pin of `actions/create-github-app-token` stops before the merge. Establish the effective `CI_APP_ID` mode using [CI App setup](./ci-app-setup.md#trust-and-setup):
 verified absence permits the inactive, separately authorized manual-merge path; a nonempty value requires the installed App's Client ID, valid authorization configuration and a successful mint established through a separately authorized exercise.
 A missing key or unknown state stops. Then run the script's merge lines by hand. Neither path waives review, local gates or CI.
-After a merge conflict, resolve it, refresh the existing inheritance marker to the tip actually merged, then run the script's remaining lines by hand: the merge commit waits for `lock-ranges:check`.
+After a merge conflict, resolve and stage all merge inputs, refresh the existing inheritance marker to the tip actually merged, then run the script's remaining lines by hand: the merge commit waits for `lock-ranges:check`. During an open merge the check uses the staged tree, not pre-merge `HEAD` or unstaged files; outside a merge normalization checks committed `HEAD`. Missing offline cache data fails the check.
 
 If `lock-ranges:check` fails, the merge is still open (no merge commit yet). Each finding names its workspace; resume by owner:
 
@@ -591,7 +593,8 @@ git add bun.lock apps/<product>-web/package.json
 # STOP on that finding: inspect the complete pre-merge, incoming and merged locks;
 # resolve without losing/re-resolving Product entries or changing protected manifest ranges.
 # If that preservation cannot be demonstrated, obtain a reviewed Kit-side resolution before continuing.
-# For a resolved lock, re-check before the merge commit (zero-edit requires committed ancestry):
+# Stage all resolved manifests, patches and the lock before checking the merge candidate:
+git add bun.lock
 bun run lock-ranges:check &&
   bun install --frozen-lockfile --minimum-release-age 0 &&
   git add bun.lock config/product/inheritance.json && git commit --no-edit

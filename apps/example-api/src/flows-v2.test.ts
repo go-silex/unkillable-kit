@@ -200,6 +200,7 @@ tasks:
     const minted = await mintApiKey(db, 'user_staff', {
       organizationId: ORG_ACME,
       name: 'flows-sk-post',
+      scopes: ['read', 'write', 'admin'],
     })
     const res = await app.request(
       '/api/flows/plans',
@@ -359,6 +360,7 @@ tasks:
     const minted = await mintApiKey(db, 'user_staff', {
       organizationId: ORG_ACME,
       name: 'flows-sk-check',
+      scopes: ['read', 'write', 'admin'],
     })
     const res = await app.request(
       '/api/flows/plans/check',

@@ -2,7 +2,13 @@ import { describe, expect, it } from 'vitest'
 import { type BetterAuthLike, createBetterAuthSessionPort } from './better-auth-port'
 import { sessionCookieName } from './cookie-name'
 import { apiKeyPrefix, generateApiKey, hashApiKey, parseBearer, verifyApiKey } from './keys'
-import { createRequireAuth, normalizeApiKeyOrganizationId, resolveDualAuth } from './require-auth'
+import {
+  allowsApiKeyScope,
+  createRequireAuth,
+  normalizeApiKeyOrganizationId,
+  parseApiKeyScopes,
+  resolveDualAuth,
+} from './require-auth'
 import {
   clearSessionCookieHeader,
   parseCookie,
@@ -18,10 +24,12 @@ function baPort(
 ): ReturnType<typeof createBetterAuthSessionPort> {
   if (!user) {
     return createBetterAuthSessionPort({
+      isAccountActive: async () => true,
       getAuth: () => ({ api: { getSession: async () => null } }),
     })
   }
   return createBetterAuthSessionPort({
+    isAccountActive: async () => true,
     getAuth: () => ({
       api: {
         getSession: async () => ({
@@ -69,6 +77,7 @@ describe('resolveDualAuth', () => {
   it('returns null without credentials', async () => {
     const r = await resolveDualAuth(null, null, {
       sessions: baPort(null),
+      isAccountActive: async () => true,
       findApiKeyByPrefix: async () => null,
     })
     expect(r).toBeNull()
@@ -79,6 +88,7 @@ describe('resolveDualAuth', () => {
     await expect(
       resolveDualAuth(`Bearer ${key}`, null, {
         sessions: baPort(null),
+        isAccountActive: async () => true,
         findApiKeyByPrefix: async () => null,
       }),
     ).rejects.toMatchObject({ code: 'UNAUTHORIZED' })
@@ -88,6 +98,7 @@ describe('resolveDualAuth', () => {
     await expect(
       resolveDualAuth('Bearer sk_deadbeef0001', 'kit_session=opaque', {
         sessions: baPort({ id: 'u1', email: 'a@b.c' }),
+        isAccountActive: async () => true,
         findApiKeyByPrefix: async () => null,
       }),
     ).rejects.toMatchObject({ code: 'UNAUTHORIZED' })
@@ -96,6 +107,7 @@ describe('resolveDualAuth', () => {
   it('CP-AUTH-DUAL: valid BA session alone succeeds', async () => {
     const r = await resolveDualAuth(null, 'kit_session=x', {
       sessions: baPort({ id: 'u1', email: 'a@b.c' }),
+      isAccountActive: async () => true,
       findApiKeyByPrefix: async () => null,
     })
     expect(r).toEqual({ subject: 'u1', method: 'session', sessionId: 'sess-1' })
@@ -106,15 +118,61 @@ describe('resolveDualAuth', () => {
     const keyHash = await hashApiKey(key)
     const r = await resolveDualAuth(`Bearer ${key}`, null, {
       sessions: baPort(null),
+      isAccountActive: async () => true,
       findApiKeyByPrefix: async () => ({
         subject: 'u-live',
         keyHash,
         revokedAt: null,
         expiresAt: Date.now() + 60_000,
         organizationId: 'org_1',
+        scopes: 'read,write',
       }),
     })
-    expect(r).toMatchObject({ subject: 'u-live', method: 'api_key', organizationId: 'org_1' })
+    expect(r).toMatchObject({
+      subject: 'u-live',
+      method: 'api_key',
+      organizationId: 'org_1',
+      scopes: ['read', 'write'],
+    })
+  })
+
+  it('checks the verified key subject and fails closed when account state is disabled or unavailable', async () => {
+    const key = generateApiKey()
+    const keyHash = await hashApiKey(key)
+    const subjects: string[] = []
+    const ports = {
+      sessions: baPort({ id: 'session-user' }),
+      findApiKeyByPrefix: async () => ({
+        subject: 'key-user',
+        keyHash,
+        revokedAt: null,
+        expiresAt: null,
+        organizationId: 'org_1',
+        scopes: 'read',
+      }),
+      isAccountActive: async (subject: string) => {
+        subjects.push(subject)
+        return true
+      },
+    }
+    expect(await resolveDualAuth(`Bearer ${key}`, null, ports)).toEqual({
+      subject: 'key-user',
+      method: 'api_key',
+      organizationId: 'org_1',
+      scopes: ['read'],
+    })
+    expect(subjects).toEqual(['key-user'])
+    for (const isAccountActive of [
+      async () => false,
+      async (): Promise<boolean> => {
+        throw new Error('state unavailable')
+      },
+      undefined as unknown as (subject: string) => Promise<boolean>,
+    ]) {
+      await expect(
+        resolveDualAuth(`Bearer ${key}`, 'kit_session=opaque', { ...ports, isAccountActive }),
+      ).rejects.toMatchObject({ code: 'UNAUTHORIZED' })
+    }
   })
 
   it('rejects a revoked key even when hash matches', async () => {
@@ -123,12 +181,14 @@ describe('resolveDualAuth', () => {
     await expect(
       resolveDualAuth(`Bearer ${key}`, 'kit_session=opaque', {
         sessions: baPort({ id: 'u1', email: 'a@b.c' }),
+        isAccountActive: async () => true,
         findApiKeyByPrefix: async () => ({
           subject: 'u-rev',
           keyHash,
           revokedAt: Date.now(),
           expiresAt: Date.now() + 60_000,
           organizationId: 'org_1',
+          scopes: 'read',
         }),
       }),
     ).rejects.toMatchObject({ code: 'UNAUTHORIZED' })
@@ -140,15 +200,42 @@ describe('resolveDualAuth', () => {
     await expect(
       resolveDualAuth(`Bearer ${key}`, 'kit_session=opaque', {
         sessions: baPort({ id: 'u1', email: 'a@b.c' }),
+        isAccountActive: async () => true,
         findApiKeyByPrefix: async () => ({
           subject: 'u-exp',
           keyHash,
           revokedAt: null,
           expiresAt: Date.now() - 1_000,
           organizationId: 'org_1',
+          scopes: 'read',
         }),
       }),
     ).rejects.toMatchObject({ code: 'UNAUTHORIZED' })
+  })
+})
+
+describe('API key scope authorization', () => {
+  it('uses independent exact membership and preserves sessions', () => {
+    const key = {
+      subject: 'u',
+      method: 'api_key' as const,
+      organizationId: 'org',
+      scopes: ['admin' as const],
+    }
+    expect(allowsApiKeyScope(key, 'admin')).toBe(true)
+    expect(allowsApiKeyScope(key, 'read')).toBe(false)
+    expect(allowsApiKeyScope(key, 'write')).toBe(false)
+    const session = { subject: 'u', method: 'session' as const, sessionId: 's' }
+    expect(allowsApiKeyScope(session, 'read')).toBe(true)
+    expect(allowsApiKeyScope(session, 'write')).toBe(true)
+    expect(allowsApiKeyScope(session, 'admin')).toBe(true)
+  })
+
+  it('fails closed for malformed and unknown stored scopes', () => {
+    expect(parseApiKeyScopes('read,write,admin')).toEqual(['read', 'write', 'admin'])
+    expect(parseApiKeyScopes('read,unknown')).toEqual([])
+    expect(parseApiKeyScopes('')).toEqual([])
+    expect(parseApiKeyScopes('read, write')).toEqual([])
   })
 })
 
@@ -173,12 +260,47 @@ describe('SessionPort (Better Auth adapter)', () => {
         }),
       },
     }
-    const port = createBetterAuthSessionPort({ getAuth: () => mockAuth })
+    const port = createBetterAuthSessionPort({
+      getAuth: () => mockAuth,
+      isAccountActive: async () => true,
+    })
     const payload = await port.resolveSession({
       cookieHeader: 'kit_session=opaque',
     })
     expect(payload).toMatchObject({ sub: 'ba-user-1', email: 'ba@kit.local', sessionId: 'sess-1' })
     expect(payload!.exp).toBeGreaterThan(Math.floor(Date.now() / 1000))
+  })
+
+  it('checks each session subject and fails closed for disabled or unavailable account state', async () => {
+    const subjects: string[] = []
+    const getAuth = () => ({
+      api: {
+        getSession: async () => ({
+          user: { id: 'session-user' },
+          session: { id: 'sess-1', expiresAt: new Date(Date.now() + 60_000) },
+        }),
+      },
+    })
+    const port = createBetterAuthSessionPort({
+      getAuth,
+      isAccountActive: async (subject) => {
+        subjects.push(subject)
+        return true
+      },
+    })
+    expect(await port.resolveSession({})).toMatchObject({ sub: 'session-user' })
+    expect(await port.resolveSession({})).toMatchObject({ sub: 'session-user' })
+    expect(subjects).toEqual(['session-user', 'session-user'])
+    for (const isAccountActive of [
+      async () => false,
+      async (): Promise<boolean> => {
+        throw new Error('state unavailable')
+      },
+      undefined as unknown as (subject: string) => Promise<boolean>,
+    ]) {
+      const denied = createBetterAuthSessionPort({ getAuth, isAccountActive })
+      expect(await denied.resolveSession({})).toBeNull()
+    }
   })
 
   it('resolveDualAuth works with BA port (cookie resolve only)', async () => {
@@ -190,9 +312,13 @@ describe('SessionPort (Better Auth adapter)', () => {
         }),
       },
     }
-    const port = createBetterAuthSessionPort({ getAuth: () => mockAuth })
+    const port = createBetterAuthSessionPort({
+      getAuth: () => mockAuth,
+      isAccountActive: async () => true,
+    })
     const r = await resolveDualAuth(null, 'kit_session=x', {
       sessions: port,
+      isAccountActive: async () => true,
       findApiKeyByPrefix: async () => null,
     })
     expect(r).toEqual({ subject: 'ba-2', method: 'session', sessionId: 'sess-1' })
@@ -200,11 +326,13 @@ describe('SessionPort (Better Auth adapter)', () => {
 
   it('resolveSession returns null for missing session / missing expiresAt / expired / throw', async () => {
     const nullPort = createBetterAuthSessionPort({
+      isAccountActive: async () => true,
       getAuth: () => ({ api: { getSession: async () => null } }),
     })
     expect(await nullPort.resolveSession({ cookieHeader: 'x=1' })).toBeNull()
 
     const noExp = createBetterAuthSessionPort({
+      isAccountActive: async () => true,
       getAuth: () => ({
         api: {
           getSession: async () => ({
@@ -217,6 +345,7 @@ describe('SessionPort (Better Auth adapter)', () => {
     expect(await noExp.resolveSession({ cookieHeader: 'x=1' })).toBeNull()
 
     const noId = createBetterAuthSessionPort({
+      isAccountActive: async () => true,
       getAuth: () => ({
         api: {
           getSession: async () => ({
@@ -229,6 +358,7 @@ describe('SessionPort (Better Auth adapter)', () => {
     expect(await noId.resolveSession({ cookieHeader: 'x=1' })).toBeNull()
 
     const expired = createBetterAuthSessionPort({
+      isAccountActive: async () => true,
       getAuth: () => ({
         api: {
           getSession: async () => ({
@@ -241,6 +371,7 @@ describe('SessionPort (Better Auth adapter)', () => {
     expect(await expired.resolveSession({ cookieHeader: 'x=1' })).toBeNull()
 
     const throws = createBetterAuthSessionPort({
+      isAccountActive: async () => true,
       getAuth: () => ({
         api: {
           getSession: async () => {
@@ -256,6 +387,7 @@ describe('SessionPort (Better Auth adapter)', () => {
     let seenCookie: string | null = null
     let seenQuery: { disableRefresh?: boolean; disableCookieCache?: boolean } | undefined
     const port = createBetterAuthSessionPort({
+      isAccountActive: async () => true,
       getAuth: () => ({
         api: {
           getSession: async ({ headers, query }) => {
@@ -282,6 +414,7 @@ describe('resolveDualAuth session cookie', () => {
     const port = baPort({ id: 'cust', email: 'c@d.e' })
     const r = await resolveDualAuth(null, 'my_sess=opaque', {
       sessions: port,
+      isAccountActive: async () => true,
       findApiKeyByPrefix: async () => null,
     })
     expect(r).toMatchObject({ subject: 'cust', method: 'session' })
@@ -336,9 +469,10 @@ describe('createRequireAuth', () => {
   it('sets subject from BA session and calls next', async () => {
     const mw = createRequireAuth(() => ({
       sessions: baPort({ id: 'req-user', email: 'r@x.y' }),
+      isAccountActive: async () => true,
       findApiKeyByPrefix: async () => null,
     }))
-    const store: Record<string, string> = {}
+    const store: Record<string, string | string[]> = {}
     let nextCalled = false
     await mw(
       {
@@ -362,6 +496,7 @@ describe('createRequireAuth', () => {
   it('throws unauthorized without credentials', async () => {
     const mw = createRequireAuth(() => ({
       sessions: baPort(null),
+      isAccountActive: async () => true,
       findApiKeyByPrefix: async () => null,
     }))
     await expect(
@@ -380,15 +515,17 @@ describe('createRequireAuth', () => {
     const hash = await hashApiKey(key)
     const mw = createRequireAuth(() => ({
       sessions: baPort({ id: 'ignored' }),
+      isAccountActive: async () => true,
       findApiKeyByPrefix: async () => ({
         subject: 'key-user',
         keyHash: hash,
         revokedAt: null,
         expiresAt: null,
         organizationId: 'org_x',
+        scopes: 'read',
       }),
     }))
-    const store: Record<string, string> = {}
+    const store: Record<string, string | string[]> = {}
     await mw(
       {
         req: {
@@ -404,6 +541,7 @@ describe('createRequireAuth', () => {
     expect(store.subject).toBe('key-user')
     expect(store.authMethod).toBe('api_key')
     expect(store.keyOrganizationId).toBe('org_x')
+    expect(store.keyScopes).toEqual(['read'])
     expect(store.sessionId).toBeUndefined()
   })
 
@@ -413,12 +551,14 @@ describe('createRequireAuth', () => {
     await expect(
       resolveDualAuth(`Bearer ${key}`, null, {
         sessions: baPort(null),
+        isAccountActive: async () => true,
         findApiKeyByPrefix: async () => ({
           subject: 'legacy',
           keyHash: hash,
           revokedAt: null,
           expiresAt: null,
           organizationId: null,
+          scopes: 'read',
         }),
       }),
     ).rejects.toMatchObject({ code: 'UNAUTHORIZED' })
@@ -430,11 +570,13 @@ describe('createRequireAuth', () => {
     await expect(
       resolveDualAuth(`Bearer ${key}`, null, {
         sessions: baPort(null),
+        isAccountActive: async () => true,
         findApiKeyByPrefix: async () => ({
           subject: 'legacy',
           keyHash: hash,
           revokedAt: null,
           expiresAt: null,
+          scopes: 'read',
         }),
       }),
     ).rejects.toMatchObject({ code: 'UNAUTHORIZED' })
@@ -447,12 +589,14 @@ describe('createRequireAuth', () => {
       await expect(
         resolveDualAuth(`Bearer ${key}`, null, {
           sessions: baPort(null),
+          isAccountActive: async () => true,
           findApiKeyByPrefix: async () => ({
             subject: 'legacy',
             keyHash: hash,
             revokedAt: null,
             expiresAt: null,
             organizationId,
+            scopes: 'read',
           }),
         }),
       ).rejects.toMatchObject({ code: 'UNAUTHORIZED' })
@@ -471,6 +615,7 @@ describe('createRequireAuth', () => {
 describe('BA SessionPort cookie helpers', () => {
   it('clearCookieHeader honors cookie name override and defaults Secure', () => {
     const port = createBetterAuthSessionPort({
+      isAccountActive: async () => true,
       cookieName: 'custom_sess',
       getAuth: () => ({ api: { getSession: async () => null } }),
     })

@@ -892,6 +892,17 @@
               "null"
             ]
           },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "read",
+                "write",
+                "admin"
+              ]
+            }
+          },
           "createdAt": {
             "type": "number"
           },
@@ -914,6 +925,7 @@
           "keyPrefix",
           "organizationId",
           "name",
+          "scopes",
           "createdAt",
           "expiresAt",
           "revokedAt"
@@ -5303,11 +5315,26 @@
                     "type": "string",
                     "maxLength": 80
                   },
+                  "scopes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "read",
+                        "write",
+                        "admin"
+                      ]
+                    },
+                    "minItems": 1
+                  },
                   "organizationId": {
                     "type": "string",
                     "minLength": 1
                   }
-                }
+                },
+                "required": [
+                  "scopes"
+                ]
               }
             }
           }
@@ -6629,11 +6656,14 @@
         "tags": [
           "orgs"
         ],
-        "summary": "Enable or disable an org module (session only)",
+        "summary": "Enable or disable an org module",
         "description": "Org isolation: `{orgId}` path param (preferred) or `X-Org-Id` header, enforced by requireOrgContext. Mismatch → 403. Header is not a request schema field so missing/optional headers keep today's validation behaviour.",
         "security": [
           {
             "session": []
+          },
+          {
+            "apiKey": []
           }
         ],
         "parameters": [

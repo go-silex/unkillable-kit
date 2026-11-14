@@ -62,6 +62,11 @@ hide the dependency from the task graph, so editing the schema would not invalid
 the consumer's Turbo cache. Cache and transport concerns (query keys, optimistic
 writes) stay in the app.
 
+The same subpath exports `ApiKeyScope`, `MintApiKeyRequest`, `MintApiKeyResponse`,
+`ApiKeyMeta` and `ListApiKeysResponse` types for `/api/keys`. Mint requests must
+specify at least one scope; `read`, `write` and `admin` are independent. These
+types do not validate JSON at runtime.
+
 The subpath is load-bearing, not cosmetic: the barrel's `fetch` transport needs the
 DOM `RequestCredentials` surface, which a Worker-typed program
 (Workers runtime types from `wrangler types`, no DOM lib) does not have. `@kit/api-client/me` stays

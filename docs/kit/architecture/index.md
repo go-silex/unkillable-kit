@@ -9,21 +9,23 @@ This index identifies the architectural authority of every decision record. ADR 
 
 ## Authority model
 
-| Family                                             | Authority                                                                       |
-| -------------------------------------------------- | ------------------------------------------------------------------------------- |
-| [`AGENTS.md`](../../../AGENTS.md)                  | Auto-loaded constitution: mission, precedence, invariants and hard agent rules  |
-| Accepted normative ADR                             | Binding current decision within its stated scope                                |
-| [`platform-direction.md`](./platform-direction.md) | Detailed direction under the constitution; not an implementation backlog        |
-| Proposed or non-normative ADR                      | Advisory only; it cannot override the constitution or an accepted normative ADR |
+| Family                                             | Authority                                                                             |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| [`AGENTS.md`](../../../AGENTS.md)                  | Auto-loaded constitution: mission, precedence, invariants and hard agent rules        |
+| Accepted normative ADR                             | Binding current decision within its stated scope                                      |
+| [`platform-direction.md`](./platform-direction.md) | Detailed direction under the constitution; not an implementation backlog              |
+| Proposed or non-normative ADR                      | Advisory only; it cannot override the constitution or an accepted normative ADR       |
+| Design notes                                       | Non-normative until adopted by an accepted ADR amendment when the code is implemented |
+
+Extracted implementation specifications: [ADR-0019](./design-notes/0019-notifications.md), [ADR-0021](./design-notes/0021-slack.md).
 
 ## Decision records
 
 Each ADR's YAML frontmatter is the sole home of its status, normativity and axial marker. Reading a
 row: a trailing `(<status>)` names the ADR's status, and a row without one is accepted.
-`bun run doc:check` checks this file and the ADR frontmatter. The header of
-[`check-adr-frontmatter.ts`](../../../scripts/kit/check-adr-frontmatter.ts) describes the rules,
-and CP-DOC-HYGIENE in [`testing.md`](../testing.md) says what the check does and does not claim.
+The table is generated from each ADR's `summary` and status; regenerate it with `bun run adr:index`, and check it with `bun run doc:check`.
 
+<!-- ADR-INDEX:START -->
 | ADR                                                                    | Decision                                                                    |
 | ---------------------------------------------------------------------- | --------------------------------------------------------------------------- |
 | [ADR-0001](./adr/0001-primary-axis-packages-compose-apps.md)           | Platform packages compose deployable apps                                   |
@@ -45,6 +47,8 @@ and CP-DOC-HYGIENE in [`testing.md`](../testing.md) says what the check does and
 | [ADR-0019](./adr/0019-notifications-rules-inbox-and-delivery.md)       | Notifications: rules, Inbox, persistence and producer contracts             |
 | [ADR-0020](./adr/0020-notification-delivery-ownership.md)              | Stable-ID Workflow ownership for notification Delivery; Queue demo boundary |
 | [ADR-0021](./adr/0021-slack-installations-and-notification-channel.md) | Slack installations, User links and notification Channel                    |
+| [ADR-0022](./adr/0022-minimal-starter-apps.md)                         | Minimal starter Apps and shared request policy                              |
+<!-- ADR-INDEX:END -->
 
 ## Reading an ADR
 

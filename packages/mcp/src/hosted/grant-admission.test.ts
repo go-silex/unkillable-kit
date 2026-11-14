@@ -12,6 +12,18 @@ type AuthorizationCode = { clientId: string; verifier: string; code: string }
 
 class MemoryKv {
   private readonly data = new Map<string, { value: string; exp?: number }>()
+  accountState: 'active' | 'disabled' | 'missing' | 'unavailable' = 'active'
+  readonly db = {
+    prepare: () => ({
+      bind: (userId: string) => ({
+        raw: async () => {
+          if (this.accountState === 'unavailable') throw new Error('D1 unavailable')
+          if (this.accountState === 'missing' || userId !== USER) return []
+          return [[this.accountState === 'disabled' ? 1 : 0]]
+        },
+      }),
+    }),
+  } as unknown as D1Database
 
   async get(key: string, opts?: { type?: string } | string) {
     const row = this.data.get(key)
@@ -42,7 +54,7 @@ class MemoryKv {
 
 function fixture(admission?: Admission) {
   const kv = new MemoryKv()
-  const env: HostedMcpEnv = { OAUTH_KV: kv as unknown as KVNamespace }
+  const env: HostedMcpEnv = { OAUTH_KV: kv as unknown as KVNamespace, DB: kv.db }
   const ctx = { waitUntil() {}, passThroughOnException() {} } as unknown as ExecutionContext
   let registered = 0
   let executed = 0
@@ -198,6 +210,9 @@ function fixture(admission?: Admission) {
     issue,
     call,
     helpers,
+    setAccountState: (state: MemoryKv['accountState']) => {
+      kv.accountState = state
+    },
     options,
     counts: () => ({ registered, executed }),
   }
@@ -209,6 +224,38 @@ async function expectUnavailable(response: Response) {
 }
 
 describe('hosted OAuth grant admission', () => {
+  it.each(['disabled', 'missing', 'unavailable'] as const)(
+    'checks live account state without optional admission: %s',
+    async (state) => {
+      const f = fixture()
+      const grant = await f.issue()
+      f.setAccountState(state)
+      expect((await f.call(grant.access_token)).status).toBe(state === 'unavailable' ? 503 : 401)
+      expect(f.counts()).toEqual({ registered: 0, executed: 0 })
+      const response = await f.refresh(grant.clientId, grant.refresh_token)
+      expect(response.status).toBe(state === 'unavailable' ? 503 : 400)
+      expect(await response.json()).not.toHaveProperty('access_token')
+    },
+  )
+
+  it('denies refresh after the account is disabled without optional admission', async () => {
+    const f = fixture()
+    const grant = await f.issue()
+    f.setAccountState('disabled')
+    const response = await f.refresh(grant.clientId, grant.refresh_token)
+    expect(response.status).toBe(400)
+    expect(await response.json()).toMatchObject({ error: 'invalid_grant' })
+  })
+
+  it('denies code exchange after the account is disabled without optional admission', async () => {
+    const f = fixture()
+    const code = await f.code()
+    f.setAccountState('disabled')
+    const response = await f.exchange(code)
+    expect(response.status).toBe(400)
+    expect(await response.json()).toMatchObject({ error: 'invalid_grant' })
+  })
+
   it('preserves existing issuance and tool access when omitted', async () => {
     const f = fixture()
     const grant = await f.issue()

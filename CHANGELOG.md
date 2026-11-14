@@ -2,24 +2,51 @@
 
 ## Unreleased
 
+### Product bootstrap
+
+- Add `create-product` for fresh dedicated clones: local Product remotes, inheritance, starter Apps and Product CI wiring, with normal-hook commits and validation. Repository creation, first push and deployment remain operator actions.
+- Split operator onboarding from the day-0 generator playbook. The fixture-only `--skip-gh-default` path explicitly leaves the GitHub CLI default repository unconfigured.
+
+### Scoped tooling self-tests
+
+- Separate gate-tooling self-tests into `validate:tooling`; keep live tree checks in `validate:full`. Pre-push and CI select the tooling lane for Kit tooling changes, conservatively run it on uncertain selection, and run it on Kit pushes to `main`. Local selection respects actual push destinations and revisions.
+- Product clones may skip inherited tooling self-tests after context validation; a tooling zero-edit exception or Product configuration, manifest or shared `bun.lock` change selects them. The CI tooling job always validates selection; its checkout, install and test steps may skip, but the aggregate requires the job to succeed with valid selection. Product validation and secret scanning remain separate.
+
 ### Product kit upgrades
 
 - Provide `bun run kit-upgrade` for the documented product-clone merge procedure, with a read-only `--check` mode and a hermetic regression test.
+
+### Minimal starter Apps
+
+- Add minimal API and web starter Apps organized by business module, with shared request policy and a neutral Organization-scoped sample.
 
 ### Product agent entry point
 
 - Route agents in product clones to `docs/product/AGENTS.md`.
 - Route agents working inside a package or app to its `README.md` when present, in every clone.
 
+### Disabled accounts
+
+- Disabled Users cannot authenticate with sessions or Organization-bound API keys. Disabling revokes existing sessions; enabling requires a new sign-in. Inheriting Products must sync the Kit schema and apply the new migration before deploying: a missing account-state column causes authentication to fail closed.
+- Hosted MCP Apps must bind `DB` to the same authentication database as the API. The hosted shell checks live User state for identity, OAuth exchanges and requests; this is required independently of optional grant admission.
+
 ### Biome D1 safety
 
 - Keep `noPlaywrightUselessAwait` diagnostics while disabling its automatic fix: Biome 2.6.7 misidentifies D1 `first()` calls as Playwright locators and otherwise removes required awaits. Restore the fix when upstream distinguishes those calls and the real D1 staged-file proof passes.
+
+### Transactional email locale and Product name
+
+- **Consumer-visible API change:** authentication email templates now require an explicit `locale` and `productName`. Migrate template callers to pass both. When supplying `emailPort` to `createBetterAuth`, also supply `emailConfig: { productName, fallbackLocale, resolveRecipientLocale }`; the App resolves each recipient's locale and chooses the fallback.
 
 ### TanStack Table v9
 
 - Migrate the Example App notes list and design-system table demo from `@tanstack/react-table` 8.21.3 to 9.3.1 with `useTable`, `FlexRender` and one explicit `listTableFeatures` set (sorting, column and global filtering), without the deprecated `useLegacyTable` bridge. Sorting is table-owned; the search and filter controls keep owning their filter state.
 - String columns now sort with TanStack's corrected automatic choice: case-insensitive `text`, or natural `alphanumeric` when sampled values contain digits. Version 8 sampled only rows after the tenth, so lists of ten rows or fewer compared raw strings.
 - Remove the Dependabot semver-major hold for `@tanstack/react-table`.
+
+### API key scopes
+
+- Organization-bound API keys require explicit independent `read`, `write`, and `admin` scopes. The Example App narrows the bound principal's existing authority and denies keys on undeclared routes; other Apps must install their own enforcement. The migration backfills existing keys with all three scopes, preserving their scope allowance while the Example App's route declarations apply.
 
 ### Bun runtime
 
@@ -33,9 +60,17 @@
 
 - Upgrade the example Workers to Wrangler 4.159.0 and regenerate their committed runtime declarations.
 
+### ADR index generation
+
+- Generate the decision index from ADR summaries and authority metadata; check it for drift during documentation validation.
+
 ### Flow run persistence
 
 - Commit run mutations and status/receipt events atomically, with path-specific Organization and snapshot fences. Failed-run closure checks ownership, preserves terminal status and errors during receipt cleanup, retains malformed receipt bytes and propagates the original exception.
+
+### ADR design notes
+
+- Move unimplemented notification destination routes, Slack schema tables and implementation specifications from binding ADRs into non-normative design notes; accepted decisions remain binding.
 
 ### API-only stack contract
 
@@ -54,11 +89,19 @@
 - Distinguish private and already-public Products: a public consumer may publish a transition only after the Kit exposure checkpoint, without introducing private-only Kit ancestry.
 - Carry the Kit's MIT notice with all inherited Kit material in the protected `docs/kit/licenses/MIT.txt`, a byte-identical copy of the root `LICENSE`, and remove the root `package.json` license field so no protected root file declares a Product's terms. A Product's root `LICENSE` stays Product-owned and unprotected: the independent-history join and every later upgrade merge restore its pre-merge presence and bytes before committing, even when they match the Kit's notice, and a change of Product terms is the Product's own reviewed commit. The Kit notices state only the Kit's terms.
 
+### Worktree setup lockfile
+
+- Check committed lockfile normalization offline in the lock-integrity gate, and fail worktree setup if its install changes `bun.lock`.
+
 ### Inactive CI App workflows
 
 - Restore successful manual operation when the CI App and authorization policy are absent: skip evaluation, token minting and automated receipt writes. With a complete valid policy but no App, retain read-only evaluation for manual merging.
 - Default-ref automation rejects partial or malformed supplied policy, including when the App is disabled. Active setup errors remain failures, and active exact-head receipt checks and token scopes are unchanged.
 - Return before loading the adapter on unprivileged `pull_request` events so consumers can inherit from a default branch that predates it; no new adapter export or fallback is required.
+
+### Agent constitution
+
+- Keep the direction and grant/approval invariants concise while retaining their detailed mechanics in the platform direction and flows references inherited by Product repositories.
 
 ### Zod Worker entry initialization
 

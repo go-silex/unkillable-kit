@@ -82,3 +82,33 @@ export const createOrgResponseSchema = z.object({
   org: meOrgSchema.extend({ bypass: z.boolean().optional() }),
   requestId: z.string(),
 })
+
+/** API key scopes are independent; none implies another. */
+export type ApiKeyScope = 'read' | 'write' | 'admin'
+
+export type MintApiKeyRequest = {
+  name?: string
+  organizationId?: string
+  scopes: ApiKeyScope[]
+}
+
+export type ApiKeyMeta = {
+  id: string
+  subject: string
+  keyPrefix: string
+  organizationId: string
+  name: string | null
+  scopes: ApiKeyScope[]
+  createdAt: number
+  expiresAt: number | null
+  revokedAt: number | null
+}
+
+export type ListApiKeysResponse = { keys: ApiKeyMeta[]; requestId: string }
+export type MintApiKeyResponse = {
+  id: string
+  key: string
+  keyPrefix: string
+  organizationId: string
+  requestId: string
+}

@@ -21,6 +21,7 @@ import {
 } from './ports'
 import { assertSafeTokenHref, type TokenHrefPolicy } from './safe-token-href'
 import { scrubHeaderLine } from './scrub'
+import type { EmailTemplateOptions } from './templates/copy'
 import { DemoEmail } from './templates/demo'
 import { InviteEmail } from './templates/invite'
 import { MagicLinkEmail } from './templates/magic-link'
@@ -28,6 +29,8 @@ import { ResetPasswordEmail } from './templates/reset-password'
 import { WelcomeSetPasswordEmail } from './templates/welcome-set-password'
 import type { EmailPort, EmailTransport } from './types'
 
+export type { EmailLocale, EmailTemplateOptions } from './templates/copy'
+export { EmailTemplateLocaleError } from './templates/copy'
 export { EmailPolicyError } from './types'
 export type { EmailPort, EmailTransport, TokenHrefPolicy }
 export { assertSafeTokenHref, createLogEmailPort, isLoopbackHost }
@@ -56,7 +59,8 @@ export function buildInviteEmailText(
     acceptUrl: string
     expiresAt: Date
     inviterLabel?: string
-  } & TokenHrefPolicy,
+  } & TokenHrefPolicy &
+    EmailTemplateOptions,
 ): {
   to: string
   subject: string
@@ -74,7 +78,8 @@ export function buildInviteEmailText(
 
 /** Password reset email (kit copy only). */
 export function buildResetPasswordEmailText(
-  params: { to: string; resetUrl: string; expiresHint?: string } & TokenHrefPolicy,
+  params: { to: string; resetUrl: string; expiresHint?: string } & TokenHrefPolicy &
+    EmailTemplateOptions,
 ): {
   to: string
   subject: string
@@ -97,7 +102,8 @@ export function buildWelcomeSetPasswordEmailText(
     setPasswordUrl: string
     expiresHint?: string
     name?: string
-  } & TokenHrefPolicy,
+  } & TokenHrefPolicy &
+    EmailTemplateOptions,
 ): {
   to: string
   subject: string
@@ -115,7 +121,8 @@ export function buildWelcomeSetPasswordEmailText(
 
 /** Magic-link sign-in email (kit copy only). */
 export function buildMagicLinkEmailText(
-  params: { to: string; magicUrl: string; expiresHint?: string } & TokenHrefPolicy,
+  params: { to: string; magicUrl: string; expiresHint?: string } & TokenHrefPolicy &
+    EmailTemplateOptions,
 ): {
   to: string
   subject: string

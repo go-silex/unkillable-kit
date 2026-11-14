@@ -148,7 +148,7 @@ describe('org RBAC (ADR-0003 Phase A) — IDOR matrix', () => {
           'content-type': 'application/json',
           Origin: ORIGIN,
         },
-        body: '{}',
+        body: JSON.stringify({ scopes: ['read', 'write', 'admin'] }),
       },
       env,
     )
@@ -167,7 +167,7 @@ describe('org RBAC (ADR-0003 Phase A) — IDOR matrix', () => {
           'content-type': 'application/json',
           Origin: ORIGIN,
         },
-        body: JSON.stringify({ organizationId: 'org_solo' }),
+        body: JSON.stringify({ organizationId: 'org_solo', scopes: ['read', 'write', 'admin'] }),
       },
       env,
     )
@@ -186,7 +186,7 @@ describe('org RBAC (ADR-0003 Phase A) — IDOR matrix', () => {
           'content-type': 'application/json',
           Origin: ORIGIN,
         },
-        body: JSON.stringify({ organizationId: 'org_acme' }),
+        body: JSON.stringify({ organizationId: 'org_acme', scopes: ['read', 'write', 'admin'] }),
       },
       env,
     )
@@ -232,7 +232,7 @@ describe('org RBAC (ADR-0003 Phase A) — IDOR matrix', () => {
       {
         method: 'POST',
         headers: { cookie, 'content-type': 'application/json', Origin: ORIGIN },
-        body: JSON.stringify({ organizationId: 'org_acme' }),
+        body: JSON.stringify({ organizationId: 'org_acme', scopes: ['read', 'write', 'admin'] }),
       },
       env,
     )
@@ -358,7 +358,7 @@ describe('org RBAC (ADR-0003 Phase A) — IDOR matrix', () => {
           'content-type': 'application/json',
           Origin: ORIGIN,
         },
-        body: JSON.stringify({ organizationId: 'org_acme' }),
+        body: JSON.stringify({ organizationId: 'org_acme', scopes: ['read', 'write', 'admin'] }),
       },
       env,
     )
@@ -409,7 +409,11 @@ describe('org RBAC (ADR-0003 Phase A) — IDOR matrix', () => {
           'content-type': 'application/json',
           Origin: ORIGIN,
         },
-        body: JSON.stringify({ organizationId: 'org_acme', name: 'acme-bot' }),
+        body: JSON.stringify({
+          organizationId: 'org_acme',
+          name: 'acme-bot',
+          scopes: ['read', 'write', 'admin'],
+        }),
       },
       env,
     )
@@ -453,7 +457,11 @@ describe('org RBAC (ADR-0003 Phase A) — IDOR matrix', () => {
       {
         method: 'POST',
         headers: { cookie, 'content-type': 'application/json', Origin: ORIGIN },
-        body: JSON.stringify({ organizationId: 'org_acme', name: 'acme-only' }),
+        body: JSON.stringify({
+          organizationId: 'org_acme',
+          name: 'acme-only',
+          scopes: ['read', 'write', 'admin'],
+        }),
       },
       env,
     )
@@ -465,7 +473,11 @@ describe('org RBAC (ADR-0003 Phase A) — IDOR matrix', () => {
       {
         method: 'POST',
         headers: { cookie, 'content-type': 'application/json', Origin: ORIGIN },
-        body: JSON.stringify({ organizationId: 'org_beta', name: 'beta-only' }),
+        body: JSON.stringify({
+          organizationId: 'org_beta',
+          name: 'beta-only',
+          scopes: ['read', 'write', 'admin'],
+        }),
       },
       env,
     )

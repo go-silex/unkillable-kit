@@ -18,7 +18,7 @@ async function mintOrgKey(
     {
       method: 'POST',
       headers: sessionHeaders(cookie, undefined, ORIGIN),
-      body: JSON.stringify({ organizationId }),
+      body: JSON.stringify({ organizationId, scopes: ['read', 'write', 'admin'] }),
     },
     env,
   )

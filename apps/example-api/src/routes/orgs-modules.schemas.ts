@@ -81,10 +81,10 @@ export const patchOrgModule = createRoute({
   method: 'patch',
   path: '/api/orgs/{orgId}/modules/{moduleId}',
   tags: ['orgs'],
-  summary: 'Enable or disable an org module (session only)',
+  summary: 'Enable or disable an org module',
   description: orgIsolationDescription,
-  security: sessionOnlySecurity,
-  middleware: [orgCtx, manageModules, requireSession] as const,
+  security: sessionOrKeySecurity,
+  middleware: [orgCtx, manageModules] as const,
   request: {
     params: orgModuleParams,
     body: { content: { 'application/json': { schema: patchModuleSchema } }, required: true },

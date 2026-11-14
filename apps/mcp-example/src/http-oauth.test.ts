@@ -6,6 +6,20 @@ import type { McpExampleEnv } from './worker-env'
 
 class MemoryKv {
   private data = new Map<string, { value: string; exp?: number }>()
+  accountState: 'active' | 'disabled' | 'missing' | 'unavailable' = 'active'
+
+  readonly db = {
+    prepare: (_query: string) => ({
+      bind: (userId: string) => ({
+        raw: async () => {
+          if (this.accountState === 'unavailable') throw new Error('D1 unavailable')
+          if (this.accountState === 'missing' || ![DEMO.userId, 'user_b'].includes(userId))
+            return []
+          return [[this.accountState === 'disabled' ? 1 : 0]]
+        },
+      }),
+    }),
+  } as unknown as D1Database
 
   async get(key: string, opts?: { type?: string } | string) {
     const row = this.data.get(key)
@@ -59,6 +73,7 @@ function stubIdentity(identity: McpIdentity | Response): McpIdentityPort {
 function env(kv: MemoryKv, extra?: Partial<McpExampleEnv>): McpExampleEnv {
   return {
     OAUTH_KV: kv as unknown as KVNamespace,
+    DB: kv.db,
     API_BASE_URL: 'http://127.0.0.1:8787',
     ...extra,
   }
@@ -183,15 +198,116 @@ async function mintAccessToken(
       }),
     }),
   )
-  const tokenBody = (await tokenRes.json()) as { access_token?: string; expires_in?: number }
+  const tokenBody = (await tokenRes.json()) as {
+    access_token?: string
+    refresh_token?: string
+    expires_in?: number
+  }
   expect(tokenRes.status).toBe(200)
   expect(tokenBody.access_token).toBeTruthy()
-  return { accessToken: tokenBody.access_token!, expiresIn: tokenBody.expires_in, clientId }
+  return {
+    accessToken: tokenBody.access_token!,
+    refreshToken: tokenBody.refresh_token!,
+    expiresIn: tokenBody.expires_in,
+    clientId,
+  }
 }
 
 describe('CP-MCP-HTTP-OAUTH', () => {
   afterEach(() => {
     delete (globalThis as { Cloudflare?: unknown }).Cloudflare
+  })
+
+  it.each(['disabled', 'missing', 'unavailable'] as const)(
+    'rejects an existing token and refresh when account state is %s',
+    async (state) => {
+      const kv = new MemoryKv()
+      const worker = createMcpWorker({ identityPort: stubIdentity(DEMO) })
+      const { accessToken, refreshToken, clientId } = await mintAccessToken(worker, kv)
+      expect(refreshToken).toBeTruthy()
+      kv.accountState = state
+      const call = await workerFetch(
+        worker,
+        kv,
+        new Request(`${LOCAL}/mcp`, {
+          method: 'POST',
+          headers: {
+            authorization: `Bearer ${accessToken}`,
+            'content-type': 'application/json',
+            accept: 'application/json',
+          },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 1,
+            method: 'tools/call',
+            params: { name: 'whoami', arguments: {} },
+          }),
+        }),
+      )
+      expect(call.status).toBe(state === 'unavailable' ? 503 : 401)
+      expect(await call.text()).not.toContain('user_demo')
+      const refresh = await workerFetch(
+        worker,
+        kv,
+        new Request(`${LOCAL}/token`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({
+            grant_type: 'refresh_token',
+            client_id: clientId,
+            refresh_token: refreshToken,
+            resource: `${LOCAL}/mcp`,
+          }),
+        }),
+      )
+      expect(refresh.status).toBe(state === 'unavailable' ? 503 : 400)
+      expect(await refresh.text()).not.toContain('access_token')
+    },
+  )
+
+  it('checks account state on identity resolution and again at code exchange', async () => {
+    const kv = new MemoryKv()
+    const worker = createMcpWorker({ identityPort: stubIdentity(DEMO) })
+    const { body } = await registerClient(worker, kv)
+    const { verifier, challenge } = await pkce()
+    const authorize = new URL(`${LOCAL}/authorize`)
+    for (const [key, value] of Object.entries({
+      response_type: 'code',
+      client_id: body.client_id!,
+      redirect_uri: REDIRECT,
+      code_challenge: challenge,
+      code_challenge_method: 'S256',
+      resource: `${LOCAL}/mcp`,
+    }))
+      authorize.searchParams.set(key, value)
+
+    kv.accountState = 'disabled'
+    expect((await workerFetch(worker, kv, new Request(authorize))).status).toBe(401)
+    kv.accountState = 'unavailable'
+    expect((await workerFetch(worker, kv, new Request(authorize))).status).toBe(503)
+    kv.accountState = 'active'
+    const response = await workerFetch(worker, kv, new Request(authorize))
+    expect(response.status).toBe(302)
+    const code = new URL(response.headers.get('location')!).searchParams.get('code')!
+    kv.accountState = 'disabled'
+    const exchange = await workerFetch(
+      worker,
+      kv,
+      new Request(`${LOCAL}/token`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          grant_type: 'authorization_code',
+          code,
+          client_id: body.client_id!,
+          redirect_uri: REDIRECT,
+          code_verifier: verifier,
+          resource: `${LOCAL}/mcp`,
+        }),
+      }),
+    )
+    expect(exchange.status).toBe(400)
+    expect(await exchange.text()).not.toContain('access_token')
   })
 
   it('unauthenticated POST /mcp → 401 challenge, zero tools', async () => {
