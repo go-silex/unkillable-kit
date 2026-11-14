@@ -48,7 +48,7 @@
 
 ### Worktree setup lockfile
 
-- Fail worktree setup when installing dependencies changes `bun.lock`, so lockfile drift is visible for review.
+- Check committed lockfile normalization offline in the lock-integrity gate, and fail worktree setup if its install changes `bun.lock`.
 
 ### Inactive CI App workflows
 

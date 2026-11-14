@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { spawnSync } from 'node:child_process'
 /**
  * check-lock-ranges — workspace ranges vs the versions bun.lock actually resolved.
  * No network. Tree root: this repo. LOCK_RANGES_ROOT overrides it for the
@@ -6,6 +7,9 @@
  * --config=config/kit/bunfig.gates.toml`, so neither a tree `.env` nor a tree
  * `bunfig.toml` (`preload`, `define`) can set the override. That launch is the
  * guarantee: running this file with a bare `bun` gives no such protection.
+ * Lock normalization checks committed HEAD inputs only; unstaged and untracked
+ * files are deliberately outside its scope. Offline verification requires the
+ * local Bun cache when resolution cannot be completed from the lock alone.
  * A lock without the root workspace `""`, or a scan that checks no range, fails.
  *
  * Scope: every `workspaces` entry in bun.lock, root `""` included. For each of
@@ -41,8 +45,9 @@
  * Bun.semver.satisfies returns true for non-ranges, which would hide the defect.
  * Its repair is a spec rewrite, which `bun update` cannot do.
  */
-import { existsSync, readFileSync, realpathSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { basename, join, resolve } from 'node:path'
 
 const SECTIONS = ['dependencies', 'devDependencies', 'optionalDependencies'] as const
 
@@ -331,6 +336,51 @@ function treeRoot(): string {
   }
 }
 
+function checkCommittedNormalization(root: string): void {
+  const list = spawnSync('git', ['ls-tree', '-r', '-z', '--name-only', 'HEAD'], { cwd: root })
+  if (list.status !== 0) fail('cannot list committed lock inputs')
+  const paths = list.stdout
+    .toString()
+    .split('\0')
+    .filter(
+      (path) =>
+        path === 'bun.lock' ||
+        path === 'bunfig.toml' ||
+        basename(path) === 'package.json' ||
+        path.startsWith('config/kit/patches/'),
+    )
+  if (!(paths.includes('bun.lock') && paths.includes('package.json')))
+    fail('committed lock inputs are missing')
+  const dir = mkdtempSync(join(tmpdir(), 'lock-normalization-'))
+  try {
+    const archive = spawnSync('git', ['archive', 'HEAD', '--', ...paths], {
+      cwd: root,
+      maxBuffer: 64 * 1024 * 1024,
+    })
+    if (archive.status !== 0) throw new Error('cannot archive committed lock inputs')
+    const extract = spawnSync('tar', ['-xf', '-', '-C', dir], { input: archive.stdout })
+    if (extract.status !== 0) throw new Error('cannot extract committed lock inputs')
+    const manifest = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'))
+    if (manifest.packageManager !== `bun@${Bun.version}`)
+      throw new Error('cannot verify lock normalization without the pinned Bun version')
+    const before = readFileSync(join(dir, 'bun.lock'))
+    const install = spawnSync(
+      process.execPath,
+      ['install', '--lockfile-only', '--offline', '--ignore-scripts', '--minimum-release-age', '0'],
+      { cwd: dir },
+    )
+    if (install.status !== 0)
+      throw new Error('cannot verify lock normalization offline; warm the Bun cache and retry')
+    if (!before.equals(readFileSync(join(dir, 'bun.lock'))))
+      throw new Error('committed bun.lock changes on install; regenerate and commit it')
+  } catch (error) {
+    rmSync(dir, { recursive: true, force: true })
+    fail(error instanceof Error ? error.message : String(error))
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+}
+
 function main(): void {
   const root = treeRoot()
   const lock = parseLock(readLock(root))
@@ -345,6 +395,7 @@ function main(): void {
     console.error(`check-lock-ranges: FAIL (${tally.findings.length} finding(s))`)
     process.exit(1)
   }
+  if (process.env.LOCK_RANGES_ROOT === undefined) checkCommittedNormalization(root)
   console.log(
     `check-lock-ranges: OK (${keys.length} workspace(s), ${tally.checked} range(s) checked, ${tally.skipped} skipped)`,
   )
