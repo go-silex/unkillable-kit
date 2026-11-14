@@ -133,6 +133,12 @@
       "file": "0024_impersonation.sql",
       "set": "core",
       "kitSha256": "6ff6a4e5ee69496fe6f0d535f87965b30b5dd9a78c13356ec8d2f975ee29faf3"
+    },
+    {
+      "id": "api_keys_scopes",
+      "file": "0025_api_keys_scopes.sql",
+      "set": "core",
+      "kitSha256": "5f027ff014888d093632763f4aa61c2597cff85849b6ee753ac51a4baddfea94"
     }
   ]
 }

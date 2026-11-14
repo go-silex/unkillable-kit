@@ -96,7 +96,13 @@ describe('organization authorization HTTP regressions', () => {
       env: { through: '0014_better_auth_1_7_additive.sql' },
       seed: { notes: false, environment: 'test' },
     })
-    const minted = await mintApiKey(db, 'user_staff', { organizationId: 'org_acme' })
+    await env.DB.exec(
+      "ALTER TABLE api_keys ADD COLUMN scopes TEXT NOT NULL DEFAULT 'read,write,admin'",
+    )
+    const minted = await mintApiKey(db, 'user_staff', {
+      organizationId: 'org_acme',
+      scopes: ['read', 'write', 'admin'],
+    })
     const headers = bearerHeaders(minted.key)
     expect((await app.request('/api/orgs/org_acme', { headers }, env)).status).toBe(200)
     await db.update(apiKeys).set({ organizationId: sql`NULL` }).where(eq(apiKeys.id, minted.id))

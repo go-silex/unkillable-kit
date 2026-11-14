@@ -255,6 +255,7 @@ describe('V3 create-run + rollup', () => {
     const minted = await mintApiKey(db, 'user_staff', {
       organizationId: ORG_ACME,
       name: 'flows-sk-run',
+      scopes: ['read', 'write', 'admin'],
     })
     const res = await postRun(app, env, bearerHeaders(minted.key), planId, '{}')
     await expectError(res, 403, 'FORBIDDEN')

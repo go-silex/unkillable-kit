@@ -22,6 +22,7 @@ describe('auth keys/modules/roles repos', () => {
       keyPrefix: KEY_PREFIX,
       subject: 'user-1',
       organizationId: 'org-a',
+      scopes: 'read,write',
       createdAt: 1,
     })
     const hit = await findApiKeyByPrefix(db, KEY_PREFIX)
@@ -31,6 +32,7 @@ describe('auth keys/modules/roles repos', () => {
       keyPrefix: KEY_PREFIX,
       subject: 'user-1',
       organizationId: 'org-a',
+      scopes: 'read,write',
     })
     expect(await findApiKeyByPrefix(db, OTHER_PREFIX)).toBeNull()
 

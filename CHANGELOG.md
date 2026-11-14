@@ -21,6 +21,10 @@
 - String columns now sort with TanStack's corrected automatic choice: case-insensitive `text`, or natural `alphanumeric` when sampled values contain digits. Version 8 sampled only rows after the tenth, so lists of ten rows or fewer compared raw strings.
 - Remove the Dependabot semver-major hold for `@tanstack/react-table`.
 
+### API key scopes
+
+- Organization-bound API keys require explicit independent `read`, `write`, and `admin` scopes. Scope checks narrow the bound principal's existing authority; undeclared routes deny key access. The migration backfills existing keys with all three scopes, preserving their scope allowance while the new route declarations apply.
+
 ### Bun runtime
 
 - Upgrade the root Bun pin to 1.4.4. Before this change reaches the Kit deploy branch, update `BUN_VERSION` on each showcase Workers Builds and Pages project as described in [the deploy runbook](docs/kit/deploy-cloudflare.md#4b-bun-and-node-versions).

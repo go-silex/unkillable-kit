@@ -89,6 +89,7 @@ async function findKeyRecord(db: KitDb, prefix: string) {
     keyHash: row.keyHash,
     revokedAt: row.revokedAt ?? null,
     expiresAt: row.expiresAt ?? null,
+    scopes: row.scopes,
     organizationId: row.organizationId,
   }
 }

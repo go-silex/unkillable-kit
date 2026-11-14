@@ -13,6 +13,7 @@ import {
   validationErrorResponse,
 } from '../lib/openapi'
 import { requireAuth } from '../middleware/require-auth'
+import { appendAudit } from '../services/audit'
 import * as authService from '../services/auth'
 import * as meService from '../services/me'
 import type { AppEnv } from '../types'
@@ -23,6 +24,7 @@ const MINT_WINDOW_MS = 60 * 60 * 1000
 
 const mintKeySchema = z.object({
   name: z.string().max(80).optional(),
+  scopes: z.array(z.enum(['read', 'write', 'admin'])).min(1),
   organizationId: z.string().min(1).optional(),
 })
 
@@ -46,6 +48,7 @@ const apiKeySchema = z
     keyPrefix: z.string(),
     organizationId: z.string(),
     name: z.string().nullable(),
+    scopes: z.array(z.enum(['read', 'write', 'admin'])),
     createdAt: z.number(),
     expiresAt: z.number().nullable(),
     revokedAt: z.number().nullable(),
@@ -195,7 +198,17 @@ meRoutes.openapi(
     // `mintApiKey` refuses a missing organization itself (ADR-0003 D11) — no opt-in flag to pass.
     const minted = await authService.mintApiKey(db, subject, {
       name: data.name,
+      scopes: data.scopes,
       organizationId,
+    })
+    await appendAudit(db, {
+      action: 'api_key.create',
+      actorUserId: subject,
+      targetType: 'api_key',
+      targetId: minted.id,
+      orgId: minted.organizationId,
+      meta: { scopes: data.scopes },
+      requestId: c.get('requestId'),
     })
     return c.json(
       {

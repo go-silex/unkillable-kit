@@ -8,6 +8,7 @@ import {
   roleAtLeast,
   roleHasCapability,
 } from './org-roles'
+import type { ApiKeyScope } from './require-auth'
 
 export type { OrgContextRecord } from './org-roles'
 export { type OriginGuardEnv, originGuard } from './origin-guard'
@@ -43,6 +44,7 @@ export type OrgMiddlewareVariables = {
   subject?: string
   authMethod?: 'session' | 'api_key'
   keyOrganizationId?: string | null
+  keyScopes?: ApiKeyScope[]
   requestId?: string
   db?: unknown
   orgId?: string

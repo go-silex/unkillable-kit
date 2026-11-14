@@ -253,7 +253,7 @@ describe('org invitations (B3 S2)', () => {
       {
         method: 'POST',
         headers: sessionHeaders(cookie, undefined, ORIGIN),
-        body: JSON.stringify({ organizationId: 'org_team' }),
+        body: JSON.stringify({ organizationId: 'org_team', scopes: ['read', 'write', 'admin'] }),
       },
       env,
     )
