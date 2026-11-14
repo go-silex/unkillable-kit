@@ -37,6 +37,10 @@
 
 - An API-only Product replaces the whole `.dev/stack.yml` `frontend` block with the canonical null scalar `frontend: null` and keeps that scalar on upgrade. No frontend App is required. The guard compares values, not filesystem existence; `~`, implicit empty, `Null`, a quoted string, a missing key, and a partial map still fail (Roxabi/roxabi-boilerplate-cf#591).
 
+### Optional native branch ruleset
+
+- Document an operator-applied CI App-only `main` ruleset alongside the retained exact-head merge gate, including rollout, refusal tests, bypass limitations and rollback. No hosted setting changes.
+
 ### Independent public root preparation
 
 - Permit an ordinary local first commit to reach both staged secret-scan passes before `HEAD` exists; explicit ranges, commit-only scans and Git errors still fail closed (Roxabi/roxabi-boilerplate-cf#510).

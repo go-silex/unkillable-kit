@@ -27,6 +27,78 @@ With `CI_APP_ID` absent, all-absent `HEAD_AUTH_*` is a successful inactive workf
 
 Payload filters avoid ordinary comments and other provable no-ops; they do not authorize a merge. The trusted preflight still validates policy and rereads protocol comments. See the [wakeup contract](./testing.md#merge-wakeup-contract) for event delivery and recovery limits.
 
+## Optional main ruleset
+
+This is an operator-only rollout, not an assertion that a ruleset is installed. Public repositories can use branch rulesets; check availability and effective inherited rules for each repository. Keep the maintained gate and Dependabot lane enabled. Confirm the configured App installation and current exact-head policy work before changing settings; otherwise the ruleset can stop all landing. Coordinate a quiet window, drain in-flight gate jobs and check open PRs before applying: a ruleset changes live merge behavior. Do not run the following commands as part of an ordinary PR.
+
+The `update` restriction is essential: PR and green-check requirements alone still allow a writer to merge a green but unadmitted PR. Only the configured App bypasses the ruleset; its `always` bypass also permits direct updates, force pushes and deletion by that App, and bypasses the PR and check rules. Protect its key and workflow provenance. The gate must continue to enforce admission, non-draft, checks and Dependabot base/head evidence. Administrators and App managers can change or bypass this policy by changing settings or credentials; this is not protection against them. GitHub-native approval cannot substitute for the receipt protocol: an author cannot approve their own PR, and native rules do not encode the protocol's issuer, withdrawal, exact selected receipt or Dependabot evaluated-base binding.
+
+Set `APP_ID` to the numeric App ID already verified in [Trust and setup](#trust-and-setup), not the Client ID, bot ID or installation ID. The check producer ID below is GitHub Actions; verify both names and producer against current check runs before applying. This JSON targets only `main` and does not add required human approval, so the Dependabot lane remains owned by the gate:
+
+```json
+{
+  "name": "main-ci-app-landing",
+  "target": "branch",
+  "enforcement": "active",
+  "bypass_actors": [
+    { "actor_id": 123456, "actor_type": "Integration", "bypass_mode": "always" }
+  ],
+  "conditions": { "ref_name": { "include": ["refs/heads/main"], "exclude": [] } },
+  "rules": [
+    { "type": "update", "parameters": { "update_allows_fetch_and_merge": false } },
+    { "type": "deletion" },
+    { "type": "non_fast_forward" },
+    {
+      "type": "pull_request",
+      "parameters": {
+        "dismiss_stale_reviews_on_push": false,
+        "require_code_owner_review": false,
+        "require_last_push_approval": false,
+        "required_approving_review_count": 0,
+        "required_review_thread_resolution": false
+      }
+    },
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "strict_required_status_checks_policy": false,
+        "required_status_checks": [
+          { "context": "ci", "integration_id": 15368 },
+          { "context": "TruffleHog", "integration_id": 15368 }
+        ]
+      }
+    }
+  ]
+}
+```
+
+Save that JSON as `ruleset.json` in a private operator working directory. Replace the placeholder programmatically and inspect the result; use an authenticated administrator, not the App token:
+
+```sh
+REPO=go-silex/unkillable-kit
+APP_ID=123456 # replace with the verified numeric App ID
+jq --argjson id "$APP_ID" '.bypass_actors[0].actor_id = $id' ruleset.json > ruleset-ready.json
+cat ruleset-ready.json
+gh api "repos/$REPO/rulesets" --paginate
+gh api "repos/$REPO/rules/branches/main" --paginate
+gh api --method POST "repos/$REPO/rulesets" --input ruleset-ready.json
+gh api "repos/$REPO/rulesets" --paginate
+gh api "repos/$REPO/rules/branches/main" --paginate
+```
+
+Record the returned ruleset ID and verify its full definition with `gh api "repos/$REPO/rulesets/$RULESET_ID"` and the effective rules above. Other inherited rules can also restrict the App. Then, in an explicitly authorized controlled exercise with a non-bypass writer credential, attempt a fast-forward direct push of a disposable commit to `main` and attempt to merge a disposable, green, non-draft PR with no receipt. Both must be refused by GitHub, including the green PR: a failed check alone does not prove the update restriction. These are real write attempts: if either unexpectedly succeeds, stop, contain and restore through a reviewed PR; do not assume rejection. Separately exercise an authorized gate merge and a Dependabot lane, verifying exact head, checks and receipt; a successful ruleset read is not behavioral proof. Do not use the App credential for the refusal tests.
+
+For an approved rollback, disable only the recorded ruleset, retaining the gate and other protections:
+
+```sh
+RULESET_ID=123456 # replace with the recorded ruleset ID
+gh api --method PUT "repos/$REPO/rulesets/$RULESET_ID" -f enforcement=disabled
+gh api "repos/$REPO/rulesets/$RULESET_ID"
+gh api "repos/$REPO/rules/branches/main" --paginate
+```
+
+Confirm effective rules and communicate that ordinary writers can again bypass an unprotected gate. Do not remove unrelated rulesets.
+
 ## Shared-App owner exception
 
 An owner may explicitly accept one shared merge App within an operating organization. This is an exception to the target-only recommendation, not equivalent isolation: compromise of a PEM available in a public repository can affect every repository reachable by that App, including private repositories. A small trusted human maintainer set does not remove that exposure.

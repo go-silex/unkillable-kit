@@ -90,7 +90,7 @@ Detailed security and agent process lives in [`docs/kit/processes/dev-process.md
 
 The root `package.json` script `validate:full` is the single source of truth for the kit gate; do not copy its internal step list into documentation. Run the applicable root gate before a push, and treat CI as a guardrail rather than the primary debugging loop. [`docs/kit/testing.md`](docs/kit/testing.md) owns the testing doctrine, CP inventory and non-claims.
 
-On GitHub **Free private**, merge-on-green is **process**, not branch protection: write access can merge a PR or push `main` without an authorization receipt and without green checks. The workflow validates receipts for its own merges; it does not constrain other writers. Residual: [`docs/kit/testing.md`](docs/kit/testing.md) § _Merge residual_.
+On GitHub Free private, merge-on-green is process, not branch protection: writers can merge or push without the gate. Where rulesets are available, an operator may restrict `main` to the CI App as the bypass actor while retaining the gate; protection is effective only after configuration and verification. See [`docs/kit/testing.md`](docs/kit/testing.md) § _Merge residual_.
 
 ## Conditional reading
 
