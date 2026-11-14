@@ -1,8 +1,9 @@
 import { APIError, createAuthMiddleware } from 'better-auth/api'
 import { eq } from 'drizzle-orm'
-import type { BetterAuthTables } from './better-auth-schema'
-import { isAccountActive } from './repos/account-state'
-import type { KitRepoDb } from './repos/db-type'
+import type { BetterAuthTables } from '../better-auth-schema'
+import { isAccountActive } from '../repos/account-state'
+import type { KitRepoDb } from '../repos/db-type'
+
 /** Distinguishes this denial from unrelated Better Auth errors without exposing details. */
 export class InactiveSessionError extends APIError {
   constructor() {

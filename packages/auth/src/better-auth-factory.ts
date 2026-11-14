@@ -24,11 +24,11 @@ import {
   betterAuthDrizzleSchema,
   withBetterAuthRelations,
 } from './better-auth-schema'
-import { createSessionAccountGuard, InactiveSessionError } from './better-auth-session-guard'
 import { sessionCookieName } from './cookie-name'
 import { createFirstSessionAfterHook, type FirstSessionHandler } from './first-session-hook'
 import { logBetterAuthEvent } from './logging/better-auth-logger'
 import { createKitOrganizationPlugin } from './org-plugin'
+import { createSessionAccountGuard, InactiveSessionError } from './policy/better-auth-session-guard'
 import { isAccountActive } from './repos/account-state'
 import { hashVerificationIdentifier } from './verification-identifier'
 

@@ -3,8 +3,8 @@ import type * as BetterAuthApi from 'better-auth/api'
 import { drizzle } from 'drizzle-orm/d1'
 import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
 import { describe, expect, it, vi } from 'vitest'
-import { createBetterAuth } from './better-auth-factory'
-import { betterAuthDrizzleSchema } from './better-auth-schema'
+import { createBetterAuth } from '../better-auth-factory'
+import { betterAuthDrizzleSchema } from '../better-auth-schema'
 import { createSessionAccountGuard, InactiveSessionError } from './better-auth-session-guard'
 
 const { getSession } = vi.hoisted(() => ({ getSession: vi.fn() }))
