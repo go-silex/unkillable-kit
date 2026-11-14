@@ -19,13 +19,121 @@ Repository administrators, App managers, configured human operators, and trusted
    | `CI_APP_ID`               | App Client ID used to mint tokens            |
 
 4. Grant the installed App repository **Contents: read and write**, **Workflows: read and write**, and **Pull requests: read and write**; GitHub supplies Metadata read. The merge token requests `contents: write` and `workflows: write` so it can merge workflow-pin changes. The separate PR comment/label publication token requests `pull-requests: write`, not `issues: write`. Gate reads use a separate read-only `GITHUB_TOKEN`; the App's union of permissions does not mean every minted token receives that union. Other inherited consumers may require additional permissions, such as Dependabot alerts read for the optional alert workflow.
-5. Confirm the implementation is present on the default branch and the effective variables and secret are available to the intended workflows. An absent `CI_APP_ID` disables automated writes: a complete valid authorization policy permits read-only merge evaluation, while an absent policy skips evaluation. An operator must perform a separately authorized manual merge. A nonempty ID with a missing key is a configuration failure, not inactive mode. Confirm an actual mint only in a separately authorized operational exercise: dispatch may also merge eligible PRs.
+5. Confirm the implementation is present on the default branch and the effective variables and secret are available to the intended workflows. An absent `CI_APP_ID` disables automated writes: a complete valid authorization policy permits read-only merge evaluation, while an absent policy skips evaluation. An operator must perform a separately authorized manual merge; an active App-only ruleset blocks it until the [manual landing procedure](#manual-landing-with-an-app-only-ruleset) is followed. A nonempty ID with a missing key is a configuration failure, not inactive mode. Confirm an actual mint only in a separately authorized operational exercise: dispatch may also merge eligible PRs.
 
 All `HEAD_AUTH_*` variables must be valid together. Plugin discovery treats all absent as unconfigured **only after complete successful pagination**; that does not automatically select native protected-auto mode. Partial, malformed, unreadable or 403 responses fail closed. Preserve the existing native protected-auto mode when it is explicitly selected by its own process.
 
 With `CI_APP_ID` absent, all-absent `HEAD_AUTH_*` is a successful inactive workflow mode: no policy parsing, evaluation, token mint or automated receipt write occurs. A complete supplied policy is still validated and permits read-only merge evaluation, but cannot enable automation while the App is disabled. Default-ref automation requires a complete valid policy whenever an App identifier or any policy value is supplied; partial or malformed policy remains an error. The unprivileged `pull_request` no-op is filtered before runner allocation; its defensive preflight return still avoids loading an adapter that may not exist on a consumer's inheritance PR. Comment wakeups, revocation and Dependabot capture retain strict validation; capture remains App-gated because it withdraws authorization before evaluation.
 
 Payload filters avoid ordinary comments and other provable no-ops; they do not authorize a merge. The trusted preflight still validates policy and rereads protocol comments. See the [wakeup contract](./testing.md#merge-wakeup-contract) for event delivery and recovery limits.
+
+## Optional main ruleset
+
+This is an operator-only rollout, not an assertion that a ruleset is installed. Public repositories can use branch rulesets; check availability and effective inherited rules for each repository. Keep the maintained gate and Dependabot lane enabled. Confirm the configured App installation and current exact-head policy work before changing settings; otherwise the ruleset can stop all landing. Coordinate a quiet window, drain in-flight gate jobs and check open PRs before applying: a ruleset changes live merge behavior. Do not run the following commands as part of an ordinary PR.
+
+The `update` restriction is essential: PR and green-check requirements alone still allow a writer to merge a green but unadmitted PR. Only the configured App can bypass the ruleset and only through a pull request; on that path it bypasses the PR and check rules as well. Protect its key and workflow provenance. The gate must continue to enforce admission, non-draft, checks and Dependabot base/head evidence. Administrators and App managers can change this policy or credentials; this is not protection against them. GitHub-native approval cannot substitute for the receipt protocol: an author cannot approve their own PR, and native rules do not encode the protocol's issuer, withdrawal, exact selected receipt or Dependabot evaluated-base binding.
+
+**Before activating on `main`**, use an explicitly authorized disposable test repository or branch with the same App installation, equivalent rules and `pull_request` Integration bypass to demonstrate that the actual App token can merge an admitted PR through `pulls.merge`. Also test a Dependabot lane where applicable. GitHub's behavior for this Integration actor has not been established by this runbook; if either required positive test fails or cannot be performed, stop and do not activate. A test branch needs the equivalent target ref and a separate test ruleset, not the production `main` ruleset below. Other inherited rules can affect results; repeat the authorized positive and negative exercises after activation.
+
+The check producer ID below is GitHub Actions; verify both names and producer against current check runs before applying. This JSON targets only `main` and does not add required human approval, so the Dependabot lane remains owned by the gate:
+
+```json
+{
+  "name": "main-ci-app-landing",
+  "target": "branch",
+  "enforcement": "active",
+  "bypass_actors": [
+    { "actor_id": 123456, "actor_type": "Integration", "bypass_mode": "pull_request" }
+  ],
+  "conditions": { "ref_name": { "include": ["refs/heads/main"], "exclude": [] } },
+  "rules": [
+    { "type": "update", "parameters": { "update_allows_fetch_and_merge": false } },
+    { "type": "deletion" },
+    { "type": "non_fast_forward" },
+    {
+      "type": "pull_request",
+      "parameters": {
+        "dismiss_stale_reviews_on_push": false,
+        "require_code_owner_review": false,
+        "require_last_push_approval": false,
+        "required_approving_review_count": 0,
+        "required_review_thread_resolution": false
+      }
+    },
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "strict_required_status_checks_policy": false,
+        "required_status_checks": [
+          { "context": "ci", "integration_id": 15368 },
+          { "context": "TruffleHog", "integration_id": 15368 }
+        ]
+      }
+    }
+  ]
+}
+```
+
+Save that JSON as `ruleset.json` in a private operator working directory. In the first block, replace `OWNER/REPO` with the intended target; all blocks require Bash and an authenticated administrator, not the App token. The guard rejects literal placeholders before any API call. `APP_ID` comes from the target repository's `HEAD_AUTH_APP_ID`, not the Client ID, bot ID or installation ID. Confirm independently that it is the App that actually merges.
+
+```bash
+REPO='OWNER/REPO' # replace with the intended target
+[[ "$REPO" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ && "$REPO" != 'OWNER/REPO' ]] || { echo 'Set the target repository' >&2; return 1 2>/dev/null || exit 1; }
+APP_ID="$(gh variable get HEAD_AUTH_APP_ID --repo "$REPO")" || { echo 'Cannot read App ID' >&2; return 1 2>/dev/null || exit 1; }
+[[ "$APP_ID" =~ ^[1-9][0-9]*$ && "$APP_ID" != 123456 ]] || { echo 'Invalid or placeholder App ID' >&2; return 1 2>/dev/null || exit 1; }
+jq --argjson id "$APP_ID" '.bypass_actors[0].actor_id = $id' ruleset.json > ruleset-ready.json || { echo 'Cannot prepare ruleset' >&2; return 1 2>/dev/null || exit 1; }
+gh api "repos/$REPO/rulesets" --paginate
+gh api "repos/$REPO/rules/branches/main" --paginate
+cat ruleset-ready.json
+```
+
+**Stop and inspect:** confirm target, actor, ref, rules, check producer and existing inherited rules; confirm the positive Integration-actor test and rollout approval. The following is a separate execution step, not a continuation to paste blindly:
+
+```bash
+[[ "${REPO:-}" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ && "$REPO" != 'OWNER/REPO' ]] || { echo 'Set the target repository' >&2; return 1 2>/dev/null || exit 1; }
+[[ "${APP_ID:-}" =~ ^[1-9][0-9]*$ && "$APP_ID" != 123456 ]] || { echo 'Invalid or placeholder App ID' >&2; return 1 2>/dev/null || exit 1; }
+jq -e --argjson id "$APP_ID" '.bypass_actors | length == 1 and .[0].actor_id == $id and .[0].actor_type == "Integration" and .[0].bypass_mode == "pull_request"' ruleset-ready.json >/dev/null || { echo 'Ruleset actor mismatch' >&2; return 1 2>/dev/null || exit 1; }
+RULESET_ID="$(gh api --method POST "repos/$REPO/rulesets" --input ruleset-ready.json --jq .id)" || { echo 'Creation failed; inspect before retrying' >&2; return 1 2>/dev/null || exit 1; }
+[[ "$RULESET_ID" =~ ^[1-9][0-9]*$ ]] || { echo 'Invalid returned ruleset ID; inspect before retrying' >&2; return 1 2>/dev/null || exit 1; }
+printf 'Record ruleset ID: %s\n' "$RULESET_ID"
+gh api "repos/$REPO/rulesets/$RULESET_ID"
+gh api "repos/$REPO/rules/branches/main" --paginate
+```
+
+Verify the full returned definition and effective rules. In an explicitly authorized controlled exercise with a non-bypass writer credential, attempt a fast-forward direct push of a disposable commit to `main` and attempt to merge a disposable, green, non-draft PR with no receipt. Both must be refused by GitHub, including the green PR: a failed check alone does not prove the update restriction. These are real write attempts: if either unexpectedly succeeds, stop, contain and restore through a reviewed PR; do not assume rejection. Separately exercise an authorized gate merge and a Dependabot lane, verifying exact head, checks and receipt; a successful ruleset read is not behavioral proof. Do not use the App credential for the refusal tests.
+
+### Manual landing with an App-only ruleset
+
+The update restriction blocks **all** human landings, including verified inactive-App fallback and the manual cutover landings, even for administrators without bypass. Before those operations, obtain operator approval for a bounded disable window, pause new admissions, drain gate jobs, and record the exact ruleset and other effective protections. Disable only this ruleset using the rollback block below; verify it is disabled. During the window ordinary writers may push or merge without the gate: restrict and monitor writers and perform only the separately authorized, independently reviewed, unchanged green heads required by the procedure. This is a mitigation, not equivalent enforcement; if the risk is unacceptable, do not proceed.
+
+After the manual landings and any required cutover reset, restore this exact ruleset with the self-contained block below, verify its effective rules and re-run the authorized refusal exercises. Coordinate gate re-enable and fresh scan with the cutover procedure; then authorize and exercise a controlled Integration-actor gate merge before resuming ordinary admissions. If restoration or verification fails, keep ordinary admissions paused and escalate; do not claim protection.
+
+For an approved rollback or temporary disable, replace both placeholders with the target and recorded numeric ID. This block is self-contained:
+
+```bash
+REPO='OWNER/REPO'
+RULESET_ID='RULESET_ID'
+[[ "$REPO" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ && "$REPO" != 'OWNER/REPO' ]] || { echo 'Set the target repository' >&2; return 1 2>/dev/null || exit 1; }
+[[ "$RULESET_ID" =~ ^[1-9][0-9]*$ ]] || { echo 'Set the recorded ruleset ID' >&2; return 1 2>/dev/null || exit 1; }
+gh api --method PUT "repos/$REPO/rulesets/$RULESET_ID" -f enforcement=disabled
+gh api "repos/$REPO/rulesets/$RULESET_ID" --jq .enforcement
+gh api "repos/$REPO/rules/branches/main" --paginate
+```
+
+To restore after the bounded window, use the same target and recorded ID, and independently confirm the ruleset definition before enabling:
+
+```bash
+REPO='OWNER/REPO'
+RULESET_ID='RULESET_ID'
+[[ "$REPO" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ && "$REPO" != 'OWNER/REPO' ]] || { echo 'Set the target repository' >&2; return 1 2>/dev/null || exit 1; }
+[[ "$RULESET_ID" =~ ^[1-9][0-9]*$ ]] || { echo 'Set the recorded ruleset ID' >&2; return 1 2>/dev/null || exit 1; }
+gh api "repos/$REPO/rulesets/$RULESET_ID"
+gh api --method PUT "repos/$REPO/rulesets/$RULESET_ID" -f enforcement=active
+gh api "repos/$REPO/rulesets/$RULESET_ID" --jq .enforcement
+gh api "repos/$REPO/rules/branches/main" --paginate
+```
+
+Do not remove unrelated rulesets. A permanent rollback leaves the writer-bypass residual until another protection is verified.
 
 ## Shared-App owner exception
 

@@ -109,7 +109,7 @@ A `409` merge response is a stale hold for that candidate and the sequential loo
 
 Behavioral tests do not establish GitHub event delivery, live configuration or checkout provenance. GitHub reads and merge are separate, so external authorization, base or check changes after the final observation remain residual; older or alternative workflow definitions may omit the maintained guards. Append-only is a publisher convention, not immutable GitHub storage: trusted deletion or editing away of history can erase a fence. Returning to identical A without an accepted withdrawal may match again, although A never authorizes B. Trusted operators, default-branch writers and dispatchers, administrators and App managers remain inside the trust boundary.
 
-Do **not** claim “main is protected” or “label `reviewed` is required”. When the plan allows Team/rulesets: require `ci`, TruffleHog, and non-draft.
+Where repository rulesets are available, the operator can add the [CI App-only bypass ruleset](./ci-app-setup.md#optional-main-ruleset) without replacing this gate. It restricts updates to the bypass actor, requires PRs and named `ci` and `TruffleHog` checks for non-bypass actors, and blocks force pushes and deletion. On the pull-request path the App bypasses the entire ruleset, including checks and PR requirements; the retained gate, App credentials and trusted workflow provenance therefore remain essential. Neither the ruleset nor this documentation proves configuration or closes the separate races and trusted-principal risks above. Free private repositories without available protection retain the writer bypass described above.
 
 ### Merge wakeup contract
 

@@ -64,6 +64,8 @@ This **push**-run promotion policy is independent from the PR merge hold: before
 
 Treat a change to inherited `merge-on-green` admission or concurrency as a five-stage operator cutover, not as a normal pull.
 
+An active App-only `main` ruleset blocks the manual landing in stage 3. Before the pause, plan the operator-approved [bounded disable and restore procedure](./ci-app-setup.md#manual-landing-with-an-app-only-ruleset); retain the all-label freeze and old-job drain. Restore and verify the ruleset after stage 4 and before resuming admissions in stage 5. The disabled window exposes writer bypass.
+
 1. **Prepare.** Inspect the consumer's **actual old** workflow revision: its jobs, event/ref set and authorization-label writers. Do not assume Kit HEAD filters or equate merge candidates with event sources; an older revision can react to **any** label from any actor, including drafts or forks. For every existing supported base — `main`, and `staging` only when present — prepare an unlabelled inheritance PR with normal current-head independent review and green quality CI, and record its eventual landing as `L_base`. A PR is pre-cutover for a base when its current merge ref may predate that base's `L_base`, including a PR opened between the `main` and `staging` landings. This does not authorize a deployment.
 2. **Pause.** Freeze **all** human or tooling label additions, not only authorization labels, on pre-cutover PRs in the actual old event-source set until their current merge ref is observed to include `L_base`. Disable the existing gate:
 
