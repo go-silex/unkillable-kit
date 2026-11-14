@@ -79,7 +79,7 @@ See [`docs/kit/testing.md`](../docs/kit/testing.md) (local-first gates, CP-\* pa
 
 ## Critical paths touched (if any)
 
-<!-- From docs/kit/testing.md — tick what this PR affects; name the test file(s) in Test plan -->
+<!-- From docs/kit/testing/critical-path.md — tick what this PR affects; name the test file(s) in Test plan -->
 
 - [ ] CP-AUTH-\* (session / keys / dual)
 - [ ] CP-IDOR / CP-UNAUTH (new or changed protected resource)

@@ -114,6 +114,11 @@
 - Reject any same-kind cycle an incomplete walk used to allow, including a short cycle behind a wide fan-out and a cycle closed through a long chain. Still accept a wide acyclic graph entered at its root, including a shared descendant, and a new link whose walk meets an existing cycle without returning to its source. Organization, kind, reflexive, duplicate and single-parent checks are unchanged (Roxabi/roxabi-boilerplate-cf#583).
 - **Breaking:** remove unused `MAX_LINK_TRAVERSAL` from `@kit/tasks`. Link issue codes and request payloads are unchanged. No Kit or Example App reference required a migration.
 
+### Documentation budgets
+
+- Split the testing strategy into navigable sections without rewording its content. The documentation gate ratchets `AGENTS.md`, `README.md` and `docs/kit/**/*.md` at 400 UTF-8 bytes per line and 60,000 bytes per file; existing overages can only shrink. Fenced blocks and link definitions count; there are no exemptions.
+- After an improvement, lower the committed baseline with `bun --no-env-file --config=config/kit/bunfig.gates.toml --no-install run scripts/kit/check-doc-hygiene.ts --regenerate-baseline`. New violations and any worsened metric for a still-violating file are refused. A file within both limits is dropped even if a metric grew while making it compliant. `--init-baseline` is only for the initial construction when no baseline exists; it is not routine regeneration.
+
 ### Better Auth logging
 
 - Route the Kit factory's Better Auth logger to fixed severity events without forwarding library-controlled messages or arguments, which can include credentials in database errors. Keep the default warning threshold (Roxabi/roxabi-boilerplate-cf#578).
@@ -250,4 +255,4 @@
 - Better Auth uses native Drizzle joins for session/user and related account/Organization reads. Supplied schema tables receive matching relation metadata; no SQL migration or cookie-format change is needed.
 - **Breaking:** `createOrgMiddleware` replaces the `findOrgById` and `findMembership` ports with `findOrgContext(db, orgId, subject)`. Migrate both properties together; keep `getPlatformRole` for the standalone Platform Role guard. See the [consumer migration](docs/kit/product-consumer-contract.md#authentication-reads-and-organization-context-migration).
 - Organization context reads status, the subject's Organization membership and Platform Role in one scoped query. Ordinary nonmembers receive 404 regardless of Organization status; suspended members remain forbidden. Super-admin break-glass, bypass audit and Module checks are preserved, without cross-request authorization caching.
-- The permanent authentication regression contract for Roxabi/roxabi-boilerplate-cf#532 is described in [testing](docs/kit/testing.md#authentication-regressions). This is not a production latency claim or a resolution of Roxabi/roxabi-boilerplate-cf#398.
+- The permanent authentication regression contract for Roxabi/roxabi-boilerplate-cf#532 is described in [testing](docs/kit/testing/auth-seams.md#authentication-regressions). This is not a production latency claim or a resolution of Roxabi/roxabi-boilerplate-cf#398.

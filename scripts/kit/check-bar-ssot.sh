@@ -17,6 +17,11 @@ FILES=(
   docs/kit/testing.md
   lefthook.yml
 )
+shopt -s nullglob
+for file in "${ROOT}"/docs/kit/testing/*.md; do
+  FILES+=("${file#"$ROOT"/}")
+done
+shopt -u nullglob
 
 THRESHOLD=3
 

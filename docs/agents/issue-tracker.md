@@ -42,7 +42,7 @@ Reads use `gh`:
 
 ## Pull requests as a triage surface
 
-**PRs as a request surface: no.** A pull request is the landing surface, not an intake queue. Merge follows a current exact-head authorization receipt plus the maintained checks. The `reviewed` and `deps-automerge` labels are hints, not authorization. See [`docs/kit/testing.md`](../kit/testing.md) § _Merge residual_ and [`docs/kit/ci-app-setup.md`](../kit/ci-app-setup.md).
+**PRs as a request surface: no.** A pull request is the landing surface, not an intake queue. Merge follows a current exact-head authorization receipt plus the maintained checks. The `reviewed` and `deps-automerge` labels are hints, not authorization. See [`docs/kit/testing.md`](../kit/testing/ops-model.md) § _Merge residual_ and [`docs/kit/ci-app-setup.md`](../kit/ci-app-setup.md).
 
 ## When a skill says "publish to the issue tracker"
 

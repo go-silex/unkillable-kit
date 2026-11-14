@@ -9,7 +9,7 @@
  *        bun scripts/kit/licenseChecker.ts              live scan only
  *        bun scripts/kit/licenseChecker.ts --self-test  gate self-test only
  *
- * Compliance hygiene — not a security/malware scan. See docs/kit/testing.md CP-LICENSE.
+ * Compliance hygiene — not a security/malware scan. See docs/kit/testing/critical-path.md CP-LICENSE.
  * Exit codes: 0 clean (UNKNOWN licenses only warn); 1 disallowed SPDX expression or
  * missing node_modules; 2 unusable scan (empty scan, bad policy, `--root` misuse).
  *

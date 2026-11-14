@@ -13,7 +13,7 @@ FAIL=0
 assert_case() {
   local name="$1" expected="$2" tree="$3" marker="$4"
   local output rc=0
-  output="$(DOC_HYGIENE_ROOT="$tree" bun "${GATE[@]}" "$SCANNER" 2>&1)" || rc=$?
+  output="$(DOC_HYGIENE_ROOT="$tree" bun "${GATE[@]}" "$SCANNER" "${5:-}" 2>&1)" || rc=$?
   if [[ "$rc" -eq "$expected" ]] && [[ "$output" == *"$marker"* ]]; then
     echo "PASS: $name"
     PASS=$((PASS + 1))
@@ -26,7 +26,8 @@ assert_case() {
 
 write_base() {
   local tree="$1"
-  mkdir -p "$tree/.dev" "$tree/docs/kit"
+  mkdir -p "$tree/.dev" "$tree/docs/kit" "$tree/config/kit"
+  printf '{}\n' >"$tree/config/kit/doc-hygiene-baseline.json"
   cat >"$tree/.dev/stack.yml" <<'EOF'
 schema_version: "1.0"
 docs:
@@ -71,6 +72,11 @@ trap 'rm -rf "$TMP"' EXIT
 echo "== doc hygiene self-test =="
 BASE="$TMP/base"
 write_base "$BASE"
+MALFORMED="$TMP/malformed-baseline"
+cp -R "$BASE" "$MALFORMED"
+printf '{"README.md":{"overLimitLines":-1,"maxLineBytes":1,"fileBytes":1}}\n' >"$MALFORMED/config/kit/doc-hygiene-baseline.json"
+assert_case "invalid baseline fails closed" 1 "$MALFORMED" "cannot read baseline"
+
 assert_case "valid documentation tree" 0 "$BASE" "check-doc-hygiene: OK"
 
 BROKEN="$TMP/broken-link"
@@ -87,6 +93,110 @@ ORPHAN="$TMP/orphan"
 cp -R "$BASE" "$ORPHAN"
 printf '# Orphan\n' >"$ORPHAN/docs/kit/orphan.md"
 assert_case "documentation not indexed" 1 "$ORPHAN" "document is not referenced by docs/kit/README.md"
+
+# Limits count UTF-8 bytes, including fenced and reference lines; the newline
+# is part of file size but not line length. No line exemptions.
+BUDGET="$TMP/budget"
+cp -R "$BASE" "$BUDGET"
+printf '%0400d\n' 0 >"$BUDGET/README.md"
+assert_case "400-byte line accepted" 0 "$BUDGET" "check-doc-hygiene: OK"
+printf '%0401d\n' 0 >"$BUDGET/README.md"
+assert_case "new long line in clean file" 1 "$BUDGET" "new documentation budget violation"
+printf '%0401d' 0 >"$BUDGET/README.md"
+assert_case "unterminated long line counts" 1 "$BUDGET" "new documentation budget violation"
+printf '```text\n%0401d\n```\n' 0 >"$BUDGET/README.md"
+assert_case "fenced long line counts" 1 "$BUDGET" "new documentation budget violation"
+printf '[ref]: https://example.test/%0400d\n' 0 >"$BUDGET/README.md"
+assert_case "link reference long line counts" 1 "$BUDGET" "new documentation budget violation"
+printf '%0200d' 0 | tr '0' 'x' >"$BUDGET/README.md"
+printf '%s\n' "$(printf 'é%.0s' {1..100})" >>"$BUDGET/README.md"
+assert_case "400-byte multibyte line accepted" 0 "$BUDGET" "check-doc-hygiene: OK"
+printf '%s\n' "$(printf 'é%.0s' {1..201})" >"$BUDGET/README.md"
+assert_case "multibyte line exceeds budget" 1 "$BUDGET" "new documentation budget violation"
+
+rm "$BUDGET/config/kit/doc-hygiene-baseline.json"
+assert_case "regeneration requires an existing baseline" 1 "$BUDGET" "cannot read baseline" --regenerate-baseline
+assert_case "initial baseline construction" 0 "$BUDGET" "check-doc-hygiene: OK" --init-baseline
+assert_case "initial baseline cannot overwrite" 1 "$BUDGET" "initial baseline already exists" --init-baseline
+cp "$BUDGET/config/kit/doc-hygiene-baseline.json" "$TMP/original-baseline"
+printf '%0401d\n' 0 >>"$BUDGET/README.md"
+assert_case "new long line in baselined file" 1 "$BUDGET" "overLimitLines"
+assert_case "regeneration refuses increase" 1 "$BUDGET" "documentation budget worsened" --regenerate-baseline
+if ! cmp -s "$TMP/original-baseline" "$BUDGET/config/kit/doc-hygiene-baseline.json"; then
+  echo "FAIL: refused regeneration changed baseline" >&2; FAIL=$((FAIL + 1))
+fi
+cp -R "$BASE" "$TMP/growth"
+GROWTH="$TMP/growth"
+printf '%0401d\n%0401d\n' 0 0 >"$GROWTH/README.md"
+rm "$GROWTH/config/kit/doc-hygiene-baseline.json"
+assert_case "construct growth baseline" 0 "$GROWTH" "check-doc-hygiene: OK" --init-baseline
+printf 'small\n' >>"$GROWTH/README.md"
+assert_case "baselined file grows" 1 "$GROWTH" "fileBytes"
+printf '%0402d\n' 0 >"$GROWTH/README.md"
+assert_case "mixed improvement and worsening refused" 1 "$GROWTH" "documentation budget worsened" --regenerate-baseline
+printf '%0400d\n%0401d\n' 0 0 >"$GROWTH/README.md"
+assert_case "lower metrics make baseline stale" 1 "$GROWTH" "stale documentation budget baseline"
+assert_case "regeneration lowers metrics" 0 "$GROWTH" "check-doc-hygiene: OK" --regenerate-baseline
+printf '%0400d\n' 0 >"$GROWTH/README.md"
+assert_case "improvement makes baseline stale" 1 "$GROWTH" "stale documentation budget baseline"
+assert_case "regeneration drops improvement" 0 "$GROWTH" "check-doc-hygiene: OK" --regenerate-baseline
+assert_case "regenerated baseline is current" 0 "$GROWTH" "check-doc-hygiene: OK"
+
+# An improvement must not launder a new violating file into the baseline.
+NEW_FILE="$TMP/new-during-regen"
+cp -R "$BASE" "$NEW_FILE"
+printf '%0401d\n' 0 >"$NEW_FILE/README.md"
+rm "$NEW_FILE/config/kit/doc-hygiene-baseline.json"
+assert_case "construct new-file baseline" 0 "$NEW_FILE" "check-doc-hygiene: OK" --init-baseline
+cp "$NEW_FILE/config/kit/doc-hygiene-baseline.json" "$TMP/new-file-baseline"
+printf '%0400d\n' 0 >"$NEW_FILE/README.md"
+printf '%0500d\n' 0 >"$NEW_FILE/docs/kit/new.md"
+printf '%s\n' '- [New](new.md)' >>"$NEW_FILE/docs/kit/README.md"
+assert_case "regeneration rejects new violation with improvement" 1 "$NEW_FILE" "new documentation budget violation" --regenerate-baseline
+if ! cmp -s "$TMP/new-file-baseline" "$NEW_FILE/config/kit/doc-hygiene-baseline.json"; then
+  echo "FAIL: new violation changed baseline" >&2; FAIL=$((FAIL + 1))
+fi
+
+# Removing an entire baselined file is stale until its entry is dropped.
+DELETED="$TMP/deleted"
+cp -R "$BASE" "$DELETED"
+printf '%0401d\n' 0 >"$DELETED/docs/kit/removed.md"
+printf '%s\n' '- [Removed](removed.md)' >>"$DELETED/docs/kit/README.md"
+rm "$DELETED/config/kit/doc-hygiene-baseline.json"
+assert_case "construct deleted-file baseline" 0 "$DELETED" "check-doc-hygiene: OK" --init-baseline
+rm "$DELETED/docs/kit/removed.md"
+cp "$BASE/docs/kit/README.md" "$DELETED/docs/kit/README.md"
+assert_case "deleted baselined file is stale" 1 "$DELETED" "stale documentation budget baseline: violation removed"
+assert_case "regeneration drops deleted file" 0 "$DELETED" "check-doc-hygiene: OK" --regenerate-baseline
+assert_case "deleted file baseline is current" 0 "$DELETED" "check-doc-hygiene: OK"
+
+# Wrapping a long list item can add indentation bytes while making it compliant.
+WRAP="$TMP/wrap"
+cp -R "$BASE" "$WRAP"
+printf -- '- %0399d\n' 0 >"$WRAP/README.md"
+rm "$WRAP/config/kit/doc-hygiene-baseline.json"
+assert_case "construct wrapped-list baseline" 0 "$WRAP" "check-doc-hygiene: OK" --init-baseline
+printf -- '- %0200d\n  %0199d\n' 0 0 >"$WRAP/README.md"
+assert_case "compliant wrapped list is stale" 1 "$WRAP" "stale documentation budget baseline: violation removed"
+assert_case "regeneration drops compliant wrapped list" 0 "$WRAP" "check-doc-hygiene: OK" --regenerate-baseline
+assert_case "wrapped list baseline is current" 0 "$WRAP" "check-doc-hygiene: OK"
+
+SIZE="$TMP/size"
+cp -R "$BASE" "$SIZE"
+for ((i = 0; i < 150; i++)); do printf '%0399d\n' 0; done >"$SIZE/docs/kit/large.md"
+printf '%s\n' '- [Large](large.md)' >>"$SIZE/docs/kit/README.md"
+assert_case "60000-byte file accepted" 0 "$SIZE" "check-doc-hygiene: OK"
+printf '\n' >>"$SIZE/docs/kit/large.md"
+assert_case "new file over 60000 bytes" 1 "$SIZE" "new documentation budget violation"
+
+# A fully compliant file drops out even if another metric grew.
+DROP="$TMP/drop"
+cp -R "$BASE" "$DROP"
+for ((i = 0; i < 30001; i++)); do printf 'x\n'; done >"$DROP/README.md"
+rm "$DROP/config/kit/doc-hygiene-baseline.json"
+assert_case "construct oversized baseline" 0 "$DROP" "check-doc-hygiene: OK" --init-baseline
+printf 'xx\n' >"$DROP/README.md"
+assert_case "drop compliant file with a larger maximum" 0 "$DROP" "check-doc-hygiene: OK" --regenerate-baseline
 
 # A cwd .env or bunfig preload re-points the root unless the package.json flags close it.
 assert_gate_launch DOC_HYGIENE_ROOT "$BROKEN" "README.md:5: broken internal link: missing.md"

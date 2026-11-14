@@ -70,7 +70,7 @@ Detailed security and agent process lives in [`docs/kit/processes/dev-process.md
 
 The root `package.json` owns the gate commands: `validate:full` checks the current tree; the scoped tooling self-test lane runs when applicable. Run the applicable root gates before a push, and treat CI as a guardrail rather than the primary debugging loop. [`docs/kit/testing.md`](docs/kit/testing.md) owns selection, testing doctrine, CP inventory and non-claims.
 
-On GitHub Free private, merge-on-green is process, not branch protection: writers can merge or push without the gate. Where rulesets are available, an operator may restrict `main` to the CI App as the bypass actor while retaining the gate; protection is effective only after configuration and verification. See [`docs/kit/testing.md`](docs/kit/testing.md) § _Merge residual_.
+On GitHub Free private, merge-on-green is process, not branch protection: writers can merge or push without the gate. Where rulesets are available, an operator may restrict `main` to the CI App as the bypass actor while retaining the gate; protection is effective only after configuration and verification. See [`docs/kit/testing.md`](docs/kit/testing/ops-model.md) § _Merge residual_.
 
 ## Conditional reading
 

@@ -14,7 +14,7 @@
  *   - claim monorepo-wide env completeness.
  *
  * SSoT: apps/example-api/src/env.schema.ts
- * See docs/kit/testing.md — CP-ENV (DX, example-api scoped).
+ * See docs/kit/testing/critical-path.md — CP-ENV (DX, example-api scoped).
  */
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -129,7 +129,7 @@ async function main() {
   console.log()
   if (errors.length > 0) {
     console.error(
-      'env:check failed. Fix schema / .dev.vars.example drift (see docs/kit/testing.md CP-ENV).',
+      'env:check failed. Fix schema / .dev.vars.example drift (see docs/kit/testing/critical-path.md CP-ENV).',
     )
     process.exit(1)
   }

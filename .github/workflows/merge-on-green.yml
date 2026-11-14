@@ -1,5 +1,5 @@
 # Merge-on-green — Free private org cannot use native branch protection.
-# This is process, not enforcement: see docs/kit/testing.md § Merge residual.
+# This is process, not enforcement: see docs/kit/testing/ops-model.md#merge-residual-github-free-private § Merge residual.
 # Gate reads use GITHUB_TOKEN; writes use the current-repository CI App installation.
 name: Merge on Green
 

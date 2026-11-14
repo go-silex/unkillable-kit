@@ -113,6 +113,12 @@ CI = validate:full (= lint · typecheck · banlist · zod-major)
 EOF
 assert_exit "normative stack inventory → 1" 1 "${BAD_STANDARD}"
 
+BAD_SPLIT="${TMP}/bad-split"
+seed_ok "${BAD_SPLIT}"
+mkdir -p "${BAD_SPLIT}/docs/kit/testing"
+printf '%s\n' 'validate:full = lint · typecheck · banlist' >"${BAD_SPLIT}/docs/kit/testing/section.md"
+assert_exit "split testing section inventory → 1" 1 "${BAD_SPLIT}"
+
 BAD_WRAP="${TMP}/bad-wrap"
 seed_ok "${BAD_WRAP}"
 cat >"${BAD_WRAP}/lefthook.yml" <<'EOF'

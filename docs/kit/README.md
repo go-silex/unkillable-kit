@@ -23,6 +23,18 @@ This index locates the authoritative home for each rule and the operational guid
 - [Stack A–L](./standards/stack.md) — runtime, frontend, auth, packages, quality and architecture choices.
 - [API contract](./api-contract.md) — the published `example-api` OpenAPI document and how it stays a projection of the routes.
 - [Testing strategy](./testing.md) — local gate doctrine, risk tiers and CP inventory.
+  - [Operations model](./testing/ops-model.md)
+  - [Risk tiers](./testing/risk-tiers.md)
+  - [Test ownership](./testing/ownership.md)
+  - [Auth test seams](./testing/auth-seams.md)
+  - [Critical path inventory](./testing/critical-path.md)
+  - [Good tests](./testing/good-tests.md)
+  - [Testing pyramid](./testing/pyramid.md)
+  - [Coverage tooling](./testing/coverage.md)
+  - [PR expectations](./testing/pr-expectations.md)
+  - [Phased tooling](./testing/phased-tooling.md)
+  - [Anti-patterns](./testing/anti-patterns.md)
+  - [Quick links](./testing/quick-links.md)
 - [Product consumer contract](./product-consumer-contract.md) — zero-edit upstream, fetch-only remotes and product/kit ownership.
 - [`@kit/ui` surface](./ui-kit.md) — owned UI package boundary and component contract.
 - [Observability](./observability.md) — logging, redaction, traces and operational visibility.

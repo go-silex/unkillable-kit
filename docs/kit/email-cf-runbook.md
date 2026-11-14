@@ -122,7 +122,7 @@ EMAIL_TRANSPORT=log
 - Only `NotificationDeliveryWorkflow` owns notification retries and terminal receipts. Generic authentication/invitation email is not moved into this owner. `sent` records transport acceptance, never recipient receipt or exactly-once sending.
 - Notification content uses configured trusted origins and the authenticated rules API link, not request Host/Origin or a nonexistent preferences screen. Staging fixtures must also use explicit non-loopback origins; production policy is not relaxed for local proof.
 
-See [notification runtime evidence and non-claims](testing.md#notifications-email-delivery-owner). Effective native success/error retention still requires operational verification before deployment; local instance deletion only models old-owner absence.
+See [notification runtime evidence and non-claims](testing/ownership.md#notifications-email-delivery-owner). Effective native success/error retention still requires operational verification before deployment; local instance deletion only models old-owner absence.
 
 ---
 
@@ -134,8 +134,8 @@ See [notification runtime evidence and non-claims](testing.md#notifications-emai
 | **Mailpit**    | Node scripts via `@kit/email/server` + compose SMTP (Mailpit 1.33.1) — not the Worker bundle |
 | **CF remote**  | Optional `remote: true` on binding in local wrangler for proxied real sends (ops only)       |
 
-Reset E2E: `docs/kit/testing.md` § password reset.  
-Invite E2E: `docs/kit/testing.md` § org invites.
+Reset E2E: `docs/kit/testing/critical-path.md#password-reset-local-e2e-b3-s3` § password reset.  
+Invite E2E: `docs/kit/testing/critical-path.md#org-invites-local-e2e-b3-s2` § org invites.
 
 ---
 

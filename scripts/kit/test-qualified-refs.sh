@@ -120,7 +120,7 @@ lint "url accepted" 0 $'feat(tasks): add tasks\n\nSee https://github.com/Roxabi/
 # Each control proves its planted config changes the previous runner's behaviour; the hook must
 # still reject a bare ref and accept a clean message. Executable cosmiconfig meta configs also run
 # under the old --config pin: isolating the process cwd closes that construction-time discovery.
-# Does not cover Lefthook local overlays or LEFTHOOK*/core.hooksPath (docs/kit/testing.md
+# Does not cover Lefthook local overlays or LEFTHOOK*/core.hooksPath (docs/kit/testing/critical-path.md
 # CP-ZERO-EDIT non-claims).
 [[ -x "$ROOT/node_modules/.bin/lefthook" ]] || { echo "FAIL: lefthook is not installed (run bun install)" >&2; exit 1; }
 HOOK_CMD='node_modules/.bin/lefthook run commit-msg {1}'

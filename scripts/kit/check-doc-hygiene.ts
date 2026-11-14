@@ -1,6 +1,13 @@
 #!/usr/bin/env bun
 /** Documentation SSoT and local Markdown-link hygiene. No network access. */
-import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs'
+import {
+  existsSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 
 const ROOT = realpathSync(
@@ -9,6 +16,14 @@ const ROOT = realpathSync(
 const STACK = '.dev/stack.yml'
 const INDEX = 'docs/kit/README.md'
 const REQUIRED_MARKDOWN = ['AGENTS.md', 'README.md']
+
+const BASELINE = 'config/kit/doc-hygiene-baseline.json'
+const LINE_LIMIT = 400
+const FILE_LIMIT = 60_000
+const REGENERATE =
+  'bun --no-env-file --config=config/kit/bunfig.gates.toml --no-install run scripts/kit/check-doc-hygiene.ts --regenerate-baseline'
+type Metrics = { overLimitLines: number; maxLineBytes: number; fileBytes: number }
+type Baseline = Record<string, Metrics>
 
 type Issue = { file: string; line: number; message: string }
 type Link = { line: number; raw: string; target: string }
@@ -238,6 +253,136 @@ function collectMarkdownFiles(): string[] {
   markdown.sort((a, b) => compareText(rel(a), rel(b)))
   return markdown
 }
+function measureMarkdown(markdown: string[]): Baseline {
+  const result: Baseline = {}
+  for (const file of markdown) {
+    const bytes = readFileSync(file)
+    let overLimitLines = 0
+    let maxLineBytes = 0
+    let lineBytes = 0
+    for (const byte of bytes) {
+      if (byte === 10) {
+        if (lineBytes > LINE_LIMIT) overLimitLines += 1
+        maxLineBytes = Math.max(maxLineBytes, lineBytes)
+        lineBytes = 0
+      } else {
+        lineBytes += 1
+      }
+    }
+    if (lineBytes > LINE_LIMIT) overLimitLines += 1
+    maxLineBytes = Math.max(maxLineBytes, lineBytes)
+    const metrics = { overLimitLines, maxLineBytes, fileBytes: bytes.length }
+    result[rel(file)] = metrics
+  }
+  return result
+}
+
+function loadBaseline(): Baseline | null {
+  try {
+    const value: unknown = JSON.parse(readFileSync(join(ROOT, BASELINE), 'utf8'))
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new Error('expected an object')
+    }
+    for (const [file, entry] of Object.entries(value)) {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+        throw new Error(`invalid entry: ${file}`)
+      }
+      const metrics = entry as Record<string, unknown>
+      if (
+        Object.keys(metrics).length !== 3 ||
+        !['overLimitLines', 'maxLineBytes', 'fileBytes'].every(
+          (key) => Number.isSafeInteger(metrics[key]) && (metrics[key] as number) >= 0,
+        )
+      ) {
+        throw new Error(`invalid metrics: ${file}`)
+      }
+    }
+    return value as Baseline
+  } catch (error) {
+    report(
+      BASELINE,
+      1,
+      `cannot read baseline: ${error instanceof Error ? error.message : String(error)}`,
+    )
+    return null
+  }
+}
+
+function compareBudget(file: string, before: Metrics, after: Metrics, mode: string): boolean {
+  let improved = false
+  for (const metric of ['overLimitLines', 'maxLineBytes', 'fileBytes'] as const) {
+    if (after[metric] > before[metric]) {
+      report(
+        file,
+        1,
+        `documentation budget worsened: ${metric} ${before[metric]} -> ${after[metric]}`,
+      )
+    } else if (after[metric] < before[metric]) {
+      improved = true
+      if (mode !== '--regenerate-baseline') {
+        report(
+          file,
+          1,
+          `stale documentation budget baseline: ${metric} ${before[metric]} -> ${after[metric]}; run ${REGENERATE}`,
+        )
+      }
+    }
+  }
+  return improved
+}
+
+function compareBaseline(
+  baseline: Baseline,
+  measured: Baseline,
+  current: Baseline,
+  mode: string,
+): boolean {
+  let improved = false
+  for (const file of new Set([...Object.keys(baseline), ...Object.keys(current)])) {
+    const before = baseline[file]
+    const after = measured[file]
+    if (!before) {
+      report(file, 1, 'new documentation budget violation')
+      continue
+    }
+    if (!current[file]) {
+      improved = true
+      if (mode !== '--regenerate-baseline') {
+        report(file, 1, `stale documentation budget baseline: violation removed; run ${REGENERATE}`)
+      }
+      continue
+    }
+    if (after && compareBudget(file, before, after, mode)) improved = true
+  }
+  return improved
+}
+
+function checkBudget(markdown: string[], mode: string): void {
+  const measured = measureMarkdown(markdown)
+  const current = Object.fromEntries(
+    Object.entries(measured).filter(
+      ([, metrics]) => metrics.overLimitLines > 0 || metrics.fileBytes > FILE_LIMIT,
+    ),
+  )
+  const baselinePath = join(ROOT, BASELINE)
+  if (mode === '--init-baseline') {
+    if (existsSync(baselinePath)) report(BASELINE, 1, 'initial baseline already exists')
+    else if (issues.length === 0) {
+      writeFileSync(baselinePath, `${JSON.stringify(current, null, 2)}\n`)
+      console.log(
+        `check-doc-hygiene: initialized ${BASELINE} (${Object.keys(current).length} files)`,
+      )
+    }
+    return
+  }
+  const baseline = loadBaseline()
+  if (!baseline) return
+  const improved = compareBaseline(baseline, measured, current, mode)
+  if (mode === '--regenerate-baseline' && issues.length === 0 && improved) {
+    writeFileSync(baselinePath, `${JSON.stringify(current, null, 2)}\n`)
+    console.log(`check-doc-hygiene: regenerated ${BASELINE} (${Object.keys(current).length} files)`)
+  }
+}
 
 function checkAllLinks(markdown: string[]): {
   linksByFile: Map<string, Link[]>
@@ -294,10 +439,17 @@ function finishDocHygiene(standards: number, markdown: number, checkedLinks: num
 }
 
 function main(): void {
+  const mode = process.argv[2] ?? ''
+  if (!['', '--init-baseline', '--regenerate-baseline'].includes(mode) || process.argv.length > 3) {
+    console.error('Usage: check-doc-hygiene.ts [--init-baseline | --regenerate-baseline]')
+    process.exitCode = 1
+    return
+  }
   const standards = parseStack()
   const markdown = collectMarkdownFiles()
   const { linksByFile, checkedLinks } = checkAllLinks(markdown)
   checkIndexCoverage(markdown, linksByFile)
+  checkBudget(markdown, mode)
   finishDocHygiene(standards.length, markdown.length, checkedLinks)
 }
 

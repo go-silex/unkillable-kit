@@ -123,7 +123,7 @@ The list does not shrink by deleting rules. A path leaves the list only after it
 
 **Amendment (2026-11-11, [Roxabi/roxabi-boilerplate-cf#591](https://github.com/Roxabi/roxabi-boilerplate-cf/issues/591)) — API-only `frontend: null`.** Replace the whole `frontend` block with `frontend: null` and keep that scalar on upgrade. No frontend App is required. The guard compares values, not filesystem existence. `~`, an implicit empty value, `Null`, a quoted string, a missing `frontend`, and a partial map still fail.
 
-Products accept the `GLOSSARY.md` rename and do not retain a root `CONTEXT.md`. The protected root `knip` script pins `--config knip.ts`; a product config discovered earlier by bare Knip is not loaded by that script. The [CP-KNIP non-claims](../../testing.md#env--i18n--license--import-boundary--non-claims) inventory remaining inputs.
+Products accept the `GLOSSARY.md` rename and do not retain a root `CONTEXT.md`. The protected root `knip` script pins `--config knip.ts`; a product config discovered earlier by bare Knip is not loaded by that script. The [CP-KNIP non-claims](../../testing/critical-path.md#env--i18n--license--import-boundary--non-claims) inventory remaining inputs.
 
 The commit-msg runner resolves the message path, exports checkout `GIT_DIR` and `GIT_WORK_TREE`, runs in an empty temporary directory and passes absolute `--cwd`, `--config` and `--edit` paths. This isolates commitlint and cosmiconfig discovery while preserving the checkout's `core.commentChar`; it does not close other runners' discovery or per-developer Node settings.
 
