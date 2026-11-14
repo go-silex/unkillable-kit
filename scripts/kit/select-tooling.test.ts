@@ -89,17 +89,24 @@ try {
   head = commit('app only')
   assert.equal(select('--base', base, '--head', head), 1, 'app-only change skips')
   git('update-ref', 'refs/remotes/origin/main', base)
-  git('symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main')
   const update = (local: string, destination: string, remote: string) =>
     `refs/heads/topic ${local} ${destination} ${remote}\n`
+  assert.equal(push(update(head, 'refs/heads/topic', base)), 0, 'missing staging base runs')
+  git('update-ref', 'refs/remotes/origin/staging', base)
+  git('symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main')
   assert.equal(push(update(head, 'refs/heads/topic', base)), 1, 'local app-only push skips')
-  assert.equal(push(update(head, 'refs/heads/topic', '0'.repeat(40))), 1, 'new feature skips')
+  assert.equal(push(update(head, 'refs/heads/topic', '0'.repeat(40))), 0, 'new feature runs')
   assert.equal(push(update(head, 'refs/heads/main', base)), 0, 'local main push runs')
   assert.equal(push(update(base, 'refs/heads/main', head)), 2, 'non-HEAD push is refused')
   assert.equal(
     push(update(head, 'refs/heads/topic', base) + update(head, 'refs/heads/main', base)),
     0,
     'multiple updates include main',
+  )
+  assert.equal(
+    push(update(head, 'refs/heads/topic', base) + update(head, 'refs/heads/new', '0'.repeat(40))),
+    0,
+    'mixed updates include initial branch',
   )
   assert.equal(push(''), 0, 'missing push context runs')
   git('symbolic-ref', '--delete', 'refs/remotes/origin/HEAD')
@@ -151,6 +158,17 @@ try {
     head = commit(path)
     assert.equal(select('--base', previous, '--head', head), 0, path)
   }
+  git('update-ref', 'refs/remotes/origin/main', head)
+  assert.equal(
+    push(update(head, 'refs/heads/staging', base)),
+    0,
+    'staging destination detects changes already on main',
+  )
+  assert.equal(
+    push(update(head, 'refs/heads/topic', head)),
+    0,
+    'non-default PR base detects tooling changes',
+  )
   git('symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main')
   assert.equal(
     push(update(head, 'refs/heads/topic', head)),

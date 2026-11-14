@@ -173,18 +173,21 @@ function parsePushUpdates(input: string): string[][] {
 
 function selectPush(input: string): boolean {
   const updates = parsePushUpdates(input)
+  const bases = ['refs/remotes/origin/main', 'refs/remotes/origin/staging'].map((ref) =>
+    git(['rev-parse', '--verify', '--end-of-options', `${ref}^{commit}`]).trim(),
+  )
   let run = false
   for (const [, local, destination, remote] of updates) {
-    if (/^0{40}$/.test(local)) {
+    if (/^0{40}$/.test(local) || /^0{40}$/.test(remote)) {
       run = true
       continue
     }
-    if (!/^0{40}$/.test(remote)) git(['cat-file', '-e', `${remote}^{commit}`])
-    const defaultRef = git(['symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD']).trim()
-    const base = git(['rev-parse', '--verify', '--end-of-options', `${defaultRef}^{commit}`]).trim()
-    const args = ['--base', base, '--head', local]
-    if (destination === 'refs/heads/main') args.push('--kit-main-push')
-    if (select(args)) run = true
+    for (const base of [remote, ...bases]) {
+      git(['merge-base', '--is-ancestor', base, local])
+      const args = ['--base', base, '--head', local]
+      if (destination === 'refs/heads/main') args.push('--kit-main-push')
+      if (select(args)) run = true
+    }
   }
   return run
 }
