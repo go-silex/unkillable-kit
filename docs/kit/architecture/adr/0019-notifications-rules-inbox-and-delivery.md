@@ -3,6 +3,7 @@ title: 'ADR-0019 — Notifications: rules, Inbox and external Delivery'
 status: accepted
 normative: true
 date: 2026-10-22
+amended: 2026-11-14
 axial: false
 related:
   - GLOSSARY.md
@@ -23,6 +24,8 @@ summary: 'Notifications: rules, Inbox, persistence and producer contracts'
 
 Accepted on 2026-10-22. The repository contains `packages/notifications`, its schema and repositories, the catalogued `0023_notifications.sql`, and notification routes and services in `example-api`. The App composes `createNotificationService` and wires Task and Flow producers; regression suites for this composition and producers are present. User/email Delivery Workflow admission, reconciliation and execution are implemented; Slack and Organization/email remain uncomposed. These are partial implementation evidence, not proof that every contract below or its integration proofs is delivered. Live or deployed delivery remains unproven; acceptance is not deployment proof.
 
+Amendment 2026-11-14: absent-code specifications linked below are non-normative design notes; the decisions remain binding.
+
 ## Context and decision
 
 Apps need one extractible Notifications capability for action-required notices, rather than separate implementations of preferences, recipient isolation and delivery guards. The first consumers are task assignment and flow approval in `example-api`. Product Notification types remain in Product Apps.
@@ -39,7 +42,8 @@ A Cloudflare Workflow owns each complete external Delivery, with a stable instan
 | `@kit/notifications/schema` and `@kit/notifications/repos` | Capability tables, atomic admissions, scoped queries and conditional receipts; no HTTP auth, runtime restart or custom scheduler                       |
 | App                                                        | Producer authority, recipient ids and source ACL, registry/renderers/catalogues, current access facts, service factory, routes and Workflow entrypoint |
 | Cloudflare Workflows                                       | Entire external Delivery and its failure retries; admission/reconciliation contract in ADR-0020, no second owner                                       |
-| `@kit/slack/notifications`                                 | Implements the Channel interface with a **type-only** import from notifications; notifications never imports Slack                                     |
+
+Slack Channel interface: [non-normative design note](../design-notes/0019-notifications.md#slack-channel).
 
 `orgId` is the Organization that owns the source. It is not the browser's selected Organization or the sender's Organization. Every recipient must be a real member of that Organization, which must be active. A type with `moduleId` also requires the recipient's effective Module **read** access: Deployment availability, Organization enablement and their Role–module grant. The sender's grants or support bypass never substitute for these checks.
 
@@ -476,12 +480,10 @@ type DeliveryMetadata = {
 type DeliveryQuery = ListQuery & {
   status?: DeliveryState; channel?: string; type?: string; targetKind?: 'user' | 'organization'
 }
-type DestinationDto = {
-  id: string; channel: string; externalId: string; selector: Selector
-  createdAt: number; updatedAt: number
-}
 // The failure body is the existing ApiErrorBody from @kit/types, not a new envelope.
 ```
+
+Destination DTO: [non-normative design note](../design-notes/0019-notifications.md#destination-dto).
 
 Types are catalogue metadata, never source parameters/Zod schema/renderers. `available` in effective rules reflects the access ceiling separately from the rule's boolean. Delivery administration reveals metadata only: no title/body/parameters, email, address credential or provider response. No Delivery-status surface is exposed to a User in V0.
 
@@ -511,16 +513,14 @@ Types are catalogue metadata, never source parameters/Zod schema/renderers. `ava
 | DELETE `/api/platform/notification-rules/{ruleId}` | No body                                   | `{ok:true,requestId}`; super_admin                                                 |
 | GET `/api/platform/notification-deliveries`        | `channel?,type?,targetKind?` + page query | `Page<DeliveryMetadata & {orgId:string}>`; **failed only**, super_admin, not staff |
 
-| Method and path                                                      | Request                                           | 200 response / authorization                                                                                       |
-| -------------------------------------------------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| GET `/api/orgs/{orgId}/notification-rules`                           | Page query                                        | `Page<RuleDto>`; manage_notifications                                                                              |
-| PUT `/api/orgs/{orgId}/notification-rules`                           | `{selector,channel,enabled,locked}`               | `{rule:RuleDto,requestId}`; manage_notifications                                                                   |
-| DELETE `/api/orgs/{orgId}/notification-rules/{ruleId}`               | No body                                           | `{ok:true,requestId}`; manage_notifications                                                                        |
-| GET `/api/orgs/{orgId}/notification-deliveries`                      | `status?,channel?,type?,targetKind?` + page query | `Page<DeliveryMetadata>`; manage_notifications                                                                     |
-| GET `/api/orgs/{orgId}/notification-destinations`                    | Page query                                        | `Page<DestinationDto>`; manage_notifications                                                                       |
-| POST `/api/orgs/{orgId}/notification-destinations`                   | `{channel,externalId,selector}`                   | **201** `{destination:DestinationDto,requestId}`; manage_notifications; validate installed address and type opt-in |
-| PUT `/api/orgs/{orgId}/notification-destinations/{destinationId}`    | `{selector}`                                      | `{destination:DestinationDto,requestId}`; address identity immutable                                               |
-| DELETE `/api/orgs/{orgId}/notification-destinations/{destinationId}` | No body                                           | `{ok:true,requestId}`; manage_notifications                                                                        |
+| Method and path                                        | Request                                           | 200 response / authorization                     |
+| ------------------------------------------------------ | ------------------------------------------------- | ------------------------------------------------ |
+| GET `/api/orgs/{orgId}/notification-rules`             | Page query                                        | `Page<RuleDto>`; manage_notifications            |
+| PUT `/api/orgs/{orgId}/notification-rules`             | `{selector,channel,enabled,locked}`               | `{rule:RuleDto,requestId}`; manage_notifications |
+| DELETE `/api/orgs/{orgId}/notification-rules/{ruleId}` | No body                                           | `{ok:true,requestId}`; manage_notifications      |
+| GET `/api/orgs/{orgId}/notification-deliveries`        | `status?,channel?,type?,targetKind?` + page query | `Page<DeliveryMetadata>`; manage_notifications   |
+
+Unimplemented destination routes: [non-normative design note](../design-notes/0019-notifications.md#administration-routes).
 
 Organization admin routes require Organization context + capability; authenticated member/reader receive 403, another Organization receives 404. Inbox/read routes never enable a super_admin bypass. User rules are global subject-owned rows even when the UI previews the current Organization. Installation, Slack channel discovery and User-link routes are specified by ADR-0021; they do not duplicate these generic destination endpoints.
 

@@ -70,6 +70,11 @@ function withFixture(
         scripts: {
           'validate:full':
             'bun run scripts/kit/root-gate.ts core:first test:coverage core:last core:tail',
+          'validate:tooling':
+            'bun run scripts/kit/root-gate.ts tooling:first tooling:last tooling:tail',
+          'tooling:first': 'bun run task.ts tooling:first',
+          'tooling:last': 'bun run task.ts tooling:last',
+          'tooling:tail': 'bun run task.ts tooling:tail',
           'core:first': 'bun run task.ts core:first',
           'test:coverage': coverageScript,
           'core:last': 'bun run task.ts core:last',
@@ -312,6 +317,49 @@ function fullAndPlan() {
     const failed = invoke()
     assert.ok(failed.status !== null && failed.status !== 0, 'failed child must fail Root')
     assert.equal(readFileSync(effects, 'utf8'), 'core:first\ntest:coverage\ncore:last\n')
+  })
+}
+
+function toolingAndPlan() {
+  withFixture('bun run task.ts test:coverage', (fixture, env) => {
+    const invoke = (...args: string[]) =>
+      command(fixture, env, process.execPath, ['run', 'validate:tooling', ...args])
+    const effects = join(fixture, 'effects.txt')
+    const plan = invoke('--', '--plan')
+    requireSuccess(plan)
+    const parsed = JSON.parse(plan.stdout)
+    assert.deepEqual(parsed.tasks, ['tooling:first', 'tooling:last', 'tooling:tail'])
+    assert.deepEqual(parsed.core, parsed.tasks)
+    assert.deepEqual(parsed.coverage, [])
+    assert.equal(existsSync(effects), false, 'tooling plan must not execute tasks')
+    const invalid = invoke('--', '--plan', '--ci-group', 'core')
+    assert.ok(invalid.status !== null && invalid.status !== 0)
+    assert.equal(existsSync(effects), false, 'invalid options must not execute tasks')
+    requireSuccess(invoke())
+    assert.equal(readFileSync(effects, 'utf8'), 'tooling:first\ntooling:last\ntooling:tail\n')
+    rmSync(effects)
+    env.ROOT_FIXTURE_FAIL = 'tooling:last'
+    const failed = invoke()
+    assert.ok(failed.status !== null && failed.status !== 0)
+    assert.equal(readFileSync(effects, 'utf8'), 'tooling:first\ntooling:last\n')
+    rmSync(effects)
+
+    const manifestPath = join(fixture, 'package.json')
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+    for (const recipe of [
+      'bun run scripts/kit/root-gate.ts tooling:first tooling:first',
+      'bun run scripts/kit/root-gate.ts tooling:first test:coverage',
+      'bun run scripts/kit/root-gate.ts tooling:first validate:tooling',
+      'bun run scripts/kit/root-gate.ts tooling:first validate:full',
+      'bun run scripts/kit/root-gate.ts tooling:first missing:task',
+      'bun run scripts/kit/root-gate.ts tooling:first  tooling:last',
+    ]) {
+      manifest.scripts['validate:tooling'] = recipe
+      writeFileSync(manifestPath, JSON.stringify(manifest))
+      const rejected = invoke('--', '--plan')
+      assert.ok(rejected.status !== null && rejected.status !== 0, `must reject ${recipe}`)
+      assert.equal(existsSync(effects), false, 'rejected recipe must not execute tasks')
+    }
   })
 }
 
@@ -562,6 +610,7 @@ refuseCoverageListing()
 coverageShard()
 coverageShardJoin()
 fullAndPlan()
+toolingAndPlan()
 coveragePlan()
 joinAdmission()
 console.log('PASS full execution, plan, fail-fast and join admission guards')

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Scoped tooling self-tests
+
+- Separate gate-tooling self-tests into `validate:tooling`; keep live tree checks in `validate:full`. Pre-push and CI select the tooling lane for Kit tooling changes, conservatively run it on uncertain selection, and run it on Kit pushes to `main`. Local selection respects actual push destinations and revisions.
+- Product clones may skip inherited tooling self-tests after context validation; a tooling zero-edit exception or Product configuration, manifest or shared `bun.lock` change selects them. The CI tooling job always validates selection; its checkout, install and test steps may skip, but the aggregate requires the job to succeed with valid selection. Product validation and secret scanning remain separate.
+
 ### Product kit upgrades
 
 - Provide `bun run kit-upgrade` for the documented product-clone merge procedure, with a read-only `--check` mode and a hermetic regression test.
@@ -57,6 +62,10 @@
 ### Flow run persistence
 
 - Commit run mutations and status/receipt events atomically, with path-specific Organization and snapshot fences. Failed-run closure checks ownership, preserves terminal status and errors during receipt cleanup, retains malformed receipt bytes and propagates the original exception.
+
+### ADR design notes
+
+- Move unimplemented notification destination routes, Slack schema tables and implementation specifications from binding ADRs into non-normative design notes; accepted decisions remain binding.
 
 ### API-only stack contract
 

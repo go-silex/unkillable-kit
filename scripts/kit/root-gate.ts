@@ -19,12 +19,21 @@ type Identity = {
   runnerHash: string
 }
 
-function recipe() {
+function recipe(args: string[]) {
   const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as {
     scripts?: Record<string, unknown>
   }
   const scripts = manifest.scripts ?? {}
-  const source = scripts['validate:full']
+  const candidates = ['validate:full', 'validate:tooling'].flatMap((name) => {
+    const source = scripts[name]
+    if (typeof source !== 'string') return []
+    const tasks = source.split(' ').slice(3)
+    return JSON.stringify(args.slice(0, tasks.length)) === JSON.stringify(tasks)
+      ? [{ name, source }]
+      : []
+  })
+  if (candidates.length !== 1) fail('arguments differ from canonical recipe')
+  const { name, source } = candidates[0]
   if (
     typeof source !== 'string' ||
     !/^bun run scripts\/kit\/root-gate\.ts(?: [A-Za-z0-9_:-]+)+$/.test(source)
@@ -33,10 +42,12 @@ function recipe() {
   const tasks = (source as string).split(' ').slice(3)
   if (
     new Set(tasks).size !== tasks.length ||
-    tasks.filter((task) => task === 'test:coverage').length !== 1 ||
-    tasks.includes('validate:full')
+    tasks.filter((task) => task === 'test:coverage').length !==
+      (name === 'validate:full' ? 1 : 0) ||
+    tasks.includes('validate:full') ||
+    tasks.includes('validate:tooling')
   )
-    fail('duplicate tasks or missing coverage')
+    fail('duplicate tasks or invalid coverage')
   for (const task of tasks)
     if (typeof scripts[task] !== 'string' || !scripts[task]) fail(`missing script: ${task}`)
   return {
@@ -247,8 +258,8 @@ function joinReceipts(dir: string, status: string, tasks: string[], expected: Id
 }
 
 try {
-  const current = recipe()
   const args = process.argv.slice(2)
+  const current = recipe(args)
   const provided = args.slice(0, current.tasks.length)
   if (JSON.stringify(provided) !== JSON.stringify(current.tasks))
     fail('arguments differ from canonical recipe')

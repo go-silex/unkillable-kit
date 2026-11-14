@@ -74,16 +74,23 @@ function dependencies(job: Job): string[] {
 function context(
   event: 'push' | 'pull_request',
   results: Record<string, Result>,
+  tooling = '',
 ): Record<string, Value> {
   return {
     github: { event_name: event, event: { pull_request: { draft: false } } },
-    needs: Object.fromEntries(Object.entries(results).map(([key, result]) => [key, { result }])),
+    needs: Object.fromEntries(
+      Object.entries(results).map(([key, result]) => [
+        key,
+        { result, outputs: { tooling: key === 'coverage-plan' ? tooling : '' } },
+      ]),
+    ),
   }
 }
 function enabled(
   job: Job,
   event: 'push' | 'pull_request',
   results: Record<string, Result>,
+  tooling = '',
 ): boolean {
   const needs = dependencies(job)
   for (const id of needs) assert.ok(results[id], `missing result for dependency ${id}`)
@@ -94,12 +101,16 @@ function enabled(
   return (
     evaluate(
       `!!(${condition.replace(/^\$\{\{\s*/, '').replace(/\s*\}\}$/, '')})`,
-      context(event, results),
+      context(event, results, tooling),
       successful,
     ) === 'true'
   )
 }
-function joinVerdict(event: 'push' | 'pull_request', results: Record<string, Result>): string {
+function joinVerdict(
+  event: 'push' | 'pull_request',
+  results: Record<string, Result>,
+  tooling = '',
+): string {
   const job = jobs.ci
   assert.ok(enabled(job, event, results), 'final ci must run after failure or skip')
   const joinStep = job.steps?.find((step) => step.env?.PRODUCERS_RESULT !== undefined)
@@ -108,9 +119,9 @@ function joinVerdict(event: 'push' | 'pull_request', results: Record<string, Res
     joinStep.if && /\b(always|failure|cancelled)\s*\(/.test(joinStep.if),
     'receipt join must run after earlier step failure',
   )
-  assert.equal(evaluate(joinStep.if, context(event, results), false), 'true')
+  assert.equal(evaluate(joinStep.if, context(event, results, tooling), false), 'true')
   const direct = Object.fromEntries(dependencies(job).map((id) => [id, results[id]]))
-  return evaluate(joinStep.env!.PRODUCERS_RESULT, context(event, direct), false)
+  return evaluate(joinStep.env!.PRODUCERS_RESULT, context(event, direct, tooling), false)
 }
 
 function preflight(cwd: string, env = process.env, output: string[] = []): boolean {
@@ -142,7 +153,7 @@ function failedPreflight() {
     assert.equal(preflight(fixture), false)
     for (const event of ['push', 'pull_request'] as const) {
       const results: Record<string, Result> = { 'coverage-plan': 'failure' }
-      for (const id of ['quality', 'coverage']) {
+      for (const id of ['quality', 'coverage', 'tooling']) {
         assert.equal(enabled(jobs[id], event, results), false, `${id} must not start`)
         results[id] = 'skipped'
       }
@@ -217,7 +228,7 @@ function protectedDriftPreflight() {
     assert.match(output.join(''), /FORBIDDEN package\.json/)
     for (const event of ['push', 'pull_request'] as const) {
       const results: Record<string, Result> = { 'coverage-plan': 'failure' }
-      for (const id of ['quality', 'coverage']) {
+      for (const id of ['quality', 'coverage', 'tooling']) {
         assert.equal(enabled(jobs[id], event, results), false, `${id} must not start`)
         results[id] = 'skipped'
       }
@@ -236,11 +247,26 @@ function successfulPreflight() {
       assert.equal(enabled(jobs[id], event, results), true, `${id} must start`)
       results[id] = 'success'
     }
-    assert.equal(joinVerdict(event, results), 'success')
+    assert.equal(enabled(jobs.tooling, event, results, 'true'), true)
+    results.tooling = 'success'
+    assert.equal(joinVerdict(event, results, 'true'), 'success')
+    for (const result of ['failure', 'skipped', 'cancelled'] as const) {
+      assert.equal(joinVerdict(event, { ...results, tooling: result }, 'true'), 'failure')
+    }
+    assert.equal(enabled(jobs.tooling, event, results, 'false'), true)
+    const toolingStep = jobs.tooling.steps?.find((step) => step.name === 'Validate tooling')
+    assert.ok(toolingStep?.if, 'tooling execution must be conditional')
+    assert.equal(evaluate(toolingStep.if, context(event, results, 'true'), true), 'true')
+    assert.equal(evaluate(toolingStep.if, context(event, results, 'false'), true), 'false')
+    assert.equal(joinVerdict(event, results, 'false'), 'success')
+    for (const result of ['failure', 'skipped', 'cancelled'] as const) {
+      assert.equal(joinVerdict(event, { ...results, tooling: result }, 'false'), 'failure')
+    }
+    assert.equal(joinVerdict(event, results), 'failure')
     for (const id of ['coverage-plan', 'quality', 'coverage']) {
       for (const result of ['failure', 'skipped', 'cancelled'] as const) {
         assert.equal(
-          joinVerdict(event, { ...results, [id]: result }),
+          joinVerdict(event, { ...results, [id]: result }, 'true'),
           'failure',
           `${id}: ${result}`,
         )
