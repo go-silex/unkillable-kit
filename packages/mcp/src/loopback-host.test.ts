@@ -6,10 +6,16 @@ describe('isLoopbackHostname', () => {
     expect(isLoopbackHostname(host)).toBe(true)
   })
 
-  it.each(['localhost.', '127.0.0.2', '0.0.0.0', '::ffff:127.0.0.1', 'localhost.evil.test'])(
-    'rejects %s',
-    (host) => {
-      expect(isLoopbackHostname(host)).toBe(false)
-    },
-  )
+  it.each([
+    'localhost.',
+    'web.localhost',
+    '127.0.0.2',
+    '0.0.0.0',
+    '::',
+    '[::]',
+    '::ffff:127.0.0.1',
+    'localhost.evil.test',
+  ])('rejects %s', (host) => {
+    expect(isLoopbackHostname(host)).toBe(false)
+  })
 })
