@@ -355,6 +355,7 @@
       },
     },
   },
+  "trustedDependencies": [],
   "patchedDependencies": {
     "zod@4.6.7": "config/kit/patches/zod@4.6.7.patch",
   },
