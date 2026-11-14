@@ -83,6 +83,7 @@ A product has one parent and does not add a remote to its grandparent. Kit HEAD 
 1. Decide the authentication surfaces (session cookie or `sk_`), and choose organization modules and roles if the product is multi-tenant ([ADR-0003](../architecture/adr/0003-multi-tenant-rbac-modules.md)).
 2. Compose `@kit/ui` in `apps/<product>-web`; product CSS token overrides are allowed. Inventory environment variables for the product apps, not only `example-api`.
 3. Capture the product brief in `docs/product/*`, then open the tracker and GitHub issues.
+   The product agent entry point is `docs/product/AGENTS.md`; the kit `AGENTS.md` routes agents to it when present.
 4. Implement under `apps/<product>-*` and product workflows as needed. If the API exists, run `bash scripts/kit/kit-schema-sync.sh --app apps/<product>-api` to sync its recorded sets. The product-owned manifest is not checked by kit `validate:full`. If Better Auth is mounted but `audit` is absent, run once with `--modules` naming `core`, `audit`, and every recorded set; see the [mount contract](../product-consumer-contract.md#better-auth-mount).
 5. Run `bun run validate:full` and product validation when product apps exist ([templates](../templates/)). Open the PR against product `main`, not a `staging` landing branch.
 

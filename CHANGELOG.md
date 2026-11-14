@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Product agent entry point
+
+- Route agents in product clones to `docs/product/AGENTS.md`.
+
 ### Biome D1 safety
 
 - Keep `noPlaywrightUselessAwait` diagnostics while disabling its automatic fix: Biome 2.6.7 misidentifies D1 `first()` calls as Playwright locators and otherwise removes required awaits. Restore the fix when upstream distinguishes those calls and the real D1 staged-file proof passes.
