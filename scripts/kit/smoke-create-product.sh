@@ -28,6 +28,17 @@ run_case() {
   local tree="$tmp/$label" base marker first
   clone "$label"
   base="$(git -C "$tree" rev-parse HEAD)"
+  # Ignored local files must never be copied from either starter, even when
+  # the generated path would itself be ignored and absent from git status.
+  local kind path
+  for kind in api web; do
+    mkdir -p "$tree/apps/starter-$kind/.turbo"
+    for path in .dev.vars .env .turbo/create-product-poison; do
+      printf 'KIT_COPY_POISON=starter-%s\n' "$kind" > "$tree/apps/starter-$kind/$path"
+      git -C "$tree" check-ignore -q "apps/starter-$kind/$path" || fail "$label fixture is not ignored: $kind/$path"
+    done
+  done
+  [[ -z "$(git -C "$tree" status --porcelain --untracked-files=all)" ]] || fail "$label poison fixture dirtied the checkout"
   local options=()
   [[ "$real" == yes ]] || options+=(--skip-gh-default)
   (cd "$tree" && bash scripts/kit/create-product.sh sample --origin "$origin" --accept-parent-origin --commit "${options[@]}" "$@") | tee "$tmp/$label.log"
@@ -52,6 +63,27 @@ run_case() {
   [[ -f "$tree/apps/sample-api/package.json" ]] || fail "$label missing API"
   if [[ " $* " == *' --web '* ]]; then [[ -f "$tree/apps/sample-web/package.json" ]] || fail "$label missing web"; else [[ ! -e "$tree/apps/sample-web" ]] || fail "$label unexpected web"; fi
   if [[ " $* " == *' --mcp '* ]]; then [[ -f "$tree/apps/sample-mcp/package.json" ]] || fail "$label missing MCP"; else [[ ! -e "$tree/apps/sample-mcp" ]] || fail "$label unexpected MCP"; fi
+  for kind in api web; do
+    [[ -d "$tree/apps/sample-$kind" ]] || continue
+    for path in .dev.vars .env .turbo/create-product-poison; do
+      [[ ! -e "$tree/apps/sample-$kind/$path" ]] || fail "$label copied ignored starter file: $kind/$path"
+    done
+    if grep -rFl -- 'KIT_COPY_POISON=starter-' "$tree/apps/sample-$kind" > "$tmp/$label-poison"; then
+      fail "$label copied starter poison into Product files"
+    else
+      [[ $? -eq 1 ]] || fail "$label could not scan Product files for poison"
+    fi
+  done
+  local -a grep_args tree_args
+  for path in HEAD --cached; do
+    grep_args=() tree_args=()
+    if [[ "$path" == HEAD ]]; then tree_args=(HEAD); else grep_args=(--cached); fi
+    if git -C "$tree" grep -Fq "${grep_args[@]}" -e 'KIT_COPY_POISON=starter-' "${tree_args[@]}" -- apps/sample-api apps/sample-web scripts/product config/product docs/product; then
+      fail "$label committed or staged starter poison"
+    else
+      [[ $? -eq 1 ]] || fail "$label could not scan commit or index for poison"
+    fi
+  done
   diff -qr "$tree/apps/starter-api/migrations" "$tree/apps/sample-api/migrations" >/dev/null || fail "$label migration bytes"
   # Path-mode dogfood exercises the actual generated Product, not a hand-planted fixture.
   bash "$ROOT/scripts/kit/dogfood-zero-edit.sh" --generated-product "$tree"
