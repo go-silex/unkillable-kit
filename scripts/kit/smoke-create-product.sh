@@ -18,10 +18,14 @@ trap 'rm -rf "$tmp"' EXIT
 export GIT_AUTHOR_NAME=Fixture GIT_AUTHOR_EMAIL=fixture@example.invalid
 export GIT_COMMITTER_NAME=Fixture GIT_COMMITTER_EMAIL=fixture@example.invalid
 fail() { echo "FAIL: $*" >&2; exit 1; }
+source_sha="$(git -C "$ROOT" rev-parse --verify 'HEAD^{commit}')"
+echo "create-product smoke source: $source_sha"
 clone() {
-  git clone -q --no-hardlinks "$ROOT" "$tmp/$1"
+  git clone -q --no-checkout --no-hardlinks "$ROOT" "$tmp/$1"
+  git -C "$tmp/$1" cat-file -e "$source_sha^{commit}" || fail "source commit no longer available in clone"
+  git -C "$tmp/$1" checkout -q --detach "$source_sha"
   git -C "$tmp/$1" remote set-url origin https://github.com/go-silex/unkillable-kit.git
-  git -C "$tmp/$1" update-ref refs/remotes/origin/main "$(git -C "$tmp/$1" rev-parse HEAD)"
+  git -C "$tmp/$1" update-ref refs/remotes/origin/main "$source_sha"
 }
 run_case() {
   local label="$1" origin="$2" real="$3"; shift 3
@@ -86,7 +90,7 @@ run_case() {
   done
   diff -qr "$tree/apps/starter-api/migrations" "$tree/apps/sample-api/migrations" >/dev/null || fail "$label migration bytes"
   # Path-mode dogfood exercises the actual generated Product, not a hand-planted fixture.
-  bash "$ROOT/scripts/kit/dogfood-zero-edit.sh" --generated-product "$tree"
+  bash "$tree/scripts/kit/dogfood-zero-edit.sh" --generated-product "$tree"
 }
 run_case api example/sample-api no
 run_case web example/sample-web no --web
