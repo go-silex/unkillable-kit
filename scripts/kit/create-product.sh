@@ -57,19 +57,21 @@ NODE
 app_paths=("apps/$name-api")
 if ((web)); then app_paths+=("apps/$name-web"); fi
 if ((mcp)); then app_paths+=("apps/$name-mcp"); fi
-node - "${app_paths[@]}" <<'NODE' || die 'generated App overlaps a protected Kit path'
+new_paths=("${app_paths[@]}" config/product/inheritance.json scripts/product/validate.sh .github/workflows/product-ci.yml config/product/deploy-gate.json docs/product/AGENTS.md config/product/coverage-order.txt)
+# Dependabot has its own bounded canonical-generation exception in zero-edit.
+node - "${new_paths[@]}" .dev/stack.yml bun.lock <<'NODE' || die 'Product destination overlaps a protected Kit path'
 const zones = require('./config/kit/zero-edit-zones.json')
 const roots = [...zones.protected_prefixes, ...zones.protected_files].map(p => p.replace(/\/+$/, ''))
-for (const app of process.argv.slice(2)) {
+for (const path of process.argv.slice(2)) {
   for (const root of roots) {
-    if (app === root || app.startsWith(`${root}/`) || root.startsWith(`${app}/`)) {
-      console.error(`create-product: ${app} overlaps protected path ${root}`)
+    if (path === root || path.startsWith(`${root}/`) || root.startsWith(`${path}/`)) {
+      console.error(`create-product: ${path} overlaps protected path ${root}`)
       process.exit(1)
     }
   }
 }
 NODE
-for path in "${app_paths[@]}" config/product/inheritance.json scripts/product/validate.sh .github/workflows/product-ci.yml config/product/deploy-gate.json docs/product/AGENTS.md config/product/coverage-order.txt; do
+for path in "${new_paths[@]}"; do
   [[ ! -e "$path" && ! -L "$path" ]] || die "destination already exists: $path"
 done
 [[ -d apps/starter-api && -f apps/starter-api/package.json ]] || die 'API starter missing'

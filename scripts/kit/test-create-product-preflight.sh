@@ -41,7 +41,7 @@ refuse() {
     missing-opt-in) expected='--accept-parent-origin is required' ;;
     missing-commit) expected='--commit is required' ;;
     invalid-name) expected='name must be' ;;
-    protected-destination) expected='generated App overlaps a protected Kit path' ;;
+    protected-destination) expected='overlaps protected path' ;;
     parent-origin) expected='Product origin must not be allowlisted' ;;
     nested-cwd) expected='run at the root' ;;
     dirty) expected='working tree must be clean' ;;
@@ -166,4 +166,60 @@ git -C "$tree" commit -qm 'fixture: protect optional App'
 git -C "$tree" update-ref refs/remotes/origin/main "$(git -C "$tree" rev-parse HEAD)"
 refuse protected-destination "$tree" "$tree" "${args[@]}" --web
 accept_preflight unselected-protected "$tree" sample
+# Future zone additions must protect every output class before remote rewrites.
+# Each fixture starts with the current zone inventory, then adds one rule.
+clone future-zones
+tree="$tmp/future-zones"
+baseline_zones="$tmp/original-zones.json"
+cp "$tree/config/kit/zero-edit-zones.json" "$baseline_zones"
+destinations=(
+  'api:apps/sample-api'
+  'web:apps/sample-web'
+  'mcp:apps/sample-mcp'
+  'fixed:config/product/inheritance.json'
+  'fixed:scripts/product/validate.sh'
+  'fixed:.github/workflows/product-ci.yml'
+  'fixed:config/product/deploy-gate.json'
+  'fixed:docs/product/AGENTS.md'
+  'fixed:config/product/coverage-order.txt'
+  'fixed:.dev/stack.yml'
+  'fixed:bun.lock'
+)
+for entry in "${destinations[@]}"; do
+  class="${entry%%:*}"
+  destination="${entry#*:}"
+  for rule in file prefix; do
+    protected="$destination"
+    if [[ "$rule" == file && "$class" != fixed ]]; then
+      protected="$destination/package.json"
+    elif [[ "$rule" == prefix && "$class" == fixed && "$destination" == */* ]]; then
+      protected="${destination%/*}"
+    fi
+    node - "$baseline_zones" "$tree/config/kit/zero-edit-zones.json" "$class" "$destination" "$rule" <<'NODE'
+const fs = require('fs')
+const [baseline, output, kind, destination, rule] = process.argv.slice(2)
+const zones = JSON.parse(fs.readFileSync(baseline, 'utf8'))
+const app = kind !== 'fixed'
+if (rule === 'file') {
+  zones.protected_files.push(app ? `${destination}/package.json` : destination)
+} else {
+  const prefix = app || !destination.includes('/') ? destination : destination.slice(0, destination.lastIndexOf('/'))
+  zones.protected_prefixes.push(`${prefix}/`)
+}
+fs.writeFileSync(output, `${JSON.stringify(zones, null, 2)}\n`)
+NODE
+    git -C "$tree" add config/kit/zero-edit-zones.json
+    git -C "$tree" commit -qm 'fixture: protect generated destination'
+    git -C "$tree" update-ref refs/remotes/origin/main "$(git -C "$tree" rev-parse HEAD)"
+    for selection in api web mcp all; do
+      case "$class:$selection" in
+        web:api|web:mcp|mcp:api|mcp:web) continue ;;
+      esac
+      flags=()
+      case "$selection" in web) flags+=(--web) ;; mcp) flags+=(--mcp) ;; all) flags+=(--web --mcp) ;; esac
+      refuse protected-destination "$tree" "$tree" "${args[@]}" "${flags[@]}"
+      grep -Fq -- "overlaps protected path $protected" "$tmp/output" || { echo "FAIL: refusal did not identify protected rule $protected" >&2; cat "$tmp/output" >&2; exit 1; }
+    done
+  done
+done
 echo 'create-product preflight refusals passed'
