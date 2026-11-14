@@ -1,15 +1,24 @@
 import { strict as assert } from 'node:assert'
 import { execFileSync, spawnSync } from 'node:child_process'
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const source = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const root = mkdtempSync(join(tmpdir(), 'tooling-selector-'))
+const bin = mkdtempSync(join(tmpdir(), 'tooling-selector-bin-'))
 const env: NodeJS.ProcessEnv = {
   ...process.env,
-  GITHUB_REPOSITORY: '',
+  GITHUB_REPOSITORY: 'kit',
   GIT_CONFIG_NOSYSTEM: '1',
   GIT_CONFIG_GLOBAL: '/dev/null',
   GIT_DIR: '',
@@ -56,16 +65,69 @@ function select(...args: string[]): number | null {
   assert.equal(child.signal, null, child.stderr)
   return child.status
 }
-function push(input: string): number | null {
+function push(
+  input: string,
+  options: { fork?: boolean; unknown?: boolean; remoteError?: boolean; ghError?: boolean } = {},
+): number | null {
+  const lines = input.trim().split('\n').filter(Boolean)
+  const heads = new Map<string, string>()
+  for (const name of ['main', 'staging']) {
+    try {
+      heads.set(`refs/heads/${name}`, git('rev-parse', '--verify', `refs/remotes/origin/${name}`))
+    } catch {}
+  }
+  for (const line of lines) {
+    const [, , destination, remote] = line.split(' ')
+    if (destination && remote && !/^0{40}$/.test(remote) && !heads.has(destination))
+      heads.set(destination, remote)
+  }
+  const [, , destination, remote] = (lines[0] || '').split(' ')
+  const branch = destination?.replace(/^refs\/heads\//, '')
+  const repository = 'fixture/kit'
+  const prs = options.unknown
+    ? []
+    : [
+        {
+          head: { sha: remote, ref: branch, repo: { full_name: repository } },
+          base: {
+            ref: 'main',
+            sha: heads.get('refs/heads/main'),
+            repo: { full_name: options.fork ? 'other/kit' : repository },
+          },
+        },
+      ]
   const child = spawnSync(
     process.execPath,
-    [join(root, 'scripts/kit/select-tooling.ts'), '--pre-push'],
-    { cwd: root, env, encoding: 'utf8', input },
+    [join(root, 'scripts/kit/select-tooling.ts'), '--pre-push', 'origin'],
+    {
+      cwd: root,
+      env: {
+        ...env,
+        PATH: `${bin}:${process.env.PATH}`,
+        TOOLING_TEST_HEADS: [...heads].map(([ref, sha]) => `${sha}\t${ref}\n`).join(''),
+        TOOLING_TEST_PRS: JSON.stringify(prs),
+        TOOLING_TEST_REMOTE_ERROR: options.remoteError ? '1' : '',
+        TOOLING_TEST_GH_ERROR: options.ghError ? '1' : '',
+      },
+      encoding: 'utf8',
+      input,
+    },
   )
   assert.equal(child.signal, null, child.stderr)
   return child.status
 }
 try {
+  const realGit = execFileSync('which', ['git'], { encoding: 'utf8' }).trim()
+  writeFileSync(
+    join(bin, 'git'),
+    `#!/bin/sh\nif [ "$1" = ls-remote ]; then [ -z "$TOOLING_TEST_REMOTE_ERROR" ] || exit 1; printf '%s' "$TOOLING_TEST_HEADS"; else exec "${realGit}" "$@"; fi\n`,
+  )
+  writeFileSync(
+    join(bin, 'gh'),
+    `#!/bin/sh\n[ -z "$TOOLING_TEST_GH_ERROR" ] || exit 1\nprintf '%s' "$TOOLING_TEST_PRS"\n`,
+  )
+  chmodSync(join(bin, 'git'), 0o755)
+  chmodSync(join(bin, 'gh'), 0o755)
   mkdirSync(join(root, 'scripts/kit'), { recursive: true })
   for (const name of ['select-tooling.ts', 'resolve-tree-identity.mjs'])
     cpSync(join(source, 'scripts/kit', name), join(root, 'scripts/kit', name))
@@ -74,11 +136,12 @@ try {
     JSON.stringify({
       version: 1,
       kit_origin_allowlist: ['kit'],
+      protected_prefixes: ['packages/', 'apps/example-web/', 'scripts/kit/', 'config/kit/'],
       exceptions_file: 'config/product/zero-edit-exceptions.json',
     }),
   )
   git('init', '-q')
-  git('remote', 'add', 'origin', 'kit')
+  git('remote', 'add', 'origin', 'https://github.com/fixture/kit.git')
   put('packages/core/src/value.ts', 'initial')
   const base = commit('base')
   put('packages/core/src/value.ts', 'changed')
@@ -91,10 +154,22 @@ try {
   git('update-ref', 'refs/remotes/origin/main', base)
   const update = (local: string, destination: string, remote: string) =>
     `refs/heads/topic ${local} ${destination} ${remote}\n`
-  assert.equal(push(update(head, 'refs/heads/topic', base)), 0, 'missing staging base runs')
+  assert.equal(push(update(head, 'refs/heads/topic', base)), 1, 'main-only app push skips')
   git('update-ref', 'refs/remotes/origin/staging', base)
   git('symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main')
   assert.equal(push(update(head, 'refs/heads/topic', base)), 1, 'local app-only push skips')
+  assert.equal(
+    push(update(head, 'refs/heads/topic', base), { unknown: true }),
+    0,
+    'unknown PR runs',
+  )
+  assert.equal(push(update(head, 'refs/heads/topic', base), { fork: true }), 0, 'fork target runs')
+  assert.equal(
+    push(update(head, 'refs/heads/topic', base), { remoteError: true }),
+    0,
+    'remote error runs',
+  )
+  assert.equal(push(update(head, 'refs/heads/topic', base), { ghError: true }), 0, 'gh error runs')
   assert.equal(push(update(head, 'refs/heads/topic', '0'.repeat(40))), 0, 'new feature runs')
   assert.equal(push(update(head, 'refs/heads/main', base)), 0, 'local main push runs')
   assert.equal(push(update(base, 'refs/heads/main', head)), 2, 'non-HEAD push is refused')
@@ -195,7 +270,7 @@ try {
   put('packages/core/src/value.ts', 'changed again')
   head = commit('test input')
   assert.equal(select('--base', beforeInput, '--head', head), 0, 'uncovered test input runs')
-  git('remote', 'set-url', 'origin', 'product')
+  env.GITHUB_REPOSITORY = 'product'
   put('config/product/inheritance.json', JSON.stringify({ upstreamCommit: base }))
   const productBase = head
   head = commit('product')
@@ -221,6 +296,14 @@ try {
     JSON.stringify({ version: 1, exceptions: [{ path: 'packages/core/src/unrelated.ts' }] }),
   )
   assert.equal(select(...productArgs), 1, 'unrelated product exception skips')
+  put('apps/widget-web/src/page.ts', 'product source')
+  assert.equal(select(...productArgs), 1, 'product app source skips')
+  put('apps/widget-web/package.json', '{}')
+  assert.equal(select(...productArgs), 0, 'product manifest runs')
+  rmSync(join(root, 'apps/widget-web/package.json'))
+  put('config/product/custom.json', '{}')
+  assert.equal(select(...productArgs), 0, 'product config runs')
+  rmSync(join(root, 'config/product/custom.json'))
   put(
     'config/product/zero-edit-exceptions.json',
     JSON.stringify({ version: 1, exceptions: [{ path: 'scripts/kit/helper.sh' }] }),
@@ -238,4 +321,5 @@ try {
   console.log('tooling selector self-tests passed')
 } finally {
   rmSync(root, { recursive: true, force: true })
+  rmSync(bin, { recursive: true, force: true })
 }

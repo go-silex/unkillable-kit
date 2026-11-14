@@ -92,6 +92,20 @@ function productNeedsLane(): boolean {
   return selected
 }
 
+function productInputsNeedLane(paths: string[]): boolean {
+  const zones = JSON.parse(readFileSync(join(root, 'config/kit/zero-edit-zones.json'), 'utf8'))
+  if (!Array.isArray(zones.protected_prefixes)) throw new Error('invalid protected prefixes')
+  return (
+    productNeedsLane() ||
+    paths.some((path) => {
+      if (path === 'config/product/inheritance.json' || path === zones.exceptions_file) return false
+      if (zones.protected_prefixes.some((prefix: string) => path.startsWith(prefix))) return true
+      if (isToolingInput(path) || testReferences(path)) return true
+      return !(/^apps\/[^/]+\/src\//.test(path) || path.startsWith('docs/product/'))
+    })
+  )
+}
+
 function parseArgs(args: string[]) {
   let base = ''
   let head = ''
@@ -142,7 +156,7 @@ function select(args: string[]): boolean {
     ...git(['diff', '--no-renames', '--name-only', '-z', 'HEAD', '--']).split('\0'),
     ...git(['ls-files', '--others', '--exclude-standard', '-z']).split('\0'),
   ].filter(Boolean)
-  if (product) return paths.includes('bun.lock') || productNeedsLane()
+  if (product) return productInputsNeedLane(paths)
   return paths.some((path) => isToolingInput(path) || testReferences(path))
 }
 
@@ -171,10 +185,69 @@ function parsePushUpdates(input: string): string[][] {
   return updates
 }
 
-function selectPush(input: string): boolean {
+function advertisedHeads(remote: string): Map<string, string> {
+  const originUrls = git(['remote', 'get-url', '--push', '--all', 'origin']).trim().split('\n')
+  if (originUrls.length !== 1 || (remote !== 'origin' && remote !== originUrls[0]))
+    throw new Error('unknown push target')
+  const result = git(['ls-remote', '--heads', remote])
+  const heads = new Map<string, string>()
+  for (const line of result.split('\n').filter(Boolean)) {
+    const match = /^([0-9a-f]{40})\t(refs\/heads\/[^\s]+)$/.exec(line)
+    if (!match || heads.has(match[2])) throw new Error('invalid remote heads')
+    heads.set(match[2], match[1])
+  }
+  if (!heads.has('refs/heads/main')) throw new Error('remote main missing')
+  return heads
+}
+
+function provePullRequest(
+  remoteName: string,
+  source: string,
+  sha: string,
+  heads: Map<string, string>,
+): void {
+  if (!source.startsWith('refs/heads/')) throw new Error('push source is not a branch')
+  const url = git(['remote', 'get-url', '--push', remoteName]).trim()
+  const match = /^(?:https:\/\/github\.com\/|git@github\.com:)([^/]+\/[^/]+?)(?:\.git)?$/.exec(url)
+  if (!match) throw new Error('unknown GitHub push target')
+  const repository = match[1]
+  const owner = repository.split('/')[0]
+  const branch = source.slice('refs/heads/'.length)
+  const response = execFileSync(
+    'gh',
+    [
+      'api',
+      '--method',
+      'GET',
+      `repos/${repository}/pulls`,
+      '-f',
+      'state=open',
+      '-f',
+      `head=${owner}:${branch}`,
+      '-f',
+      'per_page=100',
+    ],
+    { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
+  )
+  const prs = JSON.parse(response)
+  if (!Array.isArray(prs) || prs.length !== 1) throw new Error('PR target is ambiguous')
+  const pr = prs[0]
+  if (
+    pr.head?.sha !== sha ||
+    pr.head?.ref !== branch ||
+    pr.head?.repo?.full_name !== repository ||
+    pr.base?.repo?.full_name !== repository ||
+    !['main', 'staging'].includes(pr.base?.ref) ||
+    pr.base?.sha !== heads.get(`refs/heads/${pr.base?.ref}`)
+  )
+    throw new Error('PR target is unproven')
+}
+
+function selectPush(input: string, remoteName: string): boolean {
   const updates = parsePushUpdates(input)
-  const bases = ['refs/remotes/origin/main', 'refs/remotes/origin/staging'].map((ref) =>
-    git(['rev-parse', '--verify', '--end-of-options', `${ref}^{commit}`]).trim(),
+  const heads = advertisedHeads(remoteName)
+  const bases = [heads.get('refs/heads/main'), heads.get('refs/heads/staging')].filter(
+    (base): base is string => Boolean(base),
   )
   let run = false
   for (const [, local, destination, remote] of updates) {
@@ -182,6 +255,8 @@ function selectPush(input: string): boolean {
       run = true
       continue
     }
+    if (heads.get(destination) !== remote) throw new Error('push destination changed')
+    provePullRequest(remoteName, destination, remote, heads)
     for (const base of [remote, ...bases]) {
       git(['merge-base', '--is-ancestor', base, local])
       const args = ['--base', base, '--head', local]
@@ -196,8 +271,8 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   try {
     const args = process.argv.slice(2)
     const run =
-      args.length === 1 && args[0] === '--pre-push'
-        ? selectPush(readFileSync(0, 'utf8'))
+      args.length === 2 && args[0] === '--pre-push'
+        ? selectPush(readFileSync(0, 'utf8'), args[1])
         : select(args)
     console.log(`tooling lane: ${run ? 'run' : 'skip'}`)
     process.exitCode = run ? 0 : 1
