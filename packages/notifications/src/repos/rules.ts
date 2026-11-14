@@ -25,10 +25,15 @@ const ruleSchema = z.strictObject({
   enabled: z.boolean(),
   locked: z.boolean(),
 })
+type SharedRuleTable = {
+  $inferSelect: typeof deployment.$inferSelect
+  $inferInsert: typeof deployment.$inferInsert
+}
+
 function config(scope: RuleScope) {
   if (scope.level === 'organization')
     return {
-      table: organization as unknown as typeof deployment,
+      table: organization satisfies SharedRuleTable,
       owner: eq(organization.orgId, scope.orgId),
       ownerValue: { orgId: scope.orgId },
       target: [
@@ -40,7 +45,7 @@ function config(scope: RuleScope) {
     }
   if (scope.level === 'user')
     return {
-      table: user as unknown as typeof deployment,
+      table: user satisfies SharedRuleTable,
       owner: eq(user.userId, scope.userId),
       ownerValue: { userId: scope.userId },
       target: [user.userId, user.selectorKind, user.selectorValue, user.channel],
