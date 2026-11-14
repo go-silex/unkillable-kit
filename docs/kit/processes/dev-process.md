@@ -70,7 +70,7 @@ Règles dures pour tout agent (humain qui drive l’IA) :
 pre-commit (Lefthook) → Biome format/lint (staged)
          ↓
 pre-push (Lefthook)   → bun run validate:full + self-tests tooling selon sélection
-                        (SSoT commandes : root package.json ; sélection : testing.md)
+                        (SSoT commandes : root package.json ; sélection : testing/ops-model.md)
          ↓
 PR CI                 → mêmes gates applicables (garde-fou) · secret scan
          ↓

@@ -281,7 +281,7 @@ Protected by default; public routes explicit. Prefer **404** on cross-tenant res
 
 Modules: e.g. `feedback` available on platform; enabled on acme; disabled on beta.
 
-IDOR / cross-role tests are a **quality gate** for tenant routes (see consensus matrix / `docs/kit/testing.md` CP-IDOR extensions).
+IDOR / cross-role tests are a **quality gate** for tenant routes (see consensus matrix / `docs/kit/testing/critical-path.md` CP-IDOR extensions).
 
 ### D15 — Session-bound Impersonation
 

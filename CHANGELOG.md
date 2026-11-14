@@ -117,7 +117,7 @@
 ### Documentation budgets
 
 - Split the testing strategy into navigable sections without rewording its content. The documentation gate ratchets `AGENTS.md`, `README.md` and `docs/kit/**/*.md` at 400 UTF-8 bytes per line and 60,000 bytes per file; existing overages can only shrink. Fenced blocks and link definitions count; there are no exemptions.
-- After an improvement, lower the committed baseline with `bun --no-env-file --config=config/kit/bunfig.gates.toml --no-install run scripts/kit/check-doc-hygiene.ts --regenerate-baseline`. This refuses new or worsened metrics. `--init-baseline` is only for the initial construction when no baseline exists; it is not routine regeneration.
+- After an improvement, lower the committed baseline with `bun --no-env-file --config=config/kit/bunfig.gates.toml --no-install run scripts/kit/check-doc-hygiene.ts --regenerate-baseline`. New violations and any worsened metric for a still-violating file are refused. A file within both limits is dropped even if a metric grew while making it compliant. `--init-baseline` is only for the initial construction when no baseline exists; it is not routine regeneration.
 
 ### Better Auth logging
 

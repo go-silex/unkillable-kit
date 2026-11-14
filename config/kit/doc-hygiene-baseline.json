@@ -1,9 +1,4 @@
 {
-  "AGENTS.md": {
-    "overLimitLines": 1,
-    "maxLineBytes": 421,
-    "fileBytes": 11971
-  },
   "docs/kit/api-contract.md": {
     "overLimitLines": 3,
     "maxLineBytes": 521,
@@ -17,7 +12,7 @@
   "docs/kit/architecture/adr/0003-multi-tenant-rbac-modules.md": {
     "overLimitLines": 7,
     "maxLineBytes": 560,
-    "fileBytes": 25865
+    "fileBytes": 25879
   },
   "docs/kit/architecture/adr/0005-flows-platform-agentic-workflows.md": {
     "overLimitLines": 27,
@@ -142,7 +137,7 @@
   "docs/kit/processes/dev-process.md": {
     "overLimitLines": 11,
     "maxLineBytes": 711,
-    "fileBytes": 19876
+    "fileBytes": 19886
   },
   "docs/kit/product-consumer-contract.md": {
     "overLimitLines": 127,

@@ -102,6 +102,8 @@ printf '%0400d\n' 0 >"$BUDGET/README.md"
 assert_case "400-byte line accepted" 0 "$BUDGET" "check-doc-hygiene: OK"
 printf '%0401d\n' 0 >"$BUDGET/README.md"
 assert_case "new long line in clean file" 1 "$BUDGET" "new documentation budget violation"
+printf '%0401d' 0 >"$BUDGET/README.md"
+assert_case "unterminated long line counts" 1 "$BUDGET" "new documentation budget violation"
 printf '```text\n%0401d\n```\n' 0 >"$BUDGET/README.md"
 assert_case "fenced long line counts" 1 "$BUDGET" "new documentation budget violation"
 printf '[ref]: https://example.test/%0400d\n' 0 >"$BUDGET/README.md"
@@ -140,6 +142,45 @@ assert_case "improvement makes baseline stale" 1 "$GROWTH" "stale documentation 
 assert_case "regeneration drops improvement" 0 "$GROWTH" "check-doc-hygiene: OK" --regenerate-baseline
 assert_case "regenerated baseline is current" 0 "$GROWTH" "check-doc-hygiene: OK"
 
+# An improvement must not launder a new violating file into the baseline.
+NEW_FILE="$TMP/new-during-regen"
+cp -R "$BASE" "$NEW_FILE"
+printf '%0401d\n' 0 >"$NEW_FILE/README.md"
+rm "$NEW_FILE/config/kit/doc-hygiene-baseline.json"
+assert_case "construct new-file baseline" 0 "$NEW_FILE" "check-doc-hygiene: OK" --init-baseline
+cp "$NEW_FILE/config/kit/doc-hygiene-baseline.json" "$TMP/new-file-baseline"
+printf '%0400d\n' 0 >"$NEW_FILE/README.md"
+printf '%0500d\n' 0 >"$NEW_FILE/docs/kit/new.md"
+printf '%s\n' '- [New](new.md)' >>"$NEW_FILE/docs/kit/README.md"
+assert_case "regeneration rejects new violation with improvement" 1 "$NEW_FILE" "new documentation budget violation" --regenerate-baseline
+if ! cmp -s "$TMP/new-file-baseline" "$NEW_FILE/config/kit/doc-hygiene-baseline.json"; then
+  echo "FAIL: new violation changed baseline" >&2; FAIL=$((FAIL + 1))
+fi
+
+# Removing an entire baselined file is stale until its entry is dropped.
+DELETED="$TMP/deleted"
+cp -R "$BASE" "$DELETED"
+printf '%0401d\n' 0 >"$DELETED/docs/kit/removed.md"
+printf '%s\n' '- [Removed](removed.md)' >>"$DELETED/docs/kit/README.md"
+rm "$DELETED/config/kit/doc-hygiene-baseline.json"
+assert_case "construct deleted-file baseline" 0 "$DELETED" "check-doc-hygiene: OK" --init-baseline
+rm "$DELETED/docs/kit/removed.md"
+cp "$BASE/docs/kit/README.md" "$DELETED/docs/kit/README.md"
+assert_case "deleted baselined file is stale" 1 "$DELETED" "stale documentation budget baseline: violation removed"
+assert_case "regeneration drops deleted file" 0 "$DELETED" "check-doc-hygiene: OK" --regenerate-baseline
+assert_case "deleted file baseline is current" 0 "$DELETED" "check-doc-hygiene: OK"
+
+# Wrapping a long list item can add indentation bytes while making it compliant.
+WRAP="$TMP/wrap"
+cp -R "$BASE" "$WRAP"
+printf -- '- %0399d\n' 0 >"$WRAP/README.md"
+rm "$WRAP/config/kit/doc-hygiene-baseline.json"
+assert_case "construct wrapped-list baseline" 0 "$WRAP" "check-doc-hygiene: OK" --init-baseline
+printf -- '- %0200d\n  %0199d\n' 0 0 >"$WRAP/README.md"
+assert_case "compliant wrapped list is stale" 1 "$WRAP" "stale documentation budget baseline: violation removed"
+assert_case "regeneration drops compliant wrapped list" 0 "$WRAP" "check-doc-hygiene: OK" --regenerate-baseline
+assert_case "wrapped list baseline is current" 0 "$WRAP" "check-doc-hygiene: OK"
+
 SIZE="$TMP/size"
 cp -R "$BASE" "$SIZE"
 for ((i = 0; i < 150; i++)); do printf '%0399d\n' 0; done >"$SIZE/docs/kit/large.md"
@@ -148,15 +189,14 @@ assert_case "60000-byte file accepted" 0 "$SIZE" "check-doc-hygiene: OK"
 printf '\n' >>"$SIZE/docs/kit/large.md"
 assert_case "new file over 60000 bytes" 1 "$SIZE" "new documentation budget violation"
 
-# A formerly oversized file may not drop out of the baseline while another
-# frozen metric worsens, even when its new line length is below the limit.
+# A fully compliant file drops out even if another metric grew.
 DROP="$TMP/drop"
 cp -R "$BASE" "$DROP"
 for ((i = 0; i < 30001; i++)); do printf 'x\n'; done >"$DROP/README.md"
 rm "$DROP/config/kit/doc-hygiene-baseline.json"
 assert_case "construct oversized baseline" 0 "$DROP" "check-doc-hygiene: OK" --init-baseline
 printf 'xx\n' >"$DROP/README.md"
-assert_case "drop with a worse metric refused" 1 "$DROP" "documentation budget worsened: maxLineBytes" --regenerate-baseline
+assert_case "drop compliant file with a larger maximum" 0 "$DROP" "check-doc-hygiene: OK" --regenerate-baseline
 
 # A cwd .env or bunfig preload re-points the root unless the package.json flags close it.
 assert_gate_launch DOC_HYGIENE_ROOT "$BROKEN" "README.md:5: broken internal link: missing.md"

@@ -350,6 +350,7 @@ function compareBaseline(
       if (mode !== '--regenerate-baseline') {
         report(file, 1, `stale documentation budget baseline: violation removed; run ${REGENERATE}`)
       }
+      continue
     }
     if (after && compareBudget(file, before, after, mode)) improved = true
   }
