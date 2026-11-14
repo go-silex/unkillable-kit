@@ -1,6 +1,6 @@
 import { escapeHtml } from '../escape-html'
 import { assertSafeTokenHref, type TokenHrefPolicy } from '../safe-token-href'
-import { copy, type EmailTemplateOptions, templateValue } from './copy'
+import { type EmailTemplateOptions, getTemplateCopy, templateValue } from './copy'
 
 export function WelcomeSetPasswordEmail(
   props: {
@@ -11,7 +11,7 @@ export function WelcomeSetPasswordEmail(
   } & TokenHrefPolicy &
     EmailTemplateOptions,
 ) {
-  const c = copy[props.locale]
+  const c = getTemplateCopy(props.locale)
   const product = templateValue(props.productName)
   const href = assertSafeTokenHref(props.setPasswordUrl, props)
   const name = templateValue(props.name ?? '').trim() || c.fallbackName
@@ -21,7 +21,7 @@ export function WelcomeSetPasswordEmail(
   return {
     to: props.to,
     subject: c.welcomeSubject(product),
-    text: [greeting, intro, `${c.welcomeAction}: ${href}`, expiry, c.ignoreWelcome].join('\n'),
+    text: [greeting, intro, c.welcomeLink(href), expiry, c.ignoreWelcome].join('\n'),
     html: `<p>${escapeHtml(greeting)}</p><p>${escapeHtml(intro)}</p><p><a href="${escapeHtml(href)}">${escapeHtml(c.welcomeAction)}</a></p><p>${escapeHtml(expiry)}</p><p>${escapeHtml(c.ignoreWelcome)}</p>`,
   }
 }

@@ -161,6 +161,42 @@ describe('auth email wiring', () => {
     expect(sent[1]?.subject).toContain('Acme')
   })
 
+  it.each(['FR', 'fr-FR', 'de', '', '__proto__', null, undefined])(
+    'falls back for unsupported recipient locale %s in both emails',
+    async (value) => {
+      const { port, sent } = recordingPort()
+      const config = { ...emailConfig, resolveRecipientLocale: () => value }
+      await sendMagicLinkMail(port, {
+        email: 'a@b.c',
+        url: LOOPBACK,
+        allowedOrigins: [],
+        allowLoopbackHttp: true,
+        emailConfig: config,
+      })
+      await sendResetPasswordMail(port, {
+        email: 'a@b.c',
+        url: RESET,
+        allowedOrigins: [],
+        allowLoopbackHttp: true,
+        emailConfig: config,
+      })
+      expect(sent[0]?.subject).toMatch(/sign in/i)
+      expect(sent[1]?.subject).toMatch(/reset|password/i)
+    },
+  )
+
+  it('uses a French fallback for an unsupported recipient locale', async () => {
+    const { port, sent } = recordingPort()
+    await sendMagicLinkMail(port, {
+      email: 'a@b.c',
+      url: LOOPBACK,
+      allowedOrigins: [],
+      allowLoopbackHttp: true,
+      emailConfig: { ...emailConfig, fallbackLocale: 'fr', resolveRecipientLocale: () => 'de' },
+    })
+    expect(sent[0]?.subject).not.toMatch(/sign in/i)
+  })
+
   it('propagates locale resolver errors without sending', async () => {
     const send = vi.fn(async () => ({ ok: true, transport: 'log' }))
     await expect(

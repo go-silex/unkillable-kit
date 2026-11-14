@@ -17,7 +17,7 @@
 
 ### Transactional email locale and Product name
 
-- **Consumer-visible API change:** authentication email templates now require an explicit `locale` and `productName`. Migrate template callers to pass both and configure recipient locale resolution with an App-owned fallback for authentication mail.
+- **Consumer-visible API change:** authentication email templates now require an explicit `locale` and `productName`. Migrate template callers to pass both. When supplying `emailPort` to `createBetterAuth`, also supply `emailConfig: { productName, fallbackLocale, resolveRecipientLocale }`; the App resolves each recipient's locale and chooses the fallback.
 
 ### TanStack Table v9
 

@@ -1,9 +1,10 @@
 import type { EmailLocale } from '@kit/email'
+import { notificationMessages } from '../messages'
 
 /** Example product policy. Replace the resolver with the product's recipient preferences. */
 export const emailConfig = {
-  productName: 'Example App',
-  fallbackLocale: 'en' as EmailLocale,
+  productName: 'App',
+  fallbackLocale: notificationMessages.defaultLocale,
   resolveRecipientLocale: (_email: string): EmailLocale | null => null,
 }
 

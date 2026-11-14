@@ -30,6 +30,7 @@ import { WelcomeSetPasswordEmail } from './templates/welcome-set-password'
 import type { EmailPort, EmailTransport } from './types'
 
 export type { EmailLocale, EmailTemplateOptions } from './templates/copy'
+export { EmailTemplateLocaleError } from './templates/copy'
 export { EmailPolicyError } from './types'
 export type { EmailPort, EmailTransport, TokenHrefPolicy }
 export { assertSafeTokenHref, createLogEmailPort, isLoopbackHost }

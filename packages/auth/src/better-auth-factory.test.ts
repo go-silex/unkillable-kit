@@ -51,7 +51,7 @@ function factory(overrides: Partial<Parameters<typeof createBetterAuth>[0]> = {}
     emailPort: { send: vi.fn(async () => ({ ok: true, transport: 'log' })) },
     schema: betterAuthDrizzleSchema,
     ...overrides,
-  }) as BaAuth
+  } as Parameters<typeof createBetterAuth>[0]) as BaAuth
 }
 
 describe('createBetterAuth', () => {
@@ -78,7 +78,7 @@ describe('createBetterAuth', () => {
   })
 
   it('omits magic-link and reset send when emailPort is absent', () => {
-    const auth = factory({ emailPort: undefined })
+    const auth = factory({ emailPort: undefined, emailConfig: undefined })
     expect(auth.options.plugins?.map((p: { id: string }) => p.id)).toEqual(['organization'])
     expect(auth.options.emailAndPassword?.sendResetPassword).toBeUndefined()
   })
@@ -167,8 +167,26 @@ describe('createBetterAuth', () => {
     expect(send).toHaveBeenCalledTimes(2)
   })
 
-  it('requires explicit email configuration when a port is configured', () => {
+  it('requires the email port and configuration together at runtime', () => {
     expect(() => factory({ emailConfig: undefined })).toThrow(/emailConfig is required/)
+    expect(() => factory({ emailPort: undefined })).toThrow(/emailPort is required/)
+  })
+
+  it('requires the email port and configuration together in the options type', () => {
+    const base = {
+      database: stubD1(),
+      secret: SECRET,
+      baseURL: 'https://api.example.com',
+      trustedOrigins: [],
+    }
+    const emailPort = { send: vi.fn(async () => ({ ok: true, transport: 'log' })) }
+    const complete: Parameters<typeof createBetterAuth>[0] = { ...base, emailPort, emailConfig }
+    const absent: Parameters<typeof createBetterAuth>[0] = base
+    // @ts-expect-error a port requires its configuration
+    const missingConfig: Parameters<typeof createBetterAuth>[0] = { ...base, emailPort }
+    // @ts-expect-error configuration requires its port
+    const missingPort: Parameters<typeof createBetterAuth>[0] = { ...base, emailConfig }
+    expect([complete, absent, missingConfig, missingPort]).toHaveLength(4)
   })
 
   it('uses the recipient locale resolver in both handlers', async () => {

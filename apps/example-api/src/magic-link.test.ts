@@ -41,21 +41,21 @@ describe('magic link (B-magic go-silex/silex-boilerplate#59)', () => {
   it('uses the recipient locale for authentication mail, not the request language', async () => {
     const { app, env } = await seedEnv()
     const mail = captureMail()
-    const locale = vi.spyOn(emailConfig, 'resolveRecipientLocale').mockReturnValue('fr')
+    const locale = vi.spyOn(emailConfig, 'resolveRecipientLocale').mockReturnValue('en')
     onTestFinished(() => locale.mockRestore())
     const res = await app.request(
       '/api/auth/sign-in/magic-link',
       {
         method: 'POST',
-        headers: { 'content-type': 'application/json', Origin: ORIGIN, 'Accept-Language': 'en' },
+        headers: { 'content-type': 'application/json', Origin: ORIGIN, 'Accept-Language': 'fr' },
         body: JSON.stringify({ email: DEMO_EMAIL, callbackURL: `${ORIGIN}/app` }),
       },
       env,
     )
     expect(res.status).toBeLessThan(400)
     expect(locale).toHaveBeenCalledWith(DEMO_EMAIL)
-    expect(mail.message(DEMO_EMAIL).subject).toBe('Connexion — Example App')
-    expect(mail.message(DEMO_EMAIL).text).toContain('Vous avez demandé')
+    expect(mail.message(DEMO_EMAIL).subject).toBe('Sign in — App')
+    expect(mail.message(DEMO_EMAIL).text).toContain('You requested')
   })
 
   it('request for known email returns success and stores a verification row', async () => {

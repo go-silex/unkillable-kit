@@ -33,7 +33,7 @@ describe('admin users (B-users go-silex/silex-boilerplate#58)', () => {
     const mail = captureMail()
     const locale = vi
       .spyOn(emailConfig, 'resolveRecipientLocale')
-      .mockImplementation((email) => (email === 'french@kit.local' ? 'fr' : null))
+      .mockImplementation((email) => (email === 'english@kit.local' ? 'en' : null))
     onTestFinished(() => locale.mockRestore())
     const cookie = await loginCookie(app, env, 'super@kit.local', TENANCY_PASSWORD, ORIGIN)
     for (const email of ['french@kit.local', 'english@kit.local']) {
@@ -49,12 +49,10 @@ describe('admin users (B-users go-silex/silex-boilerplate#58)', () => {
       expect(response.status).toBe(201)
     }
     expect(mail.message('french@kit.local').subject).toBe(
-      'Bienvenue — créez votre mot de passe — Example App',
+      'Bienvenue — créez votre mot de passe — App',
     )
     expect(mail.message('french@kit.local').text).toContain('Un compte a été créé')
-    expect(mail.message('english@kit.local').subject).toBe(
-      'Welcome — set your password — Example App',
-    )
+    expect(mail.message('english@kit.local').subject).toBe('Welcome — set your password — App')
     expect(mail.message('english@kit.local').text).toContain('An account was created')
   })
 

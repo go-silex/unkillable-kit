@@ -23,12 +23,26 @@ export function captureMail() {
       return message!
     },
     link(to: string, label: 'Reset link' | 'Sign-in link' | 'Set your password'): URL {
+      const prefixes = {
+        'Reset link': ['Reset link: ', 'Lien de réinitialisation : '],
+        'Sign-in link': ['Sign-in link: ', 'Lien de connexion : '],
+        'Set your password': ['Set your password: ', 'Créer votre mot de passe : '],
+      }[label]
       const message = [...messages]
         .reverse()
-        .find((item) => item.to === to && item.text.includes(`${label}: `))
-      const line = message?.text.split('\n').find((item) => item.startsWith(`${label}: `))
+        .find(
+          (item) =>
+            item.to === to &&
+            item.text
+              .split('\n')
+              .some((line) => prefixes.some((prefix) => line.startsWith(prefix))),
+        )
+      const line = message?.text
+        .split('\n')
+        .find((item) => prefixes.some((prefix) => item.startsWith(prefix)))
       expect(Boolean(line), `${label} delivered`).toBe(true)
-      return new URL(line!.slice(label.length + 2))
+      const prefix = prefixes.find((item) => line!.startsWith(item))!
+      return new URL(line!.slice(prefix.length))
     },
   }
 }

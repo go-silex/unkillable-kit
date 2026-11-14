@@ -55,10 +55,6 @@ export type CreateBetterAuthOpts = {
    * self-allowlist. Default false: pin `baseURL` origin into the allowlist.
    */
   requestDerivedBaseURL?: boolean
-  /** When set, emailConfig must also be supplied. */
-  emailPort?: AuthEmailPort
-  /** Product identity and recipient language policy for auth emails. */
-  emailConfig?: AuthEmailConfig
   schema?: BetterAuthTables
   cookieName?: string
   useSecureCookies?: boolean
@@ -69,11 +65,17 @@ export type CreateBetterAuthOpts = {
   resetPasswordTokenExpiresIn?: number
   /** Only for explicit development|test placeholders — never production. */
   allowKitPlaceholderSecret?: boolean
-}
+} & (
+  | { emailPort: AuthEmailPort; emailConfig: AuthEmailConfig }
+  | { emailPort?: never; emailConfig?: never }
+)
 
 function assertEmailConfig(emailPort?: AuthEmailPort, emailConfig?: AuthEmailConfig): void {
   if (emailPort && !emailConfig) {
     throw new Error('emailConfig is required when emailPort is configured')
+  }
+  if (emailConfig && !emailPort) {
+    throw new Error('emailPort is required when emailConfig is configured')
   }
 }
 

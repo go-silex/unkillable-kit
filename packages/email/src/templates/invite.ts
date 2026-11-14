@@ -1,6 +1,6 @@
 import { escapeHtml } from '../escape-html'
 import { assertSafeTokenHref, type TokenHrefPolicy } from '../safe-token-href'
-import { copy, type EmailTemplateOptions, templateValue } from './copy'
+import { type EmailTemplateOptions, getTemplateCopy, templateValue } from './copy'
 
 export function InviteEmail(
   props: {
@@ -12,7 +12,7 @@ export function InviteEmail(
   } & TokenHrefPolicy &
     EmailTemplateOptions,
 ) {
-  const c = copy[props.locale]
+  const c = getTemplateCopy(props.locale)
   const product = templateValue(props.productName)
   const org = templateValue(props.orgName)
   const inviter = props.inviterLabel ? templateValue(props.inviterLabel) : ''
@@ -24,7 +24,7 @@ export function InviteEmail(
   return {
     to: props.to,
     subject: c.inviteSubject(org, product),
-    text: [intro, by, `${c.accept}: ${href}`, expiry].filter(Boolean).join('\n'),
+    text: [intro, by, c.acceptLink(href), expiry].filter(Boolean).join('\n'),
     html: `<p>${escapeHtml(intro)}</p>${by ? `<p>${escapeHtml(by)}</p>` : ''}<p><a href="${escapeHtml(href)}">${escapeHtml(c.accept)}</a></p><p>${escapeHtml(expiry)}</p>`,
   }
 }

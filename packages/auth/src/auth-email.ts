@@ -15,16 +15,21 @@ export type AuthEmailPort = EmailPort
 
 export const MAGIC_LINK_EXPIRES_IN_SEC = 300
 export const RESET_PASSWORD_TOKEN_EXPIRES_IN_SEC = 3600
-/** Email language is resolved per recipient; missing preferences use the configured fallback. */
+/** Email language is resolved per recipient; unsupported preferences use the configured fallback. */
 export type AuthEmailConfig = {
   productName: string
   fallbackLocale: EmailLocale
   resolveRecipientLocale: (
     email: string,
-  ) => EmailLocale | null | undefined | Promise<EmailLocale | null | undefined>
+  ) => string | null | undefined | Promise<string | null | undefined>
 }
 
 type AuthEmailInput = { email: string; url: string; emailConfig: AuthEmailConfig } & TokenHrefPolicy
+
+async function recipientLocale(config: AuthEmailConfig, email: string): Promise<EmailLocale> {
+  const locale = await config.resolveRecipientLocale(email)
+  return locale === 'en' || locale === 'fr' ? locale : config.fallbackLocale
+}
 
 async function sendOrThrow(
   emailPort: EmailPort,
@@ -48,9 +53,7 @@ export async function sendMagicLinkMail(
   emailPort: AuthEmailPort,
   input: AuthEmailInput,
 ): Promise<void> {
-  const locale =
-    (await input.emailConfig.resolveRecipientLocale(input.email)) ??
-    input.emailConfig.fallbackLocale
+  const locale = await recipientLocale(input.emailConfig, input.email)
   const tmpl = buildMagicLinkEmailText({
     to: input.email,
     magicUrl: input.url,
@@ -66,9 +69,7 @@ export async function sendResetPasswordMail(
   emailPort: AuthEmailPort,
   input: AuthEmailInput,
 ): Promise<void> {
-  const locale =
-    (await input.emailConfig.resolveRecipientLocale(input.email)) ??
-    input.emailConfig.fallbackLocale
+  const locale = await recipientLocale(input.emailConfig, input.email)
   const tmpl = buildResetPasswordEmailText({
     to: input.email,
     resetUrl: input.url,

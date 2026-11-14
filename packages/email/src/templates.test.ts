@@ -6,6 +6,7 @@ import {
   buildWelcomeSetPasswordEmailText,
   type EmailLocale,
 } from './index'
+import { copy, EmailTemplateLocaleError } from './templates/copy'
 
 const href = 'https://example.com/action?token=abc&next=home'
 const policy = { allowedOrigins: ['https://example.com'] }
@@ -82,5 +83,79 @@ describe.each(['en', 'fr'] as const)('transactional templates: %s', (locale) => 
     expect(magic.text).toContain(locale === 'fr' ? 'environ 5 minutes' : 'about 5 minutes')
     expect(welcome.text).toContain(locale === 'fr' ? 'environ 1 heure' : 'about 1 hour')
     expect(welcome.text).toContain(locale === 'fr' ? 'Bonjour' : 'Hi there')
+  })
+})
+
+function assertCompleteCatalogs(
+  catalogs: Record<'en' | 'fr', Record<string, string | ((...args: string[]) => string)>>,
+) {
+  const keys = Object.keys(catalogs.en).sort()
+  expect(Object.keys(catalogs.fr).sort()).toEqual(keys)
+  for (const key of keys) {
+    expect(typeof catalogs.fr[key]).toBe(typeof catalogs.en[key])
+    for (const locale of ['en', 'fr'] as const) {
+      const value = catalogs[locale][key]
+      expect(['string', 'function']).toContain(typeof value)
+      const text = typeof value === 'function' ? value('example', 'example') : value
+      expect(typeof text).toBe('string')
+      expect(text.trim().length).toBeGreaterThan(0)
+    }
+  }
+}
+
+describe('locale catalog contract', () => {
+  it('has matching keys and nonempty strings and function results', () => {
+    assertCompleteCatalogs(copy)
+  })
+
+  it('detects missing keys and empty values in either catalog', () => {
+    for (const locale of ['en', 'fr'] as const) {
+      const missing = { ...copy[locale] } as Record<
+        string,
+        string | ((...args: string[]) => string)
+      >
+      delete missing.accept
+      expect(() => assertCompleteCatalogs({ ...copy, [locale]: missing })).toThrow()
+      expect(() =>
+        assertCompleteCatalogs({ ...copy, [locale]: { ...copy[locale], accept: '  ' } }),
+      ).toThrow()
+      expect(() =>
+        assertCompleteCatalogs({ ...copy, [locale]: { ...copy[locale], inviteSubject: () => '' } }),
+      ).toThrow()
+    }
+  })
+})
+
+it('rejects invalid runtime locales with a named error in every template', () => {
+  for (const locale of ['de', '__proto__', '', undefined] as unknown as EmailLocale[]) {
+    const common = { to: 'person@example.com', locale, productName: 'Example', ...policy }
+    const calls = [
+      () =>
+        buildInviteEmailText({
+          ...common,
+          orgName: 'Org',
+          acceptUrl: href,
+          expiresAt: new Date('2030-01-01'),
+        }),
+      () => buildMagicLinkEmailText({ ...common, magicUrl: href }),
+      () => buildResetPasswordEmailText({ ...common, resetUrl: href }),
+      () => buildWelcomeSetPasswordEmailText({ ...common, setPasswordUrl: href }),
+    ]
+    for (const call of calls) {
+      expect(call).toThrow(EmailTemplateLocaleError)
+      expect(call).toThrow('EMAIL_LOCALE_INVALID')
+    }
+  }
+})
+
+it('uses French spacing for each complete link line', () => {
+  const lines = [
+    'Accepter l’invitation',
+    'Lien de connexion',
+    'Lien de réinitialisation',
+    'Créer votre mot de passe',
+  ]
+  messages('fr').forEach((mail, index) => {
+    expect(mail.text.split('\n')).toContain(`${lines[index]} : ${href}`)
   })
 })
