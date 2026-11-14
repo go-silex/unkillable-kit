@@ -100,6 +100,45 @@
         "wrangler": "^4.162.0",
       },
     },
+    "apps/starter-api": {
+      "name": "@kit/starter-api",
+      "version": "0.0.1",
+      "dependencies": {
+        "@kit/auth": "workspace:*",
+        "@kit/core": "workspace:*",
+        "@kit/db": "workspace:*",
+        "drizzle-orm": "^0.45.4",
+        "hono": "^4.13.18",
+      },
+      "devDependencies": {
+        "@types/better-sqlite3": "^9.6.0",
+        "better-sqlite3": "^13.1.1",
+        "vitest": "^5.1.0",
+        "wrangler": "^4.162.0",
+      },
+    },
+    "apps/starter-web": {
+      "name": "@kit/starter-web",
+      "version": "0.0.1",
+      "dependencies": {
+        "@kit/api-client": "workspace:*",
+        "@tanstack/react-query": "^5.107.1",
+        "@tanstack/react-router": "^1.170.46",
+        "react": "^19.3.1",
+        "react-dom": "^19.3.1",
+      },
+      "devDependencies": {
+        "@testing-library/react": "^16.3.3",
+        "@testing-library/user-event": "^14.6.10",
+        "@types/node": "^26.6.6",
+        "@types/react": "^19.3.0",
+        "@types/react-dom": "^19.3.0",
+        "@vitejs/plugin-react": "^6.3.0",
+        "happy-dom": "^21.0.4",
+        "vite": "^8.3.8",
+        "vitest": "^5.1.0",
+      },
+    },
     "packages/api-client": {
       "name": "@kit/api-client",
       "version": "0.0.1",
@@ -708,6 +747,10 @@
     "@kit/mcp-example": ["@kit/mcp-example@workspace:apps/mcp-example"],
 
     "@kit/notifications": ["@kit/notifications@workspace:packages/notifications"],
+
+    "@kit/starter-api": ["@kit/starter-api@workspace:apps/starter-api"],
+
+    "@kit/starter-web": ["@kit/starter-web@workspace:apps/starter-web"],
 
     "@kit/storage": ["@kit/storage@workspace:packages/storage"],
 

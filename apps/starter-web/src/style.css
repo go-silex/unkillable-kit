@@ -1,0 +1,27 @@
+body {
+  font-family: system-ui, sans-serif;
+  margin: 0;
+  color: #17212b;
+  background: #f7f8fa;
+}
+
+main {
+  max-width: 36rem;
+  margin: 4rem auto;
+  padding: 1.5rem;
+}
+
+form {
+  display: grid;
+  gap: 0.75rem;
+}
+
+input,
+button {
+  font: inherit;
+  padding: 0.6rem;
+}
+
+button {
+  cursor: pointer;
+}

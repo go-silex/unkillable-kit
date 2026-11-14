@@ -1,7 +1,5 @@
 import type { OrgCapability } from '@kit/auth'
-import { createOrgMiddleware, type OrgContextOpts, type OrgMiddlewareEnv } from '@kit/auth/hono'
-import * as orgsRepo from '@kit/auth/repos/orgs'
-import * as platformRolesRepo from '@kit/auth/repos/platform-roles'
+import { createKitOrgMiddleware, type OrgContextOpts, type OrgMiddlewareEnv } from '@kit/auth/hono'
 import type { MiddlewareHandler } from 'hono'
 import type { KitDb } from '../lib/db-type'
 import type { KitModuleId } from '../lib/kit-modules'
@@ -9,9 +7,7 @@ import * as orgRolesService from '../services/org-roles'
 import * as platformModulesService from '../services/platform-modules'
 import type { AppEnv } from '../types'
 
-const orgMiddleware = createOrgMiddleware({
-  findOrgContext: (db, orgId, subject) => orgsRepo.findOrgContext(db as KitDb, orgId, subject),
-  getPlatformRole: (db, subject) => platformRolesRepo.getPlatformRole(db as KitDb, subject),
+const orgMiddleware = createKitOrgMiddleware({
   resolveModuleAccess: (db, input) => orgRolesService.resolveModuleAccess(db as KitDb, input),
   isModuleEffective: (db, orgId, moduleId) =>
     platformModulesService.isModuleEffective(db as KitDb, orgId, moduleId as KitModuleId),

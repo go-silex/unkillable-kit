@@ -1,0 +1,3 @@
+ENVIRONMENT=development
+BETTER_AUTH_SECRET=replace-with-a-local-secret-at-least-32-characters
+ALLOW_PUBLIC_SIGNUP=true
