@@ -35,6 +35,12 @@ root=$(git rev-parse --show-toplevel 2>/dev/null) || die 'run at the root of a g
 [[ $(git worktree list --porcelain | grep -c '^worktree ') == 1 ]] || die 'multiple worktrees are not supported'
 [[ -z "$(git status --porcelain --untracked-files=all)" ]] || die 'working tree must be clean'
 [[ ! -e "$(git rev-parse --git-path MERGE_HEAD)" ]] || die 'finish the merge first'
+if git config --get core.hooksPath >/dev/null 2>&1; then
+  die 'custom core.hooksPath prevents installing Kit hooks; use a clone without an inherited hooksPath'
+fi
+if env | grep -q '^LEFTHOOK[^=]*='; then
+  die 'unset LEFTHOOK environment overrides so normal Kit hooks can run'
+fi
 [[ "$(git remote)" == origin ]] || die 'expected exactly one remote named origin; already rewired or not a fresh clone'
 parent_url=$(git remote get-url origin)
 case "$parent_url" in
@@ -80,6 +86,12 @@ else
   [[ "$(gh repo set-default --view)" == "$product_origin" && "$(git config --local --get remote.origin.gh-resolved || true)" == base ]] || die 'gh default verification failed; fix forward manually'
 fi
 
+# Install the inherited lockfile and its prepare hook before either commit.
+bun install --frozen-lockfile
+for hook in pre-commit commit-msg; do
+  [[ -x "$(git rev-parse --git-path "hooks/$hook")" ]] || die "Kit $hook hook was not installed"
+done
+
 mkdir -p config/product
 printf '{\n  "version": 1,\n  "upstreamCommit": "%s"\n}\n' "$parent_sha" > config/product/inheritance.json
 node - "$name" "$web" <<'NODE'
@@ -110,7 +122,7 @@ git commit -m 'chore(product): pin kit inheritance'
 copy_starter() {
   local kind=$1 target="apps/$name-$1"
   mkdir -p "$target"
-  git archive HEAD "apps/starter-$kind" | tar -x -C "$target" --strip-components=2
+  git archive HEAD "apps/starter-$kind" | tar -x -C "$target" --strip-components=2 --exclude='apps/starter-api/src/worker-configuration.d.ts'
 }
 copy_starter api
 if ((web)); then copy_starter web; fi
@@ -127,6 +139,12 @@ function patch(file, replacements) {
 }
 const api = `apps/${name}-api`
 patch(`${api}/package.json`, [['starter-api', `${name}-api`]])
+// Runtime types are generated locally, not copied into Product source control.
+const packageFile = `${api}/package.json`
+const pkg = JSON.parse(fs.readFileSync(packageFile, 'utf8'))
+pkg.scripts.typecheck = pkg.scripts.typecheck.replace(' --check &&', ' &&')
+fs.writeFileSync(packageFile, `${JSON.stringify(pkg, null, 2)}\n`)
+fs.writeFileSync(`${api}/.gitignore`, '/src/worker-configuration.d.ts\n')
 patch(`${api}/wrangler.toml`, [['starter-api', `${name}-api`]])
 patch(`${api}/kit-schema-manifest.json`, [['apps/starter-api', api]])
 patch(`${api}/vitest.config.ts`, [['starter-api', `${name}-api`]])
