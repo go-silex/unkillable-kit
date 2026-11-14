@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Product kit upgrades
+
+- Provide `bun run kit-upgrade` for the documented product-clone merge procedure, with a read-only `--check` mode and a hermetic regression test.
+
 ### Product agent entry point
 
 - Route agents in product clones to `docs/product/AGENTS.md`.

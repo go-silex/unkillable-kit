@@ -380,7 +380,7 @@ Existing direct and mirror-mediated consumers transition explicitly to the new i
 
 1. Work in a full-history disposable clone first. An already-public Product must start from its anonymous public origin only, not from a private clone that may contain additional history. Record the old consumer tip and the Product files, lawful stack values, exception entries and patches, and applied SQL filenames, hashes and schema-manifest records that must survive. The public parent must have no Product inheritance marker.
 2. Preserve the Product's `origin`. Point `upstream` at the approved public parent, keep its push URL `no_push`, fetch the exact candidate, and check its identity against `config/kit/zero-edit-zones.json`. Do not use identity environment overrides.
-3. Join the independent histories once with a real non-squashed merge (`--allow-unrelated-histories --no-ff --no-commit`). Resolve Kit-owned paths against the new parent's ownership manifest, retaining only approved Product exceptions. Preserve Product-owned content, stack scalars and additions, and all applied migration bytes and manifest identities. Retire removed Kit files rather than silently retaining protected differences. Root `LICENSE` is Product-owned ([Zones](#zones)): before committing, restore its pre-merge presence and bytes, conflict or not, with the `LICENSE` lines of [Pulling kit upgrades](#pulling-kit-upgrades); `HEAD` is still the pre-merge Product commit during `--no-commit`. Choosing new terms is the Product's own reviewed commit, not part of this merge.
+3. Join the independent histories once with a real non-squashed merge (`--allow-unrelated-histories --no-ff --no-commit`). Resolve Kit-owned paths against the new parent's ownership manifest, retaining only approved Product exceptions. Preserve Product-owned content, stack scalars and additions, and all applied migration bytes and manifest identities. Retire removed Kit files rather than silently retaining protected differences. Root `LICENSE` is Product-owned ([Zones](#zones)): before committing, restore its pre-merge presence and bytes, conflict or not, with the `LICENSE` lines of `scripts/kit/kit-upgrade.sh`; `HEAD` is still the pre-merge Product commit during `--no-commit`. Choosing new terms is the Product's own reviewed commit, not part of this merge.
 4. Update the **existing** inheritance marker to the public parent tip actually merged; retain its original introduction history. Commit the merge before running ancestry-dependent checks. Both the previous consumer tip and the declared public parent must be ancestors of the result; neither the marker commit nor an arbitrary equal tree is a valid parent pin.
 5. Run the applicable Kit and Product checks, then exercise a second, ordinary fetch/merge/marker update from a later public parent tip without `--allow-unrelated-histories`. Verify the same Product and migration preservation obligations again. A fetched but unmerged parent must still fail the ancestry check.
 
@@ -559,38 +559,25 @@ Do **not** commit live `product-*.yml` into the **kit** repo under `.github/work
 ## Pulling kit upgrades
 
 ```bash
-git fetch upstream
-# Read-only, printed on every path below (stop, up to date, merge):
-git diff -U0 HEAD upstream/main -- package.json | grep -q '^+.*"packageManager"' &&
-  echo "packageManager moves: set BUN_VERSION on each Workers Builds / Pages project just before this reaches its deploy/<branch> source branch (row 'Kit bumps packageManager')" >&2
-if git diff -U0 HEAD upstream/main -- .github/workflows | grep -q '^+.*create-github-app-token@'; then
-  echo "stop: this range bumps actions/create-github-app-token; establish the effective CI_APP_ID mode first (row 'Kit bumps actions/create-github-app-token')" >&2
-elif git merge-base --is-ancestor upstream/main HEAD; then
-  echo "already up to date with upstream/main"   # nothing to merge; the commit below would fail
-else
-  git merge --no-ff --no-commit upstream/main &&  # stop before the merge commit; resolve only if product violated zones
-  if git cat-file -e HEAD:LICENSE 2>/dev/null; then  # root LICENSE keeps its pre-merge presence and bytes (Zones)
-    git restore --source=HEAD --staged --worktree -- LICENSE
-  else
-    git rm -q -f --ignore-unmatch -- LICENSE
-  fi &&
-  git diff --quiet HEAD -- LICENSE &&
-  printf '{\n  "version": 1,\n  "upstreamCommit": "%s"\n}\n' "$(git rev-parse upstream/main)" > config/product/inheritance.json &&
-  bun install &&                   # kit may have added/removed a workspace; does NOT re-check versions the merge kept
-  bun run lock-ranges:check &&     # every bun.lock resolution inside its workspace range (Roxabi/roxabi-boilerplate-cf#319)
-  git add bun.lock config/product/inheritance.json && git commit --no-edit &&
-  if ! git diff --quiet upstream/main -- .github/dependabot.yml; then
-    node scripts/kit/configure-product-dependabot.cjs &&
-    git add .github/dependabot.yml &&
-    if ! git diff --cached --quiet -- .github/dependabot.yml; then
-      git commit -m "chore(deps): refresh Product Dependabot scan"
-    fi
-  fi &&
-  bun run zero-edit                # must stay green (or refresh exceptions intentionally)
-fi
+bun run kit-upgrade
 ```
 
-A range that sets a new pin of `actions/create-github-app-token` stops before the merge. Establish the effective `CI_APP_ID` mode using [CI App setup](./ci-app-setup.md#trust-and-setup): verified absence permits the inactive, separately authorized manual-merge path; a nonempty value requires the installed App's Client ID, valid authorization configuration and a successful mint established through a separately authorized exercise. A missing key or unknown state stops. Then run the merge lines by hand. Neither path waives review, local gates or CI. After a merge conflict, resolve it, refresh the existing inheritance marker to the tip actually merged, then run the remaining lines by hand: the merge commit waits for `lock-ranges:check`.
+The script runs only in a clean product clone, refuses an in-progress merge, and never pushes:
+
+1. Fetch `upstream`, report a `packageManager` move, and stop before merging a new `actions/create-github-app-token` pin; exit if already current.
+2. Merge without committing (resolve conflicts only if Product violated zones), restore the pre-merge root `LICENSE` presence and bytes, and record the incoming tip in the inheritance marker.
+3. Install dependencies (this does not re-check versions the merge kept) and check lock ranges; a failure leaves the merge open for owner-directed repair.
+4. Commit the merge, refresh the Product Dependabot scan in a separate commit if needed, and run `zero-edit`, which must stay green or have exceptions refreshed intentionally.
+
+For a new token pin, merge conflict, lock-ranges resume, or independent-lineage join, run the lines of `scripts/kit/kit-upgrade.sh` by hand from `git merge --no-ff --no-commit` onward as applicable, including its `LICENSE` lines.
+
+`bun run kit-upgrade -- --check` reports notices and pending work against the locally cached `upstream/main` without fetching or changing anything.
+A clone whose pin predates this script performs its first upgrade with the previous manual block in this section at its pinned commit; do not copy it from a newer version.
+
+A range that sets a new pin of `actions/create-github-app-token` stops before the merge. Establish the effective `CI_APP_ID` mode using [CI App setup](./ci-app-setup.md#trust-and-setup):
+verified absence permits the inactive, separately authorized manual-merge path; a nonempty value requires the installed App's Client ID, valid authorization configuration and a successful mint established through a separately authorized exercise.
+A missing key or unknown state stops. Then run the script's merge lines by hand. Neither path waives review, local gates or CI.
+After a merge conflict, resolve it, refresh the existing inheritance marker to the tip actually merged, then run the script's remaining lines by hand: the merge commit waits for `lock-ranges:check`.
 
 If `lock-ranges:check` fails, the merge is still open (no merge commit yet). Each finding names its workspace; resume by owner:
 
@@ -606,12 +593,12 @@ git add bun.lock apps/<product>-web/package.json
 bun run lock-ranges:check &&
   bun install --frozen-lockfile --minimum-release-age 0 &&
   git add bun.lock config/product/inheritance.json && git commit --no-edit
-# Then run the conditional Product scan refresh and final zero-edit from the upgrade block above.
+# Then run the conditional Product scan refresh and final zero-edit from scripts/kit/kit-upgrade.sh.
 ```
 
 If conflict in a **kit zone**, restore the Kit version and move the Product change to a Product path / design override, **except** the bounded `.github/dependabot.yml` customization: preserve the Product scan and regenerate it after the upgrade merge as above. A conflict on that customization does not justify restoring the legacy root scan.
 
-Root `LICENSE` is not a kit zone ([Zones](#zones)). Its lines run on every merge, conflict or not, and also settle a `LICENSE` conflict: the merge commit keeps the root `LICENSE` presence and bytes of the pre-merge `HEAD`. A change of Product terms is its own reviewed commit, never part of a Kit merge.
+Root `LICENSE` is not a kit zone ([Zones](#zones)). The script's `LICENSE` lines run on every merge, conflict or not, and also settle a `LICENSE` conflict: the merge commit keeps the root `LICENSE` presence and bytes of the pre-merge `HEAD`. A change of Product terms is its own reviewed commit, never part of a Kit merge.
 
 The bounded `.github/dependabot.yml` customization is the other deliberate content difference: preserve the Product scan through conflict resolution. After the upgrade merge and marker are committed, regenerate with the inherited generator, stage and commit any refresh through ordinary hooks, then run the final zero-edit and applicable local gates before any push ([configuration and migration limits](#product-dependabot-configuration)). The shared `bun.lock` is always reviewed in full; taking the Kit lock wholesale can erase or re-resolve Product dependencies and is not a safe conflict-resolution recipe.
 
