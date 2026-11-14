@@ -139,12 +139,17 @@ function patch(file, replacements) {
 }
 const api = `apps/${name}-api`
 patch(`${api}/package.json`, [['starter-api', `${name}-api`]])
-// Runtime types are generated locally, not copied into Product source control.
+// Generate Wrangler's runtime declarations outside the scanned App source tree.
 const packageFile = `${api}/package.json`
 const pkg = JSON.parse(fs.readFileSync(packageFile, 'utf8'))
-pkg.scripts.typecheck = pkg.scripts.typecheck.replace(' --check &&', ' &&')
+const typesPath = `../../.wrangler/${name}-worker-configuration.d.ts`
+pkg.scripts.types = `mkdir -p ../../.wrangler && wrangler types ${typesPath} --include-env=false`
+pkg.scripts.typecheck = `${pkg.scripts.types} && tsc --noEmit -p tsconfig.json`
 fs.writeFileSync(packageFile, `${JSON.stringify(pkg, null, 2)}\n`)
-fs.writeFileSync(`${api}/.gitignore`, '/src/worker-configuration.d.ts\n')
+const tsconfigFile = `${api}/tsconfig.json`
+const tsconfig = JSON.parse(fs.readFileSync(tsconfigFile, 'utf8'))
+tsconfig.include.push(typesPath)
+fs.writeFileSync(tsconfigFile, `${JSON.stringify(tsconfig, null, 2)}\n`)
 patch(`${api}/wrangler.toml`, [['starter-api', `${name}-api`]])
 patch(`${api}/kit-schema-manifest.json`, [['apps/starter-api', api]])
 patch(`${api}/vitest.config.ts`, [['starter-api', `${name}-api`]])
