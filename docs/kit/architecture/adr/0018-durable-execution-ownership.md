@@ -86,7 +86,7 @@ Another owner for governed plan runs requires a new Kit ADR. In an accepted ADR 
 
 - Choosing a durable owner proves nothing about authentication, Organization isolation, authority ceiling, budget, effect safety or execution history.
 - No Kit gate checks this rule or a Product ADR written under D5.
-- A Product's choice of owner is neither durable workflow proof nor a second consumer for the Agents layer gate ([`AGENTS.md`](../../../../AGENTS.md) § Direction).
+- A Product's choice of owner is neither durable workflow proof nor a second consumer for the Agents layer gate ([platform direction](../platform-direction.md#capability-sequence)).
 - Invariant 7 is unchanged.
 
 ## Consequences
