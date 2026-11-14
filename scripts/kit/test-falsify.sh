@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # CP-FALSIFY — mechanical canary: oracle tests MUST fail with assertion failures
 # when isGlobOrNullOrigin is neutered. Requires a healthy baseline before mutation,
-# uses a disposable package copy and re-runs the original oracle green afterward.
+# restores the disposable copy and re-runs the oracle green there.
 set -euo pipefail
 
 unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR 2>/dev/null || true
@@ -151,6 +151,7 @@ def run_self_test() -> None:
     cases = [
         ("baseline-healthy", "baseline", 0, json.dumps(healthy), "ok"),
         ("mutated-assertions", "mutated", 1, json.dumps(mutated), "ok"),
+        ("baseline-no-report", "baseline", 1, "", "infra"),
         ("baseline-import", "baseline", 1, json.dumps(import_fail), "infra"),
         ("mutated-import", "mutated", 1, json.dumps(import_fail), "infra"),
         ("mutated-still-green", "mutated", 0, json.dumps(healthy), "fail"),
@@ -189,10 +190,12 @@ run_oracle() {
   local package_dir="$1"
   local json_file got
   json_file="${TEMP_DIR}/oracle.json"
+  : >"${json_file}"
   set +e
   (
     cd "${package_dir}"
-    bun run test -- "${ORACLE_FILE}" --reporter=json --outputFile="${json_file}"
+    bun run test -- "${ORACLE_FILE}" --reporter=json --outputFile="${json_file}" \
+      --fsModuleCachePath="${TEMP_DIR}/vitest-cache"
   ) >/dev/null 2>&1
   got=$?
   set -e
