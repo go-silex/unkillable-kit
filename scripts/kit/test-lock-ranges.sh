@@ -391,6 +391,7 @@ assert_case "a scan that checks no range fails" 1 "$BLIND" "no range checked —
 decoy_tree() {
   local tree="$1"
   mkdir -p "$tree/scripts/kit" "$tree/config/kit" "$tree/decoy"
+  git -C "$tree" init -q
   cp "$SCANNER" "$tree/scripts/kit/"
   cp "$ROOT/config/kit/bunfig.gates.toml" "$tree/config/kit/"
   cp "$CLEAN/bun.lock" "$tree/decoy/bun.lock"
@@ -453,7 +454,7 @@ node -e 'const fs = require("node:fs"); const p = process.argv[1]; const s = fs.
 git -C "$NORMALIZATION" add bun.lock
 git -C "$NORMALIZATION" commit -qm mutant
 output="$(cd "$NORMALIZATION" && env -u LOCK_RANGES_ROOT bun scripts/kit/check-lock-ranges.ts 2>&1)" && rc=0 || rc=$?
-if [[ "$rc" -eq 1 && "$output" == *'committed bun.lock changes on install'* ]]; then
+if [[ "$rc" -eq 1 && "$output" == *'candidate bun.lock changes on install'* ]]; then
   echo 'PASS: committed lock normalization drift detected'
   PASS=$((PASS + 1))
 else

@@ -10,6 +10,9 @@ cat > "$tmp/bun" <<'BUN'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$KIT_UPGRADE_TEST_LOG"
 if [[ ${FAIL_LOCK:-} == 1 && ${1:-} == run && ${2:-} == lock-ranges:check ]]; then exit 1; fi
+if [[ ${REAL_LOCK:-} == 1 && ${1:-} == run && ${2:-} == lock-ranges:check ]]; then
+  exec bun --no-env-file --config=config/kit/bunfig.gates.toml run scripts/kit/check-lock-ranges.ts
+fi
 BUN
 chmod +x "$tmp/bun"
 export KIT_UPGRADE_BUN="$tmp/bun"
@@ -125,6 +128,41 @@ if FAIL_LOCK=1 run_upgrade; then exit 1; fi
 [[ $(git -C "$dir/product" rev-parse HEAD) == "$before" && -f "$dir/product/.git/MERGE_HEAD" ]]
 grep -q 'merge remains open' "$dir/out"
 pass 'lock-ranges failure leaves merge open without commit'
+
+normalization_fixture() {
+  dir="$tmp/$1"
+  export KIT_UPGRADE_TEST_LOG="$dir/bun.log"
+  mkdir -p "$dir/seed"
+  git -C "$ROOT" archive HEAD | tar -x -C "$dir/seed"
+  cp "$ROOT/scripts/kit/kit-upgrade.sh" "$ROOT/scripts/kit/check-lock-ranges.ts" "$dir/seed/scripts/kit/"
+  node -e 'const fs=require("fs"), p=process.argv[1], s=fs.readFileSync(p,"utf8"); const t=s.replace(/  "trustedDependencies": \[\],\n/,""); if(t===s) process.exit(1); fs.writeFileSync(p,t)' "$dir/seed/bun.lock"
+  git -C "$dir/seed" init -q -b main
+  git -C "$dir/seed" add .
+  git -C "$dir/seed" commit -qm initial
+  git clone -q --bare "$dir/seed" "$dir/upstream.git"
+  git clone -q "$dir/upstream.git" "$dir/product"
+  git -C "$dir/product" remote rename origin upstream
+  git -C "$dir/product" remote add origin product
+  mkdir -p "$dir/product/config/product"
+  printf '{"version":1,"upstreamCommit":"%s"}\n' "$(git -C "$dir/product" rev-parse HEAD)" > "$dir/product/config/product/inheritance.json"
+  git -C "$dir/product" add config/product/inheritance.json
+  git -C "$dir/product" commit -qm product
+}
+normalization_fixture normalized-merge
+cp "$ROOT/bun.lock" "$dir/seed/bun.lock"
+advance
+REAL_LOCK=1 run_upgrade
+[[ ! -f "$dir/product/.git/MERGE_HEAD" ]]
+git -C "$dir/product" show HEAD:bun.lock | cmp - "$ROOT/bun.lock"
+pass 'upgrade validates normalized staged lock despite stale pre-merge HEAD'
+
+normalization_fixture invalid-merge
+advance
+before=$(git -C "$dir/product" rev-parse HEAD)
+if REAL_LOCK=1 run_upgrade; then exit 1; fi
+[[ $(git -C "$dir/product" rev-parse HEAD) == "$before" && -f "$dir/product/.git/MERGE_HEAD" ]]
+grep -q 'bun.lock changes on install' "$dir/out"
+pass 'upgrade rejects invalid staged normalization and leaves merge open'
 fixture check
 advance
 git -C "$dir/product" fetch -q upstream
