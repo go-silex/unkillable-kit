@@ -6,6 +6,7 @@ import { cors } from 'hono/cors'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import { members } from './modules/members/routes'
 import { bindPlatform } from './platform/auth'
+import { keyScopeGate } from './platform/key-scopes'
 import { me } from './platform/me'
 import type { AppEnv } from './platform/types'
 
@@ -28,6 +29,7 @@ export function createApp() {
   )
   app.use('*', originGuard)
   app.use('*', bindPlatform)
+  app.use('*', keyScopeGate)
   app.onError((err, c) => {
     const { body, status } = toApiErrorBody(err, c.get('requestId'))
     return c.json(body, status as ContentfulStatusCode)

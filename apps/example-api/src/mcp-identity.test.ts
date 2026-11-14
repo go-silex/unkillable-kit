@@ -92,7 +92,6 @@ describe('MCP identity ticket', () => {
       { headers: { authorization: 'Bearer sk_not_a_session' } },
       env,
     )
-    expect(res.status).toBe(302)
-    expect(res.headers.get('location')).toContain('/login')
+    expect(res.status).toBe(401)
   })
 })

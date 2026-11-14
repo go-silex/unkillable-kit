@@ -28,6 +28,7 @@ CREATE TABLE api_keys (
   key_prefix TEXT NOT NULL UNIQUE,
   subject TEXT NOT NULL,
   organization_id TEXT NOT NULL,
+  scopes TEXT NOT NULL DEFAULT '',
   name TEXT,
   created_at INTEGER NOT NULL,
   expires_at INTEGER,

@@ -105,6 +105,7 @@ describe('HITL approve route', () => {
     const minted = await mintApiKey(db, 'user_staff', {
       organizationId: ORG_ACME,
       name: 'flows-sk-approve',
+      scopes: ['read', 'write', 'admin'],
     })
     const sk = await app.request(
       url,

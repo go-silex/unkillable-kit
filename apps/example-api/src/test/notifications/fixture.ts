@@ -43,7 +43,7 @@ export async function createNotificationFixture(): Promise<NotificationFixture> 
       {
         method: 'POST',
         headers: await headersFor(userId, orgId),
-        body: JSON.stringify({ organizationId: orgId }),
+        body: JSON.stringify({ organizationId: orgId, scopes: ['read', 'write', 'admin'] }),
       },
       env,
     )

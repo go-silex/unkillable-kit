@@ -41,7 +41,7 @@ describe('disabled accounts over HTTP', () => {
       {
         method: 'POST',
         headers: sessionHeaders(owner),
-        body: JSON.stringify({ organizationId: 'org_acme' }),
+        body: JSON.stringify({ organizationId: 'org_acme', scopes: ['read'] }),
       },
       env,
     )
@@ -161,7 +161,7 @@ describe('disabled accounts over HTTP', () => {
       {
         method: 'POST',
         headers: sessionHeaders(owner),
-        body: JSON.stringify({ organizationId: 'org_acme' }),
+        body: JSON.stringify({ organizationId: 'org_acme', scopes: ['read'] }),
       },
       env,
     )

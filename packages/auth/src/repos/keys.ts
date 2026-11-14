@@ -13,6 +13,7 @@ export async function insertApiKey(
     keyPrefix: string
     subject: string
     organizationId: string
+    scopes: string
     name?: string | null
     createdAt: number
     expiresAt?: number | null
@@ -26,6 +27,7 @@ export async function insertApiKey(
       keyPrefix: row.keyPrefix,
       subject: row.subject,
       organizationId: row.organizationId,
+      scopes: row.scopes,
       name: row.name ?? null,
       createdAt: row.createdAt,
       expiresAt: row.expiresAt ?? null,
@@ -51,6 +53,7 @@ export async function findActiveOrgApiKeyByPrefix(db: Db, prefix: string) {
     keyHash: row.keyHash,
     revokedAt: row.revokedAt ?? null,
     expiresAt: row.expiresAt ?? null,
+    scopes: row.scopes,
     organizationId: row.organizationId,
   }
 }
@@ -60,6 +63,7 @@ const apiKeyPublicColumns = {
   subject: apiKeys.subject,
   keyPrefix: apiKeys.keyPrefix,
   organizationId: apiKeys.organizationId,
+  scopes: apiKeys.scopes,
   name: apiKeys.name,
   createdAt: apiKeys.createdAt,
   expiresAt: apiKeys.expiresAt,

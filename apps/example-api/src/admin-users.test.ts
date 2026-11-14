@@ -225,7 +225,7 @@ describe('admin users (B-users go-silex/silex-boilerplate#58)', () => {
       {
         method: 'POST',
         headers: sessionHeaders(cookie, undefined, ORIGIN),
-        body: JSON.stringify({ name: 'admin-test-key' }),
+        body: JSON.stringify({ name: 'admin-test-key', scopes: ['read', 'write', 'admin'] }),
       },
       env,
     )

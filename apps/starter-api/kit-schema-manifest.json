@@ -53,6 +53,10 @@
     "account_state": {
       "kitSha256": "85a6504ee9df48a7cc438ff77d3027f794f9ac3e6059c75af97f6953ef82659c",
       "productFile": "migrations/0013_kit_account_state.sql"
+    },
+    "api_keys_scopes": {
+      "kitSha256": "5f027ff014888d093632763f4aa61c2597cff85849b6ee753ac51a4baddfea94",
+      "productFile": "migrations/0014_kit_api_keys_scopes.sql"
     }
   },
   "sets": ["audit", "core"]

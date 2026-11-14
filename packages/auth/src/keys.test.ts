@@ -2,7 +2,13 @@ import { describe, expect, it } from 'vitest'
 import { type BetterAuthLike, createBetterAuthSessionPort } from './better-auth-port'
 import { sessionCookieName } from './cookie-name'
 import { apiKeyPrefix, generateApiKey, hashApiKey, parseBearer, verifyApiKey } from './keys'
-import { createRequireAuth, normalizeApiKeyOrganizationId, resolveDualAuth } from './require-auth'
+import {
+  allowsApiKeyScope,
+  createRequireAuth,
+  normalizeApiKeyOrganizationId,
+  parseApiKeyScopes,
+  resolveDualAuth,
+} from './require-auth'
 import {
   clearSessionCookieHeader,
   parseCookie,
@@ -119,9 +125,15 @@ describe('resolveDualAuth', () => {
         revokedAt: null,
         expiresAt: Date.now() + 60_000,
         organizationId: 'org_1',
+        scopes: 'read,write',
       }),
     })
-    expect(r).toMatchObject({ subject: 'u-live', method: 'api_key', organizationId: 'org_1' })
+    expect(r).toMatchObject({
+      subject: 'u-live',
+      method: 'api_key',
+      organizationId: 'org_1',
+      scopes: ['read', 'write'],
+    })
   })
 
   it('checks the verified key subject and fails closed when account state is disabled or unavailable', async () => {
@@ -136,6 +148,7 @@ describe('resolveDualAuth', () => {
         revokedAt: null,
         expiresAt: null,
         organizationId: 'org_1',
+        scopes: 'read',
       }),
       isAccountActive: async (subject: string) => {
         subjects.push(subject)
@@ -146,6 +159,7 @@ describe('resolveDualAuth', () => {
       subject: 'key-user',
       method: 'api_key',
       organizationId: 'org_1',
+      scopes: ['read'],
     })
     expect(subjects).toEqual(['key-user'])
     for (const isAccountActive of [
@@ -174,6 +188,7 @@ describe('resolveDualAuth', () => {
           revokedAt: Date.now(),
           expiresAt: Date.now() + 60_000,
           organizationId: 'org_1',
+          scopes: 'read',
         }),
       }),
     ).rejects.toMatchObject({ code: 'UNAUTHORIZED' })
@@ -192,9 +207,35 @@ describe('resolveDualAuth', () => {
           revokedAt: null,
           expiresAt: Date.now() - 1_000,
           organizationId: 'org_1',
+          scopes: 'read',
         }),
       }),
     ).rejects.toMatchObject({ code: 'UNAUTHORIZED' })
+  })
+})
+
+describe('API key scope authorization', () => {
+  it('uses independent exact membership and preserves sessions', () => {
+    const key = {
+      subject: 'u',
+      method: 'api_key' as const,
+      organizationId: 'org',
+      scopes: ['admin' as const],
+    }
+    expect(allowsApiKeyScope(key, 'admin')).toBe(true)
+    expect(allowsApiKeyScope(key, 'read')).toBe(false)
+    expect(allowsApiKeyScope(key, 'write')).toBe(false)
+    const session = { subject: 'u', method: 'session' as const, sessionId: 's' }
+    expect(allowsApiKeyScope(session, 'read')).toBe(true)
+    expect(allowsApiKeyScope(session, 'write')).toBe(true)
+    expect(allowsApiKeyScope(session, 'admin')).toBe(true)
+  })
+
+  it('fails closed for malformed and unknown stored scopes', () => {
+    expect(parseApiKeyScopes('read,write,admin')).toEqual(['read', 'write', 'admin'])
+    expect(parseApiKeyScopes('read,unknown')).toEqual([])
+    expect(parseApiKeyScopes('')).toEqual([])
+    expect(parseApiKeyScopes('read, write')).toEqual([])
   })
 })
 
@@ -431,7 +472,7 @@ describe('createRequireAuth', () => {
       isAccountActive: async () => true,
       findApiKeyByPrefix: async () => null,
     }))
-    const store: Record<string, string> = {}
+    const store: Record<string, string | string[]> = {}
     let nextCalled = false
     await mw(
       {
@@ -481,9 +522,10 @@ describe('createRequireAuth', () => {
         revokedAt: null,
         expiresAt: null,
         organizationId: 'org_x',
+        scopes: 'read',
       }),
     }))
-    const store: Record<string, string> = {}
+    const store: Record<string, string | string[]> = {}
     await mw(
       {
         req: {
@@ -499,6 +541,7 @@ describe('createRequireAuth', () => {
     expect(store.subject).toBe('key-user')
     expect(store.authMethod).toBe('api_key')
     expect(store.keyOrganizationId).toBe('org_x')
+    expect(store.keyScopes).toEqual(['read'])
     expect(store.sessionId).toBeUndefined()
   })
 
@@ -515,6 +558,7 @@ describe('createRequireAuth', () => {
           revokedAt: null,
           expiresAt: null,
           organizationId: null,
+          scopes: 'read',
         }),
       }),
     ).rejects.toMatchObject({ code: 'UNAUTHORIZED' })
@@ -532,6 +576,7 @@ describe('createRequireAuth', () => {
           keyHash: hash,
           revokedAt: null,
           expiresAt: null,
+          scopes: 'read',
         }),
       }),
     ).rejects.toMatchObject({ code: 'UNAUTHORIZED' })
@@ -551,6 +596,7 @@ describe('createRequireAuth', () => {
             revokedAt: null,
             expiresAt: null,
             organizationId,
+            scopes: 'read',
           }),
         }),
       ).rejects.toMatchObject({ code: 'UNAUTHORIZED' })

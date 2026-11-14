@@ -139,6 +139,12 @@
       "file": "0025_account_state.sql",
       "set": "core",
       "kitSha256": "85a6504ee9df48a7cc438ff77d3027f794f9ac3e6059c75af97f6953ef82659c"
+    },
+    {
+      "id": "api_keys_scopes",
+      "file": "0026_api_keys_scopes.sql",
+      "set": "core",
+      "kitSha256": "5f027ff014888d093632763f4aa61c2597cff85849b6ee753ac51a4baddfea94"
     }
   ]
 }
