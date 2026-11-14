@@ -17,7 +17,7 @@ Authority descends in this order:
 
 ## Direction — multi-tenant capability kernel
 
-The Kit is a multi-tenant capability kernel: `@kit/*` packages composed by independent product deploys. _Company OS+++_ is a possible product story, non-normative and never the kit ambition or a reason to add product domain here.
+The Kit, normative, is a multi-tenant capability kernel: `@kit/*` packages composed by independent product deploys. _Company OS+++_ is a possible product story, non-normative and never the kit ambition or a reason to add product domain here.
 
 See [`docs/kit/architecture/platform-direction.md`](docs/kit/architecture/platform-direction.md) for direction and evidence.
 
@@ -25,8 +25,8 @@ See [`docs/kit/architecture/platform-direction.md`](docs/kit/architecture/platfo
 
 1. **Grants = sole max power** — plan/MCP permits may only **narrow** ; never expand.
 2. **Runner executes snapshot only** — live plan edits do not re-arm in-flight runs.
-3. **Grant provenance** — **never** mint from client, plan body, or agent self-description. Only the Kit mints grants, from org module policy facts. See [ADR-0005](docs/kit/architecture/adr/0005-flows-platform-agentic-workflows.md) and the [flows documentation](packages/flows/README.md) for enforcement mechanics.
-4. **Default-deny ambient authority** — empty/absent permits + effectful tools = fail-closed. An `approve` step continues only with approval for its organization, run and task written by the principal-bound route; a Workflow event only wakes. See [ADR-0005](docs/kit/architecture/adr/0005-flows-platform-agentic-workflows.md) and the [flows documentation](packages/flows/README.md) for enforcement mechanics.
+3. **Grant provenance** — **never** mint from client, plan body, or agent self-description. Only the Kit mints grants, from org module policy facts. The ceiling is the registry tools declared `grantClass: 'mintable'`. See [ADR-0005](docs/kit/architecture/adr/0005-flows-platform-agentic-workflows.md) for enforcement mechanics.
+4. **Default-deny ambient authority** — empty/absent permits + effectful tools = fail-closed. An `approve` step continues only with approval for its organization, run and task written by the principal-bound route; a Workflow event only wakes. See [ADR-0005](docs/kit/architecture/adr/0005-flows-platform-agentic-workflows.md) for enforcement mechanics.
 5. **Isolation fields mandatory** — every plan/run/agent tool call is org-scoped ; no cross-org ambient registry.
 6. **Product domain never under** `packages/**` · **one durable owner per durable execution**, supplied by a general-purpose runtime; no hand-built durability and no two owners for one execution ([ADR-0018](docs/kit/architecture/adr/0018-durable-execution-ownership.md), criterion in D2).
 7. **Agents tools = registry ∩ grants** — **unbuilt** until the agents layer. Dual-auth session \| `sk_` **org-bound** is the intended surface. `@kit/mcp` `effect`/`auth` in `packages/mcp/src/catalogue.ts` are **NEVER authorization** (convention only) — unlike flows `grantClass` (invariant 3), which is live today.
