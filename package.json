@@ -57,7 +57,7 @@
     "test:biome-strict": "bash scripts/kit/test-biome-strict.sh",
     "quality-gates:check": "env -u QG_FILE_EXEMPTIONS -u QG_FILE_MAX -u QG_FILE_ROOTS -u QG_FILE_PRODUCT_EXEMPTIONS QG_FILE_MODE=tree bash scripts/kit/check_file_length.sh && env -u QG_FOLDER_EXEMPTIONS -u QG_FOLDER_MAX -u QG_FOLDER_ROOTS -u QG_FOLDER_PRODUCT_EXEMPTIONS bash scripts/kit/check_folder_size.sh",
     "validate": "bun run lint && bun run typecheck && bun run typecheck:tooling && bun run test && bun run banlist && bun run zod-major && bun run ts-major && bun run extract-dry-run && bun run zero-edit && bun run env:check && bun run wrangler-migrations:check",
-    "build:kit": "turbo run build --filter=@kit/example-api --filter=@kit/example-web",
+    "build:kit": "turbo run build --filter=@kit/example-api --filter=@kit/example-web --filter=@kit/starter-api --filter=@kit/starter-web",
     "cf:showcase:install": "bash scripts/kit/cf-builds/install-monorepo.sh",
     "cf:showcase:deploy-api": "bash scripts/kit/cf-builds/api-deploy.sh",
     "cf:showcase:build-web": "bash scripts/kit/cf-builds/web-build.sh",

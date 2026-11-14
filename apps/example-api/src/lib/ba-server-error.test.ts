@@ -1,5 +1,5 @@
+import { scrubBetterAuthServerError } from '@kit/auth/hono'
 import { describe, expect, it } from 'vitest'
-import { scrubBetterAuthServerError } from './ba-server-error'
 
 describe('scrubBetterAuthServerError', () => {
   it('passes 2xx and 4xx through unchanged', async () => {

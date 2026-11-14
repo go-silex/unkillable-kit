@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "app": "apps/starter-api",
+  "modules": {
+    "init": {
+      "kitSha256": "0c4cbdfbba9c6d33b14dd7df1a6548acef4e836ea85898da34412773e222c3c9",
+      "productFile": "migrations/0001_kit_init.sql"
+    },
+    "api_keys_prefix": {
+      "kitSha256": "dbe6168d8fb6f660ffb7fde2f82cb8c9e0ce110b7af698c0ee15b8782f351abb",
+      "productFile": "migrations/0002_kit_api_keys_prefix.sql"
+    },
+    "kit_modules": {
+      "kitSha256": "df46b036f83278a804ad85fda1ece157a48694c05a9712f9ac512d8fe7b8c6ef",
+      "productFile": "migrations/0003_kit_kit_modules.sql"
+    },
+    "kit_modules_config": {
+      "kitSha256": "aca4f5c1e7106c89a1e1b4b2209bf2f67e96a313ef41349046a2308b00635b1e",
+      "productFile": "migrations/0004_kit_kit_modules_config.sql"
+    },
+    "better_auth": {
+      "kitSha256": "a2a1b36f6fa51253db2c3520e9647feaae690c507e0bacb730b98b32606c03e3",
+      "productFile": "migrations/0005_kit_better_auth.sql"
+    },
+    "better_auth_organization": {
+      "kitSha256": "dc26e44a720c50b69a37afc870bfe7bd54c2ee1edc251e6e4b466cac6f4accfd",
+      "productFile": "migrations/0006_kit_better_auth_organization.sql"
+    },
+    "rbac_modules": {
+      "kitSha256": "3e85a82d0303566c273a4fc49f937fce86c5340fb83b7dbbac6ed0b7da47cb4a",
+      "productFile": "migrations/0007_kit_rbac_modules.sql"
+    },
+    "api_keys_organization": {
+      "kitSha256": "8be34a982325b5a17f915204e4bff20be0496123a6d8df068f027563a66103d3",
+      "productFile": "migrations/0008_kit_api_keys_organization.sql"
+    },
+    "rate_limit_audit": {
+      "kitSha256": "722616d14e2bb8036e941b0909acb1f2270b4d5eb946018610c9b41114785a84",
+      "productFile": "migrations/0009_kit_rate_limit_audit.sql"
+    },
+    "better_auth_1_7_additive": {
+      "kitSha256": "871945468b5e8573a5dd2097b37ecf0c24219f487bba21b8662b74d2924e5da0",
+      "productFile": "migrations/0010_kit_better_auth_1_7_additive.sql"
+    },
+    "api_keys_org_not_null": {
+      "kitSha256": "d6ba3f1506fc1695eaff563f11ce0abb5f4cb9f4b37395f8d839ca6aac1489f9",
+      "productFile": "migrations/0011_kit_api_keys_org_not_null.sql"
+    },
+    "impersonation": {
+      "kitSha256": "6ff6a4e5ee69496fe6f0d535f87965b30b5dd9a78c13356ec8d2f975ee29faf3",
+      "productFile": "migrations/0012_kit_impersonation.sql"
+    }
+  },
+  "sets": ["audit", "core"]
+}

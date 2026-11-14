@@ -248,6 +248,8 @@ Floors are enforced by Vitest (`packages/config/vitest-coverage.mts` + per-packa
 | **T2** | `@kit/ui`, `example-web` (page chrome)                                                   | **ui ~17/17/16/23** · **web 10/10/20/12**                                                                                 | Low % OK **iff** contract suites green; do not chase Button coverage; Vitest 4 remapping (Roxabi/roxabi-boilerplate-cf#21)                                                       |
 | **T3** | `email` thin, mcp-example smoke                                                          | soft / special (e.g. funcs 0% mcp-example)                                                                                | Document, don’t pretend product security                                                                                                                                         |
 
+The starter API is in the high coverage tier, with floors of 70/70/55/70 (statements/lines/branches/functions); the starter web is in the lower tier at 50/50/40/50. Starter HTTP tests exercise authentication and Organization isolation; web smoke tests cover sign-in and the authenticated shell. The Vitest configurations enforce these floors.
+
 **Vitest 4 remapping (Roxabi/roxabi-boilerplate-cf#21):** Same sources/tests produce lower stmt/branch % under Vitest 4.1.x v8 than 3.2.x. Floors were recalibrated just under measured values. **% is a ratchet, not the story.** The story is **critical paths** below.
 
 ---

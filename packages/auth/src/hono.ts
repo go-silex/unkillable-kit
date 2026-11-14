@@ -8,9 +8,17 @@ import {
   roleAtLeast,
   roleHasCapability,
 } from './org-roles'
+import type { KitRepoDb } from './repos/db-type'
+import { findOrgContext } from './repos/orgs'
+import { getPlatformRole } from './repos/platform-roles'
 
 export type { OrgContextRecord } from './org-roles'
 export { type OriginGuardEnv, originGuard } from './origin-guard'
+export { scrubBetterAuthServerError } from './policy/ba-server-error'
+export { type BetterAuthHandlerEnv, createBetterAuthHandler } from './policy/better-auth-handler'
+export { createKitRequireAuth, type KitRequireAuthContext } from './policy/kit-require-auth'
+export { isPasswordSignInPath, normalizePasswordSignInResponse } from './policy/sign-in-anti-enum'
+export { isEmailSignUpPath, normalizeEmailSignUpResponse } from './policy/sign-up-anti-enum'
 export {
   applySecurityHeaders,
   type SecurityHeadersEnv,
@@ -69,6 +77,17 @@ export type OrgContextPorts = {
     },
   ): Promise<boolean>
   isModuleEffective(db: unknown, orgId: string, moduleId: string): Promise<boolean>
+}
+
+/** Use the kit organization and platform-role repositories with caller-owned module policy. */
+export function createKitOrgMiddleware(
+  ports: Pick<OrgContextPorts, 'resolveModuleAccess' | 'isModuleEffective'>,
+) {
+  return createOrgMiddleware({
+    ...ports,
+    findOrgContext: (db, orgId, subject) => findOrgContext(db as KitRepoDb, orgId, subject),
+    getPlatformRole: (db, subject) => getPlatformRole(db as KitRepoDb, subject),
+  })
 }
 
 function dbOf(c: { get: (k: 'db') => unknown | undefined }): unknown {
