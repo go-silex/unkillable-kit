@@ -259,6 +259,8 @@ Kit workflows read fixed credential and authorization variable names. Use a targ
 
 Setup detail: [`docs/kit/ci-app-setup.md`](./ci-app-setup.md). Bootstrap narrative: [`docs/kit/playbooks/start-product.md`](./playbooks/start-product.md).
 
+An active App-only `main` ruleset blocks manual landing, including inactive-App fallback. Follow the operator-approved [bounded disable and restore procedure](./ci-app-setup.md#manual-landing-with-an-app-only-ruleset); its disabled window exposes writer bypass.
+
 > Historical note: kit briefly used `Kit_CI_APP_*`; canonical names are **`CI_APP_*`** only.
 
 ---
