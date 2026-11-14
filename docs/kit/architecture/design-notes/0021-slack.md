@@ -204,7 +204,6 @@ type SlackTokenCiphertext = Readonly<{
 | `section.fields`     | **1…10** si fourni, chacun **1…2 000**.                                                                                                                       |
 | `header.text`        | `plain_text` seulement, **1…150**.                                                                                                                            |
 | `context.elements`   | **1…10** textes, chacun **1…3 000**.                                                                                                                          |
-| `block_id`           | Si présent, non vide et **≤255**, unique dans le message, sans secret/autorité.                                                                               |
 | Autre type/propriété | Rejet local `payload_invalid`.                                                                                                                                |
 
 ## Routes génériques des destinations
@@ -215,20 +214,6 @@ type SlackTokenCiphertext = Readonly<{
 | `POST /api/orgs/{orgId}/notification-destinations`                   | `{channel,externalId,selector}` strict | 201 `{destination,requestId}`, même DTO. Pour Slack, `externalId` est exactement le tuple JSON défini plus haut. |
 | `PUT /api/orgs/{orgId}/notification-destinations/{destinationId}`    | `{selector}` strict                    | 200 `{destination,requestId}`, même DTO ; identité canal/installation immuable.                                  |
 | `DELETE /api/orgs/{orgId}/notification-destinations/{destinationId}` | Aucun body                             | 200 `{ok:true,requestId}`.                                                                                       |
-
-## Contrat Channel partagé
-
-Le contrat partagé reste exactement :
-
-```ts
-type Channel<Input extends { orgId: string }> = Readonly<{
-  send(input: Input): Promise<ChannelResult>
-}>
-type ChannelResult =
-  | Readonly<{ status: 'sent' }>
-  | Readonly<{ status: 'retryable'; code: string; retryAfterSeconds?: number }>
-  | Readonly<{ status: 'permanent'; code: string }>
-```
 
 ## Préflight et résultats
 
@@ -264,7 +249,6 @@ type ChannelResult =
 
 | Route installation              | Entrée                                 | Sortie / autorité                                                                                                            |
 | ------------------------------- | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `GET S/installation`            | —                                      | `{installation:SlackInstallationView                                                                                         | null,requestId}` ; session/org/`manage_notifications`, sans chiffré/kid. |
 | `POST S/installation/authorize` | `{}`                                   | `{authorizationUrl,expiresAt,requestId}` ; même autorité + Origin ; pas d’audit de connexion avant commit.                   |
 | `GET S/installation/callback`   | `state` + exactement `code` ou `error` | 303 écran org fixe ; session/org/capability **mutation** revérifiée et purpose installation.                                 |
 | `DELETE S/installation`         | `{installationId,generation}`          | `{disconnected:true,requestId}` après confirmation, ou erreur explicite et `disconnecting` persisté ; mêmes guards + Origin. |
@@ -278,18 +262,6 @@ type ChannelResult =
 | `POST S/me/link/authorize` | `{}`                                   | `{authorizationUrl,expiresAt,requestId}` ; même scope + Origin, User session. |
 | `GET S/me/link/callback`   | `state` + exactement `code` ou `error` | 303 Settings fixe ; session/membership/purpose + OIDC complet.                |
 | `DELETE S/me/link`         | —                                      | `{unlinked:true,requestId}` ; même scope + Origin, aucun User ID client.      |
-
-## Preuves d'implémentation
-
-| Groupe                             | Critères observables                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| OAuth/OIDC                         | State rejoué/expiré/concurrent/autre session/org/purpose refusé ; membership/capability retirée avant callback refusée. Signature/alg/kid/iss/aud/azp/exp/iat/nbf/nonce/sub/team faux/absents ; JWKS indisponible fermé. Token de test `openid` seul avec team requis. Browser JWT seul ne crée pas une liaison.                                                                                                                                                                                                                    |
-| Coffre/lifecycle                   | Courante/précédente, IV neuf, mauvais tag/kid/AAD org/install/team/génération/Deployment ; aucun plaintext DB/log/audit/payload durable. Conflit workspace concurrent sans révoquer la connexion légitime ; toute Grid refusée ; réponse ancienne génération sans impact nouveau token ; `auth.revoke` en panne garde `disconnecting` sans envoi/retry autonome.                                                                                                                                                                    |
-| Accès/exposition                   | CP-IDOR/CP-UNAUTH par ressource, `sk_` refusées lectures/callbacks, member/reader/staff/support/break-glass exercés ; GET callback sans bypass lecture pour écrire. Type opt-in filtré serveur, catégorie/`*` ne rend pas tasks collectif ; fan-out une fois même zéro User, Inbox sans Delivery in_app, pas d’exclusion implicite de l’initiateur flows.                                                                                                                                                                           |
-| Channel/rendu                      | 429/hints valides/invalides/>86400 sans envoi prématuré ; HTTP200 `ok:false`, receipt manquante, réseau/5xx ambigu, auth CAS/audit unique, destination invalide sans révocation globale. Email absence≠panne, OIDC jamais substitué. N/N+1 pour chaque borne, 50/51 blocs, section/fields/header/context, Unicode/mentions et lien conservé ; aucun import runtime notifications.                                                                                                                                                   |
-| Composition/parcours               | Exports et schéma App, migration/catalogue, runtime Worker `jose` compatible ; étapes réussies Workflow non répétées à l’échec de finalisation ; OpenAPI/enveloppes/requestId ; navigateur installation/destinations/lien/unlink/reconnect/disconnect. Revue indépendante auth/isolation/credentials et Durable owner selon `AGENTS.md`, gates applicables du dépôt sans en réduire les exigences.                                                                                                                                  |
-| Identité email — finding High      | Amorcer hint frais `e→S1`, changer seulement l’email Slack de S1 et attribuer `e` à S2 sans changer App/fingerprint/génération ; S1 reste actif et son POST accepterait. Avant DM, `users.info(S1)` invalide le hint : aucun POST S1, au plus un lookup courant, seul S2 validé peut recevoir. Couvrir TTL 300000 ms/expiration, email absent, team/bot/deleted, 429/timeout sans POST et sans fallback panne ; retry natif après ancien checkpoint doit recharger User et revalider dans le step d’envoi.                          |
-| Auth indéterminée — finding Medium | Injecter `invalid_auth` sur `users.info`, lookup, DM et `auth.revoke` avec token encore valide depuis IP autorisée : CAS `disconnecting/auth_indeterminate`, chiffré inchangé et lisible avec son AAD, aucun nouvel envoi/refresh/retry autonome ; audit/UI sans claim remote-revoked. Après correction IP, l’admin peut appeler `auth.revoke` avec ce même credential puis l’effacer après confirmation ; réponse tardive ancienne génération sans impact nouvelle. Comparer `token_revoked` prouvé et ses reason/audit distincts. |
 
 ## Préconditions
 
@@ -354,13 +326,9 @@ type ChannelResult =
 
 ## Admission des destinations
 
-| Cible                    | Admission/recheck                                                                                                                                                                                                                                   |
-| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| DM User                  | User IDs serveur après ACL objet à l’émission ; Organization active, membership et Module effectifs ; Inbox toujours créée puis résolution des Channels externes. Adresse après règles.                                                             |
-| Organization destination | Fan-out **indépendant, une fois par émission/cible, même zéro User admissible** ; aucun faux User ou Inbox. Type déclare Slack et `organizationDestinations:true`, destination/sélecteur présents, Organization active et Module disponible/activé. |
-| Plafond Deployment       | Règle la plus spécifique type > catégorie > `*`. Locked-off Slack interdit le collectif ; off non locked est un défaut User, pas veto contre l’opt-in collectif. Locked-on ne crée ni destination/opt-in ni accès Module.                           |
-| Autres rules             | Organization/User rules des Users ne gouvernent pas cette cible collective. Ne pas choisir un auteur/admin/premier User pour lui appliquer ses préférences. Les DM suivent les trois niveaux de règles du contrat notifications.                    |
-| Tentative                | Recharger destination/installation/statut/génération, type/opt-in/Channel, sélecteur, Module et plafond courants. Interdiction observée au dernier recheck → `skipped`. Une transaction D1 n’annule pas un POST déjà accepté.                       |
+| Cible     | Admission/recheck                                                                                                                                                                                                             |
+| --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Tentative | Recharger destination/installation/statut/génération, type/opt-in/Channel, sélecteur, Module et plafond courants. Interdiction observée au dernier recheck → `skipped`. Une transaction D1 n’annule pas un POST déjà accepté. |
 
 ## Manifest
 
@@ -377,31 +345,14 @@ Manifest ESM `{types,import,default}` comme les Packages voisins. Réutiliser `@
 3. Lien séparé : href HTTPS absolu sur origin App allowlistée, sans credentials/query de capability/token ; label catalogue. Réserver `<href|label>`, séparateur et ellipse avant troncature. Ajouter fallback **et** dernière section, même sans autres blocks. Lien trop long pour section3000 → erreur, jamais URL coupée/lien supprimé.
 4. Comptage conservatif en unités UTF-16 **finales échappées**, pas de paire surrogate coupée ou troncature JSON. Retirer un jeton Slack `<…>` terminal incomplet avant ellipse/lien. Ne pas importer la limite RTM 16 KiB dans HTTP.
 
-## Pagination
-
-Destinations persistées : `ListQuery`, limite 1…100/default50, cursor≤512, keyset exact `{createdAt,id}` décroissant après scope org. Canaux : cursor opaque validé contenant installation/génération et cursor Slack ; référence périmée refusée, jamais choix de token. Relayer une page `conversations.list(public_channel,private_channel,exclude_archived:true)`, sans charger toute la liste pour fabriquer un keyset. Une page vide peut avoir un next cursor provider. Paramètre répété →400.
-
-## Sources fournisseur
-
-| Contrat                 | Source primaire                                                                                                                                                                                                                                                                                                                                                                                                   |
-| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| OAuth/OIDC/scopes       | [Sign in with Slack](https://docs.slack.dev/authentication/sign-in-with-slack/), [openid.connect.token](https://docs.slack.dev/reference/methods/openid.connect.token/), [oauth.v2.access](https://docs.slack.dev/reference/methods/oauth.v2.access/), [discovery](https://slack.com/.well-known/openid-configuration).                                                                                           |
-| Validation ID token/TLS | [OIDC Core §3.1.3.7](https://openid.net/specs/openid-connect-core-1_0.html#IDTokenValidation), [§3.1.3.8](https://openid.net/specs/openid-connect-core-1_0.html#CodeFlowTokenValidation).                                                                                                                                                                                                                         |
-| PKCE/révocation         | [PKCE](https://docs.slack.dev/authentication/using-pkce/), [auth.revoke](https://docs.slack.dev/reference/methods/auth.revoke/).                                                                                                                                                                                                                                                                                  |
-| Identité/canaux/envoi   | [users.lookupByEmail](https://docs.slack.dev/reference/methods/users.lookupByEmail/), [users.info et email](https://docs.slack.dev/reference/methods/users.info/), [conversations.list](https://docs.slack.dev/reference/methods/conversations.list/), [chat.postMessage](https://docs.slack.dev/reference/methods/chat.postMessage/), [rate limits](https://docs.slack.dev/apis/web-api/rate-limits/).           |
-| Auth indéterminée       | [Slack IP allowlist et `invalid_auth`](https://docs.slack.dev/concepts/security/#restrict-ip-addresses) : cette réponse peut signaler une IP refusée, sans invalider le token.                                                                                                                                                                                                                                    |
-| Bornes Block Kit        | [Blocks](https://docs.slack.dev/reference/block-kit/blocks/), [Section](https://docs.slack.dev/reference/block-kit/blocks/section-block/), [Header](https://docs.slack.dev/reference/block-kit/blocks/header-block/), [Context](https://docs.slack.dev/reference/block-kit/blocks/context-block/), [Text object](https://docs.slack.dev/reference/block-kit/composition-objects/text-object/).                    |
-| Sécurité/runtime        | [Cloudflare WebCrypto](https://developers.cloudflare.com/workers/runtime-apis/web-crypto/), [registre jose](https://registry.npmjs.org/jose/latest), [jose](https://github.com/panva/jose), [jwtVerify](https://github.com/panva/jose/blob/v6.2.13/docs/jwt/verify/functions/jwtVerify.md), [RemoteJWKSetOptions](https://github.com/panva/jose/blob/v6.2.13/docs/jwks/remote/interfaces/RemoteJWKSetOptions.md). |
-
 ## Événements d'audit
 
-| Actions                                                                               | Acteur / meta allowlist                                                                                                                                                               |
-| ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `slack.connected`, `slack.disconnect_requested`, `slack.disconnected`                 | User admin réel ; org/installation en colonnes dédiées ; `{generation,reason?}`.                                                                                                      |
-| `slack.revoked`                                                                       | Acteur null ; CAS par génération, uniquement révocation fournisseur prouvée, une émission ; `{generation,reason,statusReason}`, jamais nouvelle connexion visée par ancienne réponse. |
-| `slack.auth_disabled`                                                                 | Acteur null ; suspension locale sur `invalid_auth`, inactivité ou expiration, CAS/audit une fois ; `{generation,reason,statusReason}`. Jamais synonyme de révocation distante.        |
-| `slack.destination_created`, `slack.destination_updated`, `slack.destination_deleted` | User admin réel ; destination en target ; `{installationId,slackChannelId,selectorKind,selectorValue?}`.                                                                              |
-| `slack.user_linked`, `slack.user_unlinked`                                            | User session/subject ; installation en target ; `{installationId,subjectUserId,method}`. Un cache email n’est pas un consentement explicite fictif.                                   |
+| Actions                                                               | Acteur / meta allowlist                                                                                                                                                               |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `slack.connected`, `slack.disconnect_requested`, `slack.disconnected` | User admin réel ; org/installation en colonnes dédiées ; `{generation,reason?}`.                                                                                                      |
+| `slack.revoked`                                                       | Acteur null ; CAS par génération, uniquement révocation fournisseur prouvée, une émission ; `{generation,reason,statusReason}`, jamais nouvelle connexion visée par ancienne réponse. |
+| `slack.auth_disabled`                                                 | Acteur null ; suspension locale sur `invalid_auth`, inactivité ou expiration, CAS/audit une fois ; `{generation,reason,statusReason}`. Jamais synonyme de révocation distante.        |
+| `slack.user_linked`, `slack.user_unlinked`                            | User session/subject ; installation en target ; `{installationId,subjectUserId,method}`. Un cache email n’est pas un consentement explicite fictif.                                   |
 
 ## Coffre AES-GCM
 

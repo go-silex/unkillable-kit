@@ -54,9 +54,7 @@ Cette ADR ne modifie pas ADR-0018 : elle applique D1–D4 à une nouvelle exécu
 
 Le déplacement de la Delivery vers Workflows laisse un seul consumer Queues réel : le demo. Le Kit ne conserve donc pas artificiellement l’extraction `@kit/jobs` envisagée dans [Roxabi/roxabi-boilerplate-cf#471](https://github.com/Roxabi/roxabi-boilerplate-cf/issues/471). Aucun Package vide, helper générique, enveloppe générique ou type de disposition partagé n’est créé pour soutenir cet ancien découpage.
 
-J1 devient l’alignement du demo : retries bornés et DLQ explicitement configurés dans ses deux consumers existants, docblock/runbook cohérents, boucle App par message. Ce changement de déploiement reste soumis à la revue indépendante. Il ne crée pas d’environnement staging et ne transforme pas l’Example App en point de départ à copier.
-
-Demo configuration: [non-normative design note](../design-notes/0020-delivery.md#demo-configuration).
+J1 devient l’alignement du demo : retries bornés et DLQ explicitement configurés dans ses deux consumers existants, docblock/runbook cohérents, boucle App par message. Configuration : `max_retries = 5`, `retry_delay = 60`, batch 10 et timeout 5 inchangés; DLQ `example-api-demo-dlq` en local simulé et `boilerplate-api-demo-dlq` en showcase. Ce changement de déploiement reste soumis à la revue indépendante. Il ne crée pas d’environnement staging et ne transforme pas l’Example App en point de départ à copier.
 
 Le demo conserve son contrat HTTP, son format propre et ses comportements utiles; aucune migration vers une enveloppe `@kit/jobs` n’est nécessaire. Les inconnus permanents peuvent être acquittés avec log de rejet; les tentatives réellement interrompues demandent le retry natif. `ack()` et `retry()` sont les opérations CF; aucune API native `fail()` ou « dead-letter immédiat » n’est inventée. Le budget épuisé déclenche le transfert natif vers la DLQ, sans forwarding automatique de celle-ci vers sa source.
 
@@ -199,6 +197,8 @@ type ChannelResult =
 | Erreur inconnue de DB, rendu, transport ou runtime capturable | La tentative n’a pas pu continuer; erreur retryable normalisée avec code `delivery_attempt_interrupted`, sans hint inventé. Ne pas deviner la permanence depuis `Error.name`, un message de provider ou une erreur HTTP générique. |
 
 Slack adapter parsing: [non-normative design note](../design-notes/0020-delivery.md#retry-after).
+
+Le Workflow applique le budget local.
 
 La classification précède le throw. L’erreur interne utilise seulement les champs standards persistables : `name='NotificationDeliveryRetryable'`, `message=JSON.stringify({code, retryAfterSeconds?})`. Le schéma JSON privé est strict, non secret, avec code non vide et hint fini non négatif ≤86 400.
 
