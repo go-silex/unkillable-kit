@@ -27,3 +27,7 @@ Run at the clone root, with a clean tree, no merge in progress, and a single ind
 A failed `gh` lookup leaves the rewritten remotes in place. Ensure the Product repository exists and authentication can resolve it; run `gh repo set-default origin` and verify `gh repo set-default --view` equals the Product identity. The generator does not resume that partial state: finish the remaining setup manually or start again in a fresh clone. A failure after the first commit preserves that commit and the working tree for fix-forward; hook, Dependabot, zero-edit and validation failures are not bypassed. Do not reset or clean away partial work as a recovery instruction.
 
 After successful validation, the operator pushes `main`, configures the CI App, runs `issue-triage init --dry-run` and checks its target and relabel count before any write, chooses Product license terms, and performs Cloudflare configuration and cutover. Details and safeguards remain in the [operator checklist](./start-product.md#day-0-checklist).
+
+## Generator proof
+
+Kit maintainers can run `bash scripts/kit/smoke-create-product.sh` from a committed Kit checkout to exercise fresh-clone Product combinations and generated-output dogfood. Pass `--real-origin <owner>/<repo>` for the authenticated, read-only GitHub default-repository proof against an existing repository. The default fictitious origin skips that proof and does not configure a `gh` default. This outer smoke is separate from `validate:full` because each generated Product runs that gate.

@@ -3,6 +3,7 @@
 #
 # Usage:
 #   bash scripts/kit/dogfood-zero-edit.sh /path/to/product-repo
+#   bash scripts/kit/dogfood-zero-edit.sh --generated-product /path/to/product-repo
 #   bash scripts/kit/dogfood-zero-edit.sh --self-sim
 #
 # Exit 0 only if:
@@ -1354,9 +1355,15 @@ if [[ "$MODE" == "--self-sim" ]]; then
   exit 0
 fi
 
-PRODUCT="${1:-}"
+if [[ "$MODE" == "--generated-product" ]]; then
+  [[ $# -eq 2 ]] || { echo "Usage: $0 --generated-product /path/to/product-repo" >&2; exit 2; }
+  PRODUCT="$2"
+  [[ -f "$PRODUCT/config/product/inheritance.json" ]] || { echo "FAIL: generated Product lacks inheritance marker" >&2; exit 1; }
+else
+  PRODUCT="${1:-}"
+fi
 if [[ -z "$PRODUCT" || ! -d "$PRODUCT/.git" ]]; then
-  echo "Usage: $0 /path/to/product-repo | --self-sim" >&2
+  echo "Usage: $0 /path/to/product-repo | --generated-product /path/to/product-repo | --self-sim" >&2
   exit 2
 fi
 
