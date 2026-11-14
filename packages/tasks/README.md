@@ -1,6 +1,7 @@
 # @kit/tasks
 
-Work item contracts, visibility and persistence; it does not own application authentication and product-specific workflows.
+Incubating work item contracts, visibility and persistence; it does not own application authentication or product workflows.
+See [ADR-0007](../../docs/kit/architecture/adr/0007-tasks-comments-kernel.md).
 
 ## Entry points
 

@@ -12,7 +12,7 @@ Reusable React components and styling; it does not own application-specific scre
 
 - Kit dependencies: none.
 - Known consumers: `packages/auth`, `apps/example-web`.
-- Caller rules: [architecture decision](../../docs/kit/architecture/adr/0001-primary-axis-packages-compose-apps.md).
+- Caller rules: [UI kit contract](../../docs/kit/ui-kit.md).
 
 ## Development
 

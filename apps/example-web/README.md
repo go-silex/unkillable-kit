@@ -17,11 +17,13 @@ See [start a product](../../docs/kit/playbooks/start-product.md#architecture-def
 
 ## Local development
 
+- Configure the API's `.dev.vars` first: see [local onboarding](../../README.md#local-onboarding).
+- Run `@kit/example-api` on port 8787 for the development proxy; root `bun run dev` starts both apps.
 - Start: `bun run --filter @kit/example-web dev`.
 - Test: `bun run --filter @kit/example-web test`
 - Typecheck: `bun run --filter @kit/example-web typecheck`
 
 ## Where to add
 
-- Routes: `src/routes/`.
+- Routes: `src/routes/`; mount them in `src/routeTree.tsx`.
 - Tests: `src/test/` and colocated tests in `src/`.

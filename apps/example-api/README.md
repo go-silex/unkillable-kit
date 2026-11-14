@@ -19,6 +19,7 @@ See [start a product](../../docs/kit/playbooks/start-product.md#architecture-def
 
 ## Local development
 
+- Configure `.dev.vars` first: see [local onboarding](../../README.md#local-onboarding).
 - Prepare local data: `bun run --filter @kit/example-api db:migrate`, then `bun run --filter @kit/example-api db:seed`.
 - Start: `bun run --filter @kit/example-api dev`.
 - Test: `bun run --filter @kit/example-api test`
@@ -26,5 +27,5 @@ See [start a product](../../docs/kit/playbooks/start-product.md#architecture-def
 
 ## Where to add
 
-- Routes: `src/routes/`.
+- Routes: `src/routes/`; mount them in `src/app.ts`.
 - Tests: `src/test/` and colocated tests in `src/`.

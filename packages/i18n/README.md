@@ -11,7 +11,7 @@ Locale engine and React adapter; it does not own application message catalogs.
 
 - Kit dependencies: none.
 - Known consumers: `apps/example-api`, `apps/example-web`.
-- Caller rules: [architecture decision](../../docs/kit/architecture/adr/0001-primary-axis-packages-compose-apps.md).
+- Caller rules: [i18n standard](../../docs/kit/standards/stack.md#g-i18n-multilang).
 
 ## Development
 

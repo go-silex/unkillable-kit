@@ -1,6 +1,6 @@
 # @kit/flows
 
-Governed plan and run primitives; it does not own application workflow wiring.
+Incubating governed plan and run primitives; it does not own application workflow wiring. See [ADR-0005](../../docs/kit/architecture/adr/0005-flows-platform-agentic-workflows.md).
 
 ## Entry points
 

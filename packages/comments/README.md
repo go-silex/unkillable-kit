@@ -1,6 +1,7 @@
 # @kit/comments
 
-Multi-target comment contracts and persistence; it does not own product entity wiring.
+Incubating multi-target comment contracts and persistence; it does not own product entity wiring.
+See [ADR-0007](../../docs/kit/architecture/adr/0007-tasks-comments-kernel.md).
 
 ## Entry points
 

@@ -10,7 +10,8 @@ Shared audience, list and error contracts; it does not own product-specific doma
 
 - Kit dependencies: none.
 - Known consumers: `packages/core`, `packages/comments`, `packages/tasks`, `packages/notifications`, `packages/api-client`, `apps/example-api`, `apps/example-web`.
-- Caller rules: [architecture decision](../../docs/kit/architecture/adr/0003-multi-tenant-rbac-modules.md).
+- Caller rules: [audience](../../docs/kit/architecture/adr/0007-tasks-comments-kernel.md)
+  and [list contracts](../../docs/kit/architecture/adr/0010-list-page-cursor-envelope.md).
 
 ## Development
 
