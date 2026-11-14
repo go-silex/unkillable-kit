@@ -1,6 +1,7 @@
 import { and, desc, eq } from 'drizzle-orm'
 import { apiKeys } from '../tenancy-schema'
 import type { KitRepoDb } from './db-type'
+import { findMembership, findOrgById } from './orgs'
 
 type Db = KitRepoDb
 
@@ -38,6 +39,23 @@ export async function insertApiKey(
 export async function findApiKeyByPrefix(db: Db, keyPrefix: string) {
   const rows = await db.select().from(apiKeys).where(eq(apiKeys.keyPrefix, keyPrefix)).all()
   return rows[0] ?? null
+}
+
+/** Reject unbound keys and re-check active organization membership on every use (ADR-0003 D11). */
+export async function findActiveOrgApiKeyByPrefix(db: Db, prefix: string) {
+  const row = await findApiKeyByPrefix(db, prefix)
+  if (!row?.organizationId) return null
+  const org = await findOrgById(db, row.organizationId)
+  if (org?.status !== 'active') return null
+  if (!(await findMembership(db, row.organizationId, row.subject))) return null
+  return {
+    subject: row.subject,
+    keyHash: row.keyHash,
+    revokedAt: row.revokedAt ?? null,
+    expiresAt: row.expiresAt ?? null,
+    scopes: row.scopes,
+    organizationId: row.organizationId,
+  }
 }
 
 const apiKeyPublicColumns = {

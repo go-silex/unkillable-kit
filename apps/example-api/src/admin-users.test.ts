@@ -1,8 +1,9 @@
 import { baMember, baUser } from '@kit/auth/schema'
 import { encodeListCursor, MAX_REPRESENTABLE_EPOCH_MS, MIN_REPRESENTABLE_EPOCH_MS } from '@kit/core'
 import { eq } from 'drizzle-orm'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { userPlatformRoles } from './db/schema'
+import { emailConfig } from './lib/email-config'
 import { TENANCY_PASSWORD } from './seed/tenancy-data'
 import { createSeededDemoApi, loginCookie, sessionHeaders } from './test/api-fixture'
 import {
@@ -27,6 +28,34 @@ async function seedEnv() {
 }
 
 describe('admin users (B-users go-silex/silex-boilerplate#58)', () => {
+  it('uses recipient locale and product branding for welcome emails', async () => {
+    const { app, env } = await seedEnv()
+    const mail = captureMail()
+    const locale = vi
+      .spyOn(emailConfig, 'resolveRecipientLocale')
+      .mockImplementation((email) => (email === 'english@kit.local' ? 'en' : null))
+    onTestFinished(() => locale.mockRestore())
+    const cookie = await loginCookie(app, env, 'super@kit.local', TENANCY_PASSWORD, ORIGIN)
+    for (const email of ['french@kit.local', 'english@kit.local']) {
+      const response = await app.request(
+        '/api/admin/users',
+        {
+          method: 'POST',
+          headers: sessionHeaders(cookie, undefined, ORIGIN),
+          body: JSON.stringify({ email, name: 'Example' }),
+        },
+        env,
+      )
+      expect(response.status).toBe(201)
+    }
+    expect(mail.message('french@kit.local').subject).toBe(
+      'Bienvenue — créez votre mot de passe — Kit Kit',
+    )
+    expect(mail.message('french@kit.local').text).toContain('Un compte a été créé')
+    expect(mail.message('english@kit.local').subject).toBe('Welcome — set your password — Kit Kit')
+    expect(mail.message('english@kit.local').text).toContain('An account was created')
+  })
+
   it('SC1: super_admin creates user + memberships; no password in body', async () => {
     const { app, env, db } = await seedEnv()
     const cookie = await loginCookie(app, env, 'super@kit.local', TENANCY_PASSWORD, ORIGIN)

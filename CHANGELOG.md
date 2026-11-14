@@ -6,6 +6,10 @@
 
 - Provide `bun run kit-upgrade` for the documented product-clone merge procedure, with a read-only `--check` mode and a hermetic regression test.
 
+### Minimal starter Apps
+
+- Add minimal API and web starter Apps organized by business module, with shared request policy and a neutral Organization-scoped sample.
+
 ### Product agent entry point
 
 - Route agents in product clones to `docs/product/AGENTS.md`.
@@ -14,6 +18,10 @@
 ### Biome D1 safety
 
 - Keep `noPlaywrightUselessAwait` diagnostics while disabling its automatic fix: Biome 2.6.7 misidentifies D1 `first()` calls as Playwright locators and otherwise removes required awaits. Restore the fix when upstream distinguishes those calls and the real D1 staged-file proof passes.
+
+### Transactional email locale and Product name
+
+- **Consumer-visible API change:** authentication email templates now require an explicit `locale` and `productName`. Migrate template callers to pass both. When supplying `emailPort` to `createBetterAuth`, also supply `emailConfig: { productName, fallbackLocale, resolveRecipientLocale }`; the App resolves each recipient's locale and chooses the fallback.
 
 ### TanStack Table v9
 
@@ -28,6 +36,10 @@
 ### Bun runtime
 
 - Upgrade the root Bun pin to 1.4.4. Before this change reaches the Kit deploy branch, update `BUN_VERSION` on each showcase Workers Builds and Pages project as described in [the deploy runbook](docs/kit/deploy-cloudflare.md#4b-bun-and-node-versions).
+
+### Schema sync default
+
+- Fresh Product schema sync selects `core,audit`, including `rate_limit_buckets` for the Kit throttle. First `--adopt` without `--modules` also selects `audit`. Existing recorded selections remain unchanged: to opt in, pass `--modules core,audit` plus every other recorded set.
 
 ### Wrangler runtime types
 
@@ -55,6 +67,10 @@
 - Restore successful manual operation when the CI App and authorization policy are absent: skip evaluation, token minting and automated receipt writes. With a complete valid policy but no App, retain read-only evaluation for manual merging.
 - Default-ref automation rejects partial or malformed supplied policy, including when the App is disabled. Active setup errors remain failures, and active exact-head receipt checks and token scopes are unchanged.
 - Return before loading the adapter on unprivileged `pull_request` events so consumers can inherit from a default branch that predates it; no new adapter export or fallback is required.
+
+### Agent constitution
+
+- Keep the direction and grant/approval invariants concise while retaining their detailed mechanics in the platform direction and flows references inherited by Product repositories.
 
 ### Zod Worker entry initialization
 

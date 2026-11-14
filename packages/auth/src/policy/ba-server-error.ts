@@ -1,5 +1,4 @@
-import { AppError, toApiErrorBody } from '@kit/core'
-import { ErrorCode } from '@kit/types'
+import { AppError, ErrorCode, toApiErrorBody } from '@kit/core'
 
 /**
  * Replace a Better Auth 5xx body with a kit envelope.
