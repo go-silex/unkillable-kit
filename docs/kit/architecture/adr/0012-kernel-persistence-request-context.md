@@ -3,7 +3,7 @@ title: 'ADR-0012 — Kernel persistence + request-context stratum'
 status: accepted
 normative: true
 date: 2026-08-24
-amended: 2026-09-29
+amended: 2026-11-14
 axial: false
 related:
   - docs/kit/architecture/adr/0001-primary-axis-packages-compose-apps.md
@@ -94,6 +94,8 @@ No Worker middleware on the SPA graph. App keeps a thin Env / wrangler apply pat
 `@kit/flows/run` exports the existing `drive` / `persist` / `invoke-step` / `infer-step` / `ports`. The App keeps `WorkflowEntrypoint` and Wrangler `[[workflows]]`; persistence uses kit flow tables. Execution is **snapshot-only** (`parseRunnerView`; never reread live `flow_plans`). Infer binding is outside this decision. The runtime remains **incubating** until a second call site.
 
 ### D6 — Catalog is SSoT for `core`
+
+**Amendment (2026-11-14):** Fresh Products now default to `core,audit`; existing manifests retain their recorded selections. See [ADR-0008 D4](./0008-kit-schema-identity-product-compose.md#d4--sync-is-append-only) for the current rule.
 
 `--modules core` is **whatever catalog `set: core` lists**. Omitted `--modules` selects `core` plus the product manifest's recorded sets; an explicit omission of a recorded set with unapplied IDs fails closed. Published module IDs and hashes, not dogfood journal numbers, define identity.
 

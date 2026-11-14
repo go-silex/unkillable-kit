@@ -4,10 +4,10 @@
 # Never rewrite applied SQL; never copy kit NNNN onto a product NNNN.
 #
 # usage: kit-schema-sync.sh --app <apps/foo-api> [--modules core|all|<comma-sets>] [--adopt] [--dry-run]
-# Omitted --modules = core ∪ `sets` recorded in the product manifest.
-# `sets` is written by explicit --modules and --adopt, and migrated once from
-# recorded ids plus canonical headers when absent. Opt out by deleting a set
-# from `sets`. An explicit list that omits a recorded set with new catalog ids
+# Omitted --modules selects core,audit for a new manifest; existing manifests
+# retain core ∪ recorded sets. `sets` is written on first sync, explicit selection
+# and --adopt, and migrated once from recorded ids and canonical headers when
+# absent. Opt out by deleting a set from `sets`. An explicit list that omits a recorded set with new catalog ids
 # exits 1 and names those ids. --adopt names unclaimed files of an unselected set.
 set -euo pipefail
 shopt -s nullglob
@@ -502,6 +502,12 @@ if [[ "${MODULES_EXPLICIT}" -eq 1 || "${ADOPT}" -eq 1 ]]; then
 fi
 
 if [[ "${MODULES_EXPLICIT}" -eq 0 ]]; then
+  if [[ "${MANIFEST_EXISTS}" -eq 0 ]]; then
+    [[ -n "${VALID_SET[audit]+x}" ]] || die "catalog has no audit set"
+    WANT_SET["audit"]=1
+    remember_set "core"
+    remember_set "audit"
+  fi
   WANT_SET["core"]=1
   if [[ ${#PERSISTED_SETS[@]} -gt 0 ]]; then
     for s in "${!PERSISTED_SETS[@]}"; do
