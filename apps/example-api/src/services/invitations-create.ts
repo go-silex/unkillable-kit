@@ -5,6 +5,7 @@ import { AppError } from '@kit/core'
 import { buildInviteEmailText, buildWelcomeSetPasswordEmailText, type EmailPort } from '@kit/email'
 import type { DrizzleD1Database } from 'drizzle-orm/d1'
 import type { schema } from '../db/schema'
+import { emailTemplateOptions } from '../lib/email-config'
 import * as usersRepo from '../repos/users'
 import * as orgRolesService from './org-roles'
 
@@ -61,9 +62,9 @@ export async function sendInvitationMail(args: {
   if (args.welcomeToken && args.provisionedUserId) {
     const setPasswordUrl = `${args.base}/reset-password?token=${encodeURIComponent(args.welcomeToken)}&next=${encodeURIComponent(`/invite/accept?invitationId=${args.invitationId}`)}`
     const tmpl = buildWelcomeSetPasswordEmailText({
+      ...(await emailTemplateOptions(args.email)),
       to: args.email,
       setPasswordUrl,
-      expiresHint: 'about 1 hour',
       allowedOrigins: args.allowedOrigins,
     })
     const sent = await args.port.send({
@@ -76,6 +77,7 @@ export async function sendInvitationMail(args: {
     return
   }
   const tmpl = buildInviteEmailText({
+    ...(await emailTemplateOptions(args.email)),
     to: args.email,
     orgName: args.orgName,
     acceptUrl: args.acceptUrl,

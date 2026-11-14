@@ -4,6 +4,7 @@ import { AppError } from '@kit/core'
 import { buildWelcomeSetPasswordEmailText } from '@kit/email'
 import type { DrizzleD1Database } from 'drizzle-orm/d1'
 import type { schema } from '../db/schema'
+import { emailTemplateOptions } from '../lib/email-config'
 import * as usersRepo from '../repos/users'
 import type { CreateAdminUserInput } from './admin-users'
 import * as orgRolesService from './org-roles'
@@ -111,9 +112,9 @@ export async function sendWelcomeOrCompensate(
   }
   try {
     const tmpl = buildWelcomeSetPasswordEmailText({
+      ...(await emailTemplateOptions(args.email)),
       to: args.email,
       setPasswordUrl,
-      expiresHint: 'about 1 hour',
       name: args.name,
       allowedOrigins: input.allowedOrigins,
     })

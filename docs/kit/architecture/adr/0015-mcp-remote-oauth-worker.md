@@ -19,6 +19,7 @@ related:
   - docs/kit/architecture/adr/0003-multi-tenant-rbac-modules.md
   - docs/kit/standards/stack.md
   - docs/kit/testing.md
+summary: 'Hosted Streamable HTTP + Worker-issued MCP OAuth token'
 ---
 
 # ADR-0015 — Remote MCP uses Streamable HTTP + Worker-issued OAuth tokens

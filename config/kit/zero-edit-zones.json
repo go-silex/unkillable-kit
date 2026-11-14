@@ -5,6 +5,8 @@
     "packages/",
     "apps/example-api/",
     "apps/example-web/",
+    "apps/starter-api/",
+    "apps/starter-web/",
     "apps/mcp-example/",
     "config/kit/",
     "scripts/kit/",

@@ -9,6 +9,7 @@ related:
   - docs/kit/architecture/adr/0009-kit-namespace-polarity-inheritance-marker.md
   - docs/kit/product-consumer-contract.md
   - config/kit/zero-edit-zones.json
+summary: 'Fold tools into `scripts/kit` and `config/kit`'
 ---
 
 # ADR-0011 — Fold `tools/` into `scripts/kit` + `config/kit`

@@ -17,6 +17,7 @@ related:
   - docs/kit/architecture/adr/0018-durable-execution-ownership.md
   - 'Roxabi/roxabi-boilerplate-cf#469'
   - 'Roxabi/roxabi-boilerplate-cf#470'
+summary: 'Notifications: rules, Inbox, persistence and producer contracts'
 ---
 
 # ADR-0019 — Notifications: rules, Inbox and external Delivery

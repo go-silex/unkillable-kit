@@ -14,6 +14,7 @@ supersedes_notes: >
   product family; the product-app example is `apps/<product>-*` and the Test
   forbids a product package under `packages/*`. Wording only; the decision and
   the primary axis are unchanged.
+summary: 'Platform packages compose deployable apps'
 ---
 
 # ADR-0001 — Primary axis: platform packages compose deployable apps (Chemin A kit)

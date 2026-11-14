@@ -1,5 +1,5 @@
+import { isPasswordSignInPath, normalizePasswordSignInResponse } from '@kit/auth/hono'
 import { describe, expect, it } from 'vitest'
-import { isPasswordSignInPath, normalizePasswordSignInResponse } from './sign-in-anti-enum'
 
 function req(path: string, method = 'POST') {
   return new Request(`http://localhost${path}`, { method })

@@ -6,6 +6,10 @@
 
 - Provide `bun run kit-upgrade` for the documented product-clone merge procedure, with a read-only `--check` mode and a hermetic regression test.
 
+### Minimal starter Apps
+
+- Add minimal API and web starter Apps organized by business module, with shared request policy and a neutral Organization-scoped sample.
+
 ### Product agent entry point
 
 - Route agents in product clones to `docs/product/AGENTS.md`.
@@ -14,6 +18,10 @@
 ### Biome D1 safety
 
 - Keep `noPlaywrightUselessAwait` diagnostics while disabling its automatic fix: Biome 2.6.7 misidentifies D1 `first()` calls as Playwright locators and otherwise removes required awaits. Restore the fix when upstream distinguishes those calls and the real D1 staged-file proof passes.
+
+### Transactional email locale and Product name
+
+- **Consumer-visible API change:** authentication email templates now require an explicit `locale` and `productName`. Migrate template callers to pass both. When supplying `emailPort` to `createBetterAuth`, also supply `emailConfig: { productName, fallbackLocale, resolveRecipientLocale }`; the App resolves each recipient's locale and chooses the fallback.
 
 ### TanStack Table v9
 
@@ -25,9 +33,17 @@
 
 - Upgrade the root Bun pin to 1.4.4. Before this change reaches the Kit deploy branch, update `BUN_VERSION` on each showcase Workers Builds and Pages project as described in [the deploy runbook](docs/kit/deploy-cloudflare.md#4b-bun-and-node-versions).
 
+### Schema sync default
+
+- Fresh Product schema sync selects `core,audit`, including `rate_limit_buckets` for the Kit throttle. First `--adopt` without `--modules` also selects `audit`. Existing recorded selections remain unchanged: to opt in, pass `--modules core,audit` plus every other recorded set.
+
 ### Wrangler runtime types
 
 - Upgrade the example Workers to Wrangler 4.159.0 and regenerate their committed runtime declarations.
+
+### ADR index generation
+
+- Generate the decision index from ADR summaries and authority metadata; check it for drift during documentation validation.
 
 ### Flow run persistence
 
@@ -50,11 +66,19 @@
 - Distinguish private and already-public Products: a public consumer may publish a transition only after the Kit exposure checkpoint, without introducing private-only Kit ancestry.
 - Carry the Kit's MIT notice with all inherited Kit material in the protected `docs/kit/licenses/MIT.txt`, a byte-identical copy of the root `LICENSE`, and remove the root `package.json` license field so no protected root file declares a Product's terms. A Product's root `LICENSE` stays Product-owned and unprotected: the independent-history join and every later upgrade merge restore its pre-merge presence and bytes before committing, even when they match the Kit's notice, and a change of Product terms is the Product's own reviewed commit. The Kit notices state only the Kit's terms.
 
+### Worktree setup lockfile
+
+- Check committed lockfile normalization offline in the lock-integrity gate, and fail worktree setup if its install changes `bun.lock`.
+
 ### Inactive CI App workflows
 
 - Restore successful manual operation when the CI App and authorization policy are absent: skip evaluation, token minting and automated receipt writes. With a complete valid policy but no App, retain read-only evaluation for manual merging.
 - Default-ref automation rejects partial or malformed supplied policy, including when the App is disabled. Active setup errors remain failures, and active exact-head receipt checks and token scopes are unchanged.
 - Return before loading the adapter on unprivileged `pull_request` events so consumers can inherit from a default branch that predates it; no new adapter export or fallback is required.
+
+### Agent constitution
+
+- Keep the direction and grant/approval invariants concise while retaining their detailed mechanics in the platform direction and flows references inherited by Product repositories.
 
 ### Zod Worker entry initialization
 

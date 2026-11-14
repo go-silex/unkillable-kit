@@ -17,6 +17,7 @@ supersedes_notes: >
   organization route, denied by path prefix; D8 SPA row no longer relies on the
   Better Auth active organization, whose set-active route that deny covers —
   Roxabi/roxabi-boilerplate-cf#394.
+summary: 'Organization tenancy, platform RBAC and dual-level modules'
 ---
 
 # ADR-0003 — Multi-tenant organization, platform RBAC, dual-level modules

@@ -21,6 +21,7 @@ related:
   - 'Roxabi/roxabi-boilerplate-cf#484'
   - 'Roxabi/roxabi-boilerplate-cf#461'
   - 'Roxabi/roxabi-boilerplate-cf#462'
+summary: 'Slack installations, User links and notification Channel'
 ---
 
 # ADR-0021 — Installations Slack et Channel de notifications

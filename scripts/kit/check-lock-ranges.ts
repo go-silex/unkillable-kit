@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { spawnSync } from 'node:child_process'
 /**
  * check-lock-ranges — workspace ranges vs the versions bun.lock actually resolved.
  * No network. Tree root: this repo. LOCK_RANGES_ROOT overrides it for the
@@ -6,6 +7,9 @@
  * --config=config/kit/bunfig.gates.toml`, so neither a tree `.env` nor a tree
  * `bunfig.toml` (`preload`, `define`) can set the override. That launch is the
  * guarantee: running this file with a bare `bun` gives no such protection.
+ * Normalization checks committed HEAD inputs, or the staged tree during an
+ * open merge. Unstaged and untracked files are outside that snapshot.
+ * Offline verification may require the local Bun cache.
  * A lock without the root workspace `""`, or a scan that checks no range, fails.
  *
  * Scope: every `workspaces` entry in bun.lock, root `""` included. For each of
@@ -41,8 +45,9 @@
  * Bun.semver.satisfies returns true for non-ranges, which would hide the defect.
  * Its repair is a spec rewrite, which `bun update` cannot do.
  */
-import { existsSync, readFileSync, realpathSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { basename, join, resolve } from 'node:path'
 
 const SECTIONS = ['dependencies', 'devDependencies', 'optionalDependencies'] as const
 
@@ -331,9 +336,69 @@ function treeRoot(): string {
   }
 }
 
+function candidateTree(root: string): string {
+  const merge = spawnSync('git', ['rev-parse', '--git-path', 'MERGE_HEAD'], { cwd: root })
+  if (merge.status !== 0) fail('cannot determine merge state')
+  if (!existsSync(resolve(root, merge.stdout.toString().trim()))) return 'HEAD'
+  const tree = spawnSync('git', ['write-tree'], { cwd: root })
+  if (tree.status !== 0) fail('cannot verify staged merge tree; resolve conflicts first')
+  return tree.stdout.toString().trim()
+}
+
+function checkNormalization(root: string, tree: string): void {
+  const list = spawnSync('git', ['ls-tree', '-r', '-z', '--name-only', tree], { cwd: root })
+  if (list.status !== 0) fail('cannot list candidate lock inputs')
+  const paths = list.stdout
+    .toString()
+    .split('\0')
+    .filter(
+      (path) =>
+        path === 'bun.lock' ||
+        path === 'bunfig.toml' ||
+        basename(path) === 'package.json' ||
+        path.startsWith('config/kit/patches/'),
+    )
+  if (!(paths.includes('bun.lock') && paths.includes('package.json')))
+    fail('candidate lock inputs are missing')
+  const dir = mkdtempSync(join(tmpdir(), 'lock-normalization-'))
+  try {
+    const archive = spawnSync('git', ['archive', tree, '--', ...paths], {
+      cwd: root,
+      maxBuffer: 64 * 1024 * 1024,
+    })
+    if (archive.status !== 0) throw new Error('cannot archive candidate lock inputs')
+    const extract = spawnSync('tar', ['-xf', '-', '-C', dir], { input: archive.stdout })
+    if (extract.status !== 0) throw new Error('cannot extract candidate lock inputs')
+    const manifest = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'))
+    if (manifest.packageManager !== `bun@${Bun.version}`)
+      throw new Error('cannot verify lock normalization without the pinned Bun version')
+    const before = readFileSync(join(dir, 'bun.lock'))
+    const install = spawnSync(
+      process.execPath,
+      ['install', '--lockfile-only', '--offline', '--ignore-scripts', '--minimum-release-age', '0'],
+      { cwd: dir },
+    )
+    if (install.status !== 0)
+      throw new Error('cannot verify lock normalization offline; warm the Bun cache and retry')
+    if (!before.equals(readFileSync(join(dir, 'bun.lock'))))
+      throw new Error('candidate bun.lock changes on install; regenerate and stage or commit it')
+  } catch (error) {
+    rmSync(dir, { recursive: true, force: true })
+    fail(error instanceof Error ? error.message : String(error))
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+}
+
 function main(): void {
   const root = treeRoot()
-  const lock = parseLock(readLock(root))
+  const tree = process.env.LOCK_RANGES_ROOT === undefined ? candidateTree(root) : undefined
+  const stagedLock =
+    tree && tree !== 'HEAD'
+      ? spawnSync('git', ['show', `${tree}:bun.lock`], { cwd: root })
+      : undefined
+  if (stagedLock && stagedLock.status !== 0) fail('missing staged merge bun.lock')
+  const lock = parseLock(stagedLock ? stagedLock.stdout.toString() : readLock(root))
   const tally: Tally = { checked: 0, skipped: 0, findings: [] }
   const keys = Object.keys(lock.workspaces).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
   for (const key of keys) {
@@ -345,6 +410,7 @@ function main(): void {
     console.error(`check-lock-ranges: FAIL (${tally.findings.length} finding(s))`)
     process.exit(1)
   }
+  if (tree) checkNormalization(root, tree)
   console.log(
     `check-lock-ranges: OK (${keys.length} workspace(s), ${tally.checked} range(s) checked, ${tally.skipped} skipped)`,
   )
