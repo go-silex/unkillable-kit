@@ -53,12 +53,12 @@ Detailed JTBD, dogfood modes, anti-isomorphism tests and promotion priorities li
 
 ## Kit and product boundaries
 
-| Kit owns                                                                                                             | Product owns                                                                                              |
-| -------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| `packages/*`, `apps/example-*`, `apps/mcp-example`, root configuration, kit scripts/config, CI and kit documentation | New `apps/<product>-*`, product domain, product plans/prompts, product configuration and `docs/product/*` |
-| Generic capability contracts promoted by two call sites or an accepted ADR                                           | Product-specific schemas, routes, copy, branding and deployment bindings                                  |
+| Kit owns                                                                                                          | Product owns                                                                                              |
+| ----------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `packages/*`, `apps/{example,starter}-*`, `apps/mcp-example`, root configuration, kit scripts/config, CI and docs | New `apps/<product>-*`, product domain, product plans/prompts, product configuration and `docs/product/*` |
+| Generic capability contracts promoted by two call sites or an accepted ADR                                        | Product-specific schemas, routes, copy, branding and deployment bindings                                  |
 
-Packages never import apps. Product domain never enters `packages/*` or `apps/example-*`. Do not create empty packages for anticipated use, ambient connector registries, unauthenticated approval events, shell/exec tools or code mode as kit defaults.
+Packages never import apps. Product domain never enters `packages/*`, `apps/example-*` or `apps/starter-*`. Do not create empty packages for anticipated use, ambient connector registries, unauthenticated approval events, shell/exec tools or code mode as kit defaults.
 
 ## Consumer contract summary
 

@@ -6,6 +6,10 @@
 
 - Provide `bun run kit-upgrade` for the documented product-clone merge procedure, with a read-only `--check` mode and a hermetic regression test.
 
+### Minimal starter Apps
+
+- Add minimal API and web starter Apps organized by business module, with shared request policy and a neutral Organization-scoped sample.
+
 ### Product agent entry point
 
 - Route agents in product clones to `docs/product/AGENTS.md`.

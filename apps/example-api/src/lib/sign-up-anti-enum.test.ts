@@ -1,5 +1,5 @@
+import { isEmailSignUpPath, normalizeEmailSignUpResponse } from '@kit/auth/hono'
 import { describe, expect, it } from 'vitest'
-import { isEmailSignUpPath, normalizeEmailSignUpResponse } from './sign-up-anti-enum'
 
 function req(path: string, method = 'POST') {
   return new Request(`http://localhost${path}`, { method })
