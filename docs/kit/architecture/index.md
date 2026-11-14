@@ -9,12 +9,15 @@ This index identifies the architectural authority of every decision record. ADR 
 
 ## Authority model
 
-| Family                                             | Authority                                                                       |
-| -------------------------------------------------- | ------------------------------------------------------------------------------- |
-| [`AGENTS.md`](../../../AGENTS.md)                  | Auto-loaded constitution: mission, precedence, invariants and hard agent rules  |
-| Accepted normative ADR                             | Binding current decision within its stated scope                                |
-| [`platform-direction.md`](./platform-direction.md) | Detailed direction under the constitution; not an implementation backlog        |
-| Proposed or non-normative ADR                      | Advisory only; it cannot override the constitution or an accepted normative ADR |
+| Family                                             | Authority                                                                             |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| [`AGENTS.md`](../../../AGENTS.md)                  | Auto-loaded constitution: mission, precedence, invariants and hard agent rules        |
+| Accepted normative ADR                             | Binding current decision within its stated scope                                      |
+| [`platform-direction.md`](./platform-direction.md) | Detailed direction under the constitution; not an implementation backlog              |
+| Proposed or non-normative ADR                      | Advisory only; it cannot override the constitution or an accepted normative ADR       |
+| Design notes                                       | Non-normative until adopted by an accepted ADR amendment when the code is implemented |
+
+Extracted implementation specifications: [ADR-0019](./design-notes/0019-notifications.md), [ADR-0020](./design-notes/0020-delivery.md), [ADR-0021](./design-notes/0021-slack.md).
 
 ## Decision records
 

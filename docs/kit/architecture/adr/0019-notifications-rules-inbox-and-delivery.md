@@ -3,6 +3,7 @@ title: 'ADR-0019 — Notifications: rules, Inbox and external Delivery'
 status: accepted
 normative: true
 date: 2026-10-22
+amended: 2026-11-14
 axial: false
 related:
   - GLOSSARY.md
@@ -21,6 +22,8 @@ related:
 # ADR-0019 — Notifications: rules, Inbox and external Delivery
 
 Accepted on 2026-10-22. The repository contains `packages/notifications`, its schema and repositories, the catalogued `0023_notifications.sql`, and notification routes and services in `example-api`. The App composes `createNotificationService` and wires Task and Flow producers; regression suites for this composition and producers are present. User/email Delivery Workflow admission, reconciliation and execution are implemented; Slack and Organization/email remain uncomposed. These are partial implementation evidence, not proof that every contract below or its integration proofs is delivered. Live or deployed delivery remains unproven; acceptance is not deployment proof.
+
+Amendment 2026-11-14: absent-code specifications linked below are non-normative design notes; the decisions remain binding.
 
 ## Context and decision
 
@@ -510,16 +513,14 @@ Types are catalogue metadata, never source parameters/Zod schema/renderers. `ava
 | DELETE `/api/platform/notification-rules/{ruleId}` | No body                                   | `{ok:true,requestId}`; super_admin                                                 |
 | GET `/api/platform/notification-deliveries`        | `channel?,type?,targetKind?` + page query | `Page<DeliveryMetadata & {orgId:string}>`; **failed only**, super_admin, not staff |
 
-| Method and path                                                      | Request                                           | 200 response / authorization                                                                                       |
-| -------------------------------------------------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| GET `/api/orgs/{orgId}/notification-rules`                           | Page query                                        | `Page<RuleDto>`; manage_notifications                                                                              |
-| PUT `/api/orgs/{orgId}/notification-rules`                           | `{selector,channel,enabled,locked}`               | `{rule:RuleDto,requestId}`; manage_notifications                                                                   |
-| DELETE `/api/orgs/{orgId}/notification-rules/{ruleId}`               | No body                                           | `{ok:true,requestId}`; manage_notifications                                                                        |
-| GET `/api/orgs/{orgId}/notification-deliveries`                      | `status?,channel?,type?,targetKind?` + page query | `Page<DeliveryMetadata>`; manage_notifications                                                                     |
-| GET `/api/orgs/{orgId}/notification-destinations`                    | Page query                                        | `Page<DestinationDto>`; manage_notifications                                                                       |
-| POST `/api/orgs/{orgId}/notification-destinations`                   | `{channel,externalId,selector}`                   | **201** `{destination:DestinationDto,requestId}`; manage_notifications; validate installed address and type opt-in |
-| PUT `/api/orgs/{orgId}/notification-destinations/{destinationId}`    | `{selector}`                                      | `{destination:DestinationDto,requestId}`; address identity immutable                                               |
-| DELETE `/api/orgs/{orgId}/notification-destinations/{destinationId}` | No body                                           | `{ok:true,requestId}`; manage_notifications                                                                        |
+| Method and path                                        | Request                                           | 200 response / authorization                     |
+| ------------------------------------------------------ | ------------------------------------------------- | ------------------------------------------------ |
+| GET `/api/orgs/{orgId}/notification-rules`             | Page query                                        | `Page<RuleDto>`; manage_notifications            |
+| PUT `/api/orgs/{orgId}/notification-rules`             | `{selector,channel,enabled,locked}`               | `{rule:RuleDto,requestId}`; manage_notifications |
+| DELETE `/api/orgs/{orgId}/notification-rules/{ruleId}` | No body                                           | `{ok:true,requestId}`; manage_notifications      |
+| GET `/api/orgs/{orgId}/notification-deliveries`        | `status?,channel?,type?,targetKind?` + page query | `Page<DeliveryMetadata>`; manage_notifications   |
+
+Unimplemented destination routes: [non-normative design note](../design-notes/0019-notifications.md#administration-routes).
 
 Organization admin routes require Organization context + capability; authenticated member/reader receive 403, another Organization receives 404. Inbox/read routes never enable a super_admin bypass. User rules are global subject-owned rows even when the UI previews the current Organization. Installation, Slack channel discovery and User-link routes are specified by ADR-0021; they do not duplicate these generic destination endpoints.
 
