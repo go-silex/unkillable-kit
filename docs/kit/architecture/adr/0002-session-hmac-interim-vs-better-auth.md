@@ -186,7 +186,7 @@ prove a deployment.
 1. Depend on `@kit/auth` + peer `better-auth` (peer required on the Worker that mounts BA).
 2. Apply BA migrations via `kit-schema-sync` with the sets the [Better Auth mount contract](../../product-consumer-contract.md#better-auth-mount) names. Tables: `@kit/auth/schema`.
 3. Set `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, and `CORS_ORIGINS` (required outside `development|test`). Cookie name optional. **No** `AUTH_SESSION_ADAPTER`.
-4. Per-request: `createBetterAuth({ database, secret: getBetterAuthSecret(env), baseURL, emailPort?, … })` from `@kit/auth/factory`. Env helpers from `@kit/auth`. Do **not** copy `example-api/src/lib/better-auth.ts` as the factory (it is only the Env mapping example).
+4. Per-request: `createBetterAuth({ database, secret: getBetterAuthSecret(env), baseURL, emailPort?, emailConfig?, … })` from `@kit/auth/factory`. When supplying `emailPort`, also supply `emailConfig: { productName, fallbackLocale, resolveRecipientLocale }`. Env helpers from `@kit/auth`. Do **not** copy `example-api/src/lib/better-auth.ts` as the factory (it is only the Env mapping example).
 5. `createBetterAuthSessionPort({ getAuth: () => c.get('betterAuth'), cookieName })` into `createRequireAuth`.
 6. Mount Better Auth on `/api/auth/*` per the [Better Auth mount contract](../../product-consumer-contract.md#better-auth-mount).
 7. Keep `findApiKeyByPrefix` for `sk_` dual-path.

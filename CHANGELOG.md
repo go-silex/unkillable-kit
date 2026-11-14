@@ -6,6 +6,10 @@
 
 - Provide `bun run kit-upgrade` for the documented product-clone merge procedure, with a read-only `--check` mode and a hermetic regression test.
 
+### Minimal starter Apps
+
+- Add minimal API and web starter Apps organized by business module, with shared request policy and a neutral Organization-scoped sample.
+
 ### Product agent entry point
 
 - Route agents in product clones to `docs/product/AGENTS.md`.
@@ -14,6 +18,10 @@
 ### Biome D1 safety
 
 - Keep `noPlaywrightUselessAwait` diagnostics while disabling its automatic fix: Biome 2.6.7 misidentifies D1 `first()` calls as Playwright locators and otherwise removes required awaits. Restore the fix when upstream distinguishes those calls and the real D1 staged-file proof passes.
+
+### Transactional email locale and Product name
+
+- **Consumer-visible API change:** authentication email templates now require an explicit `locale` and `productName`. Migrate template callers to pass both. When supplying `emailPort` to `createBetterAuth`, also supply `emailConfig: { productName, fallbackLocale, resolveRecipientLocale }`; the App resolves each recipient's locale and chooses the fallback.
 
 ### TanStack Table v9
 

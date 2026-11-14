@@ -15,6 +15,7 @@ import {
 import { createBetterAuth as createKitBetterAuth, type KitBetterAuth } from '@kit/auth/factory'
 import { betterAuthDrizzleSchema } from '@kit/auth/schema'
 import type { Env } from '../env'
+import { emailConfig } from './email-config'
 import { resolveEmailPort } from './email-port'
 
 export { betterAuthBaseURL } from '@kit/auth'
@@ -38,6 +39,7 @@ export function createBetterAuth(env: Env, baseURL: string): KitBetterAuth {
     emailPort: {
       send: async (input) => resolveEmailPort(env).send(input),
     },
+    emailConfig,
     onFirstSession: async ({ userId }) => {
       const { createDb } = await import('@kit/db')
       const { schema: kitSchema } = await import('../db/schema')

@@ -1,0 +1,13 @@
+name = "starter-api"
+main = "src/index.ts"
+compatibility_date = "2026-07-01"
+compatibility_flags = ["nodejs_compat"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "starter-api-local"
+database_id = "local-starter-api"
+migrations_dir = "migrations"
+
+[vars]
+CORS_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173"

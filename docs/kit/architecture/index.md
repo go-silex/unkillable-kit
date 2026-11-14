@@ -44,6 +44,7 @@ The table is generated from each ADR's `summary` and status; regenerate it with 
 | [ADR-0019](./adr/0019-notifications-rules-inbox-and-delivery.md)       | Notifications: rules, Inbox, persistence and producer contracts             |
 | [ADR-0020](./adr/0020-notification-delivery-ownership.md)              | Stable-ID Workflow ownership for notification Delivery; Queue demo boundary |
 | [ADR-0021](./adr/0021-slack-installations-and-notification-channel.md) | Slack installations, User links and notification Channel                    |
+| [ADR-0022](./adr/0022-minimal-starter-apps.md)                         | Minimal starter Apps and shared request policy                              |
 <!-- ADR-INDEX:END -->
 
 ## Reading an ADR

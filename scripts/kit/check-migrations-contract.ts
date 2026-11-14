@@ -403,8 +403,13 @@ function pinVerdict(file: string, abs: string, ctx: JudgeCtx): JudgeResult | nul
   return { kind: 'judged' }
 }
 
-function kitCopyVerdict(file: string, abs: string, ctx: JudgeCtx): JudgeResult | null {
-  if (ctx.isKitApp(file)) return null
+function kitCopyVerdict(file: string, abs: string, sql: string, ctx: JudgeCtx): JudgeResult | null {
+  // Only the starter's headed copies may reuse the catalog verdict inside a kit app.
+  // Kit source migrations and every other kit app remain independently judged.
+  if (ctx.isKitApp(file)) {
+    if (!/^apps\/starter-api\/migrations\/[^/]+\.sql$/.test(file)) return null
+    if (!sql.startsWith('-- kit-schema: ')) return null
+  }
   const payload = kitSchemaPayloadSha256(abs)
   if (payload !== null && ctx.kitModules.has(payload)) return { kind: 'kit-copy' }
   return null
@@ -447,7 +452,7 @@ function judgeOneMigration(db: DatabaseSync, file: string, ctx: JudgeCtx): Judge
   }
   const pinned = pinVerdict(file, abs, ctx)
   if (pinned) return pinned
-  const kit = kitCopyVerdict(file, abs, ctx)
+  const kit = kitCopyVerdict(file, abs, sql, ctx)
   if (kit) return kit
   noteContractProblems(file, sql, before, db, ctx)
   return { kind: 'judged' }

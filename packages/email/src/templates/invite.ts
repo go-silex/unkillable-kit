@@ -1,9 +1,6 @@
-/**
- * Kit org-invite email (string-rendered). No product-domain copy.
- * Header injection defense for subject/to is at EmailPort boundary (scrubHeaderLine).
- */
 import { escapeHtml } from '../escape-html'
 import { assertSafeTokenHref, type TokenHrefPolicy } from '../safe-token-href'
+import { type EmailTemplateOptions, getTemplateCopy, templateValue } from './copy'
 
 export function InviteEmail(
   props: {
@@ -12,25 +9,22 @@ export function InviteEmail(
     acceptUrl: string
     expiresAt: Date
     inviterLabel?: string
-  } & TokenHrefPolicy,
+  } & TokenHrefPolicy &
+    EmailTemplateOptions,
 ) {
-  const org = props.orgName
-  const safeOrg = escapeHtml(org)
+  const c = getTemplateCopy(props.locale)
+  const product = templateValue(props.productName)
+  const org = templateValue(props.orgName)
+  const inviter = props.inviterLabel ? templateValue(props.inviterLabel) : ''
   const href = assertSafeTokenHref(props.acceptUrl, props)
-  const safeUrl = escapeHtml(href)
   const exp = props.expiresAt.toISOString()
-  const inviter = props.inviterLabel
-  const subject = `Invitation — ${org} (Kit kit)`
-  const text = [
-    `You have been invited to join "${org}" on Kit Kit.`,
-    inviter ? `Invited by: ${inviter}` : null,
-    `Accept: ${href}`,
-    `Expires: ${exp}`,
-  ]
-    .filter(Boolean)
-    .join('\n')
-  const html = `<p>You have been invited to join <strong>${safeOrg}</strong> on Kit Kit.</p>${
-    inviter ? `<p>Invited by: ${escapeHtml(inviter)}</p>` : ''
-  }<p><a href="${safeUrl}">Accept invitation</a></p><p>Expires: ${escapeHtml(exp)}</p>`
-  return { to: props.to, subject, text, html }
+  const intro = c.inviteIntro(org, product)
+  const by = inviter ? c.invitedBy(inviter) : ''
+  const expiry = c.expires(exp)
+  return {
+    to: props.to,
+    subject: c.inviteSubject(org, product),
+    text: [intro, by, c.acceptLink(href), expiry].filter(Boolean).join('\n'),
+    html: `<p>${escapeHtml(intro)}</p>${by ? `<p>${escapeHtml(by)}</p>` : ''}<p><a href="${escapeHtml(href)}">${escapeHtml(c.accept)}</a></p><p>${escapeHtml(expiry)}</p>`,
+  }
 }
