@@ -113,6 +113,7 @@ describe('starter HTTP composition', () => {
       keyPrefix: apiKeyPrefix(key),
       subject: profile.subject,
       organizationId: 'org-a',
+      scopes: 'read',
       createdAt: Date.now(),
     })
     const keyHeaders = { authorization: `Bearer ${key}` }
@@ -123,6 +124,23 @@ describe('starter HTTP composition', () => {
     ])
     expect((await request('/api/orgs/org-a/members', { headers: keyHeaders })).status).toBe(200)
     expect((await request('/api/orgs/org-b/members', { headers: keyHeaders })).status).toBe(403)
+    const writeKey = generateApiKey()
+    await insertApiKey(createDb(env.DB, schema), {
+      id: 'key-write',
+      keyHash: await hashApiKey(writeKey),
+      keyPrefix: apiKeyPrefix(writeKey),
+      subject: profile.subject,
+      organizationId: 'org-a',
+      scopes: 'write',
+      createdAt: Date.now(),
+    })
+    const writeHeaders = { authorization: `Bearer ${writeKey}` }
+    expect((await request('/api/me', { headers: writeHeaders })).status).toBe(403)
+    expect((await request('/api/orgs/org-a/members', { headers: writeHeaders })).status).toBe(403)
+    expect((await request('/api/unknown', { headers: keyHeaders })).status).toBe(403)
+    expect((await request('/api/auth/session', { headers: keyHeaders })).status).toBe(403)
+    expect((await request('/health', { headers: keyHeaders })).status).toBe(403)
+    expect((await request('/api/me', { method: 'POST', headers: keyHeaders })).status).toBe(403)
     expect((await post('/api/auth/sign-out', {}, signupCookie)).status).toBeLessThan(400)
     expect((await request('/api/me', { headers: { cookie: signupCookie } })).status).toBe(401)
     const signin = await post('/api/auth/sign-in/email', credentials)
