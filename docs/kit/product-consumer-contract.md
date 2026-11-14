@@ -559,36 +559,18 @@ Do **not** commit live `product-*.yml` into the **kit** repo under `.github/work
 ## Pulling kit upgrades
 
 ```bash
-git fetch upstream
-# Read-only, printed on every path below (stop, up to date, merge):
-git diff -U0 HEAD upstream/main -- package.json | grep -q '^+.*"packageManager"' &&
-  echo "packageManager moves: set BUN_VERSION on each Workers Builds / Pages project just before this reaches its deploy/<branch> source branch (row 'Kit bumps packageManager')" >&2
-if git diff -U0 HEAD upstream/main -- .github/workflows | grep -q '^+.*create-github-app-token@'; then
-  echo "stop: this range bumps actions/create-github-app-token; establish the effective CI_APP_ID mode first (row 'Kit bumps actions/create-github-app-token')" >&2
-elif git merge-base --is-ancestor upstream/main HEAD; then
-  echo "already up to date with upstream/main"   # nothing to merge; the commit below would fail
-else
-  git merge --no-ff --no-commit upstream/main &&  # stop before the merge commit; resolve only if product violated zones
-  if git cat-file -e HEAD:LICENSE 2>/dev/null; then  # root LICENSE keeps its pre-merge presence and bytes (Zones)
-    git restore --source=HEAD --staged --worktree -- LICENSE
-  else
-    git rm -q -f --ignore-unmatch -- LICENSE
-  fi &&
-  git diff --quiet HEAD -- LICENSE &&
-  printf '{\n  "version": 1,\n  "upstreamCommit": "%s"\n}\n' "$(git rev-parse upstream/main)" > config/product/inheritance.json &&
-  bun install &&                   # kit may have added/removed a workspace; does NOT re-check versions the merge kept
-  bun run lock-ranges:check &&     # every bun.lock resolution inside its workspace range (Roxabi/roxabi-boilerplate-cf#319)
-  git add bun.lock config/product/inheritance.json && git commit --no-edit &&
-  if ! git diff --quiet upstream/main -- .github/dependabot.yml; then
-    node scripts/kit/configure-product-dependabot.cjs &&
-    git add .github/dependabot.yml &&
-    if ! git diff --cached --quiet -- .github/dependabot.yml; then
-      git commit -m "chore(deps): refresh Product Dependabot scan"
-    fi
-  fi &&
-  bun run zero-edit                # must stay green (or refresh exceptions intentionally)
-fi
+bun run kit-upgrade
 ```
+
+The script runs only in a clean product clone, refuses an in-progress merge, and never pushes:
+
+1. Fetch `upstream`, report a `packageManager` move, and stop before merging a new `actions/create-github-app-token` pin; exit if already current.
+2. Merge without committing, restore the pre-merge root `LICENSE` presence and bytes, and record the incoming tip in the inheritance marker.
+3. Install dependencies and check lock ranges; a failure leaves the merge open for owner-directed repair.
+4. Commit the merge, refresh the Product Dependabot scan in a separate commit if needed, and run `zero-edit`.
+
+`bun run kit-upgrade -- --check` reports notices and pending work against the locally cached `upstream/main` without fetching or changing anything.
+A clone whose pin predates this script performs its first upgrade with the previous manual block in this section at its pinned commit; do not copy it from a newer version.
 
 A range that sets a new pin of `actions/create-github-app-token` stops before the merge. Establish the effective `CI_APP_ID` mode using [CI App setup](./ci-app-setup.md#trust-and-setup): verified absence permits the inactive, separately authorized manual-merge path; a nonempty value requires the installed App's Client ID, valid authorization configuration and a successful mint established through a separately authorized exercise. A missing key or unknown state stops. Then run the merge lines by hand. Neither path waives review, local gates or CI. After a merge conflict, resolve it, refresh the existing inheritance marker to the tip actually merged, then run the remaining lines by hand: the merge commit waits for `lock-ranges:check`.
 
@@ -606,7 +588,7 @@ git add bun.lock apps/<product>-web/package.json
 bun run lock-ranges:check &&
   bun install --frozen-lockfile --minimum-release-age 0 &&
   git add bun.lock config/product/inheritance.json && git commit --no-edit
-# Then run the conditional Product scan refresh and final zero-edit from the upgrade block above.
+# Then run the conditional Product scan refresh and final zero-edit from scripts/kit/kit-upgrade.sh.
 ```
 
 If conflict in a **kit zone**, restore the Kit version and move the Product change to a Product path / design override, **except** the bounded `.github/dependabot.yml` customization: preserve the Product scan and regenerate it after the upgrade merge as above. A conflict on that customization does not justify restoring the legacy root scan.
