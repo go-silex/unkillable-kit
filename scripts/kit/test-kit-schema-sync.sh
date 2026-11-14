@@ -349,6 +349,39 @@ else
     "exit=${RUN_EC} modules=$(manifest_count "${A2}/kit-schema-manifest.json") sql=$(sql_count "${A2}/migrations") out=$(echo "${RUN_OUT}" | tr '\n' ' ')"
 fi
 
+# Fresh default composes both sets and its SQL applies in local journal order.
+A2D="${TMP}/case2-default"
+mkdir -p "${A2D}/migrations" "${TMP}/case2d-seed"
+run_sync --app "${A2D}"
+if [[ "${RUN_EC}" -eq 0 ]] && inventory_matches_manifest "${A2D}" "${TMP}/case2d-seed" core,audit \
+  && KIT_SCHEMA_APP="${A2D}" bun -e '
+const fs = require("fs");
+const { Database } = require("bun:sqlite");
+const db = new Database(":memory:");
+const dir = process.env.KIT_SCHEMA_APP + "/migrations";
+for (const file of fs.readdirSync(dir).filter(f => f.endsWith(".sql")).sort()) {
+  db.exec("BEGIN");
+  db.exec(fs.readFileSync(dir + "/" + file, "utf8"));
+  db.exec("COMMIT");
+}
+if (!db.query("SELECT name FROM sqlite_master WHERE type = ? AND name = ?").get("table", "rate_limit_buckets")) process.exit(1);
+const m = JSON.parse(fs.readFileSync(process.env.KIT_SCHEMA_APP + "/kit-schema-manifest.json", "utf8"));
+if (JSON.stringify([...m.sets].sort()) !== JSON.stringify(["audit", "core"])) process.exit(1);
+'; then
+  pass "2d fresh default composes core and audit and applies to SQLite"
+else
+  fail_case "2d fresh default and SQLite" "exit=${RUN_EC} out=${RUN_OUT}"
+fi
+cp "${A2}/kit-schema-manifest.json" "${TMP}/case2-manifest-before.json"
+run_sync --app "${A2}"
+if [[ "${RUN_EC}" -eq 0 ]] && cmp -s "${TMP}/case2-manifest-before.json" "${A2}/kit-schema-manifest.json" \
+  && inventory_matches_manifest "${A2}" "${TMP}/case2-seed" core; then
+  pass "2 core-only recorded selection remains unchanged on default resync"
+else
+  fail_case "2 core-only selection resync" "exit=${RUN_EC} out=${RUN_OUT}"
+fi
+
+
 # Real consumer opt-in: core alone omits notifications, then the explicit set appends it.
 A2N="${TMP}/case2-notifications"
 copy_sql_range "${A2N}/migrations" 1 8
@@ -804,13 +837,13 @@ write_min_catalog "${CAT19}" "${SRC19}" \
   "flows_x|0099_x.sql|flows|${SHA18_X}"
 A19="${TMP}/case19"
 mkdir -p "${A19}/migrations"
-run_sync_cat "${CAT19}" --app "${A19}"
+run_sync_cat "${CAT19}" --app "${A19}" --modules core
 if [[ "${RUN_EC}" -ne 0 || ! -f "${A19}/migrations/0001_kit_init.sql" \
   || -e "${A19}/migrations/0002_kit_plans.sql" \
   || -e "${A19}/migrations/0002_kit_flows_x.sql" \
   || "$(sql_count "${A19}/migrations")" != "1" \
   || "$(manifest_count "${A19}/kit-schema-manifest.json")" != "1" ]]; then
-  fail_case "19 greenfield default is core only" \
+  fail_case "19 explicit core selection" \
     "exit=${RUN_EC} count=$(sql_count "${A19}/migrations") out=$(echo "${RUN_OUT}" | tr '\n' ' ')"
 fi
 cp "${KIT_COPY}/${SRC19}/0012_plans.sql" "${A19}/migrations/0009_stray.sql"
