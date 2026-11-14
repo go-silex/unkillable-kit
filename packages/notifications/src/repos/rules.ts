@@ -25,17 +25,16 @@ const ruleSchema = z.strictObject({
   enabled: z.boolean(),
   locked: z.boolean(),
 })
-type SharedRuleTable = {
-  $inferSelect: typeof deployment.$inferSelect
-  $inferInsert: typeof deployment.$inferInsert
-}
+type RuleInsert = typeof deployment.$inferInsert
+type SharedRuleTable = { $inferSelect: typeof deployment.$inferSelect }
 
 function config(scope: RuleScope) {
   if (scope.level === 'organization')
     return {
       table: organization satisfies SharedRuleTable,
       owner: eq(organization.orgId, scope.orgId),
-      ownerValue: { orgId: scope.orgId },
+      row: (shared: RuleInsert) =>
+        ({ ...shared, orgId: scope.orgId }) satisfies typeof organization.$inferInsert,
       target: [
         organization.orgId,
         organization.selectorKind,
@@ -47,13 +46,14 @@ function config(scope: RuleScope) {
     return {
       table: user satisfies SharedRuleTable,
       owner: eq(user.userId, scope.userId),
-      ownerValue: { userId: scope.userId },
+      row: (shared: RuleInsert) =>
+        ({ ...shared, userId: scope.userId }) satisfies typeof user.$inferInsert,
       target: [user.userId, user.selectorKind, user.selectorValue, user.channel],
     }
   return {
     table: deployment,
     owner: undefined,
-    ownerValue: {},
+    row: (shared: RuleInsert) => shared,
     target: [deployment.selectorKind, deployment.selectorValue, deployment.channel],
   }
 }
@@ -104,7 +104,7 @@ export async function putRule(
   )
     throw AppError.validation('Invalid rule')
   const audit = ruleAudit(inputAudit, scope, rule.id, 'notification.rule.set')
-  const { table, owner, ownerValue, target } = config(scope)
+  const { table, owner, row, target } = config(scope)
   const value = selectorValue(rule.selector)
   const natural = and(
     owner,
@@ -114,17 +114,18 @@ export async function putRule(
   )
   const mutation = db
     .insert(table)
-    .values({
-      id: rule.id,
-      selectorKind: rule.selector.kind,
-      selectorValue: value,
-      channel: rule.channel,
-      enabled: rule.enabled,
-      locked: rule.locked,
-      createdAt: now,
-      updatedAt: now,
-      ...ownerValue,
-    })
+    .values(
+      row({
+        id: rule.id,
+        selectorKind: rule.selector.kind,
+        selectorValue: value,
+        channel: rule.channel,
+        enabled: rule.enabled,
+        locked: rule.locked,
+        createdAt: now,
+        updatedAt: now,
+      }),
+    )
     .onConflictDoUpdate({
       target,
       set: { enabled: rule.enabled, locked: rule.locked, updatedAt: now },
