@@ -4,9 +4,9 @@
 import type { ImpersonationInfo, ImpersonationPermissions } from '@kit/api-client/me'
 import type { PlatformRole } from '@kit/auth'
 import { getImpersonationPermissions } from '@kit/auth/repos/impersonation'
+import * as platformRolesRepo from '@kit/auth/repos/platform-roles'
 import type { DrizzleD1Database } from 'drizzle-orm/d1'
 import type { schema } from '../db/schema'
-import * as platformRolesRepo from '../repos/platform-roles'
 import * as usersRepo from '../repos/users'
 import * as orgsService from './orgs'
 

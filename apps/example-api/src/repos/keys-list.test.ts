@@ -1,8 +1,8 @@
+import * as keysRepo from '@kit/auth/repos/keys'
 import { createDb } from '@kit/db'
 import { describe, expect, it } from 'vitest'
 import { schema } from '../db/schema'
 import { createMemoryEnv } from '../test/memory-env'
-import * as keysRepo from './keys'
 
 /**
  * Explicit list paths (no dual blank semantics):

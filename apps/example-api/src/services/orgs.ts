@@ -1,10 +1,10 @@
 import type { OrgKind } from '@kit/auth'
+import * as orgsRepo from '@kit/auth/repos/orgs'
+import * as platformModulesRepo from '@kit/auth/repos/platform-modules'
+import * as platformRolesRepo from '@kit/auth/repos/platform-roles'
 import { AppError } from '@kit/core'
 import type { DrizzleD1Database } from 'drizzle-orm/d1'
 import type { schema } from '../db/schema'
-import * as orgsRepo from '../repos/orgs'
-import * as platformModulesRepo from '../repos/platform-modules'
-import * as platformRolesRepo from '../repos/platform-roles'
 import * as orgRolesService from './org-roles'
 
 type Db = DrizzleD1Database<typeof schema>

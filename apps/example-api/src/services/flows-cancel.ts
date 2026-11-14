@@ -1,10 +1,10 @@
 import { AppError, createLogger, parseOrThrow } from '@kit/core'
 import { canCancelFlowRun, isApproveTask, parseRunnerView, readRunRollup } from '@kit/flows'
+import * as flowsRepo from '@kit/flows/repos'
 import type { DrizzleD1Database } from 'drizzle-orm/d1'
 import type { schema } from '../db/schema'
 import type { Env } from '../env'
 import { cancelRunBodySchema } from '../lib/flows-body-schemas'
-import * as flowsRepo from '../repos/flows'
 import { createAppNotificationResolver } from './notifications/app'
 import { resolveFlowApproval } from './notifications/flow-producer'
 

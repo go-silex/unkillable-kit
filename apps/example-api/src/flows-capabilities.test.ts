@@ -1,9 +1,9 @@
+import * as orgRolesRepo from '@kit/auth/repos/org-roles'
 import { baMember } from '@kit/auth/schema'
 import { FLOWS_MODULE_ID } from '@kit/flows'
 import { INVOKE_ONLY_PLAN_YAML } from '@kit/flows/run'
 import { eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
-import * as orgRolesRepo from './repos/org-roles'
 import { sessionHeaders } from './test/api-fixture'
 import {
   BOTH_ORGS,

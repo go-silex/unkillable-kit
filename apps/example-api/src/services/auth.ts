@@ -1,9 +1,8 @@
 import { apiKeyPrefix, generateApiKey, hashApiKey } from '@kit/auth'
-
+import * as keysRepo from '@kit/auth/repos/keys'
 import { AppError } from '@kit/core'
 import type { DrizzleD1Database } from 'drizzle-orm/d1'
 import type { schema } from '../db/schema'
-import * as keysRepo from '../repos/keys'
 import { DEMO_EMAIL, DEMO_EMAIL_B, DEMO_PASSWORD, DEMO_PASSWORD_B } from '../seed/demo-data'
 
 type Db = DrizzleD1Database<typeof schema>
@@ -32,7 +31,7 @@ export async function mintApiKey(
       organizationId: ['organizationId is required'],
     })
   }
-  const { findMembership, findOrgById } = await import('../repos/orgs')
+  const { findMembership, findOrgById } = await import('@kit/auth/repos/orgs')
   const org = await findOrgById(db, organizationId)
   if (org?.status !== 'active') throw AppError.notFound('Organization not found')
   const membership = await findMembership(db, organizationId, subject)

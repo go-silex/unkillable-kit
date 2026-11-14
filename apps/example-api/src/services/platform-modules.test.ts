@@ -1,11 +1,11 @@
+import { listRolesForOrg } from '@kit/auth/repos/org-roles'
+import { listPlatformModules } from '@kit/auth/repos/platform-modules'
 import { createDb } from '@kit/db'
 import { FLOWS_MODULE_ID } from '@kit/flows'
 import { describe, expect, it } from 'vitest'
 import { schema } from '../db/schema'
 import { isModuleConfigured } from '../lib/integration-config'
 import { isKitModuleId, KIT_MODULE_IDS } from '../lib/kit-modules'
-import { listRolesForOrg } from '../repos/org-roles'
-import { listPlatformModules } from '../repos/platform-modules'
 import { createMemoryEnv } from '../test/memory-env'
 import { listRolesWithGrants, resolveModuleAccess } from './org-roles'
 import * as platformModulesService from './platform-modules'
@@ -93,7 +93,7 @@ describe('platform-modules service (coverage / ADR dual-level)', () => {
     const d = await db()
     await platformModulesService.ensurePlatformModules(d)
     await platformModulesService.setPlatformAvailable(d, 'demo', true)
-    const { upsertOrgModule } = await import('../repos/platform-modules')
+    const { upsertOrgModule } = await import('@kit/auth/repos/platform-modules')
     await upsertOrgModule(d, {
       organizationId: 'org_locked',
       moduleId: 'demo',

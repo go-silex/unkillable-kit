@@ -6,13 +6,14 @@
  * - Real session login is BA-only: `seedBaDemoUsers` writes `ba_user` + `ba_account`
  *   with `better-auth/crypto` `hashPassword` (scrypt).
  */
+
+import * as modulesRepo from '@kit/auth/repos/modules'
+import * as platformRolesRepo from '@kit/auth/repos/platform-roles'
 import { baAccount, baUser } from '@kit/auth/schema'
 import { hashPassword as baHashPassword } from 'better-auth/crypto'
 import { eq } from 'drizzle-orm'
 import type { DrizzleD1Database } from 'drizzle-orm/d1'
 import { apiKeys, demoItems, demoNotes, demoUsers, type schema } from '../db/schema'
-import * as modulesRepo from '../repos/modules'
-import * as platformRolesRepo from '../repos/platform-roles'
 import * as modulesService from '../services/modules'
 import * as platformModulesService from '../services/platform-modules'
 import { SEED_ITEMS, SEED_NOTES, SEED_USERS } from './demo-data'

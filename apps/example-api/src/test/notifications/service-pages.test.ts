@@ -1,3 +1,4 @@
+import { upsertOrgModule, upsertPlatformModule } from '@kit/auth/repos/platform-modules'
 import {
   kitNotificationDeploymentRules,
   kitNotificationDestinations,
@@ -7,7 +8,6 @@ import {
 } from '@kit/notifications/schema'
 import { eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
-import { upsertOrgModule, upsertPlatformModule } from '../../repos/platform-modules'
 import { createAppNotificationService } from '../../services/notifications/app'
 import { createRecordingNotificationRuntime } from '../notification-runtime'
 import { createNotificationFixture } from './fixture'

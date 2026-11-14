@@ -1,9 +1,9 @@
 import { AppError, parseOrThrow } from '@kit/core'
 import type { Audience } from '@kit/tasks'
 import { canViewTask, checkNewLink, createTaskLinkInputSchema } from '@kit/tasks'
+import * as tasksRepo from '@kit/tasks/repos'
 import type { DrizzleD1Database } from 'drizzle-orm/d1'
 import type { schema } from '../db/schema'
-import * as tasksRepo from '../repos/tasks'
 import { recordTaskLinkMutation } from './task-audit'
 
 type Db = DrizzleD1Database<typeof schema>

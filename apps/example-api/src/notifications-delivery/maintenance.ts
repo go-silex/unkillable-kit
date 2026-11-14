@@ -1,8 +1,8 @@
+import { listAllOrgs } from '@kit/auth/repos/orgs'
 import { createDb } from '@kit/db'
 import { purgeNotifications } from '@kit/notifications/repos'
 import { schema } from '../db/schema'
 import type { Env } from '../env'
-import { listAllOrgs } from '../repos/orgs'
 import { createNotificationDeliveryRuntime } from './admission'
 
 const DAY_MS = 86_400_000

@@ -1,9 +1,9 @@
+import * as orgRoles from '@kit/auth/repos/org-roles'
+import { upsertOrgModule } from '@kit/auth/repos/platform-modules'
 import { baMember } from '@kit/auth/schema'
 import { kitNotifications } from '@kit/notifications/schema'
 import { eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import * as orgRoles from '../../repos/org-roles'
-import { upsertOrgModule } from '../../repos/platform-modules'
 import { createNotificationFixture, type NotificationFixture } from './fixture'
 
 type InboxItem = {

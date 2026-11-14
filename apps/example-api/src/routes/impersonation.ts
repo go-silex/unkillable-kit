@@ -6,6 +6,7 @@ import {
   startImpersonationSession,
   stopImpersonationSession,
 } from '@kit/auth/repos/impersonation'
+import * as platformRolesRepo from '@kit/auth/repos/platform-roles'
 import { AppError } from '@kit/core'
 import {
   authErrorResponses,
@@ -14,7 +15,6 @@ import {
   sessionOnlySecurity,
   validationErrorResponse,
 } from '../lib/openapi'
-import * as platformRolesRepo from '../repos/platform-roles'
 import { getImpersonationEligibility, getImpersonationInfo } from '../services/impersonation'
 import type { AppEnv } from '../types'
 
