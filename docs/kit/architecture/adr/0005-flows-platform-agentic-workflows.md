@@ -13,6 +13,7 @@ related:
   - packages/ (target @kit/flows, later @kit/flows-ui)
   - Cloudflare Workflows / AI Gateway
   - 'Roxabi/roxabi-boilerplate-cf#16'
+summary: 'Governed plans and durable runs'
 ---
 
 # ADR-0005 — Flows platform for agentic SaaS (Chemin A)

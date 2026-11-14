@@ -16,6 +16,7 @@ related:
   - 'Roxabi/roxabi-boilerplate-cf#470'
   - 'Roxabi/roxabi-boilerplate-cf#471'
   - 'Roxabi/roxabi-boilerplate-cf#480'
+summary: 'Stable-ID Workflow ownership for notification Delivery; Queue demo boundary'
 ---
 
 # ADR-0020 — Un Workflow complet à identité stable par Delivery

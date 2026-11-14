@@ -38,6 +38,7 @@
     "test:folder-size": "bash scripts/kit/test-folder-size.sh",
     "agents-adr:check": "bash scripts/kit/check-agents-adr-hygiene.sh",
     "doc:check": "bun --no-env-file --config=config/kit/bunfig.gates.toml --no-install run scripts/kit/check-doc-hygiene.ts && bun --no-env-file --config=config/kit/bunfig.gates.toml --no-install run scripts/kit/check-adr-frontmatter.ts && bun --no-env-file --config=config/kit/bunfig.gates.toml --no-install run scripts/kit/check-qualified-refs.ts",
+    "adr:index": "bun --no-env-file --config=config/kit/bunfig.gates.toml --no-install run scripts/kit/check-adr-frontmatter.ts --write",
     "test:doc-hygiene": "bash scripts/kit/test-doc-hygiene.sh && bash scripts/kit/test-adr-frontmatter.sh && bash scripts/kit/test-qualified-refs.sh",
     "bun-version:check": "bun --no-env-file --config=config/kit/bunfig.gates.toml run scripts/kit/check-bun-version.ts",
     "test:bun-version": "bash scripts/kit/test-bun-version.sh",

@@ -7,6 +7,7 @@ axial: false
 related:
   - packages/email
   - GitHub epic CF Email
+summary: 'Cloudflare Email transport by environment'
 ---
 
 # ADR-0004 — Email transport by environment
