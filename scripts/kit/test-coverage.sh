@@ -79,6 +79,10 @@ COVERAGE_LOWER=(
   apps/mcp-example
 )
 
+# Kit partition declarations; Product additions live in its namespace.
+COVERAGE_PARTITIONS=("apps/example-api 2")
+PARTITIONS_FILE="config/product/coverage-partitions.txt"
+
 # Kit-only seam: print the three kit tiers above (high, medium, lower; one per
 # line) and exit before the extension file is read and before discovery, so the
 # output never depends on config/product/coverage-order.txt.
@@ -223,6 +227,38 @@ if [[ "$reconcile_failed" -ne 0 ]]; then
   exit 1
 fi
 
+declare -A PARTITION_COUNTS=()
+declare_partition() {
+  local ws="$1" count="$2"
+  if [[ ! "$ws" =~ ^apps/[A-Za-z0-9._-]+$ || "$ws" =~ /\.\.?$ ||
+        ! "$count" =~ ^[234]$ || -n "${PARTITION_COUNTS[$ws]:-}" ||
+        -z "${ORIGIN[$ws]:-}" ]]; then
+    echo "test-coverage: invalid, duplicate, or stale partition: $ws $count" >&2
+    exit 1
+  fi
+  PARTITION_COUNTS[$ws]="$count"
+}
+for declaration in "${COVERAGE_PARTITIONS[@]}"; do
+  read -r ws count <<<"$declaration"
+  declare_partition "$ws" "$count"
+done
+if [[ -e "$PARTITIONS_FILE" ]]; then
+  [[ -f "$PARTITIONS_FILE" ]] || { echo "test-coverage: invalid partitions file" >&2; exit 1; }
+  while IFS= read -r raw || [[ -n "$raw" ]]; do
+    line="${raw%%#*}"
+    read -r -a fields <<<"$line" || true
+    [[ "${#fields[@]}" -eq 0 ]] && continue
+    [[ "${#fields[@]}" -eq 2 ]] || { echo "test-coverage: malformed partition declaration" >&2; exit 1; }
+    declare_partition "${fields[0]}" "${fields[1]}"
+  done <"$PARTITIONS_FILE"
+fi
+if [[ "${COVERAGE_LIST_PARTS:-0}" == "1" ]]; then
+  for ws in "${COVERAGE_ORDER[@]}"; do
+    [[ -z "${PARTITION_COUNTS[$ws]:-}" ]] || printf '%s %s\n' "$ws" "${PARTITION_COUNTS[$ws]}"
+  done
+  exit 0
+fi
+
 narrow_changed() {
   local base="$1" files file ws ordered already=""
   local -a picked=() narrowed=()
@@ -318,7 +354,15 @@ run_pkg() {
   echo "════════════════════════════════════════"
   echo " coverage: $name ($dir)"
   echo "════════════════════════════════════════"
-  if ! (cd "$dir" && bunx vitest run --coverage 2>&1 | tee "$log"); then
+  local -a extra=()
+  if [[ -n "${COVERAGE_PART:-}" ]]; then
+    [[ -n "${COVERAGE_BLOB:-}" ]] || { echo "missing blob path" >&2; exit 1; }
+    extra=(--shard="$COVERAGE_PART" --reporter=default --reporter=blob
+      --outputFile.blob="$COVERAGE_BLOB" --coverage.thresholds.lines=0
+      --coverage.thresholds.functions=0 --coverage.thresholds.branches=0
+      --coverage.thresholds.statements=0)
+  fi
+  if ! (cd "$dir" && bunx vitest run --coverage "${extra[@]}" 2>&1 | tee "$log"); then
     pkg_failed=1
   fi
   if grep -Fq "Excluding it from coverage." "$log"; then

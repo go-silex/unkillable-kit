@@ -194,6 +194,18 @@ list_with() {
   PASS=$((PASS + 1))
 }
 
+echo "== coverage partitions =="
+make_tree apps/acme-api
+write_ext <<'EOF'
+high apps/acme-api
+EOF
+printf 'apps/acme-api 3\n' >"${TREE}/config/product/coverage-partitions.txt"
+list_with "kit and product partitions" 0 $'apps/example-api 2\napps/acme-api 3' - COVERAGE_LIST_PARTS=1
+for declaration in 'apps/acme-api' 'apps/acme-api 1' 'apps/acme-api 5' 'packages/auth 2' 'apps/missing 2' 'apps/example-api 2' 'apps/acme-api 2 extra' $'apps/acme-api 2\napps/acme-api 3'; do
+  printf '%s\n' "$declaration" >"${TREE}/config/product/coverage-partitions.txt"
+  list_with "invalid partition: ${declaration}" 1 - "test-coverage:" COVERAGE_LIST_ONLY=1
+done
+
 gitcfg() {
   GIT_CONFIG_GLOBAL="${TMP}/gitconfig" GIT_CONFIG_NOSYSTEM=1 git -C "${TREE}" "$@"
 }

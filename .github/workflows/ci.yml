@@ -29,6 +29,8 @@ jobs:
     timeout-minutes: 5
     outputs:
       groups: ${{ steps.plan.outputs.groups }}
+      parts: ${{ steps.plan.outputs.parts }}
+      merges: ${{ steps.plan.outputs.merges }}
       tooling: ${{ steps.tooling.outputs.run }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -70,6 +72,10 @@ jobs:
           set -euo pipefail
           plan="$(bun run validate:full -- --coverage-plan)"
           printf 'groups=%s\n' "$plan" >> "$GITHUB_OUTPUT"
+          parts="$(bun run validate:full -- --coverage-parts-plan)"
+          printf 'parts=%s\n' "$parts" >> "$GITHUB_OUTPUT"
+          merges="$(PARTS="$parts" bun -e 'const p = JSON.parse(process.env.PARTS); console.log(JSON.stringify([...new Set(p.map(x => x.workspace))]))')"
+          printf 'merges=%s\n' "$merges" >> "$GITHUB_OUTPUT"
 
   quality:
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
@@ -194,6 +200,102 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
+  coverage-parts:
+    if: needs.coverage-plan.outputs.parts != '[]'
+    name: Root coverage part ${{ matrix.part.id }}
+    needs: coverage-plan
+    strategy:
+      fail-fast: false
+      matrix:
+        part: ${{ fromJson(needs.coverage-plan.outputs.parts) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile --minimum-release-age 0
+      - name: Run coverage part
+        id: part
+        env:
+          PART: ${{ toJson(matrix.part) }}
+        run: |
+          set -euo pipefail
+          bun -e 'const p=JSON.parse(process.env.PART); if (!p || !/^apps\/[A-Za-z0-9._-]+$/.test(p.workspace) || !Number.isInteger(p.index) || !Number.isInteger(p.count) || p.index < 1 || p.index > p.count || p.count < 2 || p.count > 4 || p.id !== `${p.workspace.replace("/", "__")}__${p.index}-of-${p.count}`) throw Error("invalid part"); console.log(`${p.workspace}\n${p.index}/${p.count}`)' > "$RUNNER_TEMP/part"
+          mapfile -t part < "$RUNNER_TEMP/part"
+          printf 'safe=%s\n' "${part[0]//\//__}" >> "$GITHUB_OUTPUT"
+          bun run validate:full -- --ci-coverage-part "${part[0]}" "${part[1]}" --raw "$RUNNER_TEMP/coverage-raw"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-raw-${{ github.run_id }}-${{ github.run_attempt }}-${{ steps.part.outputs.safe }}-${{ matrix.part.index }}-of-${{ matrix.part.count }}
+          path: ${{ runner.temp }}/coverage-raw
+          if-no-files-found: error
+          retention-days: 1
+
+  coverage-merge:
+    if: needs.coverage-plan.outputs.parts != '[]'
+    name: Root coverage merge ${{ matrix.workspace }}
+    needs: [coverage-plan, coverage-parts]
+    strategy:
+      fail-fast: false
+      matrix:
+        workspace: ${{ fromJson(needs.coverage-plan.outputs.merges) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile --minimum-release-age 0
+      - id: target
+        env:
+          WORKSPACE: ${{ matrix.workspace }}
+        run: |
+          set -euo pipefail
+          [[ "$WORKSPACE" =~ ^apps/[A-Za-z0-9._-]+$ && "$WORKSPACE" != */. && "$WORKSPACE" != */.. ]]
+          printf 'safe=%s\n' "${WORKSPACE//\//__}" >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: coverage-raw-${{ github.run_id }}-${{ github.run_attempt }}-${{ steps.target.outputs.safe }}-[1-4]-of-[2-4]
+          path: ${{ runner.temp }}/coverage-raw
+      - name: Merge coverage
+        env:
+          WORKSPACE: ${{ matrix.workspace }}
+        run: |
+          set -euo pipefail
+          [[ "$WORKSPACE" =~ ^apps/[A-Za-z0-9._-]+$ && "$WORKSPACE" != */. && "$WORKSPACE" != */.. ]]
+          safe="${WORKSPACE//\//__}"
+          mkdir "$RUNNER_TEMP/root-receipts"
+          bun run validate:full -- --ci-coverage-merge "$WORKSPACE" --raw "$RUNNER_TEMP/coverage-raw" --receipt "$RUNNER_TEMP/root-receipts/root-coverage-${safe}.json"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: root-coverage-${{ github.run_id }}-${{ github.run_attempt }}-merge-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/root-receipts
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-${{ github.run_id }}-${{ github.run_attempt }}-merge-${{ strategy.job-index }}
+          path: |
+            coverage/**/coverage-summary.json
+            coverage/**/lcov.info
+          if-no-files-found: ignore
+          retention-days: 7
+
   tooling:
     name: Tooling
     needs: coverage-plan
@@ -231,7 +333,7 @@ jobs:
   ci:
     # Preserve the check display name consumed by merge-on-green and checkup.
     name: ci
-    needs: [coverage-plan, quality, coverage, tooling]
+    needs: [coverage-plan, quality, coverage, coverage-parts, coverage-merge, tooling]
     if: always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -261,7 +363,7 @@ jobs:
       - name: Join Root receipts
         if: always()
         env:
-          PRODUCERS_RESULT: ${{ (needs.coverage-plan.result == 'success' && needs.quality.result == 'success' && needs.coverage.result == 'success' && needs.tooling.result == 'success' && (needs.coverage-plan.outputs.tooling == 'true' || needs.coverage-plan.outputs.tooling == 'false')) && 'success' || 'failure' }}
+          PRODUCERS_RESULT: ${{ (needs.coverage-plan.result == 'success' && needs.quality.result == 'success' && needs.coverage.result == 'success' && needs.tooling.result == 'success' && (needs.coverage-plan.outputs.tooling == 'true' || needs.coverage-plan.outputs.tooling == 'false') && ((needs.coverage-plan.outputs.parts == '[]' && needs.coverage-parts.result == 'skipped' && needs.coverage-merge.result == 'skipped' && 'success-without-parts') || (needs.coverage-plan.outputs.parts != '[]' && needs.coverage-parts.result == 'success' && needs.coverage-merge.result == 'success' && 'success'))) || 'failure' }}
         run: bun run validate:full -- --ci-join "$RUNNER_TEMP/root-receipts" --producers-result "$PRODUCERS_RESULT"
 
   # Showcase CD = Cloudflare Builds (git pull), not GH deploy. See docs/kit/deploy-cloudflare.md.

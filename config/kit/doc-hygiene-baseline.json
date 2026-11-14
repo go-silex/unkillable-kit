@@ -142,7 +142,7 @@
   "docs/kit/product-consumer-contract.md": {
     "overLimitLines": 127,
     "maxLineBytes": 2129,
-    "fileBytes": 181069
+    "fileBytes": 180771
   },
   "docs/kit/security-dependabot.md": {
     "overLimitLines": 36,
@@ -156,8 +156,8 @@
   },
   "docs/kit/testing/coverage.md": {
     "overLimitLines": 7,
-    "maxLineBytes": 816,
-    "fileBytes": 6234
+    "maxLineBytes": 815,
+    "fileBytes": 6227
   },
   "docs/kit/testing/critical-path.md": {
     "overLimitLines": 92,
