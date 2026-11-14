@@ -1,23 +1,20 @@
-/**
- * Kit password-reset email (string-rendered). No product-domain copy.
- * Header scrub is at EmailPort boundary (scrubHeaderLine).
- */
 import { escapeHtml } from '../escape-html'
 import { assertSafeTokenHref, type TokenHrefPolicy } from '../safe-token-href'
+import { type EmailTemplateOptions, getTemplateCopy, templateValue } from './copy'
 
 export function ResetPasswordEmail(
-  props: { to: string; resetUrl: string; expiresHint?: string } & TokenHrefPolicy,
+  props: { to: string; resetUrl: string; expiresHint?: string } & TokenHrefPolicy &
+    EmailTemplateOptions,
 ) {
+  const c = getTemplateCopy(props.locale)
+  const product = templateValue(props.productName)
   const href = assertSafeTokenHref(props.resetUrl, props)
-  const safeUrl = escapeHtml(href)
-  const subject = 'Reset your password — Kit kit'
-  const exp = props.expiresHint ?? 'about 1 hour'
-  const text = [
-    'You requested a password reset for Kit Kit.',
-    `Reset link: ${href}`,
-    `This link expires in ${exp}.`,
-    'If you did not request this, ignore this email.',
-  ].join('\n')
-  const html = `<p>You requested a password reset for <strong>Kit Kit</strong>.</p><p><a href="${safeUrl}">Reset password</a></p><p>This link expires in ${escapeHtml(exp)}.</p><p>If you did not request this, ignore this email.</p>`
-  return { to: props.to, subject, text, html }
+  const intro = c.resetIntro(product)
+  const expiry = c.expiresIn(templateValue(props.expiresHint ?? c.oneHour))
+  return {
+    to: props.to,
+    subject: c.resetSubject(product),
+    text: [intro, c.resetLink(href), expiry, c.ignoreRequest].join('\n'),
+    html: `<p>${escapeHtml(intro)}</p><p><a href="${escapeHtml(href)}">${escapeHtml(c.resetAction)}</a></p><p>${escapeHtml(expiry)}</p><p>${escapeHtml(c.ignoreRequest)}</p>`,
+  }
 }

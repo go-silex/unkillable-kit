@@ -5,6 +5,7 @@
 import {
   buildMagicLinkEmailText,
   buildResetPasswordEmailText,
+  type EmailLocale,
   type EmailPort,
   type TokenHrefPolicy,
 } from '@kit/email'
@@ -14,8 +15,24 @@ export type AuthEmailPort = EmailPort
 
 export const MAGIC_LINK_EXPIRES_IN_SEC = 300
 export const RESET_PASSWORD_TOKEN_EXPIRES_IN_SEC = 3600
-const MAGIC_LINK_EXPIRES_HINT = 'about 5 minutes'
-const RESET_PASSWORD_EXPIRES_HINT = 'about 1 hour'
+/** Email language is resolved per recipient; unsupported preferences use the configured fallback. */
+export type AuthEmailConfig = {
+  productName: string
+  fallbackLocale: EmailLocale
+  resolveRecipientLocale: (
+    email: string,
+  ) => string | null | undefined | Promise<string | null | undefined>
+}
+
+type AuthEmailInput = { email: string; url: string; emailConfig: AuthEmailConfig } & TokenHrefPolicy
+
+export async function resolveRecipientEmailLocale(
+  config: AuthEmailConfig,
+  email: string,
+): Promise<EmailLocale> {
+  const locale = await config.resolveRecipientLocale(email)
+  return locale === 'en' || locale === 'fr' ? locale : config.fallbackLocale
+}
 
 async function sendOrThrow(
   emailPort: EmailPort,
@@ -37,12 +54,14 @@ async function sendOrThrow(
 
 export async function sendMagicLinkMail(
   emailPort: AuthEmailPort,
-  input: { email: string; url: string } & TokenHrefPolicy,
+  input: AuthEmailInput,
 ): Promise<void> {
+  const locale = await resolveRecipientEmailLocale(input.emailConfig, input.email)
   const tmpl = buildMagicLinkEmailText({
     to: input.email,
     magicUrl: input.url,
-    expiresHint: MAGIC_LINK_EXPIRES_HINT,
+    productName: input.emailConfig.productName,
+    locale,
     allowedOrigins: input.allowedOrigins,
     allowLoopbackHttp: input.allowLoopbackHttp,
   })
@@ -51,12 +70,14 @@ export async function sendMagicLinkMail(
 
 export async function sendResetPasswordMail(
   emailPort: AuthEmailPort,
-  input: { email: string; url: string } & TokenHrefPolicy,
+  input: AuthEmailInput,
 ): Promise<void> {
+  const locale = await resolveRecipientEmailLocale(input.emailConfig, input.email)
   const tmpl = buildResetPasswordEmailText({
     to: input.email,
     resetUrl: input.url,
-    expiresHint: RESET_PASSWORD_EXPIRES_HINT,
+    productName: input.emailConfig.productName,
+    locale,
     allowedOrigins: input.allowedOrigins,
     allowLoopbackHttp: input.allowLoopbackHttp,
   })
