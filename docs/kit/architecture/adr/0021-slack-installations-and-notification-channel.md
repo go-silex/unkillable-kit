@@ -295,10 +295,13 @@ Retirer un jeton Slack `<…>` terminal incomplet avant ellipse/lien.
 
 Destination admission details: [non-normative design note](../design-notes/0021-slack.md#admission-des-destinations).
 
-- DM User : User IDs serveur après ACL objet à l’émission ; Organization active, membership et Module effectifs ; Inbox toujours créée puis résolution des Channels externes. Adresse après règles.
-- Organization destination : Fan-out **indépendant, une fois par émission/cible, même zéro User admissible** ; aucun faux User ou Inbox. Type déclare Slack et `organizationDestinations:true`, destination/sélecteur présents, Organization active et Module disponible/activé.
-- Plafond Deployment : Règle la plus spécifique type > catégorie > `*`. Locked-off Slack interdit le collectif ; off non locked est un défaut User, pas veto contre l’opt-in collectif. Locked-on ne crée ni destination/opt-in ni accès Module.
-- Autres rules : Organization/User rules des Users ne gouvernent pas cette cible collective. Ne pas choisir un auteur/admin/premier User pour lui appliquer ses préférences. Les DM suivent les trois niveaux de règles du contrat notifications.
+| Cible                    | Admission/recheck                                                                                                                                                                                                                                   |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| DM User                  | User IDs serveur après ACL objet à l’émission ; Organization active, membership et Module effectifs ; Inbox toujours créée puis résolution des Channels externes. Adresse après règles.                                                             |
+| Organization destination | Fan-out **indépendant, une fois par émission/cible, même zéro User admissible** ; aucun faux User ou Inbox. Type déclare Slack et `organizationDestinations:true`, destination/sélecteur présents, Organization active et Module disponible/activé. |
+| Plafond Deployment       | Règle la plus spécifique type > catégorie > `*`. Locked-off Slack interdit le collectif ; off non locked est un défaut User, pas veto contre l’opt-in collectif. Locked-on ne crée ni destination/opt-in ni accès Module.                           |
+| Autres rules             | Organization/User rules des Users ne gouvernent pas cette cible collective. Ne pas choisir un auteur/admin/premier User pour lui appliquer ses préférences. Les DM suivent les trois niveaux de règles du contrat notifications.                    |
+
 - Tentative : Recharger destination/installation/statut/génération, type/opt-in/Channel, sélecteur, Module et plafond courants. Interdiction observée au dernier recheck → `skipped`. Une transaction D1 n’annule pas un POST déjà accepté.
 
 Le Notification producer fournit seulement User IDs/source autorisés, jamais une destination. Le fan-out n’est pas un effet de la première Inbox et est dédupliqué lors du replay de l’émission. `actorId`, seulement s’il est fourni, exclut ce User, jamais le collectif. Pour `flows.approval_requested`, aucun actorId : l’owner qui lance un run solo n’est pas exclu implicitement.
@@ -353,7 +356,11 @@ Audit event details: [non-normative design note](../design-notes/0021-slack.md#�
 - `slack.connected`, `slack.disconnect_requested`, `slack.disconnected` : User admin réel ; org/installation en colonnes dédiées ; `{generation,reason?}`.
 - `slack.revoked` : Acteur null ; CAS par génération, uniquement révocation fournisseur prouvée, une émission ; `{generation,reason,statusReason}`, jamais nouvelle connexion visée par ancienne réponse.
 - `slack.auth_disabled` : Acteur null ; suspension locale sur `invalid_auth`, inactivité ou expiration, CAS/audit une fois ; `{generation,reason,statusReason}`. Jamais synonyme de révocation distante.
-- `slack.destination_created`, `slack.destination_updated`, `slack.destination_deleted` : User admin réel ; destination en target ; `{installationId,slackChannelId,selectorKind,selectorValue?}`.
+
+| Actions                                                                               | Acteur / meta allowlist                                                                                  |
+| ------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `slack.destination_created`, `slack.destination_updated`, `slack.destination_deleted` | User admin réel ; destination en target ; `{installationId,slackChannelId,selectorKind,selectorValue?}`. |
+
 - `slack.user_linked`, `slack.user_unlinked` : User session/subject ; installation en target ; `{installationId,subjectUserId,method}`. Un cache email n’est pas un consentement explicite fictif.
 
 Étendre actions **et** chaque `META_ALLOW` App : une action absente de la map actuelle n’a pas l’allowlist stricte attendue. Jamais token/chiffré/email/state/nonce/code/JWT/corps provider dans meta/erreur/URL finale.

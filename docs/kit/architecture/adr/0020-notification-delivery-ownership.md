@@ -3,7 +3,7 @@ title: 'ADR-0020 — Un Workflow complet à identité stable par Delivery'
 status: accepted
 normative: true
 date: 2026-10-22
-amended: 2026-11-14
+amended: 2026-11-06
 axial: false
 related:
   - AGENTS.md
@@ -23,8 +23,6 @@ related:
 Contrat accepté le 2026-10-22 : un Workflow complet par Delivery et une fenêtre d’admission automatique de 24 h depuis la création de l’intention. Le dépôt contient `NotificationDeliveryWorkflow`, l'admission et la réconciliation pour User/email ; Slack et Organization/email restent non composés. Les preuves et leurs limites figurent dans [testing](../../testing.md#notifications-email-delivery-owner) et ne prouvent pas une exécution déployée. La configuration demo retries/DLQ décrite en D2 est également une cible : elle n'est pas configurée dans le `wrangler.toml` actuel.
 
 Mickael a [explicitement accepté le 2026-11-06](https://github.com/Roxabi/roxabi-boilerplate-cf/issues/480#issuecomment-6685989031) l’amendement de D6 pour E5 : décodage strict des enveloppes natives observées et neutralisation du backoff implicite. Le minimum `retryAfterSeconds`, les cinq retries, les trois steps, le Durable owner unique et l’horizon d’admission de 24 h restent inchangés; les preuves et la revue indépendante restent requises.
-
-Amendment 2026-11-14: absent-code specifications linked below are non-normative design notes; the decisions remain binding.
 
 ## Contexte
 
@@ -196,9 +194,7 @@ type ChannelResult =
 | `retryable`, hint >86 400 s                                   | Retourner `failed`, code **`retry_after_exceeds_budget`**. Le budget local ne permet pas d’honorer ce minimum : ce n’est **pas** une reclassification de permanence provider. Ne pas clamper le hint puis envoyer trop tôt.        |
 | Erreur inconnue de DB, rendu, transport ou runtime capturable | La tentative n’a pas pu continuer; erreur retryable normalisée avec code `delivery_attempt_interrupted`, sans hint inventé. Ne pas deviner la permanence depuis `Error.name`, un message de provider ou une erreur HTTP générique. |
 
-Slack adapter parsing: [non-normative design note](../design-notes/0020-delivery.md#retry-after).
-
-Le Workflow applique le budget local.
+L’adaptateur Slack parse `Retry-After` en entier sûr non négatif; une valeur invalide est omise et zéro est normalisé à une seconde. L’adaptateur ne tronque pas une valeur valide à 24 h, n’effectue ni sleep ni retry et conserve le résultat `retryable`; le Workflow applique le budget local.
 
 La classification précède le throw. L’erreur interne utilise seulement les champs standards persistables : `name='NotificationDeliveryRetryable'`, `message=JSON.stringify({code, retryAfterSeconds?})`. Le schéma JSON privé est strict, non secret, avec code non vide et hint fini non négatif ≤86 400.
 

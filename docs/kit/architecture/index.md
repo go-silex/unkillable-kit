@@ -17,7 +17,7 @@ This index identifies the architectural authority of every decision record. ADR 
 | Proposed or non-normative ADR                      | Advisory only; it cannot override the constitution or an accepted normative ADR       |
 | Design notes                                       | Non-normative until adopted by an accepted ADR amendment when the code is implemented |
 
-Extracted implementation specifications: [ADR-0019](./design-notes/0019-notifications.md), [ADR-0020](./design-notes/0020-delivery.md), [ADR-0021](./design-notes/0021-slack.md).
+Extracted implementation specifications: [ADR-0019](./design-notes/0019-notifications.md), [ADR-0021](./design-notes/0021-slack.md).
 
 ## Decision records
 
