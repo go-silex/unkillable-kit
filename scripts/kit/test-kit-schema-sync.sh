@@ -381,6 +381,41 @@ else
   fail_case "2 core-only selection resync" "exit=${RUN_EC} out=${RUN_OUT}"
 fi
 
+# The previous default wrote an empty sets array, not ["core"].
+A2OLD="${TMP}/case2-old-default"
+cp -a "${A2}" "${A2OLD}"
+KIT_SCHEMA_MANIFEST="${A2OLD}/kit-schema-manifest.json" bun -e '
+const fs = require("fs"); const p = process.env.KIT_SCHEMA_MANIFEST;
+const m = JSON.parse(fs.readFileSync(p, "utf8")); m.sets = [];
+fs.writeFileSync(p, JSON.stringify(m, null, 2) + "\n");
+'
+cp "${A2OLD}/kit-schema-manifest.json" "${TMP}/case2-old-before.json"
+run_sync --app "${A2OLD}"
+if [[ "${RUN_EC}" -eq 0 ]] && cmp -s "${TMP}/case2-old-before.json" "${A2OLD}/kit-schema-manifest.json" \
+  && inventory_matches_manifest "${A2OLD}" "${TMP}/case2-seed" core; then
+  pass "2 old empty sets remain byte-identical without audit on resync"
+else
+  fail_case "2 old empty sets resync" "exit=${RUN_EC} out=${RUN_OUT}"
+fi
+
+A2LEGACY="${TMP}/case2-legacy"
+cp -a "${A2}" "${A2LEGACY}"
+KIT_SCHEMA_MANIFEST="${A2LEGACY}/kit-schema-manifest.json" bun -e '
+const fs = require("fs"); const p = process.env.KIT_SCHEMA_MANIFEST;
+const m = JSON.parse(fs.readFileSync(p, "utf8")); delete m.sets;
+fs.writeFileSync(p, JSON.stringify(m, null, 2) + "\n");
+'
+run_sync --app "${A2LEGACY}"
+if [[ "${RUN_EC}" -eq 0 ]] && inventory_matches_manifest "${A2LEGACY}" "${TMP}/case2-seed" core \
+  && KIT_SCHEMA_MANIFEST="${A2LEGACY}/kit-schema-manifest.json" bun -e '
+const m = JSON.parse(require("fs").readFileSync(process.env.KIT_SCHEMA_MANIFEST, "utf8"));
+if (JSON.stringify(m.sets) !== JSON.stringify(["core"])) process.exit(1);
+'; then
+  pass "2 legacy manifest derives core only"
+else
+  fail_case "2 legacy manifest derives core only" "exit=${RUN_EC} out=${RUN_OUT}"
+fi
+
 
 # Real consumer opt-in: core alone omits notifications, then the explicit set appends it.
 A2N="${TMP}/case2-notifications"

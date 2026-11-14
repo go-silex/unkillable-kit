@@ -27,7 +27,7 @@
 
 ### Schema sync default
 
-- Fresh Product schema sync selects `core,audit`, including Better Auth's rate-limit table. Existing recorded selections remain unchanged on upgrade; explicit selections still work.
+- Fresh Product schema sync selects `core,audit`, including `rate_limit_buckets` for the Kit throttle. First `--adopt` without `--modules` also selects `audit`. Existing recorded selections remain unchanged: to opt in, pass `--modules core,audit` plus every other recorded set.
 
 ### Wrangler runtime types
 
