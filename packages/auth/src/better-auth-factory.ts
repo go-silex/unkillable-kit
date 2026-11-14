@@ -41,7 +41,7 @@ export type KitBetterAuth = BetterAuthLike & {
 export type BetterAuthDatabase = KitD1Database
 
 export type CreateBetterAuthOpts = {
-  /** D1-shaped binding (or test double) — same members as `@kit/db` `KitD1Database`. */
+  /** `@kit/db` `KitD1Database` binding (or test double). */
   database: BetterAuthDatabase
   secret: string
   baseURL: string
@@ -79,7 +79,7 @@ export function createBetterAuth(opts: CreateBetterAuthOpts): KitBetterAuth {
     !opts.schema || opts.schema === betterAuthDrizzleSchema
       ? betterAuthDrizzleSchema
       : withBetterAuthRelations(opts.schema)
-  // drizzle-orm/d1 names the workers `D1Database` type; the public contract is the duck above.
+  // drizzle-orm/d1 names the workers `D1Database` type; the public contract is `@kit/db` `KitD1Database`.
   const db = drizzle(opts.database as never, { schema })
   const cookieName = sessionCookieName({ name: opts.cookieName })
   const secure = opts.useSecureCookies ?? true
