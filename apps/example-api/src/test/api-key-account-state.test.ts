@@ -1,8 +1,8 @@
 import { apiKeys, baUser } from '@kit/auth/schema'
 import { eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
-import { mintApiKey } from './services/auth'
-import { bearerHeaders, createApiTestContext, seedDemoEnv } from './test/api-fixture'
+import { mintApiKey } from '../services/auth'
+import { bearerHeaders, createApiTestContext, seedDemoEnv } from './api-fixture'
 
 describe('API key scopes and account state', () => {
   it('requires an active owner even for scoped keys, and restores access after re-enabling', async () => {
