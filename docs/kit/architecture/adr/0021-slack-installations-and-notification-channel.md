@@ -67,13 +67,19 @@ Ces signatures spécifient l’interface à implémenter, pas un Package déjà 
 
 Implementation signatures: [non-normative design note](../design-notes/0021-slack.md#racine-kitslack).
 
-| Précondition / résultat | Contrat                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Session                 | `sessionId` est lu côté serveur Better Auth ; `userId` est celui de cette session pour une liaison. Aucun User ID browser/state ne remplace cette autorité. L’App vérifie session, Organization active, membership et capability avant l’opération HTTP.                                                                                                                                                                                                                                                                                                                        |
-| Installation            | Predicates/CAS sur `(orgId,installationId,generation)` ; référence absente/périmée → `installation_unavailable`. Un ID seul ne donne aucune autorité cross-org.                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| Temps/réseau            | `now()` et données persistées en epoch **ms** ; JWT et `retryAfterSeconds` en **secondes**. Requêtes avec timeout 10 s, hôtes/endpoints fixes et `redirect:'error'`. Aucun claim/paramètre client ne choisit une URL de fetch.                                                                                                                                                                                                                                                                                                                                                  |
-| Erreurs                 | Erreurs attendues dans `SlackOutcome` ; `providerCode` filtré `[a-z0-9_]{1,64}` ou `unknown_error`, jamais texte/corps provider/email/token. Erreurs DB/programming inattendues restent exceptions, pas succès/permanence métier devinée.                                                                                                                                                                                                                                                                                                                                       |
-| Effets                  | `resolveUser` ne crée ni Notification ni Delivery ; `postMessage` ne choisit pas le User d’App ni une règle. Pour `kind:'user'`, il reçoit le User App courant, résout/revalide lui-même l’identité immédiatement avant `conversations.open`/POST ; un `slackUserId` issu d’un ancien préflight n’est pas accepté comme adresse autoritaire. Identité devenue indisponible après préflight → `permanent/identity_unavailable`, aucun POST ; sinon le bot de l’installation poste vers l’identité courante validée. `ts` reste une string receipt, pas une preuve d’idempotence. |
+Preconditions: [non-normative design note](../design-notes/0021-slack.md#préconditions).
+
+`sessionId` est lu côté serveur Better Auth ; `userId` est celui de cette session pour une liaison. Aucun User ID browser/state ne remplace cette autorité. L’App vérifie session, Organization active, membership et capability avant l’opération HTTP.
+
+Un ID seul ne donne aucune autorité cross-org.
+
+Requêtes avec timeout 10 s, hôtes/endpoints fixes et `redirect:'error'`. Aucun claim/paramètre client ne choisit une URL de fetch.
+
+Erreurs attendues dans `SlackOutcome` ; `providerCode` filtré `[a-z0-9_]{1,64}` ou `unknown_error`, jamais texte/corps provider/email/token.
+
+`resolveUser` ne crée ni Notification ni Delivery ; `postMessage` ne choisit pas le User d’App ni une règle.
+
+Pour `kind:'user'`, il reçoit le User App courant, résout/revalide lui-même l’identité immédiatement avant `conversations.open`/POST ; un `slackUserId` issu d’un ancien préflight n’est pas accepté comme adresse autoritaire. Identité devenue indisponible après préflight → `permanent/identity_unavailable`, aucun POST ; sinon le bot de l’installation poste vers l’identité courante validée.
 
 `completeAuthorization` fournit `linkedSlackUserId` seulement pour `user_link`. Construction : configuration OAuth complète, redirect URIs HTTPS exactes et trousseau valide requis. L’App ne sérialise jamais ces options dans ses erreurs.
 
@@ -81,45 +87,37 @@ Implementation signatures: [non-normative design note](../design-notes/0021-slac
 
 Adapter signatures: [non-normative design note](../design-notes/0021-slack.md#kitslacknotifications).
 
-Le contrat partagé reste exactement :
-
-```ts
-type Channel<Input extends { orgId: string }> = Readonly<{
-  send(input: Input): Promise<ChannelResult>
-}>
-type ChannelResult =
-  | Readonly<{ status: 'sent' }>
-  | Readonly<{ status: 'retryable'; code: string; retryAfterSeconds?: number }>
-  | Readonly<{ status: 'permanent'; code: string }>
-```
+Shared Channel contract: [non-normative design note](../design-notes/0021-slack.md#contrat-channel-partagé).
 
 Aucun champ Slack n’est imposé au cœur ; tous les imports de `@kit/notifications` sont `import type`. L’adapter utilise `orgId` du même input que l’installation, impose le rendu et retourne les trois résultats partagés. `deliveryId` sert à corréler, pas à dédupliquer chez Slack.
 
-| Préflight / résultat                                                   | Traitement                                                                                                                                                                                                                                                                                                                                        |
-| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| User sans correspondance, installation inactive, destination supprimée | Le service App écrit `skipped` **avant** Channel. Aucun quatrième résultat ou faux `sent`.                                                                                                                                                                                                                                                        |
-| `resolveUser → linked`                                                 | Préflight App `ready`, génération courante et `target:{kind:'user',user}` où `user` vient d’être relu côté App. Le `slackUserId` retourné n’est ni un checkpoint d’autorisation ni l’adresse d’un prochain POST : `postMessage` revalide l’identité courante. `unmapped` → `unavailable` ; erreur transitoire → `retryable`, pas « aucun match ». |
-| Slack accepte le POST                                                  | `sent` signifie acceptation transport, pas lecture/réception finale par le User.                                                                                                                                                                                                                                                                  |
-| Succès rendu invalide                                                  | Aucun POST ; `permanent/payload_invalid`. Le renderer App et son catalogue restent propriétaires du contenu.                                                                                                                                                                                                                                      |
+Preflight and result details: [non-normative design note](../design-notes/0021-slack.md#préflight-et-résultats).
+
+| Préflight / résultat   | Traitement                                                                                                                                                                                                                                                                                                                                        |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `resolveUser → linked` | Préflight App `ready`, génération courante et `target:{kind:'user',user}` où `user` vient d’être relu côté App. Le `slackUserId` retourné n’est ni un checkpoint d’autorisation ni l’adresse d’un prochain POST : `postMessage` revalide l’identité courante. `unmapped` → `unavailable` ; erreur transitoire → `retryable`, pas « aucun match ». |
 
 Le Workflow reçoit la référence stable `{orgId,kind:'user'|'organization',id}` de la Delivery, pas ce grand input ni un token. **Dans le callback de chaque tentative du step d’envoi, y compris retry natif**, l’App relit le User/email/emailVerified et les accès/règles courants, puis appelle le Channel ; Slack résout/revalide l’identité dans ce même chemin juste avant DM. Un résultat d’adresse, permission ou email obtenu dans un ancien step/checkpoint ne peut pas être réutilisé pour envoyer. En revanche, une reprise de persistance après un step d’envoi réussi ne doit pas reconstruire/réémettre cet effet réussi.
 
 ### Exports et dépendances
 
-| Export            | Surface                                                                                                                                                                                                                                       |
-| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `.`               | `createSlack` et types ci-dessus, serveur uniquement ; aucune route Hono ni import App.                                                                                                                                                       |
-| `./schema`        | `slackInstallations`, `slackUserLinks`, `slackOAuthTransactions`, `slackEmailMatches`, agrégat `slackDrizzleSchema` ; `SlackInstallationRow`, `SlackUserLinkRow`, `SlackOAuthTransactionRow`, `SlackEmailMatchRow` dérivés de `$inferSelect`. |
-| `./notifications` | `createSlackNotificationChannel`, `escapeSlackText`, `SlackNotificationDelivery`, `SlackNotificationContent`.                                                                                                                                 |
-| Privé             | AES-GCM, parsing/validation OAuth/OIDC/JWKS, repositories et plaintext. Aucun export `getToken` ou `call(method,args)`.                                                                                                                       |
+Export details: [non-normative design note](../design-notes/0021-slack.md#exports).
 
-Manifest ESM `{types,import,default}` comme les Packages voisins. Réutiliser `@kit/db`, Drizzle et Zod 4. `@kit/notifications` est peer workspace optionnel pour le sous-export, et dépendance de développement ; la racine n’exige pas son runtime. `jose` est direct pour JWS/JWKS ; aucun SDK Slack/Bolt, framework OIDC complet ou Package jobs supplémentaire.
+| Export | Surface                                                                                                                 |
+| ------ | ----------------------------------------------------------------------------------------------------------------------- |
+| Privé  | AES-GCM, parsing/validation OAuth/OIDC/JWKS, repositories et plaintext. Aucun export `getToken` ou `call(method,args)`. |
+
+Package manifest details: [non-normative design note](../design-notes/0021-slack.md#manifest).
+
+`jose` est direct pour JWS/JWKS ; aucun SDK Slack/Bolt, framework OIDC complet ou Package jobs supplémentaire.
 
 ## Schéma et lifecycle
 
 ### Tables de `./schema`
 
 Schema details: [non-normative design note](../design-notes/0021-slack.md#tables-de-schema).
+
+Aucun email ou token OIDC.
 
 Pas de FK vers User, membership, source Product ou table notifications : les FKs sont internes et org-scopées. L’App compose le schéma, applique le SQL via le catalogue selon ADR-0008/0012 et purge les données Slack au lifecycle User/Organization. Les transactions OAuth expirées sont inertes ; leur nettoyage ne réveille aucune exécution.
 
@@ -137,14 +135,14 @@ Pas de FK vers User, membership, source Product ou table notifications : les FKs
 
 ### Transitions
 
-| Opération                                                                       | Transition et fence                                                                                                                                                                                                                                                                                                                |
-| ------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Installation initiale acceptée                                                  | Nouvel ID, génération 1, token chiffré, `active` ; unicités org/team appliquées au commit.                                                                                                                                                                                                                                         |
-| Réinstallation du même workspace dans la même Organization                      | Même ID, `generation+1`, nouveau token/chiffré/AAD, `active` ; caches email et transactions en attente invalidés. Les liaisons OIDC du même workspace peuvent rester.                                                                                                                                                              |
-| `token_revoked` prouvé, compte/workspace définitivement inactif ou token expiré | CAS `(orgId,id,generation,status='active')→revoked`, reason respectivement `token_revoked`, `account_inactive` ou `token_expired` ; seul le premier prouve une révocation distante. Credential définitivement inutilisable écarté, pas de refresh. Une réponse d’ancienne génération ne modifie jamais la nouvelle.                |
-| `invalid_auth` ambigu sur n’importe quel appel bot                              | CAS `active→disconnecting`, `statusReason:'auth_indeterminate'`, **sans changer génération/AAD ni supprimer le chiffré**. Credential suspendu localement, conservé pour révocation seulement ; aucun envoi ou retry autonome, révocation admin encore possible après correction IP. Ce n’est pas la preuve d’une révocation Slack. |
-| Déconnexion demandée                                                            | CAS vers `disconnecting`, `statusReason:'revocation_requested'`, **sans changer la génération liée à l’AAD** ; aucun nouvel envoi. Chiffré gardé pour révocation seulement ; réinstallation refusée tant que déconnexion non terminée.                                                                                             |
-| Révocation confirmée                                                            | Supprimer token/connexion, liaisons/caches/transactions internes ; historique notifications conservé et unicité team libérée. Un retry admin terminé ne cible jamais une nouvelle connexion.                                                                                                                                       |
+Lifecycle transitions: [non-normative design note](../design-notes/0021-slack.md#transitions-du-lifecycle).
+
+- Installation initiale acceptée : Nouvel ID, génération 1, token chiffré, `active` ; unicités org/team appliquées au commit.
+- Réinstallation du même workspace dans la même Organization : Même ID, `generation+1`, nouveau token/chiffré/AAD, `active` ; caches email et transactions en attente invalidés. Les liaisons OIDC du même workspace peuvent rester.
+- `token_revoked` prouvé, compte/workspace définitivement inactif ou token expiré : CAS `(orgId,id,generation,status='active')→revoked`, reason respectivement `token_revoked`, `account_inactive` ou `token_expired` ; seul le premier prouve une révocation distante. Credential définitivement inutilisable écarté, pas de refresh. Une réponse d’ancienne génération ne modifie jamais la nouvelle.
+- `invalid_auth` ambigu sur n’importe quel appel bot : CAS `active→disconnecting`, `statusReason:'auth_indeterminate'`, **sans changer génération/AAD ni supprimer le chiffré**. Credential suspendu localement, conservé pour révocation seulement ; aucun envoi ou retry autonome, révocation admin encore possible après correction IP. Ce n’est pas la preuve d’une révocation Slack.
+- Déconnexion demandée : CAS vers `disconnecting`, `statusReason:'revocation_requested'`, **sans changer la génération liée à l’AAD** ; aucun nouvel envoi. Chiffré gardé pour révocation seulement ; réinstallation refusée tant que déconnexion non terminée.
+- Révocation confirmée : Supprimer token/connexion, liaisons/caches/transactions internes ; historique notifications conservé et unicité team libérée. Un retry admin terminé ne cible jamais une nouvelle connexion.
 
 Changer de workspace demande déconnexion puis nouvel ID d’installation. Aucun ancien Slack user ID ou canal n’est réinterprété dans l’autre workspace. Les actions admin portent l’ID et la génération attendus.
 
@@ -152,7 +150,7 @@ Les noms d’état existants sont conservés, mais `revoked` décrit un état lo
 
 ## OAuth v2 confidentiel et state
 
-`POST authorize → state persisté → navigation Slack → GET callback → guards revérifiés → state consommé → code échangé → réponse validée → chiffrement/commit → audit → 303 App fixe`.
+OAuth flow: [non-normative design note](../design-notes/0021-slack.md#parcours-oauth).
 
 1. State CSPRNG **32 octets**, base64url, TTL **600 s** ; SHA-256 stocké avec purpose, Organization, User et hash du `session.id` Better Auth. Pas de state signé réutilisable ou d’autorité choisie par le client. Consommation atomique unique, y compris refus utilisateur ; callbacks concurrents ne peuvent réussir deux fois.
 2. L’App obtient l’ID de session côté serveur depuis son instance Better Auth. Le `SessionPort` fournit cet ID via `sessionId` ; pas de refonte globale ou de hash d’un cookie refreshable à la place.
@@ -177,16 +175,16 @@ Un paramètre `code_verifier` documenté ne prouve pas un mode S256 confidentiel
 
 ### Validation obligatoire avant écriture
 
-| Élément                     | Contrôle                                                                                                                                                                                                                                                                              |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Signature/clé               | `jose`, **RS256** seulement, JWKS fixe `https://slack.com/openid/connect/keys`. Rejeter JWT malformé, `none`/HS256/autre algorithme, clé invérifiable et extension critique non supportée. `jku`/`x5u`/issuer du token ne pilotent aucun fetch.                                       |
-| `iss`                       | String exactement `https://slack.com`, pas suffix matching ou normalisation.                                                                                                                                                                                                          |
-| `aud`/`azp`                 | String `clientId`, ou array contenant seulement cet unique public attendu ; aucune audience additionnelle non approuvée. `azp` présent doit être une string égale au client. `jwtVerify` seul ne refuse pas toutes les audiences supplémentaires.                                     |
-| `exp`/`iat`/`nbf`           | `exp` et `iat` requis, entiers NumericDate finis en secondes ; `exp>iat`. Tolérance 60 s ; non expiré, `iat≤now+60`, `iat≥now−660`, `iat≥transaction.createdAt/1000−60`. Vérifier `nbf` si présent.                                                                                   |
-| `nonce`                     | String requise, hash égal au nonce envoyé, comparaison sûre, avec state lié/consommé une seule fois. Signature valide sans nonce correct = refus.                                                                                                                                     |
-| `sub`                       | ASCII non vide, ≤255 caractères ; identité `(issuer,teamId,sub)`. Slack documente `sub` comme ID User : `slackUserId` prend cette valeur validée. Aucun fallback email/claim annexe si `sub` manque ; ne pas imposer l’égalité avec un autre claim dont les exemples Slack divergent. |
-| `https://slack.com/team_id` | String non vide, exactement workspace de l’installation **et** transaction ; état/génération rechargés au commit. Le hint `team` n’est pas une preuve.                                                                                                                                |
-| `auth_time`/`at_hash`       | Aucun `max_age`/`acr` demandé. `auth_time` présent doit être numérique valide. Si `at_hash` présent, vérifier SHA-256/moitié gauche/base64url de l’access token de cette réponse ; `jwtVerify` ne le fait pas pour nous.                                                              |
+OIDC validation details: [non-normative design note](../design-notes/0021-slack.md#validation-oidc).
+
+- `jose`, **RS256** seulement, JWKS fixe `https://slack.com/openid/connect/keys`. Rejeter JWT malformé, `none`/HS256/autre algorithme, clé invérifiable et extension critique non supportée. `jku`/`x5u`/issuer du token ne pilotent aucun fetch.
+- `iss` : String exactement `https://slack.com`, pas suffix matching ou normalisation.
+- `aud`/`azp` : String `clientId`, ou array contenant seulement cet unique public attendu ; aucune audience additionnelle non approuvée. `azp` présent doit être une string égale au client. `jwtVerify` seul ne refuse pas toutes les audiences supplémentaires.
+- `exp`/`iat`/`nbf` : `exp` et `iat` requis, entiers NumericDate finis en secondes ; `exp>iat`. Tolérance 60 s ; non expiré, `iat≤now+60`, `iat≥now−660`, `iat≥transaction.createdAt/1000−60`. Vérifier `nbf` si présent.
+- `nonce` : String requise, hash égal au nonce envoyé, comparaison sûre, avec state lié/consommé une seule fois. Signature valide sans nonce correct = refus.
+- `sub` : ASCII non vide, ≤255 caractères ; identité `(issuer,teamId,sub)`. Slack documente `sub` comme ID User : `slackUserId` prend cette valeur validée. Aucun fallback email/claim annexe si `sub` manque ; ne pas imposer l’égalité avec un autre claim dont les exemples Slack divergent.
+- `https://slack.com/team_id` : String non vide, exactement workspace de l’installation **et** transaction ; état/génération rechargés au commit. Le hint `team` n’est pas une preuve.
+- `auth_time`/`at_hash` : Aucun `max_age`/`acr` demandé. `auth_time` présent doit être numérique valide. Si `at_hash` présent, vérifier SHA-256/moitié gauche/base64url de l’access token de cette réponse ; `jwtVerify` ne le fait pas pour nous.
 
 Configurer `jwtVerify` avec issuer, audience, `algorithms:['RS256']`, claims requis, date courante et tolérance. Le Package complète nonce, workspace, multi-audience, `iat` lié à la transaction et `at_hash` ; schéma des claims validé avant usage métier.
 
@@ -198,13 +196,13 @@ JWKS : fetch injecté à URL fixe, redirects refusés, cache maximal 10 min, coo
 
 ## Email et unlink
 
-| Situation      | Traitement                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Liaison OIDC   | Prioritaire même si emails différents. Un échec DM ne permet jamais un fallback email vers une autre personne ; délier/relier explicitement.                                                                                                                                                                                                                                                                                                                                                   |
-| Sans liaison   | User persisté fourni par App après guards ; `emailVerified===true`, email non vide, normalisation `trim().toLowerCase()` actuelle de `@kit/auth`, sans heuristique alias/Gmail/domaine.                                                                                                                                                                                                                                                                                                        |
-| Lookup courant | `users.lookupByEmail` avec bot de l’installation ; vérifier `user.id`, `team_id` attendu, `deleted:false`, `is_bot:false`, `is_app_user:false` et `profile.email` normalisé égal à l’email App courant vérifié. Réponse absente/incomplète n’autorise aucun DM. `users_not_found` couvre aussi désactivé → `unmapped` puis `skipped` au préflight. Réseau/429 reste `retryable`.                                                                                                               |
-| Cache-hint     | Positif, installation/org/User + génération et SHA-256 du tuple `(orgId,installationId,userId,emailNormalisé)` ; TTL **5 min maximum** depuis `resolved_at`, date future/expirée invalide. Le fingerprint reste une donnée personnelle et ne constate **pas** un changement d’email côté Slack. Même un hint frais ne peut autoriser un POST sans revalidation fournisseur courante. Changement email App/perte de vérification/réinstallation invalide le hint ; aucun cache négatif durable. |
-| Déliaison      | Supprimer liaison explicite **et** cache du User courant, puis matching email de nouveau possible. Aucun `auth.revoke` sur le bot ; audit `slack.user_unlinked`. Ce n’est pas un opt-out Slack.                                                                                                                                                                                                                                                                                                |
+Email matching details: [non-normative design note](../design-notes/0021-slack.md#correspondance-email).
+
+- Liaison OIDC : Prioritaire même si emails différents. Un échec DM ne permet jamais un fallback email vers une autre personne ; délier/relier explicitement.
+- Sans liaison : User persisté fourni par App après guards ; `emailVerified===true`, email non vide, normalisation `trim().toLowerCase()` actuelle de `@kit/auth`, sans heuristique alias/Gmail/domaine.
+- Lookup courant : `users.lookupByEmail` avec bot de l’installation ; vérifier `user.id`, `team_id` attendu, `deleted:false`, `is_bot:false`, `is_app_user:false` et `profile.email` normalisé égal à l’email App courant vérifié. Réponse absente/incomplète n’autorise aucun DM. `users_not_found` couvre aussi désactivé → `unmapped` puis `skipped` au préflight. Réseau/429 reste `retryable`.
+- Cache-hint : Positif, installation/org/User + génération et SHA-256 du tuple `(orgId,installationId,userId,emailNormalisé)` ; TTL **5 min maximum** depuis `resolved_at`, date future/expirée invalide. Le fingerprint reste une donnée personnelle et ne constate **pas** un changement d’email côté Slack. Même un hint frais ne peut autoriser un POST sans revalidation fournisseur courante. Changement email App/perte de vérification/réinstallation invalide le hint ; aucun cache négatif durable.
+- Déliaison : Supprimer liaison explicite **et** cache du User courant, puis matching email de nouveau possible. Aucun `auth.revoke` sur le bot ; audit `slack.user_unlinked`. Ce n’est pas un opt-out Slack.
 
 Avant **chaque** tentative DM par email, `postMessage` recharge la liaison/cache de son installation et revalide le hint avec `users.info(user=cachedSlackUserId)` : ID attendu, workspace, humain actif et `profile.email` normalisé égal à l’email App vérifié courant. Les scopes `users:read` et `users:read.email` déjà requis couvrent cette lecture. Cache absent/expiré, réponse d’identité absente/inactive, email changé/manquant ou mismatch team → invalider le hint et effectuer **au plus un** lookup email frais avant tout POST ; seule une identité actuelle entièrement validée peut recevoir le DM. Une panne/429 de revalidation donne `retryable`, jamais validation par défaut ni fallback déclenché par une panne.
 
@@ -218,13 +216,17 @@ L’UI explique « délier ; la correspondance email automatique reprend ». Cou
 
 Ciphertext representation: [non-normative design note](../design-notes/0021-slack.md#ciphertext).
 
-| Élément         | Contrat                                                                                                                                                                                                                                                                 |
-| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Clés            | AES-GCM 256 bits CSPRNG dédiée, import non extractible encrypt/decrypt ; IDs courant/précédent distincts. Aucun dérivé de `client_secret` ou `BETTER_AUTH_SECRET`. L’App mappe les secrets Worker vers le trousseau ; aucun binding global lu par le Package.           |
-| IV/tag          | IV **12 octets** CSPRNG neuf à chaque chiffrement/rechiffrement/réinstallation ; tag **128 bits**. Base64url d’IV et de `ciphertext                                                                                                                                     |     | tag` WebCrypto. Aucun IV dérivé de timestamp/orgId. |
-| AAD             | UTF-8 `JSON.stringify(['@kit/slack',1,'bot-token',deploymentId,orgId,installationId,teamId,generation,kid])`, ordre fixé. Reconstituer depuis les coordonnées attendues, pas seulement celles du blob. Copier vers autre org/install/team/génération/Deployment échoue. |
-| Déchiffrement   | `kid` sélectionne une clé exacte, pas un essai de toutes. Version/alg/kid/IV/tag/AAD invalides → `permanent/secret_unavailable`, aucun envoi, diagnostic redacted ; pas une révocation supposée chez Slack.                                                             |
-| Rotation coffre | Écrire courante, lire précédente. La précédente n’est retirée qu’après rechiffrement CAS/reconnexion des lignes et prise en compte des backups requis ; finir ce passage avant rotation suivante. Pas de Cron/moteur de rotation/reprise supplémentaire.                |
+Vault implementation details: [non-normative design note](../design-notes/0021-slack.md#coffre-aes-gcm).
+
+AES-GCM 256 bits CSPRNG dédiée, import non extractible encrypt/decrypt ; IDs courant/précédent distincts. Aucun dérivé de `client_secret` ou `BETTER_AUTH_SECRET`. L’App mappe les secrets Worker vers le trousseau ; aucun binding global lu par le Package.
+
+IV **12 octets** CSPRNG neuf à chaque chiffrement/rechiffrement/réinstallation ; tag **128 bits**. Aucun IV dérivé de timestamp/orgId.
+
+UTF-8 `JSON.stringify(['@kit/slack',1,'bot-token',deploymentId,orgId,installationId,teamId,generation,kid])`, ordre fixé. Reconstituer depuis les coordonnées attendues, pas seulement celles du blob. Copier vers autre org/install/team/génération/Deployment échoue.
+
+`kid` sélectionne une clé exacte, pas un essai de toutes. Version/alg/kid/IV/tag/AAD invalides → `permanent/secret_unavailable`, aucun envoi, diagnostic redacted ; pas une révocation supposée chez Slack.
+
+Écrire courante, lire précédente. La précédente n’est retirée qu’après rechiffrement CAS/reconnexion des lignes et prise en compte des backups requis ; finir ce passage avant rotation suivante. Pas de Cron/moteur de rotation/reprise supplémentaire.
 
 Rotation coffre ≠ rotation token Slack. Perte des clés → réinstallation. AES-GCM ne protège pas d’un Worker compromis disposant des secrets ou d’un rollback complet de données valides. Aucun plaintext dans cache process, payload durable, URL, exception/cause/trace fetch/audit/UI ; seules les clés non extractibles peuvent être réutilisées entre appels. Aucun cache mutable de tokens multi-Organization.
 
@@ -232,20 +234,11 @@ Rotation coffre ≠ rotation token Slack. Perte des clés → réinstallation. A
 
 ### Une tentative
 
-| Observation                                                                                               | Résultat / effet                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| HTTP 2xx, JSON `ok:true`, `channel`/`ts` valides                                                          | `ok(receipt)→sent` ; HTTP 200 seul ne suffit pas.                                                                                                                                                                                                                                                                                                                                                                                     |
-| HTTP 429 ou `ok:false,error:'ratelimited'`                                                                | `retryable/rate_limited` ; parse strict digits en entier sûr ≥0 de `Retry-After`, 0 normalisé 1 s, absent/invalide omis. Pas d’invalidation d’identité ou destination.                                                                                                                                                                                                                                                                |
-| 5xx/408/réseau/timeout, `service_unavailable`, `internal_error`, `fatal_error`                            | `retryable`, effet distant possiblement ambigu et doublon possible au prochain POST.                                                                                                                                                                                                                                                                                                                                                  |
-| `invalid_auth` sur tout appel **bot**                                                                     | `permanent/auth_indeterminate` pour la tentative ; CAS de cette génération `active→disconnecting`, reason `auth_indeterminate`, token chiffré conservé et désactivé pour révocation admin seulement ; audit `slack.auth_disabled` une fois, prochaines Deliveries `skipped` au préflight. Une restriction IP peut laisser ce token valide ailleurs : ni suppression ni affirmation de révocation distante. Erreur OIDC ≠ état du bot. |
-| `token_revoked`, `account_inactive`                                                                       | `permanent/auth_revoked`, CAS `active→revoked` avec reason exacte et credential inutilisable écarté ; `token_revoked` peut produire `slack.revoked`, l’inactivité produit `slack.auth_disabled`, pas une fausse preuve de révocation distante. Prochaines Deliveries `skipped`.                                                                                                                                                       |
-| `token_expired`                                                                                           | `permanent/token_expired`, désactivation/revoked local, reason `token_expired`, audit `slack.auth_disabled` ; pas de refresh ou claim de révocation distante.                                                                                                                                                                                                                                                                         |
-| `channel_not_found`, `is_archived`, `not_in_channel`, `restricted_action`, `no_permission`, User invalide | `permanent/destination_invalid`, Delivery `failed` et diagnostic destination ; pas de révocation globale/join automatique. Invalidation email seulement selon contrat ciblé.                                                                                                                                                                                                                                                          |
-| `missing_scope`                                                                                           | `permanent/missing_scope`, configuration/réinstallation ; pas une révocation.                                                                                                                                                                                                                                                                                                                                                         |
-| `invalid_blocks`, `invalid_arguments`, `no_text`, rendu invalide                                          | `permanent/payload_invalid`, zéro réseau si rejet local ; pas de retry du même payload malformé.                                                                                                                                                                                                                                                                                                                                      |
-| `users_not_found` au matching                                                                             | `ok(unmapped)` puis `skipped` avant Channel, pas une panne provider.                                                                                                                                                                                                                                                                                                                                                                  |
-| 2xx invalide ou receipt manquante                                                                         | `retryable/invalid_response`, jamais `sent`.                                                                                                                                                                                                                                                                                                                                                                                          |
-| Autre 4xx/code inconnu                                                                                    | `permanent/provider_error`, code filtré ou `unknown_error`, diagnostic visible ; pas de boucle infinie ou `skipped` silencieux.                                                                                                                                                                                                                                                                                                       |
+Attempt classification details: [non-normative design note](../design-notes/0021-slack.md#classification-des-tentatives).
+
+- `invalid_auth` sur tout appel **bot** : `permanent/auth_indeterminate` pour la tentative ; CAS de cette génération `active→disconnecting`, reason `auth_indeterminate`, token chiffré conservé et désactivé pour révocation admin seulement ; audit `slack.auth_disabled` une fois, prochaines Deliveries `skipped` au préflight. Une restriction IP peut laisser ce token valide ailleurs : ni suppression ni affirmation de révocation distante. Erreur OIDC ≠ état du bot.
+- `token_revoked`, `account_inactive` : `permanent/auth_revoked`, CAS `active→revoked` avec reason exacte et credential inutilisable écarté ; `token_revoked` peut produire `slack.revoked`, l’inactivité produit `slack.auth_disabled`, pas une fausse preuve de révocation distante. Prochaines Deliveries `skipped`.
+- `token_expired` : `permanent/token_expired`, désactivation/revoked local, reason `token_expired`, audit `slack.auth_disabled` ; pas de refresh ou claim de révocation distante.
 
 HTTP et corps Slack `ok:false` sont vérifiés séparément. Une exception infrastructure inconnue n’est jamais transformée en erreur permanente en devinant depuis son message.
 
@@ -259,12 +252,12 @@ HTTP et corps Slack `ok:false` sont vérifiés séparément. Une exception infra
 
 ### Déconnexion admin
 
-| Après passage local `disconnecting`                           | Traitement                                                                                                                                                                                                                                                                                    |
-| ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `auth.revoke → ok:true,revoked:true`                          | Confirmation, suppression token/connexion et audit de déconnexion terminée.                                                                                                                                                                                                                   |
-| Token déjà révoqué ou compte/workspace définitivement inactif | Terminaison locale idempotente ; pas de réactivation ou retry de credential inutilisable.                                                                                                                                                                                                     |
-| 429/réseau/timeout/5xx                                        | Garder le token **chiffré et désactivé**, usage révocation uniquement ; retour d’échec, UI `disconnecting`, nouvelle tentative admin explicite. Aucun retry autonome.                                                                                                                         |
-| `invalid_auth` ou réponse non concluante                      | Ne pas annoncer révocation distante : restriction IP possible. Garder `disconnecting`, reason `auth_indeterminate` si ce code est observé, chiffré désactivé et diagnostic borné pour correction/réessai admin. Même règle de rétention sur tous les appels bot, pas seulement `auth.revoke`. |
+Disconnection details: [non-normative design note](../design-notes/0021-slack.md#déconnexion-admin).
+
+- `auth.revoke → ok:true,revoked:true` : Confirmation, suppression token/connexion et audit de déconnexion terminée.
+- Token déjà révoqué ou compte/workspace définitivement inactif : Terminaison locale idempotente ; pas de réactivation ou retry de credential inutilisable.
+- 429/réseau/timeout/5xx : Garder le token **chiffré et désactivé**, usage révocation uniquement ; retour d’échec, UI `disconnecting`, nouvelle tentative admin explicite. Aucun retry autonome.
+- `invalid_auth` ou réponse non concluante : Ne pas annoncer révocation distante : restriction IP possible. Garder `disconnecting`, reason `auth_indeterminate` si ce code est observé, chiffré désactivé et diagnostic borné pour correction/réessai admin. Même règle de rétention sur tous les appels bot, pas seulement `auth.revoke`.
 
 Déchiffrer `disconnecting` est autorisé uniquement pour cette révocation, jamais pour poster. Un retry HTTP après suppression locale ne peut viser un nouvel ID de connexion. Aucun effacement local n’est présenté comme révocation distante pendant une panne indéterminée.
 
@@ -274,21 +267,25 @@ Sous-ensemble **fixé** : `section`, `header`, `context` textuel, `divider`. Auc
 
 Block Kit field bounds: [non-normative design note](../design-notes/0021-slack.md#bornes-block-kit).
 
-1. L’App rend dans sa locale par défaut **au moment de la tentative**, avec son catalogue ; aucun texte métier/localisé dans le Package.
-2. Après schéma strict, borner chaque texte à **son composant**, fields/context à 10, contenu à 49 blocs avec lien. Structures vides/malformées après normalisation : rejet, pas confiance dans la troncature Slack.
-3. Lien séparé : href HTTPS absolu sur origin App allowlistée, sans credentials/query de capability/token ; label catalogue. Réserver `<href|label>`, séparateur et ellipse avant troncature. Ajouter fallback **et** dernière section, même sans autres blocks. Lien trop long pour section3000 → erreur, jamais URL coupée/lien supprimé.
-4. Comptage conservatif en unités UTF-16 **finales échappées**, pas de paire surrogate coupée ou troncature JSON. Retirer un jeton Slack `<…>` terminal incomplet avant ellipse/lien. Ne pas importer la limite RTM 16 KiB dans HTTP.
+Rendering implementation details: [non-normative design note](../design-notes/0021-slack.md#rendu-block-kit).
+
+Structures vides/malformées après normalisation : rejet, pas confiance dans la troncature Slack.
+
+Lien séparé : href HTTPS absolu sur origin App allowlistée, sans credentials/query de capability/token ; label catalogue.
+
+Retirer un jeton Slack `<…>` terminal incomplet avant ellipse/lien.
+
 5. `escapeSlackText` échappe `&`, `<`, `>` des valeurs non fiables avant interpolation mrkdwn. Envoyer `verbatim:true`, `parse:'none'`, `unfurl_links:false`, `unfurl_media:false` ; ces flags ne neutralisent pas seuls une mention brute `<!channel>`.
 
 ## Organization destinations et ceiling
 
-| Cible                    | Admission/recheck                                                                                                                                                                                                                                   |
-| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| DM User                  | User IDs serveur après ACL objet à l’émission ; Organization active, membership et Module effectifs ; Inbox toujours créée puis résolution des Channels externes. Adresse après règles.                                                             |
-| Organization destination | Fan-out **indépendant, une fois par émission/cible, même zéro User admissible** ; aucun faux User ou Inbox. Type déclare Slack et `organizationDestinations:true`, destination/sélecteur présents, Organization active et Module disponible/activé. |
-| Plafond Deployment       | Règle la plus spécifique type > catégorie > `*`. Locked-off Slack interdit le collectif ; off non locked est un défaut User, pas veto contre l’opt-in collectif. Locked-on ne crée ni destination/opt-in ni accès Module.                           |
-| Autres rules             | Organization/User rules des Users ne gouvernent pas cette cible collective. Ne pas choisir un auteur/admin/premier User pour lui appliquer ses préférences. Les DM suivent les trois niveaux de règles du contrat notifications.                    |
-| Tentative                | Recharger destination/installation/statut/génération, type/opt-in/Channel, sélecteur, Module et plafond courants. Interdiction observée au dernier recheck → `skipped`. Une transaction D1 n’annule pas un POST déjà accepté.                       |
+Destination admission details: [non-normative design note](../design-notes/0021-slack.md#admission-des-destinations).
+
+- DM User : User IDs serveur après ACL objet à l’émission ; Organization active, membership et Module effectifs ; Inbox toujours créée puis résolution des Channels externes. Adresse après règles.
+- Organization destination : Fan-out **indépendant, une fois par émission/cible, même zéro User admissible** ; aucun faux User ou Inbox. Type déclare Slack et `organizationDestinations:true`, destination/sélecteur présents, Organization active et Module disponible/activé.
+- Plafond Deployment : Règle la plus spécifique type > catégorie > `*`. Locked-off Slack interdit le collectif ; off non locked est un défaut User, pas veto contre l’opt-in collectif. Locked-on ne crée ni destination/opt-in ni accès Module.
+- Autres rules : Organization/User rules des Users ne gouvernent pas cette cible collective. Ne pas choisir un auteur/admin/premier User pour lui appliquer ses préférences. Les DM suivent les trois niveaux de règles du contrat notifications.
+- Tentative : Recharger destination/installation/statut/génération, type/opt-in/Channel, sélecteur, Module et plafond courants. Interdiction observée au dernier recheck → `skipped`. Une transaction D1 n’annule pas un POST déjà accepté.
 
 Le Notification producer fournit seulement User IDs/source autorisés, jamais une destination. Le fan-out n’est pas un effet de la première Inbox et est dédupliqué lors du replay de l’émission. `actorId`, seulement s’il est fourni, exclut ce User, jamais le collectif. Pour `flows.approval_requested`, aucun actorId : l’owner qui lance un run solo n’est pas exclu implicitement.
 
@@ -302,13 +299,7 @@ Opt-in est une exposition collective : invités et Slack Connect peuvent lire, s
 
 Base `S=/api/orgs/{orgId}/slack`. `createRoute`, schémas stricts et OpenAPI. Listes `{items,nextCursor,requestId}`, autres JSON avec `requestId`, callbacks 303 et erreurs documentés. Erreurs Kit : 400 validation, 401 session absente, 403 credential/capability, 404 hors scope, 409 conflit workspace/génération, 500 infrastructure scrubbed. Aucun nouveau endpoint public d’émission/login/replay.
 
-| Route installation              | Entrée                                 | Sortie / autorité                                                                                                            |
-| ------------------------------- | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `GET S/installation`            | —                                      | `{installation:SlackInstallationView                                                                                         | null,requestId}` ; session/org/`manage_notifications`, sans chiffré/kid. |
-| `POST S/installation/authorize` | `{}`                                   | `{authorizationUrl,expiresAt,requestId}` ; même autorité + Origin ; pas d’audit de connexion avant commit.                   |
-| `GET S/installation/callback`   | `state` + exactement `code` ou `error` | 303 écran org fixe ; session/org/capability **mutation** revérifiée et purpose installation.                                 |
-| `DELETE S/installation`         | `{installationId,generation}`          | `{disconnected:true,requestId}` après confirmation, ou erreur explicite et `disconnecting` persisté ; mêmes guards + Origin. |
-| `GET S/channels`                | `limit?,cursor?`                       | Page `SlackChannelView` ; même autorité. Publics et privés où bot invité, archivés exclus, pas IM/MPIM.                      |
+Installation route shapes: [non-normative design note](../design-notes/0021-slack.md#routes-dinstallation).
 
 Les Organization destinations utilisent uniquement les routes génériques ci-dessous, session/org/`manage_notifications` et Origin sur mutations. **Aucune seconde route `S/destinations` ou PATCH Slack**. La création décode/valide `externalId`, exige l’installation active de cette Organization et appelle `checkChannel` ; type opt-in et plafond sont vérifiés serveur. Doublon `(orgId,channel,externalId)` →409, ressource étrangère →404, historique conservé.
 
@@ -316,16 +307,18 @@ Generic destination route shapes: [non-normative design note](../design-notes/00
 
 Le contrôle Slack utilise le bot de la même installation via `conversations.info`, refuse canal archivé, IM/MPIM ou privé inaccessible au bot ; un canal public peut utiliser `chat:write.public` sans invitation. Aucun canal ou secret ne provient d’un nom/URL client non validé. La disponibilité affichée est dérivée de l’installation et du diagnostic local, sans boucle de probes fournisseur à chaque liste.
 
-| Route personnelle          | Entrée                                 | Sortie / autorité                                                             |
-| -------------------------- | -------------------------------------- | ----------------------------------------------------------------------------- |
-| `GET S/me/link`            | —                                      | `{source:'oidc'                                                               | 'email' | 'none',slackUserId?,reason?,requestId}` ; session + membership réelle ; pas email, capability admin ou bypass support. |
-| `POST S/me/link/authorize` | `{}`                                   | `{authorizationUrl,expiresAt,requestId}` ; même scope + Origin, User session. |
-| `GET S/me/link/callback`   | `state` + exactement `code` ou `error` | 303 Settings fixe ; session/membership/purpose + OIDC complet.                |
-| `DELETE S/me/link`         | —                                      | `{unlinked:true,requestId}` ; même scope + Origin, aucun User ID client.      |
+Personal route shapes: [non-normative design note](../design-notes/0021-slack.md#routes-personnelles).
+
+| Route personnelle  | Entrée | Sortie / autorité                                                        |
+| ------------------ | ------ | ------------------------------------------------------------------------ |
+| `GET S/me/link`    | —      | `{source:'oidc'                                                          | 'email' | 'none',slackUserId?,reason?,requestId}` ; session + membership réelle ; pas email, capability admin ou bypass support. |
+| `DELETE S/me/link` | —      | `{unlinked:true,requestId}` ; même scope + Origin, aucun User ID client. |
 
 `selector` reprend `{kind:'type',value:string}`, `{kind:'category',value:string}` ou `{kind:'all'}` du cœur notifications. Le serveur ne propose/accepte que les types opt-in disponibles ; admission/recheck filtrent aussi les catégories/`*`, pas seulement l’écran.
 
-Destinations persistées : `ListQuery`, limite 1…100/default50, cursor≤512, keyset exact `{createdAt,id}` décroissant après scope org. Canaux : cursor opaque validé contenant installation/génération et cursor Slack ; référence périmée refusée, jamais choix de token. Relayer une page `conversations.list(public_channel,private_channel,exclude_archived:true)`, sans charger toute la liste pour fabriquer un keyset. Une page vide peut avoir un next cursor provider. Paramètre répété →400.
+Pagination details: [non-normative design note](../design-notes/0021-slack.md#pagination).
+
+Canaux : cursor opaque validé contenant installation/génération et cursor Slack ; référence périmée refusée, jamais choix de token.
 
 ### Guards actuels à prolonger
 
@@ -339,13 +332,13 @@ Mutations browser sous Origin guard existant. Callbacks GET : session+state, pas
 
 ### Audit
 
-| Actions                                                                               | Acteur / meta allowlist                                                                                                                                                               |
-| ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `slack.connected`, `slack.disconnect_requested`, `slack.disconnected`                 | User admin réel ; org/installation en colonnes dédiées ; `{generation,reason?}`.                                                                                                      |
-| `slack.revoked`                                                                       | Acteur null ; CAS par génération, uniquement révocation fournisseur prouvée, une émission ; `{generation,reason,statusReason}`, jamais nouvelle connexion visée par ancienne réponse. |
-| `slack.auth_disabled`                                                                 | Acteur null ; suspension locale sur `invalid_auth`, inactivité ou expiration, CAS/audit une fois ; `{generation,reason,statusReason}`. Jamais synonyme de révocation distante.        |
-| `slack.destination_created`, `slack.destination_updated`, `slack.destination_deleted` | User admin réel ; destination en target ; `{installationId,slackChannelId,selectorKind,selectorValue?}`.                                                                              |
-| `slack.user_linked`, `slack.user_unlinked`                                            | User session/subject ; installation en target ; `{installationId,subjectUserId,method}`. Un cache email n’est pas un consentement explicite fictif.                                   |
+Audit event details: [non-normative design note](../design-notes/0021-slack.md#événements-daudit).
+
+- `slack.connected`, `slack.disconnect_requested`, `slack.disconnected` : User admin réel ; org/installation en colonnes dédiées ; `{generation,reason?}`.
+- `slack.revoked` : Acteur null ; CAS par génération, uniquement révocation fournisseur prouvée, une émission ; `{generation,reason,statusReason}`, jamais nouvelle connexion visée par ancienne réponse.
+- `slack.auth_disabled` : Acteur null ; suspension locale sur `invalid_auth`, inactivité ou expiration, CAS/audit une fois ; `{generation,reason,statusReason}`. Jamais synonyme de révocation distante.
+- `slack.destination_created`, `slack.destination_updated`, `slack.destination_deleted` : User admin réel ; destination en target ; `{installationId,slackChannelId,selectorKind,selectorValue?}`.
+- `slack.user_linked`, `slack.user_unlinked` : User session/subject ; installation en target ; `{installationId,subjectUserId,method}`. Un cache email n’est pas un consentement explicite fictif.
 
 Étendre actions **et** chaque `META_ALLOW` App : une action absente de la map actuelle n’a pas l’allowlist stricte attendue. Jamais token/chiffré/email/state/nonce/code/JWT/corps provider dans meta/erreur/URL finale.
 
@@ -381,15 +374,7 @@ Audit listable au `super_admin` seulement. Le bypass org actuel est un log conso
 
 ### Preuves requises avant livraison
 
-| Groupe                             | Critères observables                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| OAuth/OIDC                         | State rejoué/expiré/concurrent/autre session/org/purpose refusé ; membership/capability retirée avant callback refusée. Signature/alg/kid/iss/aud/azp/exp/iat/nbf/nonce/sub/team faux/absents ; JWKS indisponible fermé. Token de test `openid` seul avec team requis. Browser JWT seul ne crée pas une liaison.                                                                                                                                                                                                                    |
-| Coffre/lifecycle                   | Courante/précédente, IV neuf, mauvais tag/kid/AAD org/install/team/génération/Deployment ; aucun plaintext DB/log/audit/payload durable. Conflit workspace concurrent sans révoquer la connexion légitime ; toute Grid refusée ; réponse ancienne génération sans impact nouveau token ; `auth.revoke` en panne garde `disconnecting` sans envoi/retry autonome.                                                                                                                                                                    |
-| Accès/exposition                   | CP-IDOR/CP-UNAUTH par ressource, `sk_` refusées lectures/callbacks, member/reader/staff/support/break-glass exercés ; GET callback sans bypass lecture pour écrire. Type opt-in filtré serveur, catégorie/`*` ne rend pas tasks collectif ; fan-out une fois même zéro User, Inbox sans Delivery in_app, pas d’exclusion implicite de l’initiateur flows.                                                                                                                                                                           |
-| Channel/rendu                      | 429/hints valides/invalides/>86400 sans envoi prématuré ; HTTP200 `ok:false`, receipt manquante, réseau/5xx ambigu, auth CAS/audit unique, destination invalide sans révocation globale. Email absence≠panne, OIDC jamais substitué. N/N+1 pour chaque borne, 50/51 blocs, section/fields/header/context, Unicode/mentions et lien conservé ; aucun import runtime notifications.                                                                                                                                                   |
-| Composition/parcours               | Exports et schéma App, migration/catalogue, runtime Worker `jose` compatible ; étapes réussies Workflow non répétées à l’échec de finalisation ; OpenAPI/enveloppes/requestId ; navigateur installation/destinations/lien/unlink/reconnect/disconnect. Revue indépendante auth/isolation/credentials et Durable owner selon `AGENTS.md`, gates applicables du dépôt sans en réduire les exigences.                                                                                                                                  |
-| Identité email — finding High      | Amorcer hint frais `e→S1`, changer seulement l’email Slack de S1 et attribuer `e` à S2 sans changer App/fingerprint/génération ; S1 reste actif et son POST accepterait. Avant DM, `users.info(S1)` invalide le hint : aucun POST S1, au plus un lookup courant, seul S2 validé peut recevoir. Couvrir TTL 300000 ms/expiration, email absent, team/bot/deleted, 429/timeout sans POST et sans fallback panne ; retry natif après ancien checkpoint doit recharger User et revalider dans le step d’envoi.                          |
-| Auth indéterminée — finding Medium | Injecter `invalid_auth` sur `users.info`, lookup, DM et `auth.revoke` avec token encore valide depuis IP autorisée : CAS `disconnecting/auth_indeterminate`, chiffré inchangé et lisible avec son AAD, aucun nouvel envoi/refresh/retry autonome ; audit/UI sans claim remote-revoked. Après correction IP, l’admin peut appeler `auth.revoke` avec ce même credential puis l’effacer après confirmation ; réponse tardive ancienne génération sans impact nouvelle. Comparer `token_revoked` prouvé et ses reason/audit distincts. |
+Implementation evidence: [non-normative design note](../design-notes/0021-slack.md#preuves-dimplémentation).
 
 Ces preuves d’intégration restent à obtenir à l’implémentation. L’acceptation du contrat et les contrôles documentaires E0 ne prouvent pas une exécution Slack ou Workflow déployée.
 
@@ -403,12 +388,6 @@ Ces preuves d’intégration restent à obtenir à l’implémentation. L’acce
 
 ### Sources fournisseur
 
-| Contrat                 | Source primaire                                                                                                                                                                                                                                                                                                                                                                                                   |
-| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| OAuth/OIDC/scopes       | [Sign in with Slack](https://docs.slack.dev/authentication/sign-in-with-slack/), [openid.connect.token](https://docs.slack.dev/reference/methods/openid.connect.token/), [oauth.v2.access](https://docs.slack.dev/reference/methods/oauth.v2.access/), [discovery](https://slack.com/.well-known/openid-configuration).                                                                                           |
-| Validation ID token/TLS | [OIDC Core §3.1.3.7](https://openid.net/specs/openid-connect-core-1_0.html#IDTokenValidation), [§3.1.3.8](https://openid.net/specs/openid-connect-core-1_0.html#CodeFlowTokenValidation).                                                                                                                                                                                                                         |
-| PKCE/révocation         | [PKCE](https://docs.slack.dev/authentication/using-pkce/), [auth.revoke](https://docs.slack.dev/reference/methods/auth.revoke/).                                                                                                                                                                                                                                                                                  |
-| Identité/canaux/envoi   | [users.lookupByEmail](https://docs.slack.dev/reference/methods/users.lookupByEmail/), [users.info et email](https://docs.slack.dev/reference/methods/users.info/), [conversations.list](https://docs.slack.dev/reference/methods/conversations.list/), [chat.postMessage](https://docs.slack.dev/reference/methods/chat.postMessage/), [rate limits](https://docs.slack.dev/apis/web-api/rate-limits/).           |
-| Auth indéterminée       | [Slack IP allowlist et `invalid_auth`](https://docs.slack.dev/concepts/security/#restrict-ip-addresses) : cette réponse peut signaler une IP refusée, sans invalider le token.                                                                                                                                                                                                                                    |
-| Bornes Block Kit        | [Blocks](https://docs.slack.dev/reference/block-kit/blocks/), [Section](https://docs.slack.dev/reference/block-kit/blocks/section-block/), [Header](https://docs.slack.dev/reference/block-kit/blocks/header-block/), [Context](https://docs.slack.dev/reference/block-kit/blocks/context-block/), [Text object](https://docs.slack.dev/reference/block-kit/composition-objects/text-object/).                    |
-| Sécurité/runtime        | [Cloudflare WebCrypto](https://developers.cloudflare.com/workers/runtime-apis/web-crypto/), [registre jose](https://registry.npmjs.org/jose/latest), [jose](https://github.com/panva/jose), [jwtVerify](https://github.com/panva/jose/blob/v6.2.13/docs/jwt/verify/functions/jwtVerify.md), [RemoteJWKSetOptions](https://github.com/panva/jose/blob/v6.2.13/docs/jwks/remote/interfaces/RemoteJWKSetOptions.md). |
+Provider sources: [non-normative design note](../design-notes/0021-slack.md#sources-fournisseur).
+
+[Slack IP allowlist et `invalid_auth`](https://docs.slack.dev/concepts/security/#restrict-ip-addresses) : cette réponse peut signaler une IP refusée, sans invalider le token.

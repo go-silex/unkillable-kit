@@ -8,4 +8,4 @@ L’adaptateur Slack parse `Retry-After` en entier sûr non négatif; une valeur
 
 ## Demo configuration
 
-Configuration : `max_retries = 5`, `retry_delay = 60`, batch 10 et timeout 5 inchangés; DLQ `example-api-demo-dlq` en local simulé et `boilerplate-api-demo-dlq` en showcase.
+J1 devient l’alignement du demo : retries bornés et DLQ explicitement configurés dans ses deux consumers existants, docblock/runbook cohérents, boucle App par message. Configuration : `max_retries = 5`, `retry_delay = 60`, batch 10 et timeout 5 inchangés; DLQ `example-api-demo-dlq` en local simulé et `boilerplate-api-demo-dlq` en showcase. Ce changement de déploiement reste soumis à la revue indépendante. Il ne crée pas d’environnement staging et ne transforme pas l’Example App en point de départ à copier.
