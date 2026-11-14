@@ -1,5 +1,5 @@
 import { disableAccount, enableAccount } from '@kit/auth/repos/account-state'
-import { baSession } from '@kit/auth/schema'
+import { baSession, baUser } from '@kit/auth/schema'
 import { eq } from 'drizzle-orm'
 import { afterEach, describe, expect, it } from 'vitest'
 import { TENANCY_PASSWORD } from '../seed/tenancy-data'
@@ -75,6 +75,83 @@ describe('disabled accounts over HTTP', () => {
     expect((await me(sessionHeaders(fresh))).status).toBe(200)
     expect((await me(bearerHeaders(key))).status).toBe(200)
     expect((await me(sessionHeaders(solo))).status).toBe(200)
+  })
+
+  it('denies Better Auth session reads and mutations when a session survives disabling', async () => {
+    const { app, env, db, owner, solo } = await setup()
+    const getSession = (cookie: string) =>
+      app.request('/api/auth/get-session', { headers: sessionHeaders(cookie) }, env)
+    const updateUser = (cookie: string, name: string) =>
+      app.request(
+        '/api/auth/update-user',
+        { method: 'POST', headers: sessionHeaders(cookie), body: JSON.stringify({ name }) },
+        env,
+      )
+
+    const activeSession = await getSession(owner)
+    expect(activeSession.status).toBe(200)
+    expect(await activeSession.json()).toMatchObject({ user: { id: target.targetUserId } })
+    expect((await updateUser(solo, 'Active user update')).status).toBe(200)
+    const before = await db
+      .select({ name: baUser.name })
+      .from(baUser)
+      .where(eq(baUser.id, target.targetUserId))
+    const sessions = await db
+      .select()
+      .from(baSession)
+      .where(eq(baSession.userId, target.targetUserId))
+    expect(sessions).toHaveLength(1)
+    expect(await disableAccount(db, target)).toBe(true)
+    // Model a session created concurrently with revocation after the disable transaction.
+    await db.insert(baSession).values(sessions)
+
+    const deniedSession = await getSession(owner)
+    expect(deniedSession.status).toBe(401)
+    expect(await deniedSession.text()).not.toMatch(/disabled|sqlite|column|database/i)
+    const deniedUpdate = await updateUser(owner, 'Disabled user update')
+    expect(deniedUpdate.status).toBe(401)
+    expect(await deniedUpdate.text()).not.toMatch(/disabled|sqlite|column|database/i)
+    expect(
+      await db.select({ name: baUser.name }).from(baUser).where(eq(baUser.id, target.targetUserId)),
+    ).toEqual(before)
+    expect((await getSession(solo)).status).toBe(200)
+  })
+
+  it('fails closed with a generic Better Auth response when account state is unreadable', async () => {
+    const { app, env, owner } = await setup()
+    const request = (path: string, init: RequestInit = {}) =>
+      app.request(path, { ...init, headers: sessionHeaders(owner) }, env)
+    expect((await request('/api/auth/get-session')).status).toBe(200)
+    await env.DB.prepare('ALTER TABLE user DROP COLUMN disabled').run()
+
+    for (const [path, init] of [
+      ['/api/auth/get-session', {}],
+      [
+        '/api/auth/update-user',
+        { method: 'POST', body: JSON.stringify({ name: 'Must not update' }) },
+      ],
+    ] as const) {
+      const response = await request(path, init)
+      expect(response.status).toBe(401)
+      expect(await response.text()).not.toMatch(/disabled|sqlite|column|database/i)
+    }
+  })
+
+  it('preserves unrelated Better Auth credential errors', async () => {
+    const { app, env } = await setup()
+    const response = await app.request(
+      '/api/auth/sign-in/email',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', Origin: TEST_ORIGIN },
+        body: JSON.stringify({ email: 'team-owner@kit.local', password: `${TENANCY_PASSWORD}x` }),
+      },
+      env,
+    )
+    expect(response.status).toBe(401)
+    expect(await response.json()).toMatchObject({
+      error: { code: 'UNAUTHORIZED', message: 'Invalid email or password' },
+    })
   })
 
   it('fails closed when the account state column is missing at runtime', async () => {

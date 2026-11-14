@@ -23,6 +23,7 @@ import {
   betterAuthDrizzleSchema,
   withBetterAuthRelations,
 } from './better-auth-schema'
+import { createSessionAccountGuard, InactiveSessionError } from './better-auth-session-guard'
 import { sessionCookieName } from './cookie-name'
 import { createFirstSessionAfterHook, type FirstSessionHandler } from './first-session-hook'
 import { logBetterAuthEvent } from './logging/better-auth-logger'
@@ -119,6 +120,7 @@ export function createBetterAuth(opts: CreateBetterAuthOpts): KitBetterAuth {
       provider: 'sqlite',
       schema,
     }),
+    hooks: { before: createSessionAccountGuard(db, schema) },
     databaseHooks: {
       session: {
         create: {
@@ -196,6 +198,25 @@ export function createBetterAuth(opts: CreateBetterAuthOpts): KitBetterAuth {
       return new Response(null, { status: 500, statusText: 'Internal Server Error' })
     }
   }
+  auth.api.getSession = new Proxy(auth.api.getSession, {
+    async apply(target, thisArg, args) {
+      try {
+        return await Reflect.apply(target, thisArg, args)
+      } catch (error) {
+        const options = args[0] as
+          | { asResponse?: boolean; returnHeaders?: boolean; returnStatus?: boolean }
+          | undefined
+        if (
+          error instanceof InactiveSessionError &&
+          !options?.asResponse &&
+          !options?.returnHeaders &&
+          !options?.returnStatus
+        )
+          return null
+        throw error
+      }
+    },
+  })
   auth.handler = safeHandler
   auth.fetch = safeHandler
   return auth
