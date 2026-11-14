@@ -18,6 +18,11 @@ export const keyScopeRoutes: ReadonlyArray<{ method: string; path: string; scope
   { method: 'PATCH', path: '/api/orgs/:orgId/modules/:moduleId', scope: 'admin' },
   { method: 'GET', path: '/api/tasks', scope: 'read' },
   { method: 'GET', path: '/api/tasks/stages', scope: 'read' },
+  { method: 'GET', path: '/api/tasks/links', scope: 'read' },
+  { method: 'POST', path: '/api/tasks/links', scope: 'write' },
+  { method: 'DELETE', path: '/api/tasks/comments/:commentId', scope: 'write' },
+  { method: 'GET', path: '/api/tasks/:id/comments', scope: 'read' },
+  { method: 'POST', path: '/api/tasks/:id/comments', scope: 'write' },
   { method: 'GET', path: '/api/tasks/:id', scope: 'read' },
   { method: 'POST', path: '/api/tasks', scope: 'write' },
   { method: 'PATCH', path: '/api/tasks/:id', scope: 'write' },
@@ -31,6 +36,10 @@ export const keyScopeRoutes: ReadonlyArray<{ method: string; path: string; scope
   { method: 'POST', path: '/api/items', scope: 'write' },
   { method: 'PATCH', path: '/api/items/:id', scope: 'write' },
   { method: 'DELETE', path: '/api/items/:id', scope: 'write' },
+  { method: 'POST', path: '/api/uploads/presign', scope: 'write' },
+  { method: 'POST', path: '/api/uploads/:uploadId/complete', scope: 'write' },
+  { method: 'POST', path: '/api/jobs/ping', scope: 'write' },
+  { method: 'POST', path: '/api/demo/email', scope: 'write' },
 ]
 
 export const keyScopeGate: MiddlewareHandler<AppEnv> = async (c, next) => {

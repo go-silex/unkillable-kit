@@ -23,7 +23,7 @@
 
 ### API key scopes
 
-- Organization-bound API keys require explicit independent `read`, `write`, and `admin` scopes. Scope checks narrow the bound principal's existing authority; undeclared routes deny key access. The migration backfills existing keys with all three scopes, preserving their scope allowance while the new route declarations apply.
+- Organization-bound API keys require explicit independent `read`, `write`, and `admin` scopes. The Example App narrows the bound principal's existing authority and denies keys on undeclared routes; other Apps must install their own enforcement. The migration backfills existing keys with all three scopes, preserving their scope allowance while the Example App's route declarations apply.
 
 ### Bun runtime
 

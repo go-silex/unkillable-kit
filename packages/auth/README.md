@@ -22,7 +22,7 @@ Authentication primitives and integration surfaces; it does not own product-spec
 
 New keys must explicitly store a comma-separated selection of `read`, `write` and `admin` in `scopes`. The scopes are independent: `admin` does not imply `read` or `write`. The migration backfills existing keys with all three scopes. Malformed stored scope strings grant no scopes.
 
-`resolveDualAuth` returns `scopes: ApiKeyScope[]` for API-key identities; `createRequireAuth` exposes them as `keyScopes` in the request context. Use `allowsApiKeyScope(identity, requiredScope)` at each protected route in addition to organization and role checks. It allows sessions through unchanged and requires exact membership for keys; it does not replace tenant or RBAC authorization.
+`resolveDualAuth` authenticates keys and returns `scopes: ApiKeyScope[]`; `createRequireAuth` exposes them as `keyScopes` in the request context. Neither enforces route scopes. Each App must install a default-deny policy for API keys, explicitly declare the required scope for each allowed method and route, and enforce it alongside Organization and Role checks. The Example App implements its own central gate; other Apps do not inherit it. `allowsApiKeyScope(identity, requiredScope)` is an optional predicate: it permits sessions and checks exact membership for keys, but does not replace tenant or RBAC authorization.
 
 ## Development
 
