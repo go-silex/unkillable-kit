@@ -49,6 +49,10 @@
     "impersonation": {
       "kitSha256": "6ff6a4e5ee69496fe6f0d535f87965b30b5dd9a78c13356ec8d2f975ee29faf3",
       "productFile": "migrations/0012_kit_impersonation.sql"
+    },
+    "account_state": {
+      "kitSha256": "85a6504ee9df48a7cc438ff77d3027f794f9ac3e6059c75af97f6953ef82659c",
+      "productFile": "migrations/0013_kit_account_state.sql"
     }
   },
   "sets": ["audit", "core"]
