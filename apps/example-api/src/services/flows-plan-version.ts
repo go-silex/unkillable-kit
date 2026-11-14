@@ -1,9 +1,9 @@
 import { AppError } from '@kit/core'
 import { digestPlan, type PlanDocument, sha256Hex } from '@kit/flows'
+import type { FlowPlanRow } from '@kit/flows/repos'
+import * as flowsRepo from '@kit/flows/repos'
 import type { DrizzleD1Database } from 'drizzle-orm/d1'
 import type { schema } from '../db/schema'
-import type { FlowPlanRow } from '../repos/flows'
-import * as flowsRepo from '../repos/flows'
 
 type Db = DrizzleD1Database<typeof schema>
 

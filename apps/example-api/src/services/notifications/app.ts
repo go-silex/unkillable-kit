@@ -1,3 +1,4 @@
+import * as orgs from '@kit/auth/repos/orgs'
 import { AppError } from '@kit/core'
 import type { AccessFacts, DeliveryRef, UserRule } from '@kit/notifications'
 import {
@@ -9,7 +10,6 @@ import {
 import type { KitDb } from '../../lib/db-type'
 import { isKitModuleId } from '../../lib/kit-modules'
 import { notificationsDogfoodRegistry } from '../../lib/notifications-dogfood'
-import * as orgs from '../../repos/orgs'
 import { resolveModuleAccess } from '../org-roles'
 import { isModuleEffective } from '../platform-modules'
 import { deliveryWorkflowId } from './delivery-identity'

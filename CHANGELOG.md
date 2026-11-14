@@ -6,6 +6,11 @@
 
 - Provide `bun run kit-upgrade` for the documented product-clone merge procedure, with a read-only `--check` mode and a hermetic regression test.
 
+### Product agent entry point
+
+- Route agents in product clones to `docs/product/AGENTS.md`.
+- Route agents working inside a package or app to its `README.md` when present, in every clone.
+
 ### Biome D1 safety
 
 - Keep `noPlaywrightUselessAwait` diagnostics while disabling its automatic fix: Biome 2.6.7 misidentifies D1 `first()` calls as Playwright locators and otherwise removes required awaits. Restore the fix when upstream distinguishes those calls and the real D1 staged-file proof passes.

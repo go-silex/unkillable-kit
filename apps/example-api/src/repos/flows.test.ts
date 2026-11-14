@@ -1,9 +1,9 @@
 import { createDb } from '@kit/db'
+import * as flowsRepo from '@kit/flows/repos'
 import { eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
 import { flowRuns, schema } from '../db/schema'
 import { createMemoryEnv } from '../test/memory-env'
-import * as flowsRepo from './flows'
 
 const ORG = 'org_acme'
 const PLAN_ID = 'plan_gated'

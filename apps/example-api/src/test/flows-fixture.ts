@@ -1,10 +1,10 @@
+import * as orgRolesRepo from '@kit/auth/repos/org-roles'
 import { baMember } from '@kit/auth/schema'
 import { FLOWS_MODULE_ID } from '@kit/flows'
 import { and, eq } from 'drizzle-orm'
 import { expect } from 'vitest'
 import { flowPlans, flowRuns } from '../db/schema'
 import type { KitDb } from '../lib/db-type'
-import * as orgRolesRepo from '../repos/org-roles'
 import { TENANCY_PASSWORD } from '../seed/tenancy-data'
 import { setOrgModuleEnabled, setPlatformAvailable } from '../services/platform-modules'
 import {

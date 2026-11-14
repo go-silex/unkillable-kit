@@ -42,6 +42,7 @@ shared:
   flows: packages/flows
   tasks: packages/tasks
   comments: packages/comments
+  notifications: packages/notifications
 build:
   orchestrator: turbo
   formatter: biome

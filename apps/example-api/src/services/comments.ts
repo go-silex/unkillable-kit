@@ -5,12 +5,12 @@ import {
   createCommentInputSchema,
   filterCommentsForAudience,
 } from '@kit/comments'
+import * as commentsRepo from '@kit/comments/repos'
 import { AppError, parseOrThrow } from '@kit/core'
 import { canViewTask } from '@kit/tasks'
+import * as tasksRepo from '@kit/tasks/repos'
 import type { DrizzleD1Database } from 'drizzle-orm/d1'
 import type { schema } from '../db/schema'
-import * as commentsRepo from '../repos/comments'
-import * as tasksRepo from '../repos/tasks'
 
 type Db = DrizzleD1Database<typeof schema>
 

@@ -1,3 +1,4 @@
+import * as orgRolesRepo from '@kit/auth/repos/org-roles'
 import { baMember } from '@kit/auth/schema'
 import {
   kitNotificationDeliveries,
@@ -6,7 +7,6 @@ import {
   kitNotifications,
 } from '@kit/notifications/schema'
 import { describe, expect, it } from 'vitest'
-import * as orgRolesRepo from './repos/org-roles'
 import { resolveModuleAccess } from './services/org-roles'
 import { setupFlowNotifications } from './test/flow-notifications-fixture'
 import { ORG_ACME, seedOperatorWriteOnAcme } from './test/flows-fixture'

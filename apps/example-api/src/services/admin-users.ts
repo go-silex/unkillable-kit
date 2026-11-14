@@ -1,12 +1,12 @@
 import type { PlatformRole } from '@kit/auth'
+import * as orgsRepo from '@kit/auth/repos/orgs'
+import * as platformRolesRepo from '@kit/auth/repos/platform-roles'
 import { assertRateLimit } from '@kit/auth/repos/rate-limit'
 import { AppError } from '@kit/core'
 import { buildWelcomeSetPasswordEmailText, type EmailPort } from '@kit/email'
 import { hashPassword } from 'better-auth/crypto'
 import type { DrizzleD1Database } from 'drizzle-orm/d1'
 import type { schema } from '../db/schema'
-import * as orgsRepo from '../repos/orgs'
-import * as platformRolesRepo from '../repos/platform-roles'
 import * as usersRepo from '../repos/users'
 import {
   assertAdminCreateActor,

@@ -1,3 +1,4 @@
+import * as auditRepo from '@kit/auth/repos/audit'
 import {
   AppError,
   clampListLimit,
@@ -6,7 +7,6 @@ import {
   takeListPage,
 } from '@kit/core'
 import type { KitDb } from '../lib/db-type'
-import * as auditRepo from '../repos/audit'
 
 const AUDIT_ACTIONS = [
   'user.created',

@@ -1,8 +1,8 @@
+import * as orgsRepo from '@kit/auth/repos/orgs'
 import { encodeListCursor, MAX_REPRESENTABLE_EPOCH_MS, MIN_REPRESENTABLE_EPOCH_MS } from '@kit/core'
 import { eq } from 'drizzle-orm'
 import { describe, expect, it, vi } from 'vitest'
 import { auditEvents } from './db/schema'
-import * as orgsRepo from './repos/orgs'
 import { TENANCY_PASSWORD } from './seed/tenancy-data'
 import * as auditService from './services/audit'
 import { createSeededDemoApi, loginCookie } from './test/api-fixture'
@@ -284,7 +284,7 @@ describe('audit (B-auth-harden go-silex/silex-boilerplate#61)', () => {
     const { db } = await seedEnv()
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
     const insertSpy = vi
-      .spyOn(await import('./repos/audit'), 'insertAuditEvent')
+      .spyOn(await import('@kit/auth/repos/audit'), 'insertAuditEvent')
       .mockRejectedValue(new Error('insert fail'))
     const ok = await auditService.appendAudit(db, {
       action: 'user.created',
@@ -292,6 +292,7 @@ describe('audit (B-auth-harden go-silex/silex-boilerplate#61)', () => {
       targetId: 'u2',
       requestId: 'req_test_audit_fail',
     })
+    expect(insertSpy).toHaveBeenCalledOnce()
     expect(ok).toBe(false)
     expect(spy).toHaveBeenCalled()
     const logged = String(spy.mock.calls[0]?.[0] ?? '')

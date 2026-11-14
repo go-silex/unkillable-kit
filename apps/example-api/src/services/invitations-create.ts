@@ -1,10 +1,10 @@
 import { normalizeEmail } from '@kit/auth'
+import * as invitationsRepo from '@kit/auth/repos/invitations'
+import * as orgsRepo from '@kit/auth/repos/orgs'
 import { AppError } from '@kit/core'
 import { buildInviteEmailText, buildWelcomeSetPasswordEmailText, type EmailPort } from '@kit/email'
 import type { DrizzleD1Database } from 'drizzle-orm/d1'
 import type { schema } from '../db/schema'
-import * as invitationsRepo from '../repos/invitations'
-import * as orgsRepo from '../repos/orgs'
 import * as usersRepo from '../repos/users'
 import * as orgRolesService from './org-roles'
 

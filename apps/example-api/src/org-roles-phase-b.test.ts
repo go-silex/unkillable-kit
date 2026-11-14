@@ -298,7 +298,7 @@ describe('org roles Phase B — IDOR + grants', () => {
   it('12 resolveModuleAccess denies reader write when grant is read', async () => {
     const { db } = await seedEnv()
     const { ensureSystemRoles, resolveModuleAccess } = await import('./services/org-roles')
-    const platformModulesRepo = await import('./repos/platform-modules')
+    const platformModulesRepo = await import('@kit/auth/repos/platform-modules')
     await ensureSystemRoles(db, 'org_team')
     await platformModulesRepo.upsertPlatformModule(db, {
       moduleId: 'demo',
@@ -370,7 +370,7 @@ describe('org roles Phase B — IDOR + grants', () => {
     )
     // Demote owner system grant to read so ceiling can fire
     const { ensureSystemRoles } = await import('./services/org-roles')
-    const orgRolesRepo = await import('./repos/org-roles')
+    const orgRolesRepo = await import('@kit/auth/repos/org-roles')
     await ensureSystemRoles(db, 'org_team')
     const ownerRole = await orgRolesRepo.findRoleByKey(db, 'org_team', 'owner')
     expect(ownerRole).toBeTruthy()

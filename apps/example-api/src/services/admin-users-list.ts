@@ -3,6 +3,8 @@
  * Staff scope is applied **before** keyset pagination (not filter-after-page).
  */
 import type { PlatformRole } from '@kit/auth'
+import * as orgsRepo from '@kit/auth/repos/orgs'
+import * as platformRolesRepo from '@kit/auth/repos/platform-roles'
 import {
   AppError,
   clampListLimit,
@@ -13,8 +15,6 @@ import {
 import type { ListPage } from '@kit/types'
 import type { DrizzleD1Database } from 'drizzle-orm/d1'
 import type { schema } from '../db/schema'
-import * as orgsRepo from '../repos/orgs'
-import * as platformRolesRepo from '../repos/platform-roles'
 import * as usersRepo from '../repos/users'
 
 type Db = DrizzleD1Database<typeof schema>

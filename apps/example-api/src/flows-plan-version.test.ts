@@ -1,7 +1,7 @@
 import { digestPlan, loadPlanFromYaml } from '@kit/flows'
+import * as flowsRepo from '@kit/flows/repos'
 import { INVOKE_ONLY_PLAN_YAML } from '@kit/flows/run'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import * as flowsRepo from './repos/flows'
 import { type ApiApp, type ApiEnv, sessionHeaders } from './test/api-fixture'
 import {
   BOTH_ORGS,

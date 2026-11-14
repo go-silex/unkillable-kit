@@ -1,7 +1,7 @@
+import { listPlatformModules } from '@kit/auth/repos/platform-modules'
 import { createDb } from '@kit/db'
 import { describe, expect, it } from 'vitest'
 import { schema } from '../db/schema'
-import { listPlatformModules } from '../repos/platform-modules'
 import { createMemoryEnv } from '../test/memory-env'
 import { ensureKitModules, getModulesState, isModuleEnabled, setModuleEnabled } from './modules'
 

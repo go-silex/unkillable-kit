@@ -11,13 +11,13 @@ import {
   type OrgRoleKey,
   systemRoleGrantSeed,
 } from '@kit/auth'
+import * as orgRolesRepo from '@kit/auth/repos/org-roles'
+import * as orgsRepo from '@kit/auth/repos/orgs'
 import { AppError } from '@kit/core'
 import { FLOWS_MODULE_ID } from '@kit/flows'
 import type { DrizzleD1Database } from 'drizzle-orm/d1'
 import type { schema } from '../db/schema'
 import { isKitModuleId, KIT_MODULE_IDS } from '../lib/kit-modules'
-import * as orgRolesRepo from '../repos/org-roles'
-import * as orgsRepo from '../repos/orgs'
 import * as platformModulesService from './platform-modules'
 
 type Db = DrizzleD1Database<typeof schema>

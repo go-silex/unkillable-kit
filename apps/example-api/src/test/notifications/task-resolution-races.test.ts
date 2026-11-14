@@ -1,7 +1,7 @@
 import { kitNotificationDeliveries, kitNotifications } from '@kit/notifications/schema'
+import * as tasksRepo from '@kit/tasks/repos'
 import { eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import * as tasksRepo from '../../repos/tasks'
 import { notifyTaskMutation } from '../../services/notifications/task-producer'
 import { createTaskNotificationService } from '../../services/notifications/task-service'
 import { createRecordingNotificationRuntime } from '../notification-runtime'
