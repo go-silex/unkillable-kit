@@ -10,6 +10,7 @@ related:
   - docs/kit/product-consumer-contract.md
   - docs/kit/playbooks/start-product.md
   - docs/kit/kit-schema-sync.md
+summary: 'Kit schema identity by module id + hash'
 ---
 
 # ADR-0008 — Kit schema identity is module id + hash, not example-api NNNN

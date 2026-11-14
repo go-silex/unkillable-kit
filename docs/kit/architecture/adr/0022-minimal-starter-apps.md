@@ -9,6 +9,7 @@ related:
   - GLOSSARY.md
   - docs/kit/architecture/adr/0001-primary-axis-packages-compose-apps.md
   - docs/kit/architecture/adr/0012-kernel-persistence-request-context.md
+summary: 'Minimal starter Apps and shared request policy'
 ---
 
 # ADR-0022 — Minimal starter Apps

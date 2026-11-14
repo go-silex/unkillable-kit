@@ -11,6 +11,7 @@ related:
   - docs/kit/architecture/adr/0005-flows-platform-agentic-workflows.md
   - docs/kit/api-contract.md
   - docs/kit/standards/stack.md
+summary: 'OpenAPI projected from the Hono routes'
 ---
 
 # ADR-0014 — The published OpenAPI document is a projection of the Hono routes
