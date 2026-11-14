@@ -35,7 +35,7 @@
 
 ### ADR design notes
 
-- Move unimplemented notification destination routes and Slack implementation signatures and retry parsing from binding ADRs into non-normative design notes; accepted decisions remain binding.
+- Move unimplemented notification destination routes, Slack schema tables, implementation specifications and retry parsing from binding ADRs into non-normative design notes; accepted decisions remain binding.
 
 ### API-only stack contract
 

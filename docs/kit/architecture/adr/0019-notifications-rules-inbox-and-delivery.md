@@ -41,7 +41,8 @@ A Cloudflare Workflow owns each complete external Delivery, with a stable instan
 | `@kit/notifications/schema` and `@kit/notifications/repos` | Capability tables, atomic admissions, scoped queries and conditional receipts; no HTTP auth, runtime restart or custom scheduler                       |
 | App                                                        | Producer authority, recipient ids and source ACL, registry/renderers/catalogues, current access facts, service factory, routes and Workflow entrypoint |
 | Cloudflare Workflows                                       | Entire external Delivery and its failure retries; admission/reconciliation contract in ADR-0020, no second owner                                       |
-| `@kit/slack/notifications`                                 | Implements the Channel interface with a **type-only** import from notifications; notifications never imports Slack                                     |
+
+Slack Channel interface: [non-normative design note](../design-notes/0019-notifications.md#slack-channel).
 
 `orgId` is the Organization that owns the source. It is not the browser's selected Organization or the sender's Organization. Every recipient must be a real member of that Organization, which must be active. A type with `moduleId` also requires the recipient's effective Module **read** access: Deployment availability, Organization enablement and their Role–module grant. The sender's grants or support bypass never substitute for these checks.
 
@@ -478,12 +479,10 @@ type DeliveryMetadata = {
 type DeliveryQuery = ListQuery & {
   status?: DeliveryState; channel?: string; type?: string; targetKind?: 'user' | 'organization'
 }
-type DestinationDto = {
-  id: string; channel: string; externalId: string; selector: Selector
-  createdAt: number; updatedAt: number
-}
 // The failure body is the existing ApiErrorBody from @kit/types, not a new envelope.
 ```
+
+Destination DTO: [non-normative design note](../design-notes/0019-notifications.md#destination-dto).
 
 Types are catalogue metadata, never source parameters/Zod schema/renderers. `available` in effective rules reflects the access ceiling separately from the rule's boolean. Delivery administration reveals metadata only: no title/body/parameters, email, address credential or provider response. No Delivery-status surface is exposed to a User in V0.
 
