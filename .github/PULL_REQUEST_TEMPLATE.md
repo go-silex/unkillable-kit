@@ -75,7 +75,7 @@ See [`docs/kit/testing.md`](../docs/kit/testing.md) (local-first gates, CP-\* pa
 - [ ] Tests added/updated for behaviour change — map to **CP-\*** / suite names when auth, IDOR, storage, errors, FE credentials
 - [ ] **`bun run validate:full` green locally** before push (primary gate; CI is guardrail only)
 - [ ] Docs / `AGENTS.md` / `docs/kit/testing.md` updated if stack or test policy changed
-- [ ] Dual-mission: product code stays out of kit packages (`packages/*` has no share-domain strings)
+- [ ] Kit/product boundary: product code stays out of kit packages (`packages/*` has no share-domain strings)
 
 ## Critical paths touched (if any)
 
