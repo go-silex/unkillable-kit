@@ -2,6 +2,7 @@
  * Per-request Better Auth factory (CF Workers pattern, ADR-0002 + ADR-0008 D6).
  * Products import this — they do not copy `example-api/src/lib/better-auth.ts`.
  */
+import type { KitD1Database } from '@kit/db'
 import { betterAuth } from 'better-auth'
 import { drizzleAdapter } from 'better-auth/adapters/drizzle'
 import { isAPIError } from 'better-auth/api'
@@ -37,26 +38,10 @@ export type KitBetterAuth = BetterAuthLike & {
   handler: (request: Request) => Response | Promise<Response>
 }
 
-/**
- * D1 duck matching `@kit/db` `KitD1Database` (chainable `bind`, optional `batch`/`exec`).
- * Auth does not depend on `@kit/db` — keep this declaration in lockstep by hand.
- */
-type BetterAuthStatement = {
-  bind(...values: unknown[]): BetterAuthStatement
-  first<T = unknown>(): Promise<T | null>
-  run(): Promise<unknown>
-  all(): Promise<unknown>
-  raw<T = unknown>(): Promise<T[][]>
-}
-
-export type BetterAuthDatabase = {
-  prepare(query: string): BetterAuthStatement
-  batch?(statements: unknown[]): Promise<unknown>
-  exec?(query: string): Promise<unknown>
-}
+export type BetterAuthDatabase = KitD1Database
 
 export type CreateBetterAuthOpts = {
-  /** D1-shaped binding (or test double) — same members as `@kit/db` `KitD1Database`. */
+  /** `@kit/db` `KitD1Database` binding (or test double). */
   database: BetterAuthDatabase
   secret: string
   baseURL: string
@@ -94,7 +79,7 @@ export function createBetterAuth(opts: CreateBetterAuthOpts): KitBetterAuth {
     !opts.schema || opts.schema === betterAuthDrizzleSchema
       ? betterAuthDrizzleSchema
       : withBetterAuthRelations(opts.schema)
-  // drizzle-orm/d1 names the workers `D1Database` type; the public contract is the duck above.
+  // drizzle-orm/d1 names the workers `D1Database` type; the public contract is `@kit/db` `KitD1Database`.
   const db = drizzle(opts.database as never, { schema })
   const cookieName = sessionCookieName({ name: opts.cookieName })
   const secure = opts.useSecureCookies ?? true
