@@ -4,16 +4,16 @@ import { fileURLToPath } from 'node:url'
 import { apiKeyPrefix, generateApiKey, hashApiKey } from '@kit/auth'
 import { baMember } from '@kit/auth/schema'
 import { describe, expect, it } from 'vitest'
-import { keyScopeRoutes } from './middleware/key-scopes'
-import { TENANCY_PASSWORD } from './seed/tenancy-data'
-import { mintApiKey } from './services/auth'
+import { keyScopeRoutes } from '../middleware/key-scopes'
+import { TENANCY_PASSWORD } from '../seed/tenancy-data'
+import { mintApiKey } from '../services/auth'
 import {
   type ApiApp,
   bearerHeaders,
   createSeededDemoApi,
   loginCookie,
   sessionHeaders,
-} from './test/api-fixture'
+} from './api-fixture'
 
 const ORG = 'org_acme'
 const full = ['read', 'write', 'admin'] as const
@@ -210,7 +210,7 @@ describe('legacy API key scope migration', () => {
       VALUES (?, ?, ?, ?, ?, ?)`)
       .bind('legacy', await hashApiKey(key), apiKeyPrefix(key), 'user_staff', ORG, 1)
       .run()
-    const migrations = join(dirname(fileURLToPath(import.meta.url)), '../migrations')
+    const migrations = join(dirname(fileURLToPath(import.meta.url)), '../../migrations')
     await env.DB.exec(readFileSync(join(migrations, '0025_api_keys_scopes.sql'), 'utf8'))
     const row = await env.DB.prepare('SELECT scopes FROM api_keys WHERE id = ?')
       .bind('legacy')
