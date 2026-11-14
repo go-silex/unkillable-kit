@@ -1,4 +1,5 @@
 import { createBetterAuthSessionPort, createRequireAuth } from '@kit/auth'
+import { isAccountActive } from '@kit/auth/repos/account-state'
 import * as keysRepo from '@kit/auth/repos/keys'
 import { AppError } from '@kit/core'
 import type { MiddlewareHandler } from 'hono'
@@ -28,8 +29,10 @@ const authenticate: MiddlewareHandler<AppEnv> = createRequireAuth((c) => {
     sessions: createBetterAuthSessionPort({
       cookieName,
       getAuth: () => auth,
+      isAccountActive: (userId) => isAccountActive(db, userId),
     }),
     findApiKeyByPrefix: async (prefix) => findKeyRecord(db, prefix),
+    isAccountActive: (userId) => isAccountActive(db, userId),
   }
 }) as MiddlewareHandler<AppEnv>
 

@@ -23,6 +23,7 @@ export type AuthorizeEnv = HostedMcpEnv & { OAUTH_PROVIDER: OAuthHelpers }
 
 export type AuthorizeDeps = {
   identityPort: McpIdentityPort
+  accountAdmission: (userId: string) => Promise<Response | null>
   apiBaseUrl: string
   consent: ConsentPolicy
   consentPresentation?: ConsentPresentation
@@ -80,7 +81,11 @@ async function completeAs(
   return new Response(null, { status: 302, headers: { ...headers, location: redirectTo } })
 }
 
-async function handleConsentPost(request: Request, env: AuthorizeEnv): Promise<Response> {
+async function handleConsentPost(
+  request: Request,
+  env: AuthorizeEnv,
+  deps: AuthorizeDeps,
+): Promise<Response> {
   const consent = await readConsent(env.OAUTH_KV, request)
   if (!consent) {
     return new Response('Invalid or expired consent', { status: 401 })
@@ -89,6 +94,8 @@ async function handleConsentPost(request: Request, env: AuthorizeEnv): Promise<R
   if (!(form && sameToken(String(form.get('csrf') ?? ''), consent.csrf))) {
     return new Response('Invalid consent CSRF', { status: 400 })
   }
+  const denied = await deps.accountAdmission(consent.identity.userId)
+  if (denied) return denied
   // Best effort: KV has no atomic take, so a replay inside its visibility window
   // can complete again — for this same request, which only its PKCE holder redeems.
   await env.OAUTH_KV.delete(consent.key)
@@ -171,7 +178,7 @@ export async function handleAuthorize(
   env: AuthorizeEnv,
   deps: AuthorizeDeps,
 ): Promise<Response> {
-  if (request.method === 'POST') return handleConsentPost(request, env)
+  if (request.method === 'POST') return handleConsentPost(request, env, deps)
   if (request.method !== 'GET') {
     return new Response('Method not allowed', { status: 405, headers: { allow: 'GET, POST' } })
   }
@@ -183,6 +190,8 @@ export async function handleAuthorize(
   if (!identity) {
     return new Response('Identity port returned an unusable user id', { status: 500 })
   }
+  const denied = await deps.accountAdmission(identity.userId)
+  if (denied) return denied
   if (parsed instanceof AuthorizationError) return authorizationErrorResponse(parsed)
   const oauthRequest = parsed
   const scope = grantedScope(oauthRequest.scope)

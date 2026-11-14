@@ -1,9 +1,11 @@
 import { AppError } from '@kit/core'
+import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
 import { describe, expect, it, vi } from 'vitest'
 import { MAGIC_LINK_EXPIRES_IN_SEC, RESET_PASSWORD_TOKEN_EXPIRES_IN_SEC } from './auth-email'
 import { getBetterAuthSecret } from './better-auth-env'
 import { createBetterAuth } from './better-auth-factory'
 import { betterAuthDrizzleSchema } from './better-auth-schema'
+import * as accountState from './repos/account-state'
 
 const SECRET = 'test-better-auth-secret-xxxxxxxx32c!!'
 
@@ -20,6 +22,14 @@ type BaAuth = ReturnType<typeof createBetterAuth> & {
     }
     plugins?: { id: string; options?: Record<string, unknown> }[]
     rateLimit?: { enabled?: boolean }
+    databaseHooks: {
+      session: {
+        create: {
+          before: (session: { userId: string }) => Promise<void>
+          after: (session: { userId: string }) => Promise<void>
+        }
+      }
+    }
   }
 }
 
@@ -48,6 +58,84 @@ function factory(overrides: Partial<Parameters<typeof createBetterAuth>[0]> = {}
 }
 
 describe('createBetterAuth', () => {
+  it('queries account state through the custom schema on the supplied D1 binding', async () => {
+    const queries: string[] = []
+    const values: unknown[][] = []
+    const statement = {
+      bind: (...params: unknown[]) => {
+        values.push(params)
+        return statement
+      },
+      first: async () => null,
+      run: async () => ({}),
+      all: async () => ({}),
+      raw: async <T = unknown>(): Promise<T[][]> => [[0 as T]],
+    }
+    const database = {
+      prepare: (query: string) => {
+        queries.push(query)
+        return statement
+      },
+    }
+    const user = sqliteTable('custom_user', {
+      id: text('id').primaryKey(),
+      disabled: integer('disabled', { mode: 'boolean' }).notNull(),
+    }) as unknown as typeof betterAuthDrizzleSchema.user
+    const auth = factory({ database, schema: { ...betterAuthDrizzleSchema, user } })
+    await expect(
+      auth.options.databaseHooks.session.create.before({ userId: 'user-custom' }),
+    ).resolves.toBeUndefined()
+    expect(queries).toHaveLength(1)
+    expect(queries[0]).toContain('"custom_user"')
+    expect(values[0]).toContain('user-custom')
+  })
+
+  it('checks each session against the bound database and exact custom user table', async () => {
+    const database = stubD1()
+    const user = sqliteTable('custom_user', {
+      id: text('id').primaryKey(),
+    }) as unknown as typeof betterAuthDrizzleSchema.user
+    const lookup = vi.spyOn(accountState, 'isAccountActive').mockResolvedValue(true)
+    try {
+      const onFirstSession = vi.fn(async () => {})
+      const auth = factory({
+        database,
+        schema: { ...betterAuthDrizzleSchema, user },
+        onFirstSession,
+      })
+      const hook = auth.options.databaseHooks.session.create
+      await expect(hook.before({ userId: 'user-1' })).resolves.toBeUndefined()
+      expect(lookup).toHaveBeenCalledWith(
+        expect.objectContaining({ $client: database }),
+        'user-1',
+        user,
+      )
+      await hook.after({ userId: 'user-1' })
+      expect(onFirstSession).toHaveBeenCalledWith({ userId: 'user-1' })
+    } finally {
+      lookup.mockRestore()
+    }
+  })
+
+  it.each(['disabled or missing', 'database failure'])(
+    'rejects session creation generically when account state is %s',
+    async (reason) => {
+      const lookup = vi.spyOn(accountState, 'isAccountActive')
+      if (reason === 'database failure')
+        lookup.mockRejectedValue(new Error('private database detail'))
+      else lookup.mockResolvedValue(false)
+      try {
+        const before = factory().options.databaseHooks.session.create.before
+        await expect(before({ userId: 'user-1' })).rejects.toMatchObject({
+          status: 'UNAUTHORIZED',
+          body: { message: 'Invalid email or password' },
+        })
+      } finally {
+        lookup.mockRestore()
+      }
+    },
+  )
+
   it('fail-closed defaults: signup off, secure cookies, kit TTLs, org+magic plugins', () => {
     const send = vi.fn(async () => ({ ok: true, transport: 'log' }))
     const auth = factory({ emailPort: { send } })

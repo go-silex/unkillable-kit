@@ -251,6 +251,7 @@
       "version": "0.0.1",
       "dependencies": {
         "@kit/auth": "workspace:*",
+        "drizzle-orm": "^0.45.4",
         "zod": "^4.6.7",
       },
       "devDependencies": {
@@ -355,6 +356,7 @@
       },
     },
   },
+  "trustedDependencies": [],
   "patchedDependencies": {
     "zod@4.6.7": "config/kit/patches/zod@4.6.7.patch",
   },

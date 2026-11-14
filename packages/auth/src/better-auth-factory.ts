@@ -5,7 +5,7 @@
 import type { KitD1Database } from '@kit/db'
 import { betterAuth } from 'better-auth'
 import { drizzleAdapter } from 'better-auth/adapters/drizzle'
-import { isAPIError } from 'better-auth/api'
+import { APIError, isAPIError } from 'better-auth/api'
 import { magicLink } from 'better-auth/plugins'
 import { drizzle } from 'drizzle-orm/d1'
 import {
@@ -27,6 +27,7 @@ import { sessionCookieName } from './cookie-name'
 import { createFirstSessionAfterHook, type FirstSessionHandler } from './first-session-hook'
 import { logBetterAuthEvent } from './logging/better-auth-logger'
 import { createKitOrganizationPlugin } from './org-plugin'
+import { isAccountActive } from './repos/account-state'
 import { hashVerificationIdentifier } from './verification-identifier'
 
 /**
@@ -121,6 +122,17 @@ export function createBetterAuth(opts: CreateBetterAuthOpts): KitBetterAuth {
     databaseHooks: {
       session: {
         create: {
+          before: async (session) => {
+            let active = false
+            try {
+              active = await isAccountActive(db, session.userId, schema.user)
+            } catch {
+              // An unreadable account state must never issue a session.
+            }
+            if (!active) {
+              throw new APIError('UNAUTHORIZED', { message: 'Invalid email or password' })
+            }
+          },
           after: createFirstSessionAfterHook(opts.onFirstSession),
         },
       },
