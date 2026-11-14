@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # CP-FALSIFY — mechanical canary: oracle tests MUST fail with assertion failures
 # when isGlobOrNullOrigin is neutered. Requires a healthy baseline before mutation,
-# restores source on every exit, and re-runs the oracle green after restore.
+# uses a disposable package copy and re-runs the original oracle green afterward.
 set -euo pipefail
 
 unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR 2>/dev/null || true
@@ -186,11 +186,12 @@ PY
 }
 
 run_oracle() {
+  local package_dir="$1"
   local json_file got
-  json_file="$(mktemp)"
+  json_file="${TEMP_DIR}/oracle.json"
   set +e
   (
-    cd "${ROOT}/packages/auth"
+    cd "${package_dir}"
     bun run test -- "${ORACLE_FILE}" --reporter=json --outputFile="${json_file}"
   ) >/dev/null 2>&1
   got=$?
@@ -198,13 +199,12 @@ run_oracle() {
   ORACLE_EXIT=$got
   ORACLE_OUT="$(cat "${json_file}")"
   rm -f "${json_file}"
-  rm -rf "${ROOT}/packages/auth/.vitest"
 }
 
 classify_oracle() {
   local mode="$1"
   local tmp
-  tmp="$(mktemp)"
+  tmp="${TEMP_DIR}/classification.txt"
   printf '%s' "${ORACLE_OUT}" >"${tmp}"
   source_classifier "${mode}" "${ORACLE_EXIT}" "${tmp}"
   rm -f "${tmp}"
@@ -233,30 +233,18 @@ if ! grep -q 'isGlobOrNullOrigin' "${TARGET}"; then
   exit 1
 fi
 
-BACKUP="$(mktemp)"
-cp "${TARGET}" "${BACKUP}"
-RESTORED=0
-MUTATED=0
-
-restore() {
-  if [[ "${RESTORED}" -eq 1 ]]; then
-    return 0
-  fi
-  cp "${BACKUP}" "${TARGET}" || {
-    echo "FAIL: restore cp failed for ${TARGET}" >&2
-    exit 1
-  }
-  if ! cmp -s "${BACKUP}" "${TARGET}"; then
-    echo "FAIL: restore did not match backup for ${TARGET}" >&2
-    exit 1
-  fi
-  RESTORED=1
-  rm -f "${BACKUP}"
-}
-trap restore EXIT
+TEMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/kit-falsify.XXXXXX")"
+trap 'rm -rf "${TEMP_DIR}"' EXIT
+mkdir -p "${TEMP_DIR}/packages/auth"
+tar -C "${ROOT}/packages/auth" --exclude=node_modules --exclude=.vitest -cf - . |
+  tar -C "${TEMP_DIR}/packages/auth" -xf -
+ln -s "${ROOT}/packages/auth/node_modules" "${TEMP_DIR}/packages/auth/node_modules"
+ln -s "${ROOT}/node_modules" "${TEMP_DIR}/node_modules"
+ln -s "${ROOT}/packages/config" "${TEMP_DIR}/packages/config"
+ln -s "${ROOT}/packages/ui" "${TEMP_DIR}/packages/ui"
 
 echo "== CP-FALSIFY baseline =="
-run_oracle
+run_oracle "${ROOT}/packages/auth"
 mapfile -t BASELINE_RESULT < <(classify_oracle baseline)
 BASELINE_KIND="${BASELINE_RESULT[0]}"
 BASELINE_DETAIL="$(printf '%s\n' "${BASELINE_RESULT[@]:1}")"
@@ -270,7 +258,7 @@ if [[ "${BASELINE_KIND}" != "ok" ]]; then
 fi
 echo "  ${BASELINE_DETAIL}"
 
-python3 - "${TARGET}" <<'PY'
+python3 - "${TEMP_DIR}/${REL}" <<'PY'
 import pathlib
 import re
 import sys
@@ -287,10 +275,9 @@ if not match:
 mutated = "function isGlobOrNullOrigin(_o: string): boolean {\n  return false\n}"
 path.write_text(text[: match.start()] + mutated + text[match.end() :])
 PY
-MUTATED=1
 
 echo "== CP-FALSIFY mutated oracle =="
-run_oracle
+run_oracle "${TEMP_DIR}/packages/auth"
 mapfile -t MUTATED_RESULT < <(classify_oracle mutated)
 MUTATED_KIND="${MUTATED_RESULT[0]}"
 MUTATED_DETAIL="$(printf '%s\n' "${MUTATED_RESULT[@]:1}")"
@@ -304,13 +291,10 @@ if [[ "${MUTATED_KIND}" != "ok" ]]; then
   echo "${ORACLE_OUT}" >&2
   exit 1
 fi
-
-restore
-trap - EXIT
-MUTATED=0
+cp "${TARGET}" "${TEMP_DIR}/${REL}"
 
 echo "== CP-FALSIFY post-restore baseline =="
-run_oracle
+run_oracle "${TEMP_DIR}/packages/auth"
 mapfile -t POST_RESULT < <(classify_oracle baseline)
 POST_KIND="${POST_RESULT[0]}"
 POST_DETAIL="$(printf '%s\n' "${POST_RESULT[@]:1}")"
