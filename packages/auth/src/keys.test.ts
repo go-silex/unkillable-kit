@@ -148,6 +148,7 @@ describe('resolveDualAuth', () => {
         revokedAt: null,
         expiresAt: null,
         organizationId: 'org_1',
+        scopes: 'read',
       }),
       isAccountActive: async (subject: string) => {
         subjects.push(subject)
@@ -158,6 +159,7 @@ describe('resolveDualAuth', () => {
       subject: 'key-user',
       method: 'api_key',
       organizationId: 'org_1',
+      scopes: ['read'],
     })
     expect(subjects).toEqual(['key-user'])
     for (const isAccountActive of [
