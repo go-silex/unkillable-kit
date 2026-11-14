@@ -9,6 +9,7 @@ export {
   type AuthEmailPort,
   MAGIC_LINK_EXPIRES_IN_SEC,
   RESET_PASSWORD_TOKEN_EXPIRES_IN_SEC,
+  resolveRecipientEmailLocale,
   sendMagicLinkMail,
   sendResetPasswordMail,
 } from './auth-email'

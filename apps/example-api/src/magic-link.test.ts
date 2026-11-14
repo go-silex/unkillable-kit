@@ -54,7 +54,7 @@ describe('magic link (B-magic go-silex/silex-boilerplate#59)', () => {
     )
     expect(res.status).toBeLessThan(400)
     expect(locale).toHaveBeenCalledWith(DEMO_EMAIL)
-    expect(mail.message(DEMO_EMAIL).subject).toBe('Sign in — App')
+    expect(mail.message(DEMO_EMAIL).subject).toBe('Sign in — Kit Kit')
     expect(mail.message(DEMO_EMAIL).text).toContain('You requested')
   })
 

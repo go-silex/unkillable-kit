@@ -49,10 +49,10 @@ describe('admin users (B-users go-silex/silex-boilerplate#58)', () => {
       expect(response.status).toBe(201)
     }
     expect(mail.message('french@kit.local').subject).toBe(
-      'Bienvenue — créez votre mot de passe — App',
+      'Bienvenue — créez votre mot de passe — Kit Kit',
     )
     expect(mail.message('french@kit.local').text).toContain('Un compte a été créé')
-    expect(mail.message('english@kit.local').subject).toBe('Welcome — set your password — App')
+    expect(mail.message('english@kit.local').subject).toBe('Welcome — set your password — Kit Kit')
     expect(mail.message('english@kit.local').text).toContain('An account was created')
   })
 

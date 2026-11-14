@@ -26,7 +26,10 @@ export type AuthEmailConfig = {
 
 type AuthEmailInput = { email: string; url: string; emailConfig: AuthEmailConfig } & TokenHrefPolicy
 
-async function recipientLocale(config: AuthEmailConfig, email: string): Promise<EmailLocale> {
+export async function resolveRecipientEmailLocale(
+  config: AuthEmailConfig,
+  email: string,
+): Promise<EmailLocale> {
   const locale = await config.resolveRecipientLocale(email)
   return locale === 'en' || locale === 'fr' ? locale : config.fallbackLocale
 }
@@ -53,7 +56,7 @@ export async function sendMagicLinkMail(
   emailPort: AuthEmailPort,
   input: AuthEmailInput,
 ): Promise<void> {
-  const locale = await recipientLocale(input.emailConfig, input.email)
+  const locale = await resolveRecipientEmailLocale(input.emailConfig, input.email)
   const tmpl = buildMagicLinkEmailText({
     to: input.email,
     magicUrl: input.url,
@@ -69,7 +72,7 @@ export async function sendResetPasswordMail(
   emailPort: AuthEmailPort,
   input: AuthEmailInput,
 ): Promise<void> {
-  const locale = await recipientLocale(input.emailConfig, input.email)
+  const locale = await resolveRecipientEmailLocale(input.emailConfig, input.email)
   const tmpl = buildResetPasswordEmailText({
     to: input.email,
     resetUrl: input.url,
