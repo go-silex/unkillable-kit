@@ -8,7 +8,9 @@ const scopeMigration = '0013_kit_api_keys_scopes.sql'
 
 function database() {
   const sqlite = new Database(':memory:')
-  onTestFinished(() => sqlite.close())
+  onTestFinished(() => {
+    sqlite.close()
+  })
   return sqlite
 }
 
