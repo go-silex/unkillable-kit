@@ -28,11 +28,12 @@ if ! $check; then
   git fetch upstream
 fi
 package_diff=$(git diff -U0 HEAD upstream/main -- package.json)
-if grep -q '^+.*"packageManager"' <<<"$package_diff"; then
+# Read the whole pipe: grep -q can cause SIGPIPE, while large here-strings can fail on a full TMPDIR.
+if printf '%s\n' "$package_diff" | grep '^+.*"packageManager"' >/dev/null; then
   echo "packageManager moves: set BUN_VERSION on each Workers Builds / Pages project just before this reaches its deploy/<branch> source branch (row 'Kit bumps packageManager')" >&2
 fi
 workflow_diff=$(git diff -U0 HEAD upstream/main -- .github/workflows)
-if grep -q '^+.*create-github-app-token@' <<<"$workflow_diff"; then
+if printf '%s\n' "$workflow_diff" | grep '^+.*create-github-app-token@' >/dev/null; then
   echo "stop: this range bumps actions/create-github-app-token; establish the effective CI_APP_ID mode first (row 'Kit bumps actions/create-github-app-token')" >&2
   exit 1
 fi
