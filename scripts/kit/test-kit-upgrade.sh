@@ -163,6 +163,19 @@ if REAL_LOCK=1 run_upgrade; then exit 1; fi
 [[ $(git -C "$dir/product" rev-parse HEAD) == "$before" && -f "$dir/product/.git/MERGE_HEAD" ]]
 grep -q 'bun.lock changes on install' "$dir/out"
 pass 'upgrade rejects invalid staged normalization and leaves merge open'
+
+normalization_fixture index-isolation
+cp "$ROOT/bun.lock" "$dir/seed/bun.lock"
+advance
+git -C "$dir/product" fetch -q upstream
+git -C "$dir/product" merge -q --no-ff --no-commit upstream/main
+git -C "$dir/product" show HEAD:bun.lock > "$dir/product/bun.lock"
+(cd "$dir/product" && bun --no-env-file --config=config/kit/bunfig.gates.toml run scripts/kit/check-lock-ranges.ts) >"$dir/out" 2>&1
+git -C "$dir/product" add bun.lock
+cp "$ROOT/bun.lock" "$dir/product/bun.lock"
+if (cd "$dir/product" && bun --no-env-file --config=config/kit/bunfig.gates.toml run scripts/kit/check-lock-ranges.ts) >"$dir/out" 2>&1; then exit 1; fi
+grep -q 'bun.lock changes on install' "$dir/out"
+pass 'merge gate uses staged lock, not conflicting unstaged bytes'
 fixture check
 advance
 git -C "$dir/product" fetch -q upstream
