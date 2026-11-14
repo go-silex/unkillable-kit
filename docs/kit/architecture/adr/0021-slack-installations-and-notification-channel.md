@@ -3,6 +3,7 @@ title: 'ADR-0021 — Installations Slack et Channel de notifications'
 status: accepted
 normative: true
 date: 2026-10-22
+amended: 2026-11-14
 axial: false
 related:
   - AGENTS.md
@@ -319,7 +320,7 @@ Les noms d’état existants sont conservés, mais `revoked` décrit un état lo
 `POST authorize → state persisté → navigation Slack → GET callback → guards revérifiés → state consommé → code échangé → réponse validée → chiffrement/commit → audit → 303 App fixe`.
 
 1. State CSPRNG **32 octets**, base64url, TTL **600 s** ; SHA-256 stocké avec purpose, Organization, User et hash du `session.id` Better Auth. Pas de state signé réutilisable ou d’autorité choisie par le client. Consommation atomique unique, y compris refus utilisateur ; callbacks concurrents ne peuvent réussir deux fois.
-2. L’App obtient l’ID de session côté serveur depuis son instance Better Auth. Le `SessionPort` actuel fournit `sub/email/exp`, pas cet ID ; pas de refonte globale ou de hash d’un cookie refreshable à la place.
+2. L’App obtient l’ID de session côté serveur depuis son instance Better Auth. Le `SessionPort` fournit cet ID via `sessionId` ; pas de refonte globale ou de hash d’un cookie refreshable à la place.
 3. Endpoints fixes `https://slack.com/oauth/v2/authorize` et `POST https://slack.com/api/oauth.v2.access` ; authentification confidentielle `client_secret_basic`, corps form-urlencoded, redirect URI HTTPS **identique** aux deux étapes. Aucun client secret côté SPA.
 4. Contrôler HTTP et `ok`, forme, bot `token_type`, token non vide, `app_id` attendu, `team.id`, scopes requis. **Rejeter toute Enterprise Grid**, pas seulement l’installation org-wide : `is_enterprise_install` doit être `false`, `enterprise` explicitement nul ; valeur/métadonnée ambiguë échoue fermée. Refuser aussi `expires_in`/`refresh_token` signalant la rotation Slack non gérée.
 5. La contrainte unique workspace arbitre les callbacks de deux Organizations. Conflit public sans divulguer l’autre Organization. **Ne jamais révoquer aveuglément le token d’une réponse refusée**, potentiellement déjà celui de la connexion légitime. Après consommation state, erreur d’échange/commit → nouveau parcours utilisateur, pas replay automatique du code.

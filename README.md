@@ -35,7 +35,7 @@ The local API health endpoint is `http://127.0.0.1:8787/health`; the web app is 
 
 ### Demo users
 
-The seed source of truth is `apps/example-api/src/seed/demo-data.ts`.
+The seed sources of truth are `apps/example-api/src/seed/demo-data.ts` and `apps/example-api/src/seed/tenancy-data.ts`.
 
 | User               | Password                    | Role                    |
 | ------------------ | --------------------------- | ----------------------- |

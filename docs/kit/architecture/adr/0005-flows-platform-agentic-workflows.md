@@ -3,7 +3,7 @@ title: 'ADR-0005 — Flows platform: governed plans + durable runs (agentic SaaS
 status: accepted
 normative: true
 date: 2026-08-05
-amended: 2026-11-12
+amended: 2026-11-14
 axial: false
 related:
   - docs/kit/architecture/adr/0001-primary-axis-packages-compose-apps.md
@@ -84,7 +84,7 @@ Apps compose packages:
 ### D2 — Runtime = Cloudflare Workflows (do not reimplement durable engine)
 
 ```text
-YAML plan  →  parse (budget)  →  Zod  →  check(plan, grants, registry)
+YAML plan  →  parse (budget)  →  Zod  →  checkPlan(plan, grants, registry)
                                           ↓ pass
                                create-run snapshot (immutable)
                                           ↓
@@ -143,7 +143,7 @@ tasks:
 | `agent`   | Leashed tool-loop                                                   | **deferred** (schema reject until meter ships) |
 | `exec`    | Shell                                                               | **never** on Workers kit                       |
 
-- **`check(planInput, grants, registry)`** is pure: **re-runs Zod** on `planInput` (`unknown`), then unknown tools, DAG edges/cycles, missing/empty authority, tools outside **effective** allowlist, static token ceilings → fail **before** first token
+- **`checkPlan(planInput, grants, registry)`** is pure: **re-runs Zod** on `planInput` (`unknown`), then unknown tools, DAG edges/cycles, missing/empty authority, tools outside **effective** allowlist, static token ceilings → fail **before** first token
 - **`grant.registryVersion`** required and must match registry; never silently default-filled on the snapshot
 
 - Plans in kit dogfood = **generic** (e.g. echo → infer summary) — **zero** Roxabi/Silex business strings in `packages/*`

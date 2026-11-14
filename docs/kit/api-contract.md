@@ -98,4 +98,4 @@ Inbox content is rendered at read time from API-owned `@kit/i18n` catalogues. On
 
 Approval-source links target the authenticated App route `/app/flows/runs/{runId}` and reuse the existing run view in the active Organization. The existing flows API remains authoritative for read and approval access; the `/admin` entry still requires a Platform actor. No Notifications UI or new approval authority is introduced.
 
-Organization destination endpoints remain S2. E3 does not emit Notifications, create a service factory, start a Delivery owner or send to a provider.
+In the E3 phase, Organization destination endpoints remained S2; E3 did not emit Notifications, create a service factory, start a Delivery owner or send to a provider.
