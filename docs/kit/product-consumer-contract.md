@@ -176,7 +176,7 @@ Better Auth still owns session refresh, cookies and applied revocations. The joi
 does not change handler-only cookie issuance or session resolution behavior.
 The optimization does not implement the password-reset changes tracked by Roxabi/roxabi-boilerplate-cf#395. The refusal
 ordering coordinates with still-open Roxabi/roxabi-boilerplate-cf#398; this document is not a
-claim that either issue has been delivered. See the permanent [authentication regressions](./testing.md#authentication-regressions) and their limits.
+claim that either issue has been delivered. See the permanent [authentication regressions](./testing/auth-seams.md#authentication-regressions) and their limits.
 
 ### Impersonation V1 migration
 
@@ -406,7 +406,7 @@ The independent-history cases in `scripts/kit/dogfood-zero-edit.sh` exercise syn
 bun run zero-edit
 ```
 
-The inherited root gate still runs its live current-tree checks in Product mode. After validating context, its gate-tooling self-tests may skip in a Product clone. A zero-edit exception covering a tooling input or changes to Product configuration, manifests or the shared, unprotected `bun.lock` select `validate:tooling`; uncertain context runs it conservatively. An exception does not authorize a protected edit by itself. Run `bun run validate:tooling` explicitly when needed; it does not replace Product app validation. Local and CI selection and its limits are documented in [testing.md](./testing.md#ops-model--local-first-ci-guardrail).
+The inherited root gate still runs its live current-tree checks in Product mode. After validating context, its gate-tooling self-tests may skip in a Product clone. A zero-edit exception covering a tooling input or changes to Product configuration, manifests or the shared, unprotected `bun.lock` select `validate:tooling`; uncertain context runs it conservatively. An exception does not authorize a protected edit by itself. Run `bun run validate:tooling` explicitly when needed; it does not replace Product app validation. Local and CI selection and its limits are documented in [testing.md](./testing/ops-model.md#ops-model--local-first-ci-guardrail).
 
 Do **not** dual-edit kit `ci.yml` for this — the pattern lives in the kit.  
 Do **not** rely on org secrets to fetch private `upstream` solely for zero-edit when the kit tip is already in product history after merge.  
@@ -450,7 +450,7 @@ export DENY_UPSTREAM_URL_SUBSTRINGS=my-private-chassis
 
 Do **not** hardcode product chassis names into kit defaults. Prefer full repo slugs (not generic tokens like `api`).
 
-**Client-side only:** this hook is UX / footgun prevention. `LEFTHOOK=0` and `git push --no-verify` still bypass it. Real kit integrity = **GitHub write ACLs** (product has no write to boilerplate / chassis). Proof: `bun run test:deny-upstream` (**CP-DENY** in [`testing.md`](./testing.md)).
+**Client-side only:** this hook is UX / footgun prevention. `LEFTHOOK=0` and `git push --no-verify` still bypass it. Real kit integrity = **GitHub write ACLs** (product has no write to boilerplate / chassis). Proof: `bun run test:deny-upstream` (**CP-DENY** in [`testing.md`](./testing/critical-path.md)).
 
 **Misconfiguration:** a product without `inheritance.json` is treated as a kit clone (`deny-upstream` no-op). If origin is also not in `kit_origin_allowlist`, `zero-edit` fails closed (`cannot classify`). GitHub Fork of a kit repo is still **DENY**: PRs default to the kit parent and private/deletion stay coupled to that network ([`start-product.md`](./playbooks/start-product.md)).
 
@@ -539,9 +539,9 @@ Workflow job: checkout with **`fetch-depth: 0`** → setup-bun → `bun install 
 
 `merge-on-green` uses the same pure declaration parser as promotion / `--check`, but judges a PR rather than a deploy branch: it resolves the **current** base once for each verdict, reads `config/product/inheritance.json` and `config/product/deploy-gate.json` at that immutable base SHA and at the PR head, and requires the union of declared `product-*.yml` workflows. A base without a declaration is allowed only for bootstrap; once Product mode is indicated, the head declaration is mandatory, readable and valid. Each declared workflow **MUST execute on the PR head**: its latest matching run must be completed `success`, name a valid explicit attempt, have a non-empty job list whose jobs on that exact attempt all succeed, and still be completed/successful when reread. A skipped, neutral, missing, queued, cancelled or failed Product run holds the merge; optional Kit checks may conclude `neutral` or `skipped`, but required Kit checks must succeed.
 
-The completion filter is intended to wake the merge gate for additional declared Product workflow files (each retains the required name `Product CI`), plus other producers such as PR Title, while excluding the reserved `Merge on Green` gate name. A wakeup is not a successful verdict. See the [wakeup contract](./testing.md#merge-wakeup-contract) for bounded hosted evidence, suppressed events and dispatch recovery.
+The completion filter is intended to wake the merge gate for additional declared Product workflow files (each retains the required name `Product CI`), plus other producers such as PR Title, while excluding the reserved `Merge on Green` gate name. A wakeup is not a successful verdict. See the [wakeup contract](./testing/ops-model.md#merge-wakeup-contract) for bounded hosted evidence, suppressed events and dispatch recovery.
 
-The initial scan checks admission before Product or Kit quality: an unadmitted PR has no quality verdict, not a green one. Default-ref dispatch still scans eligible open PRs, and its App mint diagnostic does not bypass quality or admission. Assess the repository's shared API capacity before rollout; see the [wakeup contract](./testing.md#merge-wakeup-contract) for cost and operator-controlled containment.
+The initial scan checks admission before Product or Kit quality: an unadmitted PR has no quality verdict, not a green one. Default-ref dispatch still scans eligible open PRs, and its App mint diagnostic does not bypass quality or admission. Assess the repository's shared API capacity before rollout; see the [wakeup contract](./testing/ops-model.md#merge-wakeup-contract) for cost and operator-controlled containment.
 
 Retire a Product workflow in two PRs for the merge hold: undeclare it while keeping its file and green PR-head run, merge, then delete the file. Rename one in the same two: add the new declaration and workflow while undeclaring the old one but keeping its file; both workflows need green PR-head runs because the base/head declaration union still requires the old one; merge, then delete the old file. Those two merges do not retire the deploy obligation. Deletion is legal for `promote-deploy.ts --check` only once the undeclaring commit is what each required local `refs/remotes/origin/deploy/<branch>` snapshot names — `deploy/main`, and `deploy/staging` when that ref exists. That is a promotion onto those branches, not another merge onto `main`. The check does not fetch: a stale local ref keeps the old obligation; a missing ref is bootstrap. A malformed or unreadable deployed declaration, or a real git read failure, fails closed. This merge gate reports structured declaration/read failures. It selects the latest matching workflow path and PR-head SHA, not a particular `pull_request` event, PR base or head repository; it does not prove GitHub event delivery, Product CI wiring in a live repository, branch protection, or an atomic read-and-merge transaction.
 

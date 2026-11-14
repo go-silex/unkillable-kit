@@ -5,7 +5,7 @@
  * a trailing version comment, and one action never drifts to two SHAs.
  * No network access.
  *
- * Scope decisions (see docs/kit/testing.md CP-ACTIONS-PIN):
+ * Scope decisions (see docs/kit/testing/critical-path.md CP-ACTIONS-PIN):
  * - `./...` refs (local composite actions, local reusable workflows) are exempt
  *   as *refs*: the pointer is this repository at this commit, so a SHA would be
  *   self-referential and unmaintainable. The exemption is identity of the ref,

@@ -2,7 +2,7 @@
 
 > **SSoT** for suppression markers in Chemin A.  
 > Inspiration: kit-factory debt-tracking — **simpler**: no full registry, no Python audit JSON.  
-> Gate: `bun run debt:check` · self-test: `bun run test:debt` · CP-DEBT in [`testing.md`](./testing.md).
+> Gate: `bun run debt:check` · self-test: `bun run test:debt` · CP-DEBT in [`testing.md`](./testing/critical-path.md).
 
 ---
 
@@ -141,10 +141,10 @@ Included in `quality-gates:check` next to file length.
 
 ## Related
 
-| Doc / gate                                    | Role                                                                       |
-| --------------------------------------------- | -------------------------------------------------------------------------- |
-| [`testing.md`](./testing.md) · **CP-DEBT**    | control-point inventory                                                    |
-| Historical plan `010-quality-hygiene-debt.md` | provenance retained; the historical target is no longer in this repository |
-| `scripts/kit/check-debt.ts`                   | untagged + expiry scanner                                                  |
-| `scripts/kit/check_folder_size.sh`            | folder density                                                             |
-| kit-factory `docs/kit/debt-tracking.md`       | upstream inspiration                                                       |
+| Doc / gate                                               | Role                                                                       |
+| -------------------------------------------------------- | -------------------------------------------------------------------------- |
+| [`testing.md`](./testing/critical-path.md) · **CP-DEBT** | control-point inventory                                                    |
+| Historical plan `010-quality-hygiene-debt.md`            | provenance retained; the historical target is no longer in this repository |
+| `scripts/kit/check-debt.ts`                              | untagged + expiry scanner                                                  |
+| `scripts/kit/check_folder_size.sh`                       | folder density                                                             |
+| kit-factory `docs/kit/debt-tracking.md`                  | upstream inspiration                                                       |

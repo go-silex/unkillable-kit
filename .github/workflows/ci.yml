@@ -267,4 +267,4 @@ jobs:
   # Showcase CD = Cloudflare Builds (git pull), not GH deploy. See docs/kit/deploy-cloudflare.md.
   # Browser e2e is local-only (Free CI minutes + flake risk).
   # Local: bun run test:e2e:design-system (servers up) or bun run test:e2e:ci (one-shot).
-  # Not in validate:full / Lefthook. See docs/kit/testing.md CP-E2E.
+  # Not in validate:full / Lefthook. See docs/kit/testing/critical-path.md CP-E2E.

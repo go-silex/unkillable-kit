@@ -25,7 +25,7 @@ All `HEAD_AUTH_*` variables must be valid together. Plugin discovery treats all 
 
 With `CI_APP_ID` absent, all-absent `HEAD_AUTH_*` is a successful inactive workflow mode: no policy parsing, evaluation, token mint or automated receipt write occurs. A complete supplied policy is still validated and permits read-only merge evaluation, but cannot enable automation while the App is disabled. Default-ref automation requires a complete valid policy whenever an App identifier or any policy value is supplied; partial or malformed policy remains an error. The unprivileged `pull_request` no-op is filtered before runner allocation; its defensive preflight return still avoids loading an adapter that may not exist on a consumer's inheritance PR. Comment wakeups, revocation and Dependabot capture retain strict validation; capture remains App-gated because it withdraws authorization before evaluation.
 
-Payload filters avoid ordinary comments and other provable no-ops; they do not authorize a merge. The trusted preflight still validates policy and rereads protocol comments. See the [wakeup contract](./testing.md#merge-wakeup-contract) for event delivery and recovery limits.
+Payload filters avoid ordinary comments and other provable no-ops; they do not authorize a merge. The trusted preflight still validates policy and rereads protocol comments. See the [wakeup contract](./testing/ops-model.md#merge-wakeup-contract) for event delivery and recovery limits.
 
 ## Optional main ruleset
 
@@ -159,15 +159,15 @@ The gate queues the exact receipt during evaluation and requires that same recei
 
 Initial evaluation checks admission before quality: an unadmitted PR is reported with its authorization reason, not a green quality verdict. Admitted PRs receive the complete quality assessment. At landing, fresh quality precedes the final fresh authorization read and exact-receipt comparison.
 
-The completion filter is intended to cover arbitrary workflow names while excluding the reserved gate name. See the [wakeup contract](./testing.md#merge-wakeup-contract) for bounded hosted evidence and delivery limits. Automatic evaluations without candidates do not mint a merge token; default-ref dispatch retains the configured-App mint diagnostic even with no candidates. Neither wakeup nor mint proves admission.
+The completion filter is intended to cover arbitrary workflow names while excluding the reserved gate name. See the [wakeup contract](./testing/ops-model.md#merge-wakeup-contract) for bounded hosted evidence and delivery limits. Automatic evaluations without candidates do not mint a merge token; default-ref dispatch retains the configured-App mint diagnostic even with no candidates. Neither wakeup nor mint proves admission.
 
 ## Holds, repair and residual risk
 
 - Inspect the current PR, head, scope, issuer configuration, comment stream and API errors. Repair missing permissions or invalid variables; a failed withdrawal is not a confirmed disarm. After a confirmed withdrawal, perform fresh source admission and explicit reissue for the current head. Do not delete a denial to restore authority.
-- Assess [API capacity](./testing.md#merge-wakeup-contract) per repository before admission or rollout. A rate-limit error or budget overrun calls for holding new admissions and an operator-approved containment or rollback decision. Disabling automation or limiting wakeups is separately authorized mitigation with manual recovery, not a correction; a rollback must retain admission, revocation and required-check success.
+- Assess [API capacity](./testing/ops-model.md#merge-wakeup-contract) per repository before admission or rollout. A rate-limit error or budget overrun calls for holding new admissions and an operator-approved containment or rollback decision. Disabling automation or limiting wakeups is separately authorized mitigation with manual recovery, not a correction; a rollback must retain admission, revocation and required-check success.
 - Append-only is a publisher contract, not immutable GitHub storage: trusted deletion or editing away of history can erase a fence. Returning to identical head A without an accepted withdrawal can match A again; a grant for A never authorizes B.
 - GitHub reads and merge are not atomic. Changes after the final read and old or alternative workflow definitions remain residual risks. A default-ref guard cannot constrain an older definition.
-- On GitHub Free private, merge-on-green is process, not branch protection: writers can merge or push without the gate. Never claim labels enforce checks or review. See [testing.md](./testing.md#merge-residual-github-free-private).
+- On GitHub Free private, merge-on-green is process, not branch protection: writers can merge or push without the gate. Never claim labels enforce checks or review. See [testing.md](./testing/ops-model.md#merge-residual-github-free-private).
 
 ## Workflow consumers and operations
 

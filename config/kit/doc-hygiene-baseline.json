@@ -1,0 +1,197 @@
+{
+  "AGENTS.md": {
+    "overLimitLines": 1,
+    "maxLineBytes": 421,
+    "fileBytes": 11971
+  },
+  "docs/kit/api-contract.md": {
+    "overLimitLines": 3,
+    "maxLineBytes": 521,
+    "fileBytes": 9799
+  },
+  "docs/kit/architecture/adr/0002-session-hmac-interim-vs-better-auth.md": {
+    "overLimitLines": 1,
+    "maxLineBytes": 559,
+    "fileBytes": 13991
+  },
+  "docs/kit/architecture/adr/0003-multi-tenant-rbac-modules.md": {
+    "overLimitLines": 7,
+    "maxLineBytes": 560,
+    "fileBytes": 25865
+  },
+  "docs/kit/architecture/adr/0005-flows-platform-agentic-workflows.md": {
+    "overLimitLines": 27,
+    "maxLineBytes": 1718,
+    "fileBytes": 41434
+  },
+  "docs/kit/architecture/adr/0007-tasks-comments-kernel.md": {
+    "overLimitLines": 1,
+    "maxLineBytes": 656,
+    "fileBytes": 6090
+  },
+  "docs/kit/architecture/adr/0008-kit-schema-identity-product-compose.md": {
+    "overLimitLines": 2,
+    "maxLineBytes": 558,
+    "fileBytes": 15542
+  },
+  "docs/kit/architecture/adr/0009-kit-namespace-polarity-inheritance-marker.md": {
+    "overLimitLines": 10,
+    "maxLineBytes": 1311,
+    "fileBytes": 20667
+  },
+  "docs/kit/architecture/adr/0012-kernel-persistence-request-context.md": {
+    "overLimitLines": 3,
+    "maxLineBytes": 510,
+    "fileBytes": 10465
+  },
+  "docs/kit/architecture/adr/0013-root-github-workflow-ownership.md": {
+    "overLimitLines": 36,
+    "maxLineBytes": 705,
+    "fileBytes": 26361
+  },
+  "docs/kit/architecture/adr/0014-openapi-from-hono-routes.md": {
+    "overLimitLines": 2,
+    "maxLineBytes": 570,
+    "fileBytes": 7523
+  },
+  "docs/kit/architecture/adr/0015-mcp-remote-oauth-worker.md": {
+    "overLimitLines": 33,
+    "maxLineBytes": 1243,
+    "fileBytes": 34205
+  },
+  "docs/kit/architecture/adr/0016-tasks-owner-org-tenancy.md": {
+    "overLimitLines": 3,
+    "maxLineBytes": 426,
+    "fileBytes": 4318
+  },
+  "docs/kit/architecture/adr/0018-durable-execution-ownership.md": {
+    "overLimitLines": 4,
+    "maxLineBytes": 617,
+    "fileBytes": 10775
+  },
+  "docs/kit/architecture/adr/0019-notifications-rules-inbox-and-delivery.md": {
+    "overLimitLines": 59,
+    "maxLineBytes": 1272,
+    "fileBytes": 72276
+  },
+  "docs/kit/architecture/adr/0020-notification-delivery-ownership.md": {
+    "overLimitLines": 41,
+    "maxLineBytes": 735,
+    "fileBytes": 58782
+  },
+  "docs/kit/architecture/adr/0021-slack-installations-and-notification-channel.md": {
+    "overLimitLines": 38,
+    "maxLineBytes": 736,
+    "fileBytes": 58492
+  },
+  "docs/kit/architecture/design-notes/0021-slack.md": {
+    "overLimitLines": 33,
+    "maxLineBytes": 619,
+    "fileBytes": 45856
+  },
+  "docs/kit/architecture/platform-direction.md": {
+    "overLimitLines": 3,
+    "maxLineBytes": 477,
+    "fileBytes": 6237
+  },
+  "docs/kit/auth-abuse-response.md": {
+    "overLimitLines": 16,
+    "maxLineBytes": 881,
+    "fileBytes": 20676
+  },
+  "docs/kit/ci-app-setup.md": {
+    "overLimitLines": 18,
+    "maxLineBytes": 817,
+    "fileBytes": 23330
+  },
+  "docs/kit/debt-tracking.md": {
+    "overLimitLines": 1,
+    "maxLineBytes": 446,
+    "fileBytes": 11435
+  },
+  "docs/kit/deploy-cloudflare.md": {
+    "overLimitLines": 60,
+    "maxLineBytes": 3643,
+    "fileBytes": 109974
+  },
+  "docs/kit/environments.md": {
+    "overLimitLines": 2,
+    "maxLineBytes": 834,
+    "fileBytes": 16988
+  },
+  "docs/kit/kit-schema-sync.md": {
+    "overLimitLines": 5,
+    "maxLineBytes": 810,
+    "fileBytes": 9373
+  },
+  "docs/kit/observability.md": {
+    "overLimitLines": 2,
+    "maxLineBytes": 431,
+    "fileBytes": 3174
+  },
+  "docs/kit/playbooks/create-product-day0.md": {
+    "overLimitLines": 5,
+    "maxLineBytes": 664,
+    "fileBytes": 5068
+  },
+  "docs/kit/playbooks/start-product.md": {
+    "overLimitLines": 22,
+    "maxLineBytes": 1323,
+    "fileBytes": 24663
+  },
+  "docs/kit/processes/dev-process.md": {
+    "overLimitLines": 11,
+    "maxLineBytes": 711,
+    "fileBytes": 19876
+  },
+  "docs/kit/product-consumer-contract.md": {
+    "overLimitLines": 127,
+    "maxLineBytes": 2129,
+    "fileBytes": 181069
+  },
+  "docs/kit/security-dependabot.md": {
+    "overLimitLines": 36,
+    "maxLineBytes": 732,
+    "fileBytes": 30075
+  },
+  "docs/kit/standards/stack.md": {
+    "overLimitLines": 52,
+    "maxLineBytes": 867,
+    "fileBytes": 64133
+  },
+  "docs/kit/testing/coverage.md": {
+    "overLimitLines": 7,
+    "maxLineBytes": 816,
+    "fileBytes": 6234
+  },
+  "docs/kit/testing/critical-path.md": {
+    "overLimitLines": 92,
+    "maxLineBytes": 3787,
+    "fileBytes": 280258
+  },
+  "docs/kit/testing/ops-model.md": {
+    "overLimitLines": 35,
+    "maxLineBytes": 1173,
+    "fileBytes": 37115
+  },
+  "docs/kit/testing/ownership.md": {
+    "overLimitLines": 27,
+    "maxLineBytes": 1286,
+    "fileBytes": 27236
+  },
+  "docs/kit/testing/risk-tiers.md": {
+    "overLimitLines": 6,
+    "maxLineBytes": 408,
+    "fileBytes": 3251
+  },
+  "docs/kit/third-party-notices.md": {
+    "overLimitLines": 2,
+    "maxLineBytes": 539,
+    "fileBytes": 4380
+  },
+  "docs/kit/ui-kit.md": {
+    "overLimitLines": 9,
+    "maxLineBytes": 499,
+    "fileBytes": 11739
+  }
+}

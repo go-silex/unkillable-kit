@@ -122,4 +122,4 @@ Bind `OAUTH_KV`. Deployed composes set `ENVIRONMENT=production` or `staging`; ot
 
 ## Probes
 
-See [testing](../../docs/kit/testing.md#mcp-contract-probes--non-claims) **CP-MCP-REG / SMOKE / REFUSAL / SCHEMA / BUDGET / GRANT-ADMISSION**. Consent policy, fallthrough and OAuth grant admission are tested through the public hosted handler in this package. Dogfood connect is **CP-MCP-HTTP-OAUTH** in `apps/mcp-example` (not `smoke:mcp`).
+See [testing](../../docs/kit/testing/critical-path.md#mcp-contract-probes--non-claims) **CP-MCP-REG / SMOKE / REFUSAL / SCHEMA / BUDGET / GRANT-ADMISSION**. Consent policy, fallthrough and OAuth grant admission are tested through the public hosted handler in this package. Dogfood connect is **CP-MCP-HTTP-OAUTH** in `apps/mcp-example` (not `smoke:mcp`).
