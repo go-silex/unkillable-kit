@@ -14,6 +14,7 @@ related:
   - docs/kit/architecture/adr/0012-kernel-persistence-request-context.md
   - packages/tasks/
   - packages/comments/
+summary: 'Tasks and comments as kit capabilities'
 ---
 
 # ADR-0007 — Tasks + comments as kit capability (incubating)

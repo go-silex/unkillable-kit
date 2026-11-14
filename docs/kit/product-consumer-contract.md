@@ -123,7 +123,7 @@ Normative: [ADR-0008](./architecture/adr/0008-kit-schema-identity-product-compos
 | `apps/<product>-api/migrations/*`             | **product**                        | Local filenames (`0021_kit_rate_limit_audit.sql`, domain `1000_*`). Append via `scripts/kit/kit-schema-sync.sh` — never rewrite applied files. |
 | `apps/<product>-api/kit-schema-manifest.json` | **product**                        | **New product file (allowed).** Records `sets` (opt-in) plus `id` + `kitSha256` (hex of kit source bytes) + `productFile`.                     |
 
-Default sync (no `--modules`): `core` ∪ the manifest `sets` array. First opt-in of a named set stays explicit (`--modules core,<set>`) — [`start-product.md` § Core vs opt-in](./playbooks/start-product.md#core-vs-opt-in); do not fork that table here. An explicit list that omits a set still in `sets` exits non-zero when that set has catalog ids not yet in `modules`. Opt out by deleting the set from `sets`. Existing clones: freeze 0009–0020 domain history; `--adopt` (name every applied set, or the command exits 1); later runs omit `--modules`.
+Default sync (no `--modules`): a fresh Product records `core,audit`; an existing manifest selects `core` ∪ its recorded `sets`, without silently adding `audit`. First opt-in of another named set is explicit — [`start-product.md` § Core vs opt-in](./playbooks/start-product.md#core-vs-opt-in). An explicit list that omits a recorded set exits non-zero when that set has catalog ids not yet in `modules`. Opt out by deleting the set from `sets`. Existing clones: freeze domain history; `--adopt` (name every applied set, or the command exits 1); later runs omit `--modules`.
 
 Auth glue (ADR-0008 D6): import `createBetterAuth` from `@kit/auth/factory`, tables from `@kit/auth/schema`, env helpers from `@kit/auth`. SPA forgot/reset/change-password: `@kit/auth/react` forms (app owns routes + catalogs). Do **not** copy or dual-edit `apps/example-api/src/lib/better-auth.ts` as the factory. Never import `@kit/auth/react` from a Worker.
 
@@ -224,7 +224,7 @@ V1 does not implement consent requests, consent configuration/status, target not
 
 The one contract for mounting Better Auth on a product Worker. ADR-0002's inject recipe, [start-product](./playbooks/start-product.md) step 8, [`deploy-cloudflare.md`](./deploy-cloudflare.md) and [`auth-abuse-response.md`](./auth-abuse-response.md) link here. `createBetterAuth` pins Better Auth's own limiter off, plugin rate-limit rules included, so a mount that skips this contract has no limiter at all.
 
-1. **Schema sets `core,audit`:** `bash scripts/kit/kit-schema-sync.sh --app apps/<product>-api --modules core,audit`, plus every set already in the manifest `sets`. `rate_limit_buckets` ships in `audit`. Without it every non-exempt Better Auth request fails closed with a 500.
+1. **Schema sets `core,audit`:** fresh default sync includes both. For an existing manifest without `audit`, run `bash scripts/kit/kit-schema-sync.sh --app apps/<product>-api --modules core,audit` plus every set already recorded. Apply the resulting migrations before mounting. `rate_limit_buckets` ships in `audit`; without it every non-exempt Better Auth request fails closed with a 500.
 2. **One route: the org deny, then the kit throttle, then the handler.** A catch-all on `/api/auth/*` tests `isBaOrganizationRoute(pathname)` from `@kit/auth` on the raw pathname first. It answers 404 there, before any budget is spent. The deny covers every path under `/api/auth/organization/`, so a route that a Better Auth upgrade adds is denied too. ADR-0003 D10: Better Auth's organization routes skip the kit's role ceiling, org-status check and audit, and the kit organization APIs replace them. Then `throttleBetterAuthRequest(db, { request, ip, sessionId })` from `@kit/auth/repos/ba-throttle`, then `auth.handler(c.req.raw)`. Reference: `apps/example-api/src/routes/auth.ts`.
 3. **Inputs:**
    - `request` is `c.req.raw`. The throttle routes on its raw pathname and reads the body from a clone.
@@ -472,7 +472,7 @@ Pull kit updates from `upstream/main` into `main`. For `.dev/stack.yml`, keep th
 5. Configure a target-only **kit-ci** App and repository-scoped credentials and authorization variables, or establish verified inactive App mode and use separately authorized manual merge — see [`ci-app-setup.md`](./ci-app-setup.md#trust-and-setup).
 6. Choose the Product's terms in the root `LICENSE` ([Zones](#zones)), then add product apps under `apps/<product>-*` only.
    Stage the Product App manifests, then run `node scripts/kit/configure-product-dependabot.cjs` ([bounded configuration](#product-dependabot-configuration)); commit the generated file with the Product setup.
-7. When `apps/<product>-api` exists: `bash scripts/kit/kit-schema-sync.sh --app apps/<product>-api --modules core,audit` for a product that mounts Better Auth. The throttle needs the `audit` set. Omitted `--modules` syncs `core` ∪ the manifest `sets`, which is `core` only on a new product, and every non-exempt auth request then returns 500. Last-resort clones: `--adopt` immediately. Product domain SQL starts at `1000_`.
+7. When `apps/<product>-api` exists: `bash scripts/kit/kit-schema-sync.sh --app apps/<product>-api`. A fresh default selects `core,audit`, required by the Better Auth throttle. Existing manifests retain their recorded selection; add `audit` explicitly if absent before mounting Better Auth. Last-resort clones: `--adopt` immediately. Product domain SQL starts at `1000_`.
 8. Keep `bun run validate:full` green (kit bar). When `apps/<product>-*` exist, also wire product-validate / product-ci (see Product CI DoD below).
 
 Optional product-only files (safe for upstream merge):
@@ -568,7 +568,7 @@ The script runs only in a clean product clone, refuses an in-progress merge, and
 
 1. Fetch `upstream`, report a `packageManager` move, and stop before merging a new `actions/create-github-app-token` pin; exit if already current.
 2. Merge without committing (resolve conflicts only if Product violated zones), restore the pre-merge root `LICENSE` presence and bytes, and record the incoming tip in the inheritance marker.
-3. Install dependencies (this does not re-check versions the merge kept) and check lock ranges; a failure leaves the merge open for owner-directed repair.
+3. Install dependencies (this does not re-check versions the merge kept), stage `bun.lock`, and check the staged merge tree's lock ranges and normalization; a failure leaves the merge open for owner-directed repair.
 4. Commit the merge, refresh the Product Dependabot scan in a separate commit if needed, and run `zero-edit`, which must stay green or have exceptions refreshed intentionally.
 
 For a new token pin, merge conflict, lock-ranges resume, or independent-lineage join, run the lines of `scripts/kit/kit-upgrade.sh` by hand from `git merge --no-ff --no-commit` onward as applicable, including its `LICENSE` lines.
@@ -579,7 +579,7 @@ A clone whose pin predates this script performs its first upgrade with the previ
 A range that sets a new pin of `actions/create-github-app-token` stops before the merge. Establish the effective `CI_APP_ID` mode using [CI App setup](./ci-app-setup.md#trust-and-setup):
 verified absence permits the inactive, separately authorized manual-merge path; a nonempty value requires the installed App's Client ID, valid authorization configuration and a successful mint established through a separately authorized exercise.
 A missing key or unknown state stops. Then run the script's merge lines by hand. Neither path waives review, local gates or CI.
-After a merge conflict, resolve it, refresh the existing inheritance marker to the tip actually merged, then run the script's remaining lines by hand: the merge commit waits for `lock-ranges:check`.
+After a merge conflict, resolve and stage all merge inputs, refresh the existing inheritance marker to the tip actually merged, then run the script's remaining lines by hand: the merge commit waits for `lock-ranges:check`. During an open merge the check uses the staged tree, not pre-merge `HEAD` or unstaged files; outside a merge normalization checks committed `HEAD`. Missing offline cache data fails the check.
 
 If `lock-ranges:check` fails, the merge is still open (no merge commit yet). Each finding names its workspace; resume by owner:
 
@@ -591,7 +591,8 @@ git add bun.lock apps/<product>-web/package.json
 # STOP on that finding: inspect the complete pre-merge, incoming and merged locks;
 # resolve without losing/re-resolving Product entries or changing protected manifest ranges.
 # If that preservation cannot be demonstrated, obtain a reviewed Kit-side resolution before continuing.
-# For a resolved lock, re-check before the merge commit (zero-edit requires committed ancestry):
+# Stage all resolved manifests, patches and the lock before checking the merge candidate:
+git add bun.lock
 bun run lock-ranges:check &&
   bun install --frozen-lockfile --minimum-release-age 0 &&
   git add bun.lock config/product/inheritance.json && git commit --no-edit

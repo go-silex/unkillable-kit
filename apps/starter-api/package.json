@@ -1,0 +1,29 @@
+{
+  "name": "@kit/starter-api",
+  "version": "0.0.1",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "types": "wrangler types src/worker-configuration.d.ts --include-env=false",
+    "typecheck": "wrangler types src/worker-configuration.d.ts --include-env=false --check && tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "db:migrate": "wrangler d1 migrations apply starter-api-local --local",
+    "build": "wrangler deploy --dry-run --outdir=dist"
+  },
+  "dependencies": {
+    "@kit/auth": "workspace:*",
+    "@kit/core": "workspace:*",
+    "@kit/db": "workspace:*",
+    "drizzle-orm": "^0.45.4",
+    "hono": "^4.13.18"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "better-sqlite3": "^13.1.1",
+    "vitest": "^5.1.0",
+    "wrangler": "^4.162.0"
+  }
+}

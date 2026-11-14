@@ -20,11 +20,10 @@ The additive `impersonation` id from `0024_impersonation.sql` belongs to `core`.
 ## Happy path (greenfield)
 
 1. Create `apps/<product>-api` that **imports `@kit/*`** — do not `cp -R apps/example-api`.
-2. Sync kit modules. A product that mounts Better Auth names the `audit` set, per the [Better Auth mount contract](./product-consumer-contract.md#better-auth-mount):
+2. Sync kit modules. The fresh default includes `core,audit`, required by the [Better Auth mount contract](./product-consumer-contract.md#better-auth-mount):
 
 ```bash
-bash scripts/kit/kit-schema-sync.sh --app apps/<product>-api --modules core,audit
-# no Better Auth mount: omit --modules (core ∪ sets already in the manifest; empty manifest → core only)
+bash scripts/kit/kit-schema-sync.sh --app apps/<product>-api
 ```
 
 3. Product domain SQL starts at **`1000_`**. Leave `0009`–`0999` for later kit appends (`NNNN_kit_*`).
@@ -36,7 +35,7 @@ bash scripts/kit/kit-schema-sync.sh --app apps/<product>-api --modules core,audi
 bash scripts/kit/kit-schema-sync.sh --app apps/<product>-api --modules all   # every catalogued module — not default
 ```
 
-`--modules` omitted: `core` ∪ the manifest `sets` array (plus core). First opt-in is `--modules core,<set>` — a single non-core set exits 1 while any core id is still absent, and names that id. An explicit list that omits a set still listed in `sets` exits 1 when that set has catalog ids absent from `modules`, and names those ids. Opt out by deleting the set from `sets` (the applied module rows stay; new ids of that set are not applied). There is no opt-out flag. A product that mounts Better Auth cannot opt out of `audit`: the throttle needs `rate_limit_buckets`, and without it every non-exempt auth request returns 500 ([mount contract](./product-consumer-contract.md#better-auth-mount)). `all` records every catalog set that exists at that run — not the default. Named sets: `rbac` · `audit` · `demo` · `flows` · `tasks`.
+With no `--modules`, a fresh Product selects and records `core,audit`; an existing manifest selects `core` ∪ its recorded `sets`, never silently adding `audit` on upgrade. A manifest without `sets` derives them once from recorded ids and canonical headers. To add a set explicitly, name `core` and all recorded sets. A single non-core set exits 1 while any core id is absent. An explicit list that omits a recorded set exits 1 when that set has catalog ids absent from `modules`, and names those ids. Opt out by deleting the set from `sets` (applied module rows stay). A Product that mounts Better Auth cannot opt out of `audit`: its `rate_limit_buckets` table is required by the throttle, without which every non-exempt auth request returns 500. `all` records every catalog set at that run, not future sets.
 
 ## Existing clone (already copied example-api)
 
@@ -47,7 +46,7 @@ D1 journal = filename. Do **not** rename applied files. Do **not** rewrite `d1_m
 
 ```bash
 bash scripts/kit/kit-schema-sync.sh --app apps/<product>-api --adopt
-# no manifest yet: core only. Unclaimed files that match another catalog set exit 1
+# no manifest yet: core,audit. Unclaimed files that match another catalog set exit 1
 # and print `run without --adopt: --modules core,<sets>`. Re-run that command
 # without --adopt: adopt cannot append a missing id of a partial set (0012 present,
 # 0016 absent). The printed list is the union of sets you passed and sets on disk.
@@ -87,7 +86,7 @@ Append-only: never rewrite an applied local file.
 
 ## Manifest
 
-Product-owned. JSON keys (see [`templates/kit-schema-manifest.example.json`](./templates/kit-schema-manifest.example.json)): `version`, `app`, `sets`, `modules.<id>.kitSha256`, `modules.<id>.productFile`. `sets` is the opt-in record (written by explicit `--modules` and by `--adopt`). A manifest without `sets` is migrated once from recorded ids and canonical `-- kit-schema:` headers, then written. Deleting a name from `sets` is the opt-out. `kitSha256` is the hex sha256 of **kit source bytes** (not of the headed product copy). Do not dual-edit the catalog by hand in a product.
+Product-owned. JSON keys (see [`templates/kit-schema-manifest.example.json`](./templates/kit-schema-manifest.example.json)): `version`, `app`, `sets`, `modules.<id>.kitSha256`, `modules.<id>.productFile`. `sets` records the fresh default, explicit `--modules`, and `--adopt`. A manifest without `sets` is migrated once from recorded ids and canonical `-- kit-schema:` headers, then written. Deleting a name from `sets` is the opt-out. `kitSha256` is the hex sha256 of **kit source bytes** (not of the headed product copy). Do not dual-edit the catalog by hand in a product.
 
 ## Not this doc
 

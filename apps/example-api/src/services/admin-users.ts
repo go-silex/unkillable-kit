@@ -7,6 +7,7 @@ import { buildWelcomeSetPasswordEmailText, type EmailPort } from '@kit/email'
 import { hashPassword } from 'better-auth/crypto'
 import type { DrizzleD1Database } from 'drizzle-orm/d1'
 import type { schema } from '../db/schema'
+import { emailTemplateOptions } from '../lib/email-config'
 import * as usersRepo from '../repos/users'
 import {
   assertAdminCreateActor,
@@ -184,9 +185,9 @@ export async function resendWelcome(
   const setPasswordUrl = `${base}/reset-password?token=${encodeURIComponent(token)}`
   try {
     const tmpl = buildWelcomeSetPasswordEmailText({
+      ...(await emailTemplateOptions(user.email)),
       to: user.email,
       setPasswordUrl,
-      expiresHint: 'about 1 hour',
       name: user.name,
       allowedOrigins: input.allowedOrigins,
     })

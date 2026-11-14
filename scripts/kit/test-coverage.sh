@@ -52,6 +52,7 @@ EXT_FILE="config/product/coverage-order.txt"
 COVERAGE_HIGH=(
   packages/auth
   packages/core
+  apps/starter-api
   apps/example-api
 )
 
@@ -73,6 +74,7 @@ COVERAGE_MEDIUM=(
 # Lower bar — large UI surface still expanding
 COVERAGE_LOWER=(
   packages/ui
+  apps/starter-web
   apps/example-web
   apps/mcp-example
 )

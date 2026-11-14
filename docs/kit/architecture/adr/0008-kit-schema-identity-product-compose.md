@@ -3,13 +3,14 @@ title: 'ADR-0008 — Kit schema identity is module id + hash, not example-api NN
 status: accepted
 normative: true
 date: 2026-08-19
-amended: 2026-10-06
+amended: 2026-11-14
 axial: false
 related:
   - docs/kit/architecture/adr/0001-primary-axis-packages-compose-apps.md
   - docs/kit/product-consumer-contract.md
   - docs/kit/playbooks/start-product.md
   - docs/kit/kit-schema-sync.md
+summary: 'Kit schema identity by module id + hash'
 ---
 
 # ADR-0008 — Kit schema identity is module id + hash, not example-api NNNN
@@ -74,6 +75,8 @@ Manifest JSON keys (sync script): `modules.<id>.kitSha256`, `modules.<id>.produc
 
 ### D4 — Sync is append-only
 
+**Amendment (2026-11-14):** The fresh default is now `core,audit`, recorded in the new manifest. For an existing manifest, omitted `--modules` remains `core` plus recorded sets, including sets derived once from legacy manifests without `sets`; it does not silently add `audit`. Explicit selections are unchanged. The historical default and opt-in descriptions below describe the original decision; this amendment supersedes them for fresh Products. `audit` owns `rate_limit_buckets`, required by a mounted Better Auth throttle.
+
 The catalog defines the `core` set, including `0014_better_auth_1_7_additive` and `0015_api_keys_org_not_null`. Omitted `--modules` selects `core` plus the product manifest `sets` array. Explicit `--modules` and `--adopt` record selected sets; when `sets` is absent it is migrated once from recorded ids and canonical headers. An explicit list omitting a recorded set fails if catalog ids in that set are missing from `modules`, naming those ids. Delete the set from `sets` to opt out. `--adopt` fails closed when an unclaimed file matches an unselected set.
 
 ```text
@@ -113,16 +116,16 @@ Set ↔ current applied files (catalog remains SSoT):
 
 | Piece                                                                           | Where                                                                                                                                                                                                                                               |
 | ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `createBetterAuth({ database, secret, baseURL, emailPort?, … })`                | `@kit/auth/factory` (not the root barrel — SPA/MCP stay free of `better-auth`)                                                                                                                                                                      |
+| `createBetterAuth({ database, secret, baseURL, emailPort?, emailConfig?, … })`  | `@kit/auth/factory` (not the root barrel — SPA/MCP stay free of `better-auth`); when supplying `emailPort`, also supply `emailConfig: { productName, fallbackLocale, resolveRecipientLocale }`                                                      |
 | Drizzle BA tables                                                               | `@kit/auth/schema` — `drizzle-orm` is an **optional peer** of `@kit/auth`. The product API that imports `./schema`, `./factory`, or `./repos/*` must declare it (`example-api` already does). Root barrel and `./react` stay drizzle-free.          |
 | Env helpers (`getBetterAuthSecret`, `betterAuthBaseURL`, cors, signup, cookies) | `@kit/auth` — **required** with the factory (min-32 + placeholder denylist also runs inside `createBetterAuth`)                                                                                                                                     |
-| Magic-link + reset send via EmailPort                                           | Optional `emailPort` on `@kit/auth/factory` (`sendMagicLinkMail` / `sendResetPasswordMail`). Omit the port to skip those plugins.                                                                                                                   |
+| Magic-link + reset send via EmailPort                                           | Optional `emailPort` on `@kit/auth/factory` (`sendMagicLinkMail` / `sendResetPasswordMail`), with required `emailConfig: { productName, fallbackLocale, resolveRecipientLocale }` when the port is supplied. Omit the port to skip those plugins.   |
 | `first_login` hook                                                              | `@kit/auth` `onFirstSession` / `createFirstSessionAfterHook` — product supplies the audit insert (`tryFirstLogin`). Its `audit_events` table ships in the `audit` set, which a product that mounts Better Auth always syncs (Opt-in sets row above) |
 | Welcome / invite mail                                                           | already `@kit/email` `build*EmailText` + app `resolveEmailPort`                                                                                                                                                                                     |
 
 `example-api/src/lib/better-auth.ts` is a thin **Env adapter** (dogfood): maps Worker env → factory opts + lazy `emailPort` + `onFirstSession`. It is the mapping example, not a second factory. Do not `cp` it as the BA implementation.
 
-`emailPort.send` runs only when BA sends mail. Do **not** call `resolveEmailPort(env)` at factory construction — that 500s every request (including `/health`) when staging/prod lacks `EMAIL_TRANSPORT`. Wrap: `emailPort: { send: (input) => resolveEmailPort(env).send(input) }`.
+`emailPort.send` runs only when BA sends mail. Do **not** call `resolveEmailPort(env)` at factory construction — that 500s every request (including `/health`) when staging/prod lacks `EMAIL_TRANSPORT`. Wrap: `emailPort: { send: (input) => resolveEmailPort(env).send(input) }, emailConfig: { productName, fallbackLocale, resolveRecipientLocale }`.
 
 SQL identity is still D1–D5 (this ADR). D6 does **not** move applied SQL into `packages/*/migrations`.
 
