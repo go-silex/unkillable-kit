@@ -18,7 +18,11 @@ const fields: Record<string, (value: unknown) => boolean> = {
   status: (value) => typeof value === 'string' && statuses.includes(value),
   normative: (value) => typeof value === 'boolean',
   axial: (value) => typeof value === 'boolean',
-  summary: (value) => typeof value === 'string' && value.trim().length > 0 && !/[\r\n]/.test(value),
+  summary: (value) =>
+    typeof value === 'string' &&
+    value.trim().length > 0 &&
+    !/[\r\n]/.test(value) &&
+    !/\((?:accepted|deprecated|proposed|rejected|superseded)\)\s*$/i.test(value),
 }
 type Adr = {
   name: string
@@ -97,7 +101,7 @@ function loadAdrs(): Adr[] {
 
 function render(adrs: Adr[]): string {
   const rows = adrs.map((adr) => {
-    const title = adr.summary.replaceAll('|', '\\|')
+    const title = adr.summary.replace(/(\\*)\|/g, '$1$1\\|')
     const status = adr.status === 'accepted' ? '' : ` (${adr.status})`
     return [`[ADR-${adr.number}](./adr/${adr.name})`, `${title}${status}`]
   })

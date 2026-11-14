@@ -11,12 +11,20 @@ adr="$tmp/docs/kit/architecture/adr/0001-primary-axis-packages-compose-apps.md"
 second="$tmp/docs/kit/architecture/adr/0002-session-hmac-interim-vs-better-auth.md"
 run() { ADR_FRONTMATTER_ROOT="$tmp" bun --no-install "$gate" "$@"; }
 expect_failure() {
-  if run >/dev/null 2>&1; then echo "Expected failure: $1" >&2; exit 1; fi
+  local label="$1"
+  shift
+  if run "$@" >/dev/null 2>&1; then echo "Expected failure: $label" >&2; exit 1; fi
 }
 restore() { cp "$root/docs/kit/architecture/adr/$(basename "$1")" "$1"; }
 run
 sed -i 's/^status: accepted/status: invalid/' "$adr"
 expect_failure status
+restore "$adr"
+sed -i 's/^status: accepted/status: proposed/' "$adr"
+expect_failure normative-nonaccepted --write
+restore "$adr"
+sed -i "s/^summary:.*/summary: 'Decision (rejected)'/" "$adr"
+expect_failure misleading-summary --write
 restore "$adr"
 sed -i '/^normative:/d' "$adr"
 expect_failure missing-field
@@ -29,6 +37,21 @@ expect_failure empty-summary
 restore "$adr"
 sed -i 's/Platform packages compose deployable apps/stale/' "$tmp/docs/kit/architecture/index.md"
 expect_failure stale-index
+cp "$root/docs/kit/architecture/index.md" "$tmp/docs/kit/architecture/index.md"
+sed -i '/| \[ADR-0001\]/d' "$tmp/docs/kit/architecture/index.md"
+expect_failure missing-row
+cp "$root/docs/kit/architecture/index.md" "$tmp/docs/kit/architecture/index.md"
+sed -i 's/ADR-0001/ADR-9999/' "$tmp/docs/kit/architecture/index.md"
+expect_failure unknown-number
+cp "$root/docs/kit/architecture/index.md" "$tmp/docs/kit/architecture/index.md"
+sed -i "/ADR-0001.* |/a | [ADR-9999](./adr/9999-ghost.md) | Ghost |" "$tmp/docs/kit/architecture/index.md"
+expect_failure ghost-row
+cp "$root/docs/kit/architecture/index.md" "$tmp/docs/kit/architecture/index.md"
+sed -i "s/^summary:.*/summary: 'two \\\\| three'/" "$adr"
+run --write
+bun -e 'const html = Bun.markdown.html(await Bun.file(process.argv[1]).text()); if (!html.includes("<td>two \\| three</td>")) throw new Error("summary did not render intact")' "$tmp/docs/kit/architecture/index.md"
+run
+restore "$adr"
 cp "$root/docs/kit/architecture/index.md" "$tmp/docs/kit/architecture/index.md"
 cp "$adr" "$tmp/docs/kit/architecture/adr/0001-duplicate.md"
 expect_failure duplicate-number
