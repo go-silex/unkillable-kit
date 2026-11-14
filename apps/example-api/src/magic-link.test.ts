@@ -2,9 +2,10 @@ import { assertRateLimit } from '@kit/auth/repos/rate-limit'
 import { baUser, baVerification } from '@kit/auth/schema'
 import { createDb } from '@kit/db'
 import { eq } from 'drizzle-orm'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { createApp } from './app'
 import { schema } from './db/schema'
+import { emailConfig } from './lib/email-config'
 import { DEMO_EMAIL } from './services/auth'
 import { createSeededDemoApi } from './test/api-fixture'
 import { captureMail, expectTokenAbsentFromVerification } from './test/mail-capture'
@@ -37,6 +38,26 @@ async function userCountByEmail(db: ReturnType<typeof createDb>, email: string):
 }
 
 describe('magic link (B-magic go-silex/silex-boilerplate#59)', () => {
+  it('uses the recipient locale for authentication mail, not the request language', async () => {
+    const { app, env } = await seedEnv()
+    const mail = captureMail()
+    const locale = vi.spyOn(emailConfig, 'resolveRecipientLocale').mockReturnValue('fr')
+    onTestFinished(() => locale.mockRestore())
+    const res = await app.request(
+      '/api/auth/sign-in/magic-link',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', Origin: ORIGIN, 'Accept-Language': 'en' },
+        body: JSON.stringify({ email: DEMO_EMAIL, callbackURL: `${ORIGIN}/app` }),
+      },
+      env,
+    )
+    expect(res.status).toBeLessThan(400)
+    expect(locale).toHaveBeenCalledWith(DEMO_EMAIL)
+    expect(mail.message(DEMO_EMAIL).subject).toBe('Connexion — Example App')
+    expect(mail.message(DEMO_EMAIL).text).toContain('Vous avez demandé')
+  })
+
   it('request for known email returns success and stores a verification row', async () => {
     const { app, env, db } = await seedEnv()
     const before = await verificationCount(db)

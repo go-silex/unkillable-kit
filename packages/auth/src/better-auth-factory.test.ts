@@ -1,4 +1,5 @@
 import { AppError } from '@kit/core'
+import type { EmailPort } from '@kit/email'
 import { describe, expect, it, vi } from 'vitest'
 import { MAGIC_LINK_EXPIRES_IN_SEC, RESET_PASSWORD_TOKEN_EXPIRES_IN_SEC } from './auth-email'
 import { getBetterAuthSecret } from './better-auth-env'
@@ -6,6 +7,11 @@ import { createBetterAuth } from './better-auth-factory'
 import { betterAuthDrizzleSchema } from './better-auth-schema'
 
 const SECRET = 'test-better-auth-secret-xxxxxxxx32c!!'
+const emailConfig = {
+  productName: 'Acme',
+  fallbackLocale: 'en' as const,
+  resolveRecipientLocale: () => undefined,
+}
 
 type BaAuth = ReturnType<typeof createBetterAuth> & {
   options: {
@@ -41,6 +47,7 @@ function factory(overrides: Partial<Parameters<typeof createBetterAuth>[0]> = {}
     baseURL: 'http://localhost:8787',
     trustedOrigins: ['http://localhost:5173'],
     allowLoopbackOrigins: true,
+    emailConfig,
     emailPort: { send: vi.fn(async () => ({ ok: true, transport: 'log' })) },
     schema: betterAuthDrizzleSchema,
     ...overrides,
@@ -119,6 +126,7 @@ describe('createBetterAuth', () => {
         secret: SECRET,
         baseURL: 'https://api.example.com',
         trustedOrigins: ['http://127.0.0.1:5173'],
+        emailConfig,
         emailPort: { send: vi.fn(async () => ({ ok: true, transport: 'log' })) },
         schema: betterAuthDrizzleSchema,
       }),
@@ -157,6 +165,44 @@ describe('createBetterAuth', () => {
       url: 'http://localhost:8787/api/auth/magic-link/verify?token=x',
     })
     expect(send).toHaveBeenCalledTimes(2)
+  })
+
+  it('requires explicit email configuration when a port is configured', () => {
+    expect(() => factory({ emailConfig: undefined })).toThrow(/emailConfig is required/)
+  })
+
+  it('uses the recipient locale resolver in both handlers', async () => {
+    const send = vi.fn(async (_message: Parameters<EmailPort['send']>[0]) => ({
+      ok: true,
+      transport: 'log',
+    }))
+    const resolveRecipientLocale = vi.fn((email: string) =>
+      email === 'fr@example.com' ? ('fr' as const) : undefined,
+    )
+    const auth = factory({
+      emailPort: { send },
+      emailConfig: { productName: 'Acme', fallbackLocale: 'en', resolveRecipientLocale },
+    })
+    await auth.options.emailAndPassword?.sendResetPassword?.({
+      user: { email: 'fr@example.com' },
+      url: 'http://localhost:8787/api/auth/reset-password/tok',
+    })
+    const magic = auth.options.plugins?.find((p: { id: string }) => p.id === 'magic-link') as {
+      options?: { sendMagicLink?: (i: { email: string; url: string }) => Promise<void> }
+    }
+    await magic?.options?.sendMagicLink?.({
+      email: 'en@example.com',
+      url: 'http://localhost:8787/api/auth/magic-link/verify?token=x',
+    })
+    expect(resolveRecipientLocale.mock.calls).toEqual([['fr@example.com'], ['en@example.com']])
+    expect(send.mock.calls[0]?.[0]).toMatchObject({
+      to: 'fr@example.com',
+      subject: expect.stringContaining('Acme'),
+    })
+    expect(send.mock.calls[1]?.[0]).toMatchObject({
+      to: 'en@example.com',
+      subject: expect.stringMatching(/sign in/i),
+    })
   })
   it('does not allowlist a request-derived baseURL host', async () => {
     const send = vi.fn(async () => ({ ok: true, transport: 'log' }))

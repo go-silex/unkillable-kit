@@ -9,6 +9,7 @@ import { isAPIError } from 'better-auth/api'
 import { magicLink } from 'better-auth/plugins'
 import { drizzle } from 'drizzle-orm/d1'
 import {
+  type AuthEmailConfig,
   type AuthEmailPort,
   MAGIC_LINK_EXPIRES_IN_SEC,
   RESET_PASSWORD_TOKEN_EXPIRES_IN_SEC,
@@ -54,8 +55,10 @@ export type CreateBetterAuthOpts = {
    * self-allowlist. Default false: pin `baseURL` origin into the allowlist.
    */
   requestDerivedBaseURL?: boolean
-  /** When set, registers magic-link + password-reset send. Omit for password-only peers. */
+  /** When set, emailConfig must also be supplied. */
   emailPort?: AuthEmailPort
+  /** Product identity and recipient language policy for auth emails. */
+  emailConfig?: AuthEmailConfig
   schema?: BetterAuthTables
   cookieName?: string
   useSecureCookies?: boolean
@@ -66,6 +69,12 @@ export type CreateBetterAuthOpts = {
   resetPasswordTokenExpiresIn?: number
   /** Only for explicit development|test placeholders — never production. */
   allowKitPlaceholderSecret?: boolean
+}
+
+function assertEmailConfig(emailPort?: AuthEmailPort, emailConfig?: AuthEmailConfig): void {
+  if (emailPort && !emailConfig) {
+    throw new Error('emailConfig is required when emailPort is configured')
+  }
 }
 
 export function createBetterAuth(opts: CreateBetterAuthOpts): KitBetterAuth {
@@ -85,6 +94,8 @@ export function createBetterAuth(opts: CreateBetterAuthOpts): KitBetterAuth {
   const secure = opts.useSecureCookies ?? true
   const publicSignup = opts.allowPublicSignup ?? false
   const emailPort = opts.emailPort
+  const emailConfig = opts.emailConfig
+  assertEmailConfig(emailPort, emailConfig)
   const linkOrigins = new Set<string>(trustedOrigins)
   let base: URL
   try {
@@ -132,23 +143,28 @@ export function createBetterAuth(opts: CreateBetterAuthOpts): KitBetterAuth {
       revokeSessionsOnPasswordReset: true,
       resetPasswordTokenExpiresIn:
         opts.resetPasswordTokenExpiresIn ?? RESET_PASSWORD_TOKEN_EXPIRES_IN_SEC,
-      ...(emailPort
+      ...(emailPort && emailConfig
         ? {
             sendResetPassword: async ({ user, url }) => {
-              await sendResetPasswordMail(emailPort, { email: user.email, url, ...tokenHref })
+              await sendResetPasswordMail(emailPort, {
+                email: user.email,
+                url,
+                emailConfig,
+                ...tokenHref,
+              })
             },
           }
         : {}),
     },
     plugins: [
       createKitOrganizationPlugin(),
-      ...(emailPort
+      ...(emailPort && emailConfig
         ? [
             magicLink({
               expiresIn: opts.magicLinkExpiresIn ?? MAGIC_LINK_EXPIRES_IN_SEC,
               disableSignUp: !publicSignup,
               sendMagicLink: async ({ email, url }) => {
-                await sendMagicLinkMail(emailPort, { email, url, ...tokenHref })
+                await sendMagicLinkMail(emailPort, { email, url, emailConfig, ...tokenHref })
               },
             }),
           ]

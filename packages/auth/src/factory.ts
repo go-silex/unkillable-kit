@@ -5,6 +5,7 @@
  * SPA password forms: `@kit/auth/react` (never from this Worker entry).
  */
 export {
+  type AuthEmailConfig,
   type AuthEmailPort,
   MAGIC_LINK_EXPIRES_IN_SEC,
   RESET_PASSWORD_TOKEN_EXPIRES_IN_SEC,
