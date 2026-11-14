@@ -1,6 +1,7 @@
 import type { FlowsMessages } from './flows-catalog'
 import { flowsFr } from './flows-catalog'
 import { type ImpersonationMessages, impersonationFr } from './impersonation-catalog'
+import { type KeysMessages, keysFr } from './keys-catalog'
 
 export type Messages = {
   appTitle: string
@@ -64,12 +65,6 @@ export type Messages = {
   tableFilterEmptyBody: string
   tableNoResults: string
   tableSortHint: string
-  keys: string
-  keysDesc: string
-  mintKey: string
-  mintKeyDesc: string
-  copyKey: string
-  keyOnce: string
   settings: string
   settingsDesc: string
   appearance: string
@@ -298,10 +293,12 @@ export type Messages = {
   membersEmpty: string
   inviteExpires: string
 } & FlowsMessages &
-  ImpersonationMessages
+  ImpersonationMessages &
+  KeysMessages
 
 export const fr: Messages = {
   ...impersonationFr,
+  ...keysFr,
   appTitle: 'Kit Kit',
   appSubtitle: 'example-web · starter SaaS',
   login: 'Connexion',
@@ -363,12 +360,6 @@ export const fr: Messages = {
   tableFilterEmptyBody: 'Corps vide',
   tableNoResults: 'Aucun résultat pour ce filtre / recherche',
   tableSortHint: 'Cliquer pour trier',
-  keys: 'Clés API',
-  keysDesc: 'Mint une clé sk_ pour MCP / machine auth',
-  mintKey: 'Générer une clé',
-  mintKeyDesc: 'La clé en clair n’est affichée qu’une fois.',
-  copyKey: 'Copier',
-  keyOnce: 'Copiez-la maintenant — elle ne sera plus visible.',
   settings: 'Paramètres',
   settingsDesc: 'Thème, langue et compte démo',
   appearance: 'Apparence',

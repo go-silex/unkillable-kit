@@ -1,4 +1,4 @@
-import type { PlatformRole } from '@kit/auth'
+import type { ApiKeyScope, PlatformRole } from '@kit/auth'
 import type { KitBetterAuth } from '@kit/auth/factory'
 import { kitAuthSchema } from '@kit/auth/schema'
 import type { DrizzleD1Database } from 'drizzle-orm/d1'
@@ -24,6 +24,7 @@ export type AppEnv = {
     authMethod?: 'session' | 'api_key'
     sessionId?: string
     keyOrganizationId?: string
+    keyScopes?: ApiKeyScope[]
     orgId?: string
     orgRole?: string
     orgBypass?: boolean

@@ -146,6 +146,7 @@ describe('POST /api/flows/runs/:id/cancel', () => {
     const minted = await mintApiKey(db, 'user_staff', {
       organizationId: ORG_ACME,
       name: 'flows-sk-cancel',
+      scopes: ['read', 'write', 'admin'],
     })
     const sk = await app.request(
       cancelUrl(runId),

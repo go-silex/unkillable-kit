@@ -55,6 +55,7 @@ describe('flows admin API (V1 gates + GET)', () => {
     const minted = await mintApiKey(db, 'user_staff', {
       organizationId: ORG_ACME,
       name: 'flows-sk',
+      scopes: ['read', 'write', 'admin'],
     })
     const headers = bearerHeaders(minted.key)
     const plans = await app.request('/api/flows/plans', { headers }, env)

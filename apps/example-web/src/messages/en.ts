@@ -1,9 +1,11 @@
 import { flowsEn } from './flows-catalog'
 import type { Messages } from './fr'
 import { impersonationEn } from './impersonation-catalog'
+import { keysEn } from './keys-catalog'
 
 export const en: Messages = {
   ...impersonationEn,
+  ...keysEn,
   appTitle: 'Kit Kit',
   appSubtitle: 'example-web · SaaS starter',
   login: 'Sign in',
@@ -65,12 +67,6 @@ export const en: Messages = {
   tableFilterEmptyBody: 'Empty body',
   tableNoResults: 'No results for this filter / search',
   tableSortHint: 'Click to sort',
-  keys: 'API keys',
-  keysDesc: 'Mint an sk_ key for MCP / machine auth',
-  mintKey: 'Generate key',
-  mintKeyDesc: 'Plaintext key is shown only once.',
-  copyKey: 'Copy',
-  keyOnce: 'Copy it now — it will not be shown again.',
   settings: 'Settings',
   settingsDesc: 'Theme, language and demo account',
   appearance: 'Appearance',

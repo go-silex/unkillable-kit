@@ -12,6 +12,7 @@ export const apiKeys = sqliteTable('api_keys', {
   subject: text('subject').notNull(),
   /** ADR-0003 D11 + INV-04 — multi-tenant keys are org-bound (enforced NOT NULL after 0015 cleanup/revoke). */
   organizationId: text('organization_id').notNull(),
+  scopes: text('scopes').notNull().default(''),
   name: text('name'),
   createdAt: integer('created_at', { mode: 'number' }).notNull(),
   expiresAt: integer('expires_at', { mode: 'number' }),

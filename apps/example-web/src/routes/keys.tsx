@@ -1,3 +1,9 @@
+import type {
+  ApiKeyScope,
+  ListApiKeysResponse,
+  MintApiKeyRequest,
+  MintApiKeyResponse,
+} from '@kit/api-client/me'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -29,13 +35,6 @@ import { apiErrorToMessage, apiFetch } from '../lib/api'
 import { useLocale } from '../lib/locale'
 import { useOrgContext } from '../lib/org-context'
 
-type KeyMeta = {
-  id: string
-  subject: string
-  createdAt: number
-  revokedAt: number | null
-}
-
 /** Plaintext sk_ is shown once then auto-cleared. */
 const PLAINTEXT_TTL_MS = 60_000
 
@@ -45,6 +44,7 @@ export function KeysPage() {
   const { activeOrgId, orgs } = useOrgContext()
   const [minted, setMinted] = useState<{ id: string; key: string } | null>(null)
   const [revokeId, setRevokeId] = useState<string | null>(null)
+  const [scopes, setScopes] = useState<ApiKeyScope[]>(['read'])
 
   const orgScope = activeOrgId ?? orgs[0]?.id ?? 'none'
   const keysQueryKey = ['keys', orgScope] as const
@@ -54,7 +54,7 @@ export function KeysPage() {
     queryFn: () => {
       const headers: Record<string, string> = {}
       if (orgScope !== 'none') headers['X-Org-Id'] = orgScope
-      return apiFetch<{ keys: KeyMeta[] }>('/api/keys', { headers })
+      return apiFetch<ListApiKeysResponse>('/api/keys', { headers })
     },
   })
 
@@ -69,10 +69,11 @@ export function KeysPage() {
       const organizationId = activeOrgId ?? orgs[0]?.id
       const headers: Record<string, string> = {}
       if (organizationId) headers['X-Org-Id'] = organizationId
-      return apiFetch<{ id: string; key: string }>('/api/keys', {
+      const body: MintApiKeyRequest = { organizationId, scopes }
+      return apiFetch<MintApiKeyResponse>('/api/keys', {
         method: 'POST',
         headers,
-        body: JSON.stringify(organizationId ? { organizationId } : {}),
+        body: JSON.stringify(body),
       })
     },
     onSuccess: async (data) => {
@@ -120,7 +121,32 @@ export function KeysPage() {
             <CardDescription>{m.mintKeyDesc}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <Button onClick={() => mint.mutate()} disabled={mint.isPending}>
+            <fieldset className="space-y-2">
+              <legend className="text-sm font-medium">{m.keyScopes}</legend>
+              <p className="text-xs text-muted-foreground">{m.keyScopesHelp}</p>
+              {(
+                [
+                  ['read', m.keyScopeRead],
+                  ['write', m.keyScopeWrite],
+                  ['admin', m.keyScopeAdmin],
+                ] as const
+              ).map(([scope, label]) => (
+                <label key={scope} className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={scopes.includes(scope)}
+                    onChange={(event) => {
+                      const checked = event.target.checked
+                      setScopes((current) =>
+                        checked ? [...current, scope] : current.filter((value) => value !== scope),
+                      )
+                    }}
+                  />
+                  {label}
+                </label>
+              ))}
+            </fieldset>
+            <Button onClick={() => mint.mutate()} disabled={mint.isPending || scopes.length === 0}>
               {m.mintKey}
             </Button>
             {minted ? (
@@ -174,7 +200,12 @@ export function KeysPage() {
                       key={k.id}
                       className="flex items-center justify-between gap-2 rounded-md border border-border px-3 py-2 text-xs"
                     >
-                      <span className="truncate font-mono">{k.id.slice(0, 8)}…</span>
+                      <div className="min-w-0">
+                        <span className="block truncate font-mono">{k.id.slice(0, 8)}…</span>
+                        <span>
+                          {m.keyScopes}: {k.scopes.join(', ') || '—'}
+                        </span>
+                      </div>
                       <Button
                         type="button"
                         size="icon-sm"

@@ -113,6 +113,7 @@ describe('starter HTTP composition', () => {
       keyPrefix: apiKeyPrefix(key),
       subject: profile.subject,
       organizationId: 'org-a',
+      scopes: 'read',
       createdAt: Date.now(),
     })
     const keyHeaders = { authorization: `Bearer ${key}` }
@@ -123,6 +124,23 @@ describe('starter HTTP composition', () => {
     ])
     expect((await request('/api/orgs/org-a/members', { headers: keyHeaders })).status).toBe(200)
     expect((await request('/api/orgs/org-b/members', { headers: keyHeaders })).status).toBe(403)
+    const writeKey = generateApiKey()
+    await insertApiKey(createDb(env.DB, schema), {
+      id: 'key-write',
+      keyHash: await hashApiKey(writeKey),
+      keyPrefix: apiKeyPrefix(writeKey),
+      subject: profile.subject,
+      organizationId: 'org-a',
+      scopes: 'write',
+      createdAt: Date.now(),
+    })
+    const writeHeaders = { authorization: `Bearer ${writeKey}` }
+    expect((await request('/api/me', { headers: writeHeaders })).status).toBe(403)
+    expect((await request('/api/orgs/org-a/members', { headers: writeHeaders })).status).toBe(403)
+    expect((await request('/api/unknown', { headers: keyHeaders })).status).toBe(403)
+    expect((await request('/api/auth/session', { headers: keyHeaders })).status).toBe(403)
+    expect((await request('/health', { headers: keyHeaders })).status).toBe(403)
+    expect((await request('/api/me', { method: 'POST', headers: keyHeaders })).status).toBe(403)
     expect((await post('/api/auth/sign-out', {}, signupCookie)).status).toBeLessThan(400)
     expect((await request('/api/me', { headers: { cookie: signupCookie } })).status).toBe(401)
     const signin = await post('/api/auth/sign-in/email', credentials)
@@ -156,27 +174,40 @@ describe('starter HTTP composition', () => {
         "INSERT INTO member (id, organization_id, user_id, role, created_at) VALUES (?, ?, ?, 'member', ?)",
       )
       .run('member-a', 'org-a', profile.subject, Date.now())
-    const key = generateApiKey()
-    await insertApiKey(createDb(env.DB, schema), {
-      id: 'key-a',
-      keyHash: await hashApiKey(key),
-      keyPrefix: apiKeyPrefix(key),
-      subject: profile.subject,
-      organizationId: 'org-a',
-      createdAt: Date.now(),
-    })
+    const keyHeaders: Record<string, Record<string, string>> = {}
+    for (const [id, scopes] of [
+      ['read', 'read'],
+      ['write', 'write'],
+      ['unscoped', ''],
+      ['malformed', 'read,unknown'],
+    ] as const) {
+      const key = generateApiKey()
+      await insertApiKey(createDb(env.DB, schema), {
+        id: `key-${id}`,
+        keyHash: await hashApiKey(key),
+        keyPrefix: apiKeyPrefix(key),
+        subject: profile.subject,
+        organizationId: 'org-a',
+        scopes,
+        createdAt: Date.now(),
+      })
+      keyHeaders[id] = { authorization: `Bearer ${key}` }
+    }
     const sessionHeaders: Record<string, string> = { cookie }
-    const keyHeaders: Record<string, string> = { authorization: `Bearer ${key}` }
     const memberPath = '/api/orgs/org-a/members'
-    for (const headers of [sessionHeaders, keyHeaders]) {
+    for (const headers of [sessionHeaders, keyHeaders.read!]) {
       expect((await request('/api/me', { headers })).status).toBe(200)
       expect((await request(memberPath, { headers })).status).toBe(200)
+    }
+    for (const headers of [keyHeaders.write!, keyHeaders.unscoped!, keyHeaders.malformed!]) {
+      expect((await request('/api/me', { headers })).status).toBe(403)
+      expect((await request(memberPath, { headers })).status).toBe(403)
     }
     expect((await request('/api/auth/get-session', { headers: sessionHeaders })).status).toBe(200)
 
     // Keep the existing session to exercise the per-request guard independently of revocation.
     sqlite.prepare('UPDATE user SET disabled = 1 WHERE id = ?').run(profile.subject)
-    for (const headers of [sessionHeaders, keyHeaders]) {
+    for (const headers of [sessionHeaders, ...Object.values(keyHeaders)]) {
       expect((await request('/api/me', { headers })).status).toBe(401)
       expect((await request(memberPath, { headers })).status).toBe(401)
     }
@@ -186,9 +217,13 @@ describe('starter HTTP composition', () => {
     expect(deniedSignin.headers.get('set-cookie')).toBeNull()
 
     sqlite.prepare('UPDATE user SET disabled = 0 WHERE id = ?').run(profile.subject)
-    for (const headers of [sessionHeaders, keyHeaders]) {
+    for (const headers of [sessionHeaders, keyHeaders.read!]) {
       expect((await request('/api/me', { headers })).status).toBe(200)
       expect((await request(memberPath, { headers })).status).toBe(200)
+    }
+    for (const headers of [keyHeaders.write!, keyHeaders.unscoped!, keyHeaders.malformed!]) {
+      expect((await request('/api/me', { headers })).status).toBe(403)
+      expect((await request(memberPath, { headers })).status).toBe(403)
     }
     expect((await request('/api/auth/get-session', { headers: sessionHeaders })).status).toBe(200)
     const signin = await post('/api/auth/sign-in/email', credentials)

@@ -9,6 +9,7 @@ import { withBetterAuth } from './middleware/better-auth'
 import { withDb } from './middleware/db'
 import { onError } from './middleware/error-handler'
 import { impersonationGate } from './middleware/impersonation'
+import { keyScopeGate } from './middleware/key-scopes'
 import { requestIdMiddleware } from './middleware/request-id'
 import { adminAuditRoutes } from './routes/admin-audit'
 import { adminUsersRoutes } from './routes/admin-users'
@@ -63,6 +64,7 @@ export function createApp() {
   app.use('*', originGuard)
   app.use('*', withDb)
   app.use('*', withBetterAuth)
+  app.use('*', keyScopeGate)
   app.use('*', impersonationGate)
   app.onError((err, c) => onError(err, c))
   app.notFound((c) => {

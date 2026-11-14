@@ -3,6 +3,22 @@ import { apiKeyPrefix, parseBearer, verifyApiKey } from './keys'
 import type { SessionPort } from './session-port'
 
 export type AuthMethod = 'session' | 'api_key'
+export type ApiKeyScope = 'read' | 'write' | 'admin'
+
+/** Unknown or malformed stored values grant no scopes. */
+export function parseApiKeyScopes(value: string): ApiKeyScope[] {
+  if (typeof value !== 'string' || !value) return []
+  const scopes = value.split(',')
+  if (scopes.some((scope) => scope !== 'read' && scope !== 'write' && scope !== 'admin')) {
+    return []
+  }
+  return scopes as ApiKeyScope[]
+}
+
+/** API-key scopes narrow access independently; sessions remain governed by existing policy. */
+export function allowsApiKeyScope(identity: AuthIdentity, requiredScope: ApiKeyScope): boolean {
+  return identity.method === 'session' || identity.scopes.includes(requiredScope)
+}
 
 export type SessionAuthIdentity = {
   subject: string
@@ -15,6 +31,7 @@ export type ApiKeyAuthIdentity = {
   subject: string
   method: 'api_key'
   organizationId: string
+  scopes: ApiKeyScope[]
 }
 
 export type AuthIdentity = SessionAuthIdentity | ApiKeyAuthIdentity
@@ -26,6 +43,7 @@ export type ApiKeyRecord = {
   revokedAt: number | null
   expiresAt: number | null
   organizationId?: string | null
+  scopes: string
 }
 
 export type DualAuthPorts = {
@@ -90,6 +108,7 @@ export async function resolveDualAuth(
       subject: row.subject,
       method: 'api_key',
       organizationId,
+      scopes: parseApiKeyScopes(row.scopes),
     }
   }
 
@@ -108,7 +127,10 @@ export type RequireAuthContext = {
     /** Hono raw Request — used to forward Headers to BA getSession. */
     raw?: { headers: Headers }
   }
-  set: (key: 'subject' | 'authMethod' | 'keyOrganizationId' | 'sessionId', value: string) => void
+  set: (
+    key: 'subject' | 'authMethod' | 'keyOrganizationId' | 'sessionId' | 'keyScopes',
+    value: string | ApiKeyScope[],
+  ) => void
 }
 
 export function createRequireAuth<C extends RequireAuthContext>(
@@ -128,6 +150,7 @@ export function createRequireAuth<C extends RequireAuthContext>(
     c.set('authMethod', auth.method)
     if (auth.method === 'api_key') {
       c.set('keyOrganizationId', auth.organizationId)
+      c.set('keyScopes', auth.scopes)
     } else {
       c.set('sessionId', auth.sessionId)
     }

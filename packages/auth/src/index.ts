@@ -76,10 +76,13 @@ export {
 export {
   type ApiKeyAuthIdentity,
   type ApiKeyRecord,
+  type ApiKeyScope,
   type AuthIdentity,
   type AuthMethod,
+  allowsApiKeyScope,
   createRequireAuth,
   type DualAuthPorts,
+  parseApiKeyScopes,
   type RequireAuthContext,
   resolveDualAuth,
   type SessionAuthIdentity,

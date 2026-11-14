@@ -25,6 +25,7 @@ describe('listApiKeysForSubject / listApiKeysForOrg', () => {
       keyPrefix: 'sk_aaaa',
       subject: 'user_staff',
       organizationId: 'org_acme',
+      scopes: 'read',
       createdAt: now,
     })
     await keysRepo.insertApiKey(db, {
@@ -33,6 +34,7 @@ describe('listApiKeysForSubject / listApiKeysForOrg', () => {
       keyPrefix: 'sk_bbbb',
       subject: 'user_staff',
       organizationId: 'org_beta',
+      scopes: 'read',
       createdAt: now,
     })
     return db

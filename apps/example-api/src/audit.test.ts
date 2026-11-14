@@ -134,7 +134,7 @@ describe('audit (B-auth-harden go-silex/silex-boilerplate#61)', () => {
           'content-type': 'application/json',
           Origin: ORIGIN,
         },
-        body: JSON.stringify({ organizationId: 'org_acme' }),
+        body: JSON.stringify({ organizationId: 'org_acme', scopes: ['read', 'write', 'admin'] }),
       },
       env,
     )

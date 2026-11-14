@@ -8,6 +8,8 @@ Copy `.dev.vars.example` to `.dev.vars` and set a local secret. Public signup is
 
 `GET /api/me` returns the current profile and memberships; `GET /api/orgs/:orgId/members` requires a session or organization-bound key and current membership. Better Auth's Organization routes are disabled: provision Organizations and memberships through your Product's authorized administration flow.
 
+API keys require the `read` scope for both endpoints; scopes are independent grants. All other routes deny API keys unless their exact method and path are declared in `src/platform/key-scopes.ts`. Sessions keep their existing access rules. The scopes migration preserves legacy keys with `read,write,admin`; newly created keys must receive explicit scopes.
+
 ## Copy / rename map
 
 | Starter value                            | Product replacement                             |
