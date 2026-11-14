@@ -1,3 +1,4 @@
+import * as commentsRepo from '@kit/comments/repos'
 import { AppError, parseOrThrow } from '@kit/core'
 import type { Audience, UpdateTaskInput } from '@kit/tasks'
 import {
@@ -10,11 +11,10 @@ import {
   suggestedDoneForStage,
   updateTaskInputSchema,
 } from '@kit/tasks'
+import * as tasksRepo from '@kit/tasks/repos'
 import type { kitTasks } from '@kit/tasks/schema'
 import type { DrizzleD1Database } from 'drizzle-orm/d1'
 import type { schema } from '../db/schema'
-import * as commentsRepo from '../repos/comments'
-import * as tasksRepo from '../repos/tasks'
 import type { NotificationRuntimePorts } from './notifications/service'
 import { recordTaskMutation } from './task-audit'
 import { assertAssigneesAreMembers, replaceAssigneesOrThrow } from './tasks-assignees'

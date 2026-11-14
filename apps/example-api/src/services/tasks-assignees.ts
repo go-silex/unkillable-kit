@@ -1,8 +1,8 @@
+import * as orgsRepo from '@kit/auth/repos/orgs'
 import { AppError } from '@kit/core'
+import * as tasksRepo from '@kit/tasks/repos'
 import type { DrizzleD1Database } from 'drizzle-orm/d1'
 import type { schema } from '../db/schema'
-import * as orgsRepo from '../repos/orgs'
-import * as tasksRepo from '../repos/tasks'
 
 type Db = DrizzleD1Database<typeof schema>
 

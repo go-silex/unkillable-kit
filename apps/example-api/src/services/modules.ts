@@ -1,3 +1,5 @@
+import * as modulesRepo from '@kit/auth/repos/modules'
+import * as platformModulesRepo from '@kit/auth/repos/platform-modules'
 import { AppError } from '@kit/core'
 import type { DrizzleD1Database } from 'drizzle-orm/d1'
 import type { schema } from '../db/schema'
@@ -7,8 +9,6 @@ import {
   type ModulePublicState,
 } from '../lib/integration-config'
 import { isKitModuleId, KIT_MODULE_IDS, type KitModuleId } from '../lib/kit-modules'
-import * as modulesRepo from '../repos/modules'
-import * as platformModulesRepo from '../repos/platform-modules'
 import * as platformModulesService from './platform-modules'
 
 type Db = DrizzleD1Database<typeof schema>

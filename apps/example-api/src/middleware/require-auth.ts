@@ -1,9 +1,9 @@
 import { createBetterAuthSessionPort, createRequireAuth } from '@kit/auth'
+import * as keysRepo from '@kit/auth/repos/keys'
 import { AppError } from '@kit/core'
 import type { MiddlewareHandler } from 'hono'
 import type { KitDb } from '../lib/db-type'
 import { sessionCookieNameFromEnv } from '../lib/session-env'
-import * as keysRepo from '../repos/keys'
 import type { AppEnv } from '../types'
 
 function dbFromContext(c: { get: (k: 'db') => KitDb | undefined }): KitDb {
@@ -79,7 +79,7 @@ async function findKeyRecord(db: KitDb, prefix: string) {
   const row = await keysRepo.findApiKeyByPrefix(db, prefix)
   if (!row) return null
   if (!row.organizationId) return null
-  const { findMembership, findOrgById } = await import('../repos/orgs')
+  const { findMembership, findOrgById } = await import('@kit/auth/repos/orgs')
   const org = await findOrgById(db, row.organizationId)
   if (org?.status !== 'active') return null
   const membership = await findMembership(db, row.organizationId, row.subject)

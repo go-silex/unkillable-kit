@@ -1,11 +1,11 @@
 import { createHash } from 'node:crypto'
+import { upsertOrgModule, upsertPlatformModule } from '@kit/auth/repos/platform-modules'
 import { baOrganization } from '@kit/auth/schema'
 import { putRule } from '@kit/notifications/repos'
 import { kitNotificationDeliveries, kitNotifications } from '@kit/notifications/schema'
 import { eq } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
 import { notificationsDogfoodRegistry } from '../../lib/notifications-dogfood'
-import { upsertOrgModule, upsertPlatformModule } from '../../repos/platform-modules'
 import {
   createAppNotificationPersistencePorts,
   createAppNotificationService,

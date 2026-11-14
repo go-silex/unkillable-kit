@@ -1,9 +1,9 @@
+import { findMembership } from '@kit/auth/repos/orgs'
 import { AppError } from '@kit/core'
 import { canViewTask, isTerminalStage, type TaskMutationEvent } from '@kit/tasks'
+import * as tasksRepo from '@kit/tasks/repos'
 import type { KitDb } from '../../lib/db-type'
 import type { notificationsDogfoodRegistry } from '../../lib/notifications-dogfood'
-import { findMembership } from '../../repos/orgs'
-import * as tasksRepo from '../../repos/tasks'
 import { resolveAudience } from '../tasks-audience'
 import type { NotificationService } from './service'
 

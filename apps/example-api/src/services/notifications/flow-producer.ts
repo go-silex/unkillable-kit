@@ -1,10 +1,10 @@
+import * as orgsRepo from '@kit/auth/repos/orgs'
 import { canDecideFlowApproval, isApproveTask, parseReceipts, parseRunnerView } from '@kit/flows'
+import * as flowsRepo from '@kit/flows/repos'
 import type { ApprovalNotice, ApprovalNotificationPorts } from '@kit/flows/run'
 import type { SourceRef } from '@kit/notifications'
 import type { KitDb } from '../../lib/db-type'
 import type { notificationsDogfoodRegistry } from '../../lib/notifications-dogfood'
-import * as flowsRepo from '../../repos/flows'
-import * as orgsRepo from '../../repos/orgs'
 import { resolveModuleAccess } from '../org-roles'
 import type { NotificationResolver, NotificationService } from './service'
 

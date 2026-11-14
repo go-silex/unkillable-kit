@@ -2,8 +2,8 @@ import {
   getImpersonationPermissions,
   type ImpersonationSession,
 } from '@kit/auth/repos/impersonation'
+import * as orgsRepo from '@kit/auth/repos/orgs'
 import type { KitDb } from '../lib/db-type'
-import * as orgsRepo from '../repos/orgs'
 import * as usersRepo from '../repos/users'
 
 /** Re-evaluated for every delegated request, including recovery introspection. */

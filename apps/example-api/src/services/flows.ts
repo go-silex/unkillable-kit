@@ -10,6 +10,7 @@ import {
   parseRunnerView,
   readRunRollup,
 } from '@kit/flows'
+import * as flowsRepo from '@kit/flows/repos'
 import type { DrizzleD1Database } from 'drizzle-orm/d1'
 import type { schema } from '../db/schema'
 import type { Env } from '../env'
@@ -19,7 +20,6 @@ import {
   setEnabledBodySchema,
 } from '../lib/flows-body-schemas'
 import { dogfoodToolRegistry } from '../lib/flows-dogfood'
-import * as flowsRepo from '../repos/flows'
 import { allowedModelsForPlan, mintGrantForOrg } from './flows-grant'
 import { insertOrMatchPlanVersion } from './flows-plan-version'
 

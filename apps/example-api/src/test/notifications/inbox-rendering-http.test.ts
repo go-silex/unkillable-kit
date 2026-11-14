@@ -1,8 +1,8 @@
+import * as orgRoles from '@kit/auth/repos/org-roles'
+import { upsertOrgModule, upsertPlatformModule } from '@kit/auth/repos/platform-modules'
 import { kitNotifications } from '@kit/notifications/schema'
 import { eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import * as orgRoles from '../../repos/org-roles'
-import { upsertOrgModule, upsertPlatformModule } from '../../repos/platform-modules'
 import { createNotificationFixture, type NotificationFixture } from './fixture'
 
 type Page = { items: Array<{ content: { title: string; body: string; href: string } }> }
