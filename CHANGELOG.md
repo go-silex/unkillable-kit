@@ -25,6 +25,10 @@
 
 - Upgrade the root Bun pin to 1.4.4. Before this change reaches the Kit deploy branch, update `BUN_VERSION` on each showcase Workers Builds and Pages project as described in [the deploy runbook](docs/kit/deploy-cloudflare.md#4b-bun-and-node-versions).
 
+### Schema sync default
+
+- Fresh Product schema sync selects `core,audit`, including `rate_limit_buckets` for the Kit throttle. First `--adopt` without `--modules` also selects `audit`. Existing recorded selections remain unchanged: to opt in, pass `--modules core,audit` plus every other recorded set.
+
 ### Wrangler runtime types
 
 - Upgrade the example Workers to Wrangler 4.159.0 and regenerate their committed runtime declarations.
