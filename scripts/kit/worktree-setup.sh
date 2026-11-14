@@ -26,7 +26,16 @@ shopt -u nullglob
 # ─── bun-install-warmup ──────────────────────────────────────────
 # --minimum-release-age 0: install the lock as reviewed. bunfig.toml's gate is meant for new resolutions,
 # but Bun 1.4.0 also rejects a lock entry younger than the gate (docs/kit/security-dependabot.md).
+lock_snapshot=$(mktemp)
+trap 'rm -f "$lock_snapshot"' EXIT
+cp bun.lock "$lock_snapshot"
 bun install --minimum-release-age 0
+if ! cmp -s bun.lock "$lock_snapshot"; then
+  echo "worktree-setup: bun install changed bun.lock; review and commit the lockfile normalization" >&2
+  exit 1
+fi
+rm -f "$lock_snapshot"
+trap - EXIT
 
 # ─── lefthook-hookspath-fix ──────────────────────────────────────────
 # in worktrees, lefthook installs core.hooksPath relative to the worktree git dir (wrong —

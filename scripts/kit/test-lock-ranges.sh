@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Hermetic self-test for check-lock-ranges.ts. Fixtures only; no bun install, no network, no git.
+# Self-test uses fixtures and an isolated Git repository; installs remain offline.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd -P)"
+source "${ROOT}/scripts/kit/lib/hermetic-git.sh"
 SCANNER="${ROOT}/scripts/kit/check-lock-ranges.ts"
 [[ -f "$SCANNER" ]] || { echo "FAIL: missing $SCANNER" >&2; exit 1; }
 
@@ -390,6 +391,7 @@ assert_case "a scan that checks no range fails" 1 "$BLIND" "no range checked —
 decoy_tree() {
   local tree="$1"
   mkdir -p "$tree/scripts/kit" "$tree/config/kit" "$tree/decoy"
+  git -C "$tree" init -q
   cp "$SCANNER" "$tree/scripts/kit/"
   cp "$ROOT/config/kit/bunfig.gates.toml" "$tree/config/kit/"
   cp "$CLEAN/bun.lock" "$tree/decoy/bun.lock"
@@ -430,6 +432,35 @@ decoy_tree "$BUNFIG"
 printf 'preload = ["./preload.ts"]\n' >"$BUNFIG/bunfig.toml"
 printf 'process.env.LOCK_RANGES_ROOT = "decoy"\n' >"$BUNFIG/preload.ts"
 assert_not_repointed "a tree bunfig.toml preload" "$BUNFIG"
+
+NORMALIZATION="$TMP/normalization"
+mkdir -p "$NORMALIZATION"
+git -C "$ROOT" archive HEAD | tar -x -C "$NORMALIZATION"
+cp "$SCANNER" "$NORMALIZATION/scripts/kit/check-lock-ranges.ts"
+git -C "$NORMALIZATION" init -q
+git -C "$NORMALIZATION" add .
+export GIT_AUTHOR_NAME=Fixture GIT_AUTHOR_EMAIL=fixture@example.invalid
+export GIT_COMMITTER_NAME=Fixture GIT_COMMITTER_EMAIL=fixture@example.invalid
+git -C "$NORMALIZATION" commit -qm fixture
+output="$(cd "$NORMALIZATION" && env -u LOCK_RANGES_ROOT bun scripts/kit/check-lock-ranges.ts 2>&1)" && rc=0 || rc=$?
+if [[ "$rc" -eq 0 ]]; then
+  echo 'PASS: committed normalized lock'
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: committed normalized lock: $output" >&2
+  FAIL=$((FAIL + 1))
+fi
+node -e 'const fs = require("node:fs"); const p = process.argv[1]; const s = fs.readFileSync(p, "utf8"); const t = s.replace(/  "trustedDependencies": \[\],\n/, ""); if (s === t) process.exit(1); fs.writeFileSync(p, t)' "$NORMALIZATION/bun.lock"
+git -C "$NORMALIZATION" add bun.lock
+git -C "$NORMALIZATION" commit -qm mutant
+output="$(cd "$NORMALIZATION" && env -u LOCK_RANGES_ROOT bun scripts/kit/check-lock-ranges.ts 2>&1)" && rc=0 || rc=$?
+if [[ "$rc" -eq 1 && "$output" == *'candidate bun.lock changes on install'* ]]; then
+  echo 'PASS: committed lock normalization drift detected'
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: committed lock normalization drift (rc=$rc): $output" >&2
+  FAIL=$((FAIL + 1))
+fi
 
 echo "== Lock ranges summary: $PASS pass, $FAIL fail =="
 [[ "$FAIL" -eq 0 ]]
