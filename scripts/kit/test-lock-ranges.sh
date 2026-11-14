@@ -3,6 +3,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd -P)"
+source "${ROOT}/scripts/kit/lib/hermetic-git.sh"
 SCANNER="${ROOT}/scripts/kit/check-lock-ranges.ts"
 [[ -f "$SCANNER" ]] || { echo "FAIL: missing $SCANNER" >&2; exit 1; }
 
