@@ -180,3 +180,38 @@ export declare function escapeSlackText(text: string): string
 | `slack_user_links`         | PK `(installation_id,org_id,user_id)` ; `team_id`, `issuer`, `subject`, `slack_user_id`, `created_at`, `updated_at` ; FK composite installation/org. Aucun email ou token OIDC.                                                                                                                                                                                                                                                                                                                                                   |
 | `slack_email_matches`      | PK `(installation_id,org_id,user_id)` ; `generation`, `email_fingerprint`, `slack_user_id`, `resolved_at` ; FK composite installation/org. Hint positif seulement, TTL maximal 300 000 ms, jamais preuve durable d’identité ; revalidation Slack avant chaque tentative DM même avant expiration.                                                                                                                                                                                                                                 |
 | `slack_oauth_transactions` | `state_hash` PK ; `purpose`, `org_id`, `user_id`, `session_binding_hash`, `created_at`, `expires_at`, `nonce_hash NULL`, `installation_id NULL`, `generation NULL`, `expected_team_id NULL`. Pour `user_link`, ces dernières coordonnées et nonce sont obligatoires. Consommation atomique delete/returning ou CAS équivalent.                                                                                                                                                                                                    |
+
+## Ciphertext
+
+```ts
+// Interne persisté, jamais un DTO HTTP.
+type SlackTokenCiphertext = Readonly<{
+  v: 1
+  alg: 'A256GCM'
+  kid: string
+  iv: string
+  ciphertext: string
+}>
+```
+
+## Bornes Block Kit
+
+| Champ                | Borne                                                                                                                                                         |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `blocks` de message  | **50** au total ; réserver le dernier au lien. Les 100 blocs modals/Home ne s’appliquent pas.                                                                 |
+| Top-level `text`     | **4 000 par contrat Kit**, fallback accessible avec sens et lien. Slack recommande 4 000 et tronque au-delà de 40 000 : pas une limite universelle Block Kit. |
+| `section.text.text`  | **1…3 000** ; texte ou fields valides requis.                                                                                                                 |
+| `section.fields`     | **1…10** si fourni, chacun **1…2 000**.                                                                                                                       |
+| `header.text`        | `plain_text` seulement, **1…150**.                                                                                                                            |
+| `context.elements`   | **1…10** textes, chacun **1…3 000**.                                                                                                                          |
+| `block_id`           | Si présent, non vide et **≤255**, unique dans le message, sans secret/autorité.                                                                               |
+| Autre type/propriété | Rejet local `payload_invalid`.                                                                                                                                |
+
+## Routes génériques des destinations
+
+| Route générique                                                      | Entrée                                 | Sortie                                                                                                           |
+| -------------------------------------------------------------------- | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `GET /api/orgs/{orgId}/notification-destinations`                    | `limit?,cursor?`                       | Page de `{id,channel,externalId,selector,createdAt,updatedAt}`.                                                  |
+| `POST /api/orgs/{orgId}/notification-destinations`                   | `{channel,externalId,selector}` strict | 201 `{destination,requestId}`, même DTO. Pour Slack, `externalId` est exactement le tuple JSON défini plus haut. |
+| `PUT /api/orgs/{orgId}/notification-destinations/{destinationId}`    | `{selector}` strict                    | 200 `{destination,requestId}`, même DTO ; identité canal/installation immuable.                                  |
+| `DELETE /api/orgs/{orgId}/notification-destinations/{destinationId}` | Aucun body                             | 200 `{ok:true,requestId}`.                                                                                       |

@@ -216,16 +216,7 @@ L’UI explique « délier ; la correspondance email automatique reprend ». Cou
 
 ## Coffre AES-GCM
 
-```ts
-// Interne persisté, jamais un DTO HTTP.
-type SlackTokenCiphertext = Readonly<{
-  v: 1
-  alg: 'A256GCM'
-  kid: string
-  iv: string
-  ciphertext: string
-}>
-```
+Ciphertext representation: [non-normative design note](../design-notes/0021-slack.md#ciphertext).
 
 | Élément         | Contrat                                                                                                                                                                                                                                                                 |
 | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -281,16 +272,7 @@ Déchiffrer `disconnecting` est autorisé uniquement pour cette révocation, jam
 
 Sous-ensemble **fixé** : `section`, `header`, `context` textuel, `divider`. Aucun passthrough `unknown[]`, image/fichier, interactivité/modal/bouton d’approbation Slack. Le lien mène à l’App et ses guards.
 
-| Champ                | Borne                                                                                                                                                         |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `blocks` de message  | **50** au total ; réserver le dernier au lien. Les 100 blocs modals/Home ne s’appliquent pas.                                                                 |
-| Top-level `text`     | **4 000 par contrat Kit**, fallback accessible avec sens et lien. Slack recommande 4 000 et tronque au-delà de 40 000 : pas une limite universelle Block Kit. |
-| `section.text.text`  | **1…3 000** ; texte ou fields valides requis.                                                                                                                 |
-| `section.fields`     | **1…10** si fourni, chacun **1…2 000**.                                                                                                                       |
-| `header.text`        | `plain_text` seulement, **1…150**.                                                                                                                            |
-| `context.elements`   | **1…10** textes, chacun **1…3 000**.                                                                                                                          |
-| `block_id`           | Si présent, non vide et **≤255**, unique dans le message, sans secret/autorité.                                                                               |
-| Autre type/propriété | Rejet local `payload_invalid`.                                                                                                                                |
+Block Kit field bounds: [non-normative design note](../design-notes/0021-slack.md#bornes-block-kit).
 
 1. L’App rend dans sa locale par défaut **au moment de la tentative**, avec son catalogue ; aucun texte métier/localisé dans le Package.
 2. Après schéma strict, borner chaque texte à **son composant**, fields/context à 10, contenu à 49 blocs avec lien. Structures vides/malformées après normalisation : rejet, pas confiance dans la troncature Slack.
@@ -330,12 +312,7 @@ Base `S=/api/orgs/{orgId}/slack`. `createRoute`, schémas stricts et OpenAPI. Li
 
 Les Organization destinations utilisent uniquement les routes génériques ci-dessous, session/org/`manage_notifications` et Origin sur mutations. **Aucune seconde route `S/destinations` ou PATCH Slack**. La création décode/valide `externalId`, exige l’installation active de cette Organization et appelle `checkChannel` ; type opt-in et plafond sont vérifiés serveur. Doublon `(orgId,channel,externalId)` →409, ressource étrangère →404, historique conservé.
 
-| Route générique                                                      | Entrée                                 | Sortie                                                                                                           |
-| -------------------------------------------------------------------- | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `GET /api/orgs/{orgId}/notification-destinations`                    | `limit?,cursor?`                       | Page de `{id,channel,externalId,selector,createdAt,updatedAt}`.                                                  |
-| `POST /api/orgs/{orgId}/notification-destinations`                   | `{channel,externalId,selector}` strict | 201 `{destination,requestId}`, même DTO. Pour Slack, `externalId` est exactement le tuple JSON défini plus haut. |
-| `PUT /api/orgs/{orgId}/notification-destinations/{destinationId}`    | `{selector}` strict                    | 200 `{destination,requestId}`, même DTO ; identité canal/installation immuable.                                  |
-| `DELETE /api/orgs/{orgId}/notification-destinations/{destinationId}` | Aucun body                             | 200 `{ok:true,requestId}`.                                                                                       |
+Generic destination route shapes: [non-normative design note](../design-notes/0021-slack.md#routes-génériques-des-destinations).
 
 Le contrôle Slack utilise le bot de la même installation via `conversations.info`, refuse canal archivé, IM/MPIM ou privé inaccessible au bot ; un canal public peut utiliser `chat:write.public` sans invitation. Aucun canal ou secret ne provient d’un nom/URL client non validé. La disponibilité affichée est dérivée de l’installation et du diagnostic local, sans boucle de probes fournisseur à chaque liste.
 
