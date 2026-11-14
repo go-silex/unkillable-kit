@@ -5,6 +5,7 @@
 ### Product agent entry point
 
 - Route agents in product clones to `docs/product/AGENTS.md`.
+- Route agents working inside a package or app to its `README.md` when present, in every clone.
 
 ### Biome D1 safety
 
