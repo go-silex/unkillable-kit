@@ -362,7 +362,7 @@ run_pkg() {
       --coverage.thresholds.functions=0 --coverage.thresholds.branches=0
       --coverage.thresholds.statements=0)
   fi
-  if ! (cd "$dir" && bunx vitest run --coverage "${extra[@]}" 2>&1 | tee "$log"); then
+  if ! (cd "$dir" && bunx vitest run --coverage ${extra[@]+"${extra[@]}"} 2>&1 | tee "$log"); then
     pkg_failed=1
   fi
   if grep -Fq "Excluding it from coverage." "$log"; then

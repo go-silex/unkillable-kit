@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import {
   closeSync,
   copyFileSync,
+  existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
@@ -183,7 +184,10 @@ function replayParts(root: string, workspace: string, stage: string) {
     fail('merged test file inventory mismatch')
   if (listed.some((path: string) => !resolve(path).startsWith(`${cwd}${sep}`)))
     fail('foreign test path')
-  const summary = json(join(root, 'coverage', basename(workspace), 'coverage-summary.json'))
+  const summaryPath = join(root, 'coverage', basename(workspace), 'coverage-summary.json')
+  if (!existsSync(summaryPath))
+    fail(`missing coverage-summary.json for ${workspace}: expected ${summaryPath}`)
+  const summary = json(summaryPath)
   for (const path of Object.keys(summary))
     if (path !== 'total' && !resolve(path).startsWith(`${cwd}${sep}`)) fail('foreign coverage path')
 }

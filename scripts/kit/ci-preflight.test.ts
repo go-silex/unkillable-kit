@@ -14,11 +14,20 @@ type Step = {
   env?: Record<string, string>
   with?: Record<string, string>
 }
-type Job = { if?: string; needs?: string | string[]; steps?: Step[] }
+type Job = {
+  if?: string
+  needs?: string | string[]
+  steps?: Step[]
+  uses?: string
+  strategy?: { matrix?: Record<string, string> }
+}
 const workflow = Bun.YAML.parse(readFileSync(join(root, '.github/workflows/ci.yml'), 'utf8')) as {
   jobs: Record<string, Job>
 }
 const jobs = workflow.jobs
+const appWorkflow = Bun.YAML.parse(
+  readFileSync(join(root, '.github/workflows/coverage-app.yml'), 'utf8'),
+) as { jobs: Record<string, Job> }
 type Value = string | boolean | { [key: string]: Value }
 function dictionary(input: Record<string, Value>): data.Dictionary {
   return new data.Dictionary(
@@ -166,8 +175,7 @@ function failedPreflight() {
         assert.equal(enabled(jobs[id], event, results), false, `${id} must not start`)
         results[id] = 'skipped'
       }
-      results['coverage-parts'] = 'skipped'
-      results['coverage-merge'] = 'skipped'
+      results['coverage-partitions'] = 'skipped'
       assert.equal(joinVerdict(event, results), 'failure')
     }
   } finally {
@@ -243,8 +251,7 @@ function protectedDriftPreflight() {
         assert.equal(enabled(jobs[id], event, results), false, `${id} must not start`)
         results[id] = 'skipped'
       }
-      results['coverage-parts'] = 'skipped'
-      results['coverage-merge'] = 'skipped'
+      results['coverage-partitions'] = 'skipped'
       assert.equal(joinVerdict(event, results), 'failure')
     }
   } finally {
@@ -256,22 +263,13 @@ function assertPartitionJobResults(
   event: 'push' | 'pull_request',
   results: Record<string, Result>,
 ) {
-  assert.equal(joinVerdict(event, results, 'true'), 'success-without-parts')
-  assert.equal(joinVerdict(event, results, 'true', '[{"index":1}]'), 'failure')
-  const partitioned = {
-    ...results,
-    'coverage-parts': 'success' as const,
-    'coverage-merge': 'success' as const,
-  }
-  assert.equal(joinVerdict(event, partitioned, 'true', '[{"index":1}]'), 'success')
-  assert.equal(joinVerdict(event, partitioned, 'true', '[]'), 'failure')
-  for (const id of ['coverage-parts', 'coverage-merge']) {
-    for (const result of ['failure', 'skipped', 'cancelled'] as const) {
-      assert.equal(
-        joinVerdict(event, { ...partitioned, [id]: result }, 'true', '[{"index":1}]'),
-        'failure',
-      )
-    }
+  const passing = { ...results, 'coverage-partitions': 'success' as const }
+  assert.equal(joinVerdict(event, passing, 'true'), 'success')
+  for (const result of ['failure', 'skipped', 'cancelled'] as const) {
+    assert.equal(
+      joinVerdict(event, { ...passing, 'coverage-partitions': result }, 'true'),
+      'failure',
+    )
   }
 }
 
@@ -285,8 +283,7 @@ function successfulPreflight() {
     }
     assert.equal(enabled(jobs.tooling, event, results, 'true'), true)
     results.tooling = 'success'
-    results['coverage-parts'] = 'skipped'
-    results['coverage-merge'] = 'skipped'
+    results['coverage-partitions'] = 'success'
     assertPartitionJobResults(event, results)
     for (const result of ['failure', 'skipped', 'cancelled'] as const) {
       assert.equal(joinVerdict(event, { ...results, tooling: result }, 'true'), 'failure')
@@ -296,7 +293,7 @@ function successfulPreflight() {
     assert.ok(toolingStep?.if, 'tooling execution must be conditional')
     assert.equal(evaluate(toolingStep.if, context(event, results, 'true'), true), 'true')
     assert.equal(evaluate(toolingStep.if, context(event, results, 'false'), true), 'false')
-    assert.equal(joinVerdict(event, results, 'false'), 'success-without-parts')
+    assert.equal(joinVerdict(event, results, 'false'), 'success')
     for (const result of ['failure', 'skipped', 'cancelled'] as const) {
       assert.equal(joinVerdict(event, { ...results, tooling: result }, 'false'), 'failure')
     }
@@ -314,7 +311,7 @@ function successfulPreflight() {
 }
 
 function rawArtifactPattern() {
-  const download = jobs['coverage-merge'].steps?.find((step) =>
+  const download = appWorkflow.jobs.merge.steps?.find((step) =>
     step.uses?.startsWith('actions/download-artifact@'),
   )
   assert.ok(download?.with?.pattern)
@@ -330,8 +327,36 @@ function rawArtifactPattern() {
   assert.equal(matches('coverage-raw-123-1-apps__example-api-1-of-2-extra'), false)
 }
 
+function appIsolation() {
+  const caller = jobs['coverage-partitions']
+  assert.equal(caller.uses, './.github/workflows/coverage-app.yml')
+  assert.deepEqual(dependencies(caller), ['coverage-plan'])
+  assert.equal(
+    caller.strategy?.matrix?.partition,
+    `\${{ fromJson(needs.coverage-plan.outputs.parts) }}`,
+  )
+  assert.equal(appWorkflow.jobs.part.strategy?.matrix?.index, `\${{ fromJson(inputs.indices) }}`)
+  assert.equal(appWorkflow.jobs.part.if, undefined)
+  assert.equal(appWorkflow.jobs.merge.if, undefined)
+  assert.deepEqual(dependencies(appWorkflow.jobs.merge), ['part'])
+  const uploads = appWorkflow.jobs.merge.steps?.filter((step) =>
+    step.uses?.startsWith('actions/upload-artifact@'),
+  )
+  assert.equal(uploads?.length, 2)
+  for (const upload of uploads ?? []) {
+    assert.ok(upload.with?.name?.includes(`\${{ steps.target.outputs.safe }}`))
+    assert.ok(!upload.with?.name?.includes('job-index'))
+  }
+  assert.equal(enabled(appWorkflow.jobs.merge, 'push', { part: 'success', other: 'failure' }), true)
+  assert.equal(
+    enabled(appWorkflow.jobs.merge, 'push', { part: 'failure', other: 'success' }),
+    false,
+  )
+}
+
 failedPreflight()
 protectedDriftPreflight()
 successfulPreflight()
+appIsolation()
 rawArtifactPattern()
 console.log('CI preflight workflow fixtures passed')

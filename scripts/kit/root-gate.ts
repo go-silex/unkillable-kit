@@ -200,7 +200,10 @@ function listedPartitions(): Map<string, number> {
     env,
     encoding: 'utf8',
   })
-  if (result.status !== 0) fail('cannot list coverage partitions')
+  if (result.status !== 0) {
+    if (result.stderr) process.stderr.write(result.stderr)
+    fail('cannot list coverage partitions')
+  }
   const parts = new Map<string, number>()
   for (const line of (result.stdout ?? '').trim().split('\n').filter(Boolean)) {
     const match = /^(apps\/[A-Za-z0-9._-]+) ([234])$/.exec(line)
@@ -211,21 +214,30 @@ function listedPartitions(): Map<string, number> {
   return parts
 }
 
+let partitionSnapshot: Map<string, number> | undefined
+function coveragePartitions(): Map<string, number> {
+  if (!partitionSnapshot) partitionSnapshot = listedPartitions()
+  return partitionSnapshot
+}
+
 function partsPlan() {
   const bar = listedCoverage()
-  return [...listedPartitions()].flatMap(([workspace, count]) => {
+  const partitions = coveragePartitions()
+  if (partitions.get('apps/example-api') !== 2)
+    fail('ADR-0023 D10 requires apps/example-api partitioned into 2 parts')
+  return [...partitions].map(([workspace, count]) => {
     if (!bar.includes(workspace)) fail('partition outside coverage bar')
-    return Array.from({ length: count }, (_, i) => ({
-      id: `${workspace.replace('/', '__')}__${i + 1}-of-${count}`,
+    return {
+      id: workspace.replace('/', '__'),
       workspace,
-      index: i + 1,
       count,
-    }))
+      indices: Array.from({ length: count }, (_, i) => i + 1),
+    }
   })
 }
 
 function coveragePlan() {
-  const partitions = listedPartitions()
+  const partitions = coveragePartitions()
   const workspaces = listedCoverage().filter((workspace) => !partitions.has(workspace))
   const packages = workspaces.filter((workspace) => workspace.startsWith('packages/'))
   const count = Math.ceil(packages.length / 4)
@@ -260,22 +272,6 @@ function sameShards(left: string[], right: string[]) {
   return JSON.stringify([...left].sort()) === JSON.stringify([...right].sort())
 }
 
-function joinMonolithic(
-  dir: string,
-  entries: string[],
-  shards: string[],
-  tasks: string[],
-  expected: Identity,
-) {
-  if (shards.length !== 0 || entries.length !== 2 || !entries.includes('root-core.json')) {
-    fail('expected exactly two receipt files')
-  }
-  if (listedPartitions().size !== 0)
-    fail('monolithic coverage receipt cannot authorize declared partitions')
-  for (const group of ['core', 'coverage'] as const)
-    validateReceiptFile(join(dir, `root-${group}.json`), group, tasks, expected)
-}
-
 function joinShards(
   dir: string,
   entries: string[],
@@ -291,7 +287,7 @@ function joinShards(
     fail('expected Core plus one receipt per coverage workspace')
   }
   validateReceiptFile(join(dir, 'root-core.json'), 'core', tasks, expected)
-  const partitions = listedPartitions()
+  const partitions = coveragePartitions()
   const seen = shards.map((file) => {
     const workspace = shardWorkspace(dir, file)
     const receipt = JSON.parse(readFileSync(join(dir, file), 'utf8'))
@@ -317,15 +313,13 @@ function joinShards(
 }
 
 function joinReceipts(dir: string, status: string, tasks: string[], expected: Identity) {
-  const hasParts = listedPartitions().size !== 0
-  if (status !== (hasParts ? 'success' : 'success-without-parts'))
-    fail('producer matrix result does not match recomputed coverage partitions')
+  if (coveragePartitions().get('apps/example-api') !== 2)
+    fail('ADR-0023 D10 requires apps/example-api partitioned into 2 parts')
+  if (status !== 'success') fail('producer matrix did not succeed')
   const entries = readdirSync(dir).filter((entry) => !entry.startsWith('.'))
   const shards = entries.filter((entry) => /^root-coverage-.+\.json$/.test(entry))
-  if (entries.includes('root-coverage.json')) {
-    joinMonolithic(dir, entries, shards, tasks, expected)
-    return
-  }
+  if (entries.includes('root-coverage.json'))
+    fail('monolithic coverage receipt cannot authorize declared partitions')
   joinShards(dir, entries, shards, tasks, expected)
 }
 
@@ -338,7 +332,7 @@ try {
   const options = args
     .slice(current.tasks.length)
     .filter((arg, index) => !(arg === '--' && index === 0))
-  if (current.tasks.includes('test:coverage')) listedPartitions()
+  if (current.tasks.includes('test:coverage')) coveragePartitions()
   if (options.length === 1 && options[0] === '--plan') {
     console.log(
       JSON.stringify({
@@ -393,7 +387,7 @@ try {
     const workspace = options[1]
     if (basename(options[3]) !== coverageReceiptName(workspace)) fail('incorrect receipt filename')
     const bound = identity(current.recipeHash, current.runnerHash)
-    if (listedPartitions().has(workspace))
+    if (coveragePartitions().has(workspace))
       fail('partitioned workspace cannot run as a coverage shard')
     console.log(`root-gate: coverage shard ${workspace}`)
     const outcome = run(['test:coverage'], workspace)
@@ -418,7 +412,7 @@ try {
   ) {
     const workspace = options[1]
     const match = /^([1-4])\/([2-4])$/.exec(options[2])
-    const count = listedPartitions().get(workspace)
+    const count = coveragePartitions().get(workspace)
     if (!match || count === undefined || count !== Number(match[2]) || Number(match[1]) > count)
       fail('invalid coverage part')
     bindCoverage(['test:coverage'], workspace)
@@ -438,7 +432,7 @@ try {
     options[4] === '--receipt'
   ) {
     const workspace = options[1]
-    const count = listedPartitions().get(workspace)
+    const count = coveragePartitions().get(workspace)
     if (!count || basename(options[5]) !== coverageReceiptName(workspace))
       fail('invalid coverage merge')
     bindCoverage(['test:coverage'])
