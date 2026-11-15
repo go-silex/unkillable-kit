@@ -1,0 +1,111 @@
+name: Coverage App
+
+on:
+  workflow_call:
+    inputs:
+      workspace:
+        required: true
+        type: string
+      count:
+        required: true
+        type: number
+      indices:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  checks: read
+  pull-requests: read
+
+jobs:
+  part:
+    name: Coverage part ${{ matrix.index }}
+    strategy:
+      fail-fast: false
+      matrix:
+        index: ${{ fromJson(inputs.indices) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile --minimum-release-age 0
+      - name: Run coverage part
+        id: part
+        env:
+          WORKSPACE: ${{ inputs.workspace }}
+          COUNT: ${{ inputs.count }}
+          INDEX: ${{ matrix.index }}
+        run: |
+          set -euo pipefail
+          [[ "$WORKSPACE" =~ ^apps/[A-Za-z0-9._-]+$ && "$WORKSPACE" != */. && "$WORKSPACE" != */.. ]]
+          [[ "$COUNT" =~ ^[234]$ && "$INDEX" =~ ^[1-4]$ && "$INDEX" -le "$COUNT" ]]
+          printf 'safe=%s\n' "${WORKSPACE//\//__}" >> "$GITHUB_OUTPUT"
+          bun run validate:full -- --ci-coverage-part "$WORKSPACE" "$INDEX/$COUNT" --raw "$RUNNER_TEMP/coverage-raw"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-raw-${{ github.run_id }}-${{ github.run_attempt }}-${{ steps.part.outputs.safe }}-${{ matrix.index }}-of-${{ inputs.count }}
+          path: ${{ runner.temp }}/coverage-raw
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    name: Coverage merge
+    needs: part
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile --minimum-release-age 0
+      - id: target
+        env:
+          WORKSPACE: ${{ inputs.workspace }}
+        run: |
+          set -euo pipefail
+          [[ "$WORKSPACE" =~ ^apps/[A-Za-z0-9._-]+$ && "$WORKSPACE" != */. && "$WORKSPACE" != */.. ]]
+          printf 'safe=%s\n' "${WORKSPACE//\//__}" >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: coverage-raw-${{ github.run_id }}-${{ github.run_attempt }}-${{ steps.target.outputs.safe }}-[1-4]-of-[2-4]
+          path: ${{ runner.temp }}/coverage-raw
+      - name: Merge coverage
+        env:
+          WORKSPACE: ${{ inputs.workspace }}
+        run: |
+          set -euo pipefail
+          [[ "$WORKSPACE" =~ ^apps/[A-Za-z0-9._-]+$ && "$WORKSPACE" != */. && "$WORKSPACE" != */.. ]]
+          safe="${WORKSPACE//\//__}"
+          mkdir "$RUNNER_TEMP/root-receipts"
+          bun run validate:full -- --ci-coverage-merge "$WORKSPACE" --raw "$RUNNER_TEMP/coverage-raw" --receipt "$RUNNER_TEMP/root-receipts/root-coverage-${safe}.json"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: root-coverage-${{ github.run_id }}-${{ github.run_attempt }}-merge-${{ steps.target.outputs.safe }}
+          path: ${{ runner.temp }}/root-receipts
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-${{ github.run_id }}-${{ github.run_attempt }}-merge-${{ steps.target.outputs.safe }}
+          path: |
+            coverage/**/coverage-summary.json
+            coverage/**/lcov.info
+          if-no-files-found: ignore
+          retention-days: 7

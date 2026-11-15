@@ -68,6 +68,7 @@ This index locates the authoritative home for each rule and the operational guid
 - [ADR-0020 — Workflow-owned Delivery and Queue demo boundary](./architecture/adr/0020-notification-delivery-ownership.md).
 - [ADR-0021 — Slack installations and notification Channel](./architecture/adr/0021-slack-installations-and-notification-channel.md).
 - [ADR-0022 — minimal starter Apps](./architecture/adr/0022-minimal-starter-apps.md).
+- [ADR-0023 — CI coverage partitions for heavy Apps](./architecture/adr/0023-ci-coverage-partitions.md).
 - Non-normative design notes: [ADR-0019](./architecture/design-notes/0019-notifications.md), [ADR-0021](./architecture/design-notes/0021-slack.md).
 
 ## Processes, operations and security

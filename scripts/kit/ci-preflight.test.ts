@@ -12,12 +12,22 @@ type Step = {
   run?: string
   if?: string
   env?: Record<string, string>
+  with?: Record<string, string>
 }
-type Job = { if?: string; needs?: string | string[]; steps?: Step[] }
+type Job = {
+  if?: string
+  needs?: string | string[]
+  steps?: Step[]
+  uses?: string
+  strategy?: { matrix?: Record<string, string> }
+}
 const workflow = Bun.YAML.parse(readFileSync(join(root, '.github/workflows/ci.yml'), 'utf8')) as {
   jobs: Record<string, Job>
 }
 const jobs = workflow.jobs
+const appWorkflow = Bun.YAML.parse(
+  readFileSync(join(root, '.github/workflows/coverage-app.yml'), 'utf8'),
+) as { jobs: Record<string, Job> }
 type Value = string | boolean | { [key: string]: Value }
 function dictionary(input: Record<string, Value>): data.Dictionary {
   return new data.Dictionary(
@@ -75,13 +85,20 @@ function context(
   event: 'push' | 'pull_request',
   results: Record<string, Result>,
   tooling = '',
+  parts = '[]',
 ): Record<string, Value> {
   return {
     github: { event_name: event, event: { pull_request: { draft: false } } },
     needs: Object.fromEntries(
       Object.entries(results).map(([key, result]) => [
         key,
-        { result, outputs: { tooling: key === 'coverage-plan' ? tooling : '' } },
+        {
+          result,
+          outputs: {
+            tooling: key === 'coverage-plan' ? tooling : '',
+            parts: key === 'coverage-plan' ? parts : '',
+          },
+        },
       ]),
     ),
   }
@@ -110,6 +127,7 @@ function joinVerdict(
   event: 'push' | 'pull_request',
   results: Record<string, Result>,
   tooling = '',
+  parts = '[]',
 ): string {
   const job = jobs.ci
   assert.ok(enabled(job, event, results), 'final ci must run after failure or skip')
@@ -119,9 +137,9 @@ function joinVerdict(
     joinStep.if && /\b(always|failure|cancelled)\s*\(/.test(joinStep.if),
     'receipt join must run after earlier step failure',
   )
-  assert.equal(evaluate(joinStep.if, context(event, results, tooling), false), 'true')
+  assert.equal(evaluate(joinStep.if, context(event, results, tooling, parts), false), 'true')
   const direct = Object.fromEntries(dependencies(job).map((id) => [id, results[id]]))
-  return evaluate(joinStep.env!.PRODUCERS_RESULT, context(event, direct, tooling), false)
+  return evaluate(joinStep.env!.PRODUCERS_RESULT, context(event, direct, tooling, parts), false)
 }
 
 function preflight(cwd: string, env = process.env, output: string[] = []): boolean {
@@ -157,6 +175,7 @@ function failedPreflight() {
         assert.equal(enabled(jobs[id], event, results), false, `${id} must not start`)
         results[id] = 'skipped'
       }
+      results['coverage-partitions'] = 'skipped'
       assert.equal(joinVerdict(event, results), 'failure')
     }
   } finally {
@@ -232,10 +251,25 @@ function protectedDriftPreflight() {
         assert.equal(enabled(jobs[id], event, results), false, `${id} must not start`)
         results[id] = 'skipped'
       }
+      results['coverage-partitions'] = 'skipped'
       assert.equal(joinVerdict(event, results), 'failure')
     }
   } finally {
     rmSync(fixture, { recursive: true, force: true })
+  }
+}
+
+function assertPartitionJobResults(
+  event: 'push' | 'pull_request',
+  results: Record<string, Result>,
+) {
+  const passing = { ...results, 'coverage-partitions': 'success' as const }
+  assert.equal(joinVerdict(event, passing, 'true'), 'success')
+  for (const result of ['failure', 'skipped', 'cancelled'] as const) {
+    assert.equal(
+      joinVerdict(event, { ...passing, 'coverage-partitions': result }, 'true'),
+      'failure',
+    )
   }
 }
 
@@ -249,7 +283,8 @@ function successfulPreflight() {
     }
     assert.equal(enabled(jobs.tooling, event, results, 'true'), true)
     results.tooling = 'success'
-    assert.equal(joinVerdict(event, results, 'true'), 'success')
+    results['coverage-partitions'] = 'success'
+    assertPartitionJobResults(event, results)
     for (const result of ['failure', 'skipped', 'cancelled'] as const) {
       assert.equal(joinVerdict(event, { ...results, tooling: result }, 'true'), 'failure')
     }
@@ -275,7 +310,53 @@ function successfulPreflight() {
   }
 }
 
+function rawArtifactPattern() {
+  const download = appWorkflow.jobs.merge.steps?.find((step) =>
+    step.uses?.startsWith('actions/download-artifact@'),
+  )
+  assert.ok(download?.with?.pattern)
+  const pattern = download.with.pattern
+    .replace(`\${{ github.run_id }}`, '123')
+    .replace(`\${{ github.run_attempt }}`, '1')
+    .replace(`\${{ steps.target.outputs.safe }}`, 'apps__example-api')
+  const matches = (name: string) =>
+    spawnSync('bash', ['-c', '[[ "$1" == $2 ]]', 'glob', name, pattern]).status === 0
+  assert.equal(matches('coverage-raw-123-1-apps__example-api-1-of-2'), true)
+  assert.equal(matches('coverage-raw-123-1-apps__example-api-2-of-2'), true)
+  assert.equal(matches('coverage-raw-123-1-apps__example-api-v2-1-of-2'), false)
+  assert.equal(matches('coverage-raw-123-1-apps__example-api-1-of-2-extra'), false)
+}
+
+function appIsolation() {
+  const caller = jobs['coverage-partitions']
+  assert.equal(caller.uses, './.github/workflows/coverage-app.yml')
+  assert.deepEqual(dependencies(caller), ['coverage-plan'])
+  assert.equal(
+    caller.strategy?.matrix?.partition,
+    `\${{ fromJson(needs.coverage-plan.outputs.parts) }}`,
+  )
+  assert.equal(appWorkflow.jobs.part.strategy?.matrix?.index, `\${{ fromJson(inputs.indices) }}`)
+  assert.equal(appWorkflow.jobs.part.if, undefined)
+  assert.equal(appWorkflow.jobs.merge.if, undefined)
+  assert.deepEqual(dependencies(appWorkflow.jobs.merge), ['part'])
+  const uploads = appWorkflow.jobs.merge.steps?.filter((step) =>
+    step.uses?.startsWith('actions/upload-artifact@'),
+  )
+  assert.equal(uploads?.length, 2)
+  for (const upload of uploads ?? []) {
+    assert.ok(upload.with?.name?.includes(`\${{ steps.target.outputs.safe }}`))
+    assert.ok(!upload.with?.name?.includes('job-index'))
+  }
+  assert.equal(enabled(appWorkflow.jobs.merge, 'push', { part: 'success', other: 'failure' }), true)
+  assert.equal(
+    enabled(appWorkflow.jobs.merge, 'push', { part: 'failure', other: 'success' }),
+    false,
+  )
+}
+
 failedPreflight()
 protectedDriftPreflight()
 successfulPreflight()
+appIsolation()
+rawArtifactPattern()
 console.log('CI preflight workflow fixtures passed')

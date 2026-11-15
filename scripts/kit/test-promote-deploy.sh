@@ -769,6 +769,7 @@ seed_kit() {
   local dir="$1"
   mkdir -p "${dir}/.github/workflows"
   cp "${ROOT}/.github/workflows/ci.yml" "${dir}/.github/workflows/ci.yml"
+  cp "${ROOT}/.github/workflows/coverage-app.yml" "${dir}/.github/workflows/coverage-app.yml"
   cp "${ROOT}/.github/workflows/secret-scan.yml" "${dir}/.github/workflows/secret-scan.yml"
   if [[ ! -e "${dir}/.git" ]]; then
     git init -q "$dir"
@@ -1389,6 +1390,7 @@ mkdir -p "${NO_CALL}/config/product" "${NO_CALL}/.github/workflows"
 printf '{"version":1}\n' >"${NO_CALL}/config/product/inheritance.json"
 printf '%s\n' '{"workflows":[".github/workflows/product-ci.yml"]}' >"${NO_CALL}/config/product/deploy-gate.json"
 cp "${ROOT}/.github/workflows/ci.yml" "${NO_CALL}/.github/workflows/ci.yml"
+cp "${ROOT}/.github/workflows/coverage-app.yml" "${NO_CALL}/.github/workflows/coverage-app.yml"
 cp "${ROOT}/.github/workflows/secret-scan.yml" "${NO_CALL}/.github/workflows/secret-scan.yml"
 cat >"${NO_CALL}/.github/workflows/product-ci.yml" <<'EOF'
 name: Product CI

@@ -44,6 +44,7 @@
     ".github/dependabot.yml",
     ".github/dependabot.yaml",
     ".github/workflows/ci.yml",
+    ".github/workflows/coverage-app.yml",
     ".github/workflows/deploy-main.yml",
     ".github/workflows/secret-scan.yml",
     ".github/workflows/merge-on-green.yml",

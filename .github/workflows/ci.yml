@@ -29,6 +29,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       groups: ${{ steps.plan.outputs.groups }}
+      parts: ${{ steps.plan.outputs.parts }}
       tooling: ${{ steps.tooling.outputs.run }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -70,6 +71,8 @@ jobs:
           set -euo pipefail
           plan="$(bun run validate:full -- --coverage-plan)"
           printf 'groups=%s\n' "$plan" >> "$GITHUB_OUTPUT"
+          parts="$(bun run validate:full -- --coverage-parts-plan)"
+          printf 'parts=%s\n' "$parts" >> "$GITHUB_OUTPUT"
 
   quality:
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
@@ -194,6 +197,20 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
+  coverage-partitions:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    name: Root coverage partition ${{ matrix.partition.id }}
+    needs: coverage-plan
+    strategy:
+      fail-fast: false
+      matrix:
+        partition: ${{ fromJson(needs.coverage-plan.outputs.parts) }}
+    uses: ./.github/workflows/coverage-app.yml
+    with:
+      workspace: ${{ matrix.partition.workspace }}
+      count: ${{ matrix.partition.count }}
+      indices: ${{ toJson(matrix.partition.indices) }}
+
   tooling:
     name: Tooling
     needs: coverage-plan
@@ -231,7 +248,7 @@ jobs:
   ci:
     # Preserve the check display name consumed by merge-on-green and checkup.
     name: ci
-    needs: [coverage-plan, quality, coverage, tooling]
+    needs: [coverage-plan, quality, coverage, coverage-partitions, tooling]
     if: always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -261,7 +278,7 @@ jobs:
       - name: Join Root receipts
         if: always()
         env:
-          PRODUCERS_RESULT: ${{ (needs.coverage-plan.result == 'success' && needs.quality.result == 'success' && needs.coverage.result == 'success' && needs.tooling.result == 'success' && (needs.coverage-plan.outputs.tooling == 'true' || needs.coverage-plan.outputs.tooling == 'false')) && 'success' || 'failure' }}
+          PRODUCERS_RESULT: ${{ (needs.coverage-plan.result == 'success' && needs.quality.result == 'success' && needs.coverage.result == 'success' && needs.coverage-partitions.result == 'success' && needs.tooling.result == 'success' && (needs.coverage-plan.outputs.tooling == 'true' || needs.coverage-plan.outputs.tooling == 'false')) && 'success' || 'failure' }}
         run: bun run validate:full -- --ci-join "$RUNNER_TEMP/root-receipts" --producers-result "$PRODUCERS_RESULT"
 
   # Showcase CD = Cloudflare Builds (git pull), not GH deploy. See docs/kit/deploy-cloudflare.md.
