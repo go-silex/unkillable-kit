@@ -259,7 +259,7 @@ function coverageShard() {
   })
 }
 
-function coverageShardJoin() {
+function liveCoverageShardJoin() {
   const repo = join(kitScripts, '../..')
   const env = { ...process.env }
   for (const key of Object.keys(env)) {
@@ -272,6 +272,10 @@ function coverageShardJoin() {
   const sha = command(repo, env, 'git', ['rev-parse', 'HEAD'])
   requireSuccess(sha)
   env.GITHUB_SHA = sha.stdout.trim()
+  coverageShardJoin(repo, env)
+}
+
+function coverageShardJoin(repo: string, env: NodeJS.ProcessEnv) {
   const plan = command(repo, env, process.execPath, ['run', 'validate:full', '--', '--plan'])
   requireSuccess(plan)
   const parsed = JSON.parse(plan.stdout) as {
@@ -420,6 +424,19 @@ function coverageShardJoin() {
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
+}
+
+function consumerCoverageShardJoin() {
+  withFixture('bun run task.ts test:coverage', (fixture, env) => {
+    writeFileSync(
+      join(fixture, 'scripts/kit/test-coverage.sh'),
+      `#!/bin/bash\nif [[ "\${COVERAGE_LIST_PARTS:-}" == 1 ]]; then cat partitions.txt; else printf 'apps/example-api\\napps/acme-api\\npackages/core\\n'; fi\n`,
+    )
+    for (const count of [2, 3, 4]) {
+      writeFileSync(join(fixture, 'partitions.txt'), `apps/example-api 2\napps/acme-api ${count}\n`)
+      coverageShardJoin(fixture, env)
+    }
+  })
 }
 
 function fullAndPlan() {
@@ -1239,7 +1256,8 @@ sameRunJoin()
 console.log('PASS same-run Core and Coverage join; missing Coverage refused')
 refuseCoverageListing()
 coverageShard()
-coverageShardJoin()
+liveCoverageShardJoin()
+consumerCoverageShardJoin()
 fullAndPlan()
 toolingAndPlan()
 coveragePlan()
