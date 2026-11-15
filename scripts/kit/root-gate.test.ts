@@ -729,6 +729,60 @@ function emptyPartitionJoin() {
   })
 }
 
+function requiredKitPartition() {
+  withFixture('bun run task.ts test:coverage', (fixture, env) => {
+    const listing = join(fixture, 'scripts/kit/test-coverage.sh')
+    const declarations = join(fixture, 'partitions.txt')
+    writeFileSync(
+      listing,
+      `#!/bin/bash\nif [[ "\${COVERAGE_LIST_PARTS:-}" == 1 ]]; then cat partitions.txt; else printf 'apps/example-api\\napps/acme-api\\n'; fi\n`,
+    )
+    writeFileSync(declarations, 'apps/example-api 2\napps/acme-api 2\n')
+    const dir = join(fixture, 'receipts')
+    mkdirSync(dir)
+    const invoke = (...args: string[]) =>
+      command(fixture, env, process.execPath, ['run', 'validate:full', '--', ...args])
+    requireSuccess(invoke('--ci-group', 'core', '--receipt', join(dir, 'root-core.json')))
+    const original = join(dir, 'root-coverage.json')
+    requireSuccess(invoke('--ci-group', 'coverage', '--receipt', original))
+    const coverage = JSON.parse(readFileSync(original, 'utf8'))
+    rmSync(original)
+    const blobs = (count: number) => Array.from({ length: count }, (_, i) => `${i}`.repeat(64))
+    const writeShard = (workspace: string, count?: number) => {
+      const receipt = { ...coverage, shard: workspace }
+      if (count !== undefined) receipt.partition = { count, blobs: blobs(count) }
+      writeFileSync(
+        join(dir, `root-coverage-${workspace.replace('/', '__')}.json`),
+        JSON.stringify(receipt),
+      )
+    }
+    writeShard('apps/acme-api', 2)
+    writeShard('apps/example-api', 2)
+    const plan = invoke('--coverage-parts-plan')
+    requireSuccess(plan)
+    assert.deepEqual(JSON.parse(plan.stdout), [
+      { id: 'apps__example-api', workspace: 'apps/example-api', count: 2, indices: [1, 2] },
+      { id: 'apps__acme-api', workspace: 'apps/acme-api', count: 2, indices: [1, 2] },
+    ])
+    const joinGate = () => invoke('--ci-join', dir, '--producers-result', 'success')
+    requireSuccess(joinGate())
+    for (const count of [undefined, 3]) {
+      writeFileSync(
+        declarations,
+        `${count === undefined ? '' : `apps/example-api ${count}\n`}apps/acme-api 2\n`,
+      )
+      writeShard('apps/example-api', count)
+      for (const result of [invoke('--coverage-parts-plan'), joinGate()]) {
+        assert.notEqual(result.status, 0)
+        assert.match(
+          result.stderr,
+          /ADR-0023 D10 requires apps\/example-api partitioned into 2 parts/,
+        )
+      }
+    }
+  })
+}
+
 function partitionVitest() {
   withFixture('bash scripts/kit/test-coverage.sh', (fixture, env) => {
     const kit = command(join(kitScripts, '../..'), { ...env, COVERAGE_LIST_KIT: '1' }, 'bash', [
@@ -1139,6 +1193,7 @@ toolingAndPlan()
 coveragePlan()
 joinAdmission()
 emptyPartitionJoin()
+requiredKitPartition()
 partitionVitest()
 console.log('PASS full execution, plan, fail-fast and join admission guards')
 console.log('PASS coverage listing modes refused in full and Coverage group')

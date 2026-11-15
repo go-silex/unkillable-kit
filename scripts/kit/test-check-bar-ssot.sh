@@ -40,6 +40,19 @@ seed_ok() {
   local tree="$1"
   mkdir -p "${tree}/docs/kit/standards" "${tree}/docs/kit/processes" "${tree}/scripts/kit"
   cp "${ROOT}/scripts/kit/root-gate.ts" "${tree}/scripts/kit/root-gate.ts"
+  local module
+  for module in "${ROOT}"/scripts/kit/root-gate-*.ts; do
+    [[ -f "${module}" && "${module}" != *.test.ts ]] || continue
+    cp "${module}" "${tree}/scripts/kit/"
+  done
+  cat >"${tree}/scripts/kit/test-coverage.sh" <<'EOF'
+#!/usr/bin/env bash
+if [[ "${COVERAGE_LIST_PARTS:-}" == 1 ]]; then
+  echo 'apps/example-api 2'
+elif [[ "${COVERAGE_LIST_ONLY:-}" == 1 ]]; then
+  echo 'apps/example-api'
+fi
+EOF
   cat >"${tree}/package.json" <<'EOF'
 {
   "scripts": {
