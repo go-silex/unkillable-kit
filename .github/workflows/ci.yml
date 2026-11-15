@@ -94,7 +94,16 @@ jobs:
           bun-version-file: package.json
       # Frozen install reproduces the reviewed lock regardless of its release age.
       - name: Install
-        run: bun install --frozen-lockfile --minimum-release-age 0
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Native fallback resolves node-gyp from PATH; expose only selected Node's bundled copy here.
+          node_gyp="$(npm prefix -g)/lib/node_modules/npm/node_modules/node-gyp/bin/node-gyp.js"
+          test -x "$node_gyp"
+          bin="${RUNNER_TEMP}/node-gyp-bin"
+          mkdir -p "$bin"
+          ln -s "$node_gyp" "$bin/node-gyp"
+          PATH="$bin:$PATH" bun install --frozen-lockfile --minimum-release-age 0
       - name: Validate core
         run: |
           set -euo pipefail
@@ -132,7 +141,16 @@ jobs:
         with:
           bun-version-file: package.json
       - name: Install
-        run: bun install --frozen-lockfile --minimum-release-age 0
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Native fallback resolves node-gyp from PATH; expose only selected Node's bundled copy here.
+          node_gyp="$(npm prefix -g)/lib/node_modules/npm/node_modules/node-gyp/bin/node-gyp.js"
+          test -x "$node_gyp"
+          bin="${RUNNER_TEMP}/node-gyp-bin"
+          mkdir -p "$bin"
+          ln -s "$node_gyp" "$bin/node-gyp"
+          PATH="$bin:$PATH" bun install --frozen-lockfile --minimum-release-age 0
       - name: Validate coverage group
         env:
           COVERAGE_GROUP: ${{ toJson(matrix.group) }}

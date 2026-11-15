@@ -17,6 +17,11 @@ SSoT for **how we test** this monorepo. Complements the [`AGENTS.md`](../../AGEN
 
 **Anti-slogan:** “We deprioritized coverage for quality” must never mean “we lowered T0 floors” or “we deleted negative cases.”
 
+Root core and grouped coverage select Node from `.node-version` and expose its npm-bundled
+`node-gyp` through a temporary job-local PATH shim only during the frozen Bun install. A missing
+executable or failed install fails the job; no global package or lockfile change is involved.
+A successful install using native prebuilds does not prove a hosted source compilation.
+
 ---
 
 | What it answers                                        | Section                                                          |
