@@ -8,6 +8,7 @@
 - The merge applies the App's full configured floors to the merged coverage, and parts never authorize. Local `validate:full` still runs every App monolithically and remains the reference.
 - The Kit permanently declares `apps/example-api 2`, and CI refuses a partition plan or join without it. Products may declare their own Apps in `config/product/coverage-partitions.txt`.
 - Private Products pay the extra Actions minutes and one-day RAW artifact storage of every declaration, the inherited `example-api` one included.
+- Fix Root gate self-test receipts to follow all declared App partitions, including Product additions; the runtime join and receipt protocol are unchanged.
 
 ### Product bootstrap
 

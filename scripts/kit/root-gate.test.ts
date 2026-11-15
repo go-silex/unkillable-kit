@@ -122,6 +122,28 @@ function convertFixtureCoverage(dir: string) {
   rmSync(original)
 }
 
+function writeFixtureShard(
+  dir: string,
+  workspace: string,
+  coverage: Record<string, unknown>,
+  partitions: ReadonlyMap<string, number>,
+) {
+  const count = partitions.get(workspace)
+  const receipt = {
+    ...coverage,
+    shard: workspace,
+    ...(count === undefined
+      ? {}
+      : {
+          partition: { count, blobs: Array.from({ length: count }, (_, i) => `${i}`.repeat(64)) },
+        }),
+  }
+  writeFileSync(
+    join(dir, `root-coverage-${workspace.replace('/', '__')}.json`),
+    `${JSON.stringify(receipt)}\n`,
+  )
+}
+
 function sameRunJoin() {
   withFixture('bun run task.ts test:coverage', (fixture, env) => {
     declareFixturePartition(fixture)
@@ -237,7 +259,7 @@ function coverageShard() {
   })
 }
 
-function coverageShardJoin() {
+function liveCoverageShardJoin() {
   const repo = join(kitScripts, '../..')
   const env = { ...process.env }
   for (const key of Object.keys(env)) {
@@ -250,6 +272,10 @@ function coverageShardJoin() {
   const sha = command(repo, env, 'git', ['rev-parse', 'HEAD'])
   requireSuccess(sha)
   env.GITHUB_SHA = sha.stdout.trim()
+  coverageShardJoin(repo, env)
+}
+
+function coverageShardJoin(repo: string, env: NodeJS.ProcessEnv) {
   const plan = command(repo, env, process.execPath, ['run', 'validate:full', '--', '--plan'])
   requireSuccess(plan)
   const parsed = JSON.parse(plan.stdout) as {
@@ -263,6 +289,18 @@ function coverageShardJoin() {
   requireSuccess(listed)
   const workspaces = listed.stdout.trim().split('\n').filter(Boolean)
   assert.ok(workspaces.length > 1, 'the live bar must have more than one workspace')
+  const partsPlan = command(repo, env, process.execPath, [
+    'run',
+    'validate:full',
+    '--',
+    '--coverage-parts-plan',
+  ])
+  requireSuccess(partsPlan)
+  const partitions = new Map<string, number>(
+    (JSON.parse(partsPlan.stdout) as { workspace: string; count: number }[]).map(
+      ({ workspace, count }) => [workspace, count],
+    ),
+  )
   const dir = mkdtempSync(join(tmpdir(), 'kit-coverage-shards-'))
   try {
     const bound = {
@@ -284,23 +322,20 @@ function coverageShardJoin() {
         complete: true,
       })}\n`,
     )
-    const writeShard = (workspace: string) => {
-      writeFileSync(
-        join(dir, `root-coverage-${workspace.replace('/', '__')}.json`),
-        `${JSON.stringify({
+    const writeShard = (workspace: string) =>
+      writeFixtureShard(
+        dir,
+        workspace,
+        {
           version: 1,
           group: 'coverage',
-          shard: workspace,
           ...bound,
           tasks: ['test:coverage'],
           results: [{ task: 'test:coverage', exitCode: 0 }],
           complete: true,
-          ...(workspace === 'apps/example-api'
-            ? { partition: { count: 2, blobs: ['a'.repeat(64), 'b'.repeat(64)] } }
-            : {}),
-        })}\n`,
+        },
+        partitions,
       )
-    }
     for (const workspace of workspaces) writeShard(workspace)
     const skippedVerdict = 'success-without-parts'
     const joinGate = (status = 'success') =>
@@ -327,7 +362,8 @@ function coverageShardJoin() {
     const skippedWithValidReceipts = joinGate(skippedVerdict)
     assert.notEqual(skippedWithValidReceipts.status, 0)
     assert.match(skippedWithValidReceipts.stderr, /producer matrix did not succeed/)
-    const ordinary = workspaces.find((ws) => ws !== 'apps/example-api')!
+    const ordinary = workspaces.find((ws) => !partitions.has(ws))
+    assert.ok(ordinary, 'the live bar must include an unpartitioned workspace')
     const ordinaryPath = join(dir, `root-coverage-${ordinary.replace('/', '__')}.json`)
     const ordinaryReceipt = readFileSync(ordinaryPath, 'utf8')
     const wrongMode = JSON.parse(ordinaryReceipt)
@@ -388,6 +424,19 @@ function coverageShardJoin() {
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
+}
+
+function consumerCoverageShardJoin() {
+  withFixture('bun run task.ts test:coverage', (fixture, env) => {
+    writeFileSync(
+      join(fixture, 'scripts/kit/test-coverage.sh'),
+      `#!/bin/bash\nif [[ "\${COVERAGE_LIST_PARTS:-}" == 1 ]]; then cat partitions.txt; else printf 'apps/example-api\\napps/acme-api\\npackages/core\\n'; fi\n`,
+    )
+    for (const count of [2, 3, 4]) {
+      writeFileSync(join(fixture, 'partitions.txt'), `apps/example-api 2\napps/acme-api ${count}\n`)
+      coverageShardJoin(fixture, env)
+    }
+  })
 }
 
 function fullAndPlan() {
@@ -747,17 +796,14 @@ function requiredKitPartition() {
     requireSuccess(invoke('--ci-group', 'coverage', '--receipt', original))
     const coverage = JSON.parse(readFileSync(original, 'utf8'))
     rmSync(original)
-    const blobs = (count: number) => Array.from({ length: count }, (_, i) => `${i}`.repeat(64))
-    const writeShard = (workspace: string, count?: number) => {
-      const receipt = { ...coverage, shard: workspace }
-      if (count !== undefined) receipt.partition = { count, blobs: blobs(count) }
-      writeFileSync(
-        join(dir, `root-coverage-${workspace.replace('/', '__')}.json`),
-        JSON.stringify(receipt),
-      )
-    }
-    writeShard('apps/acme-api', 2)
-    writeShard('apps/example-api', 2)
+    const partitions = new Map<string, number>([
+      ['apps/example-api', 2],
+      ['apps/acme-api', 2],
+    ])
+    const writeShard = (workspace: string) =>
+      writeFixtureShard(dir, workspace, coverage, partitions)
+    writeShard('apps/acme-api')
+    writeShard('apps/example-api')
     const plan = invoke('--coverage-parts-plan')
     requireSuccess(plan)
     assert.deepEqual(JSON.parse(plan.stdout), [
@@ -766,12 +812,35 @@ function requiredKitPartition() {
     ])
     const joinGate = () => invoke('--ci-join', dir, '--producers-result', 'success')
     requireSuccess(joinGate())
+    function assertConsumerPartitions() {
+      for (const count of [2, 3, 4]) {
+        writeFileSync(declarations, `apps/example-api 2\napps/acme-api ${count}\n`)
+        partitions.set('apps/acme-api', count)
+        writeShard('apps/acme-api')
+        requireSuccess(joinGate())
+        partitions.delete('apps/acme-api')
+        writeShard('apps/acme-api')
+        const missingPartition = joinGate()
+        assert.notEqual(missingPartition.status, 0)
+        assert.match(missingPartition.stderr, /coverage receipt partition mode mismatch/)
+        partitions.set('apps/acme-api', count === 2 ? 3 : 2)
+        writeShard('apps/acme-api')
+        const wrongCount = joinGate()
+        assert.notEqual(wrongCount.status, 0)
+        assert.match(wrongCount.stderr, /coverage receipt partition mode mismatch/)
+      }
+    }
+    assertConsumerPartitions()
+    partitions.set('apps/acme-api', 2)
+    writeShard('apps/acme-api')
     for (const count of [undefined, 3]) {
       writeFileSync(
         declarations,
         `${count === undefined ? '' : `apps/example-api ${count}\n`}apps/acme-api 2\n`,
       )
-      writeShard('apps/example-api', count)
+      if (count === undefined) partitions.delete('apps/example-api')
+      else partitions.set('apps/example-api', count)
+      writeShard('apps/example-api')
       for (const result of [invoke('--coverage-parts-plan'), joinGate()]) {
         assert.notEqual(result.status, 0)
         assert.match(
@@ -1187,7 +1256,8 @@ sameRunJoin()
 console.log('PASS same-run Core and Coverage join; missing Coverage refused')
 refuseCoverageListing()
 coverageShard()
-coverageShardJoin()
+liveCoverageShardJoin()
+consumerCoverageShardJoin()
 fullAndPlan()
 toolingAndPlan()
 coveragePlan()
