@@ -97,7 +97,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Native fallback resolves node-gyp from PATH; expose only selected Node's bundled copy here.
+          # Expose the selected Node's bundled node-gyp only to this install.
           node_gyp="$(npm prefix -g)/lib/node_modules/npm/node_modules/node-gyp/bin/node-gyp.js"
           test -x "$node_gyp"
           bin="${RUNNER_TEMP}/node-gyp-bin"
@@ -144,7 +144,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Native fallback resolves node-gyp from PATH; expose only selected Node's bundled copy here.
+          # Expose the selected Node's bundled node-gyp only to this install.
           node_gyp="$(npm prefix -g)/lib/node_modules/npm/node_modules/node-gyp/bin/node-gyp.js"
           test -x "$node_gyp"
           bin="${RUNNER_TEMP}/node-gyp-bin"

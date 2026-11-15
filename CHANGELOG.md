@@ -4,7 +4,7 @@
 
 ### CI native install transport
 
-- Root core and grouped coverage expose the selected Node's npm-bundled `node-gyp` only to their frozen install; a missing executable or failed install fails the job.
+- Root core and grouped coverage expose the selected Node's npm-bundled `node-gyp` only to their frozen install; a missing executable or failed install fails the job. The current lock's `trustedDependencies: []` prevents dependency install lifecycles, so this does not exercise native fallback. A prebuilt install, an explicit native source build and an install fallback are separate evidence.
 
 ### CI coverage partitions
 
