@@ -1,7 +1,8 @@
 import { AppError } from '@kit/core'
+import type { KitD1Database, KitD1Statement } from '@kit/db'
 import { z } from 'zod'
 import { deliveryRefSchema } from '../delivery-ref'
-import { lifecycleBatch, lifecycleStatement } from './admit-sql'
+import { binding, lifecycleBatch } from './admit-sql'
 import type { AdmissionBatch, AdmissionOwnerIdentity, Db, NotifyResult } from './types'
 import {
   channelKeySchema,
@@ -74,17 +75,26 @@ function validateOwners(
   return { owners, deadline }
 }
 
-export async function admitNotifications(
-  db: Db,
+export type AdmitStatementKind = 'notification' | 'user' | 'organization'
+export type AdmitPlan = Readonly<{
+  orgId: string
+  statements: readonly KitD1Statement[]
+  kinds: readonly AdmitStatementKind[]
+}>
+
+export function planAdmitNotifications(
+  db: KitD1Database,
   input: AdmissionBatch,
   ownerIdentities: readonly AdmissionOwnerIdentity[],
-): Promise<NotifyResult> {
+): AdmitPlan {
   const data = parseRepositoryInput(batchSchema, input)
   const identities = parseRepositoryInput(identitiesSchema, ownerIdentities)
   const { owners, deadline } = validateOwners(data, identities)
   const params = serializeParams(data.params)
-  const statements = []
-  const kinds: Array<'notification' | 'user' | 'organization'> = []
+  const statements: KitD1Statement[] = []
+  const kinds: AdmitStatementKind[] = []
+  const lifecycleStatement = (client: KitD1Database, sql: string, values: unknown[]) =>
+    client.prepare(sql).bind(...values)
   for (const user of data.users) {
     statements.push(
       lifecycleStatement(
@@ -161,16 +171,60 @@ export async function admitNotifications(
     )
     kinds.push('organization')
   }
-  const results = await lifecycleBatch(db, statements)
+  return { orgId: data.orgId, statements, kinds }
+}
+
+function decodeAdmitResult(
+  orgId: string,
+  kind: AdmitStatementKind,
+  result: Readonly<{ results: readonly Record<string, unknown>[] }>,
+  createdNotificationIds: string[],
+  createdDeliveries: NotifyResult['createdDeliveries'][number][],
+) {
+  if (
+    (kind !== 'notification' && kind !== 'user' && kind !== 'organization') ||
+    !result ||
+    !Array.isArray(result.results) ||
+    result.results.length > (kind === 'user' ? 10 : 1)
+  )
+    throw AppError.validation('Invalid notification admission results')
+  for (const row of result.results) {
+    if (!row || typeof row.id !== 'string' || row.id.length === 0)
+      throw AppError.validation('Invalid notification admission results')
+    if (kind === 'notification') createdNotificationIds.push(row.id)
+    else createdDeliveries.push({ orgId, kind, id: row.id })
+  }
+}
+
+export function interpretAdmitResults(
+  plan: AdmitPlan,
+  results: readonly Readonly<{ results: readonly Record<string, unknown>[] }>[],
+): NotifyResult {
+  if (
+    !Array.isArray(results) ||
+    plan.statements.length !== plan.kinds.length ||
+    results.length !== plan.kinds.length
+  )
+    throw AppError.validation('Invalid notification admission results')
   const createdNotificationIds: string[] = []
   const createdDeliveries: NotifyResult['createdDeliveries'][number][] = []
   results.forEach((result, index) => {
-    for (const row of result.results) {
-      const id = String(row.id)
-      const kind = kinds[index]
-      if (kind === 'notification') createdNotificationIds.push(id)
-      else if (kind) createdDeliveries.push({ orgId: data.orgId, kind, id })
-    }
+    decodeAdmitResult(
+      plan.orgId,
+      plan.kinds[index],
+      result,
+      createdNotificationIds,
+      createdDeliveries,
+    )
   })
   return { createdNotificationIds, createdDeliveries }
+}
+
+export async function admitNotifications(
+  db: Db,
+  input: AdmissionBatch,
+  ownerIdentities: readonly AdmissionOwnerIdentity[],
+): Promise<NotifyResult> {
+  const plan = planAdmitNotifications(binding(db), input, ownerIdentities)
+  return interpretAdmitResults(plan, await lifecycleBatch(db, [...plan.statements]))
 }

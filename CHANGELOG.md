@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Atomic notification admission
+
+- Apps can compose planned notification admission with business writes in the same D1 transaction, then interpret the admission results. Existing execution and best-effort flow producers remain unchanged; external runtime admission is not part of that transaction.
+
 ### CI coverage partitions
 
 - CI can run one App's coverage as 2 to 4 native Vitest parts plus one merge, through one reusable `coverage-app.yml` call per declared App ([ADR-0023](docs/kit/architecture/adr/0023-ci-coverage-partitions.md)). This adds capacity; it is not a budget guarantee.

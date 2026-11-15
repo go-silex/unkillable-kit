@@ -10,7 +10,12 @@ export type {
   DeliveryAdmissionWriteResult,
   RecordDeliveryAdmissionObservationInput,
 } from './repos/admission-types'
-export { admitNotifications } from './repos/admit'
+export type { AdmitPlan, AdmitStatementKind } from './repos/admit'
+export {
+  admitNotifications,
+  interpretAdmitResults,
+  planAdmitNotifications,
+} from './repos/admit'
 export {
   finishDelivery,
   loadDelivery,

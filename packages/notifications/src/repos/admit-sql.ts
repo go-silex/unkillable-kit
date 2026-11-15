@@ -3,7 +3,7 @@ import type { Db } from './types'
 
 type BatchResult = { results: Record<string, unknown>[] }
 
-function binding(db: Db): KitD1Database {
+export function binding(db: Db): KitD1Database {
   // Drizzle exposes $client at runtime, but its public base database type omits it.
   const withClient = db as Db & { $client: KitD1Database }
   return withClient.$client
