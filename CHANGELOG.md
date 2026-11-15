@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### CI coverage partitions
+
+- CI can run one App's coverage as 2 to 4 native Vitest parts plus one merge, through one reusable `coverage-app.yml` call per declared App ([ADR-0023](docs/kit/architecture/adr/0023-ci-coverage-partitions.md)). This adds capacity; it is not a budget guarantee.
+- The merge applies the App's full configured floors to the merged coverage, and parts never authorize. Local `validate:full` still runs every App monolithically and remains the reference.
+- The Kit permanently declares `apps/example-api 2`, and CI refuses a partition plan or join without it. Products may declare their own Apps in `config/product/coverage-partitions.txt`.
+- Private Products pay the extra Actions minutes and one-day RAW artifact storage of every declaration, the inherited `example-api` one included.
+
 ### Product bootstrap
 
 - Add `create-product` for fresh dedicated clones: local Product remotes, inheritance, starter Apps and Product CI wiring, with normal-hook commits and validation. Repository creation, first push and deployment remain operator actions.
