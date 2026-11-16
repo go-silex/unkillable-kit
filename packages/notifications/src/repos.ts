@@ -28,6 +28,7 @@ export {
   listDestinations,
   updateDestinationSelector,
 } from './repos/destinations'
+export type { InboxReadSelection } from './repos/inbox'
 export { countUnread, hasInboxNotification, listInbox, markRead } from './repos/inbox'
 export { listDeliveryMetadata, listDeploymentFailures } from './repos/metadata'
 export { type ResolvePredicates, resolveNotifications } from './repos/resolve'

@@ -24,6 +24,18 @@ After a successful batch, pass `interpretAdmitResults` exactly the results for t
 
 The App still owns live producer and recipient authorization, including source ACL checks. When authorization can change concurrently, enforce the required live checks in the same batch; planning is not authorization. Only after commit may the App request Workflow admission for newly created Deliveries, under ADR-0020. The existing `admitNotifications` wrapper continues to execute admission on its own; existing best-effort flow callbacks remain unchanged.
 
+### Restricting Inbox read marks
+
+`markRead(db, scope, { id?, now }, selection?)` accepts an optional `InboxReadSelection` from `@kit/notifications/repos`: `{ sql, params }`. The three-argument call keeps its existing behavior. The fourth argument is a **trusted server-code seam**, not request data; never accept its SQL from a client or place it in an HTTP body.
+
+`sql` must be one self-contained, read-only SQLite SELECT returning exactly one Notification ID column. It may begin with `WITH` or `WITH RECURSIVE`; it must not depend on an outer alias, inject a top-level CTE, contain a trailing terminator or contain another statement. Use anonymous `?` placeholders and provide D1-bindable `params` in their original positional order. SQL structure and identifiers must come from reviewed server code or a trusted compiler; bind request-derived values instead of interpolating them. Named or numbered parameters and unfilled Drizzle placeholders are not supported.
+
+Kit embeds the selection in its single UPDATE, evaluating it at mutation time rather than materializing IDs first. It intersects the result with the existing Organization, User, readable Module and unread scope and, when supplied, the requested `id`. The selection can only narrow that scope; an empty result marks nothing, and duplicate or NULL IDs do not increase the count. This guarantee assumes a well-formed, trusted selection: the seam is not an SQL sandbox or authorization validator.
+
+Kit sets only `readAt` and returns the number of newly marked rows. Previously read timestamps are preserved, and resolved-but-unread rows remain eligible. Zero can mean already read or outside the effective scope; it is not an authorization verdict. Omission leaves the default behavior unchanged and does not add a live source ACL check. Apps needing such a check must provide their current restriction in the selection.
+
+Malformed selection shapes, including `null`, blank SQL or missing/non-array `params`, fail rather than becoming unrestricted. SQL syntax, result-column arity and bind errors propagate from the database; there is no unrestricted retry. The D1 parameter limit includes both Kit's outer binds and the selection's binds.
+
 ## Development
 
 - Where to add: `src/registry.ts` for definitions; `src/resolve.ts` for resolution; `src/repos/` for persistence.
