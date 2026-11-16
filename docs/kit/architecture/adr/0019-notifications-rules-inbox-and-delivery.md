@@ -246,12 +246,10 @@ The App factory closes these ports over its adapters; it does not move bindings 
 
 Admission atomically writes Notifications and initial Delivery intentions. Active conflicts add no row, overwrite or Delivery. After commit the App requests admission only for newly created Deliveries with stable identities. Failed or ambiguous runtime admission does not roll back Inbox or send directly; it is reported and represented by its receipt, with bounded reconciliation under ADR-0020. Repeated `notify` does not republish prior work.
 
-Apps may compose admission and business writes in one D1 batch. Keep the plan contiguous
-and ordered on the same database; interpret only its results, excluding guards and other
-statements. Hard failures abort the batch. The App enforces live authority, membership,
-Module access and source ACL, including in-batch checks when needed. The existing executor
-is independent; Workflow admission remains post-commit and flows best-effort.
-See the [`@kit/notifications` README](../../../../packages/notifications/README.md).
+Apps may batch business writes and admission atomically with live authorization.
+The [`@kit/notifications` README](../../../../packages/notifications/README.md)
+defines ordering and result slicing. The executor is separate; Workflow
+admission is post-commit; flows are best-effort.
 
 `resolve` is idempotent and never marks read. Omitted `types` means all types of that source; omitted `userIds` means all Users **and** collective Deliveries. Provided `userIds` restricts to those Users and never resolves collective delivery. Explicit empty arrays are no-op, not all. Changes to Notification resolution and pending Delivery skips share a batch. No caller may supply another Organization through a filter or patch.
 
