@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Inbox read selection
+
+- `markRead` accepts an optional trusted server-authored, bound SELECT of Notification IDs, evaluated inside the read UPDATE to narrow the existing scope. Omitted selection preserves existing behavior; read-once semantics and newly marked row counts remain unchanged.
+
 ### Portable tooling checks
 
 - Resolve Wrangler migration paths without GNU `realpath`, retaining symlink-aware containment even for missing paths. Deploy-ref refusal fixtures no longer depend on Git's diagnostic language; ADR mutation fixtures use portable `sed` syntax.
