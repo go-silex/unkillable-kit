@@ -15,6 +15,23 @@ const base = {
 const all = { sql: 'SELECT id FROM kit_notifications', params: [] }
 
 describe('inbox read selection', () => {
+  it('accepts a bound selection ending in a line comment without widening scope', async () => {
+    const { db, sqlite } = createMemoryD1()
+    await db.insert(kitNotifications).values([
+      { ...base, id: 'own', sourceId: 'own' },
+      { ...base, id: 'other', sourceId: 'other', userId: 'another' },
+    ])
+    const selection = {
+      sql: 'SELECT id FROM kit_notifications WHERE type_key = ? -- policy',
+      params: ['event'],
+    }
+    expect(await markRead(db, scope, { now: 20 }, selection)).toBe(1)
+    expect(sqlite.prepare('SELECT id, read_at FROM kit_notifications ORDER BY id').all()).toEqual([
+      { id: 'other', read_at: null },
+      { id: 'own', read_at: 20 },
+    ])
+  })
+
   it('intersects even broad, duplicate and NULL selections with the Kit ceiling and requested ID', async () => {
     const { db, sqlite } = createMemoryD1()
     await db.insert(kitNotifications).values([

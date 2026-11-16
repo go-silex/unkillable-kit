@@ -134,7 +134,7 @@ export async function markRead(
     ')',
     restriction ? ' AND id IN (' : '',
     restriction?.sql ?? '',
-    restriction ? ')' : '',
+    restriction ? '\n)' : '',
     ' RETURNING id',
   ].join('')
   const result = (await lifecycleStatement(db, query, [
