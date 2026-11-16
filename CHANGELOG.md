@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Portable tooling checks
+
+- Resolve Wrangler migration paths without GNU `realpath`, retaining symlink-aware containment even for missing paths. Deploy-ref refusal fixtures no longer depend on Git's diagnostic language; ADR mutation fixtures use portable `sed` syntax.
+
 ### Atomic notification admission
 
 - Apps can compose planned notification admission with business writes in the same D1 transaction, then interpret the admission results. Existing execution and best-effort flow producers remain unchanged; external runtime admission is not part of that transaction.

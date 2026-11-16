@@ -211,6 +211,49 @@ database_name = "foo"
 EOF
 assert_exit "omitted migrations_dir symlink to packages/ → 1" 1 "${OMIT_SYMLINK}" "packages/*/migrations are not the apply path"
 
+# Resolve symlinks before `..`, even when the remaining target does not exist.
+SYMLINK_PARENT="${TMP}/symlink-parent"
+mkdir -p "${SYMLINK_PARENT}/packages/auth" "${SYMLINK_PARENT}/apps/foo-api"
+ln -s ../../packages/auth "${SYMLINK_PARENT}/apps/foo-api/link"
+cat >"${SYMLINK_PARENT}/apps/foo-api/wrangler.toml" <<'EOF'
+name = "foo-api"
+[[d1_databases]]
+binding = "DB"
+migrations_dir = "link/../missing/migrations"
+EOF
+assert_exit "symlink then parent and missing target → 1" 1 "${SYMLINK_PARENT}" "packages/*/migrations are not the apply path"
+
+MISSING_PARENT="${TMP}/missing-parent"
+mkdir -p "${MISSING_PARENT}/packages" "${MISSING_PARENT}/apps/foo-api"
+cat >"${MISSING_PARENT}/apps/foo-api/wrangler.toml" <<'EOF'
+name = "foo-api"
+[[d1_databases]]
+binding = "DB"
+migrations_dir = "../../packages/missing/../auth/migrations"
+EOF
+assert_exit "missing component then parent → 1" 1 "${MISSING_PARENT}" "packages/*/migrations are not the apply path"
+
+SAFE_MISSING="${TMP}/safe-missing"
+mkdir -p "${SAFE_MISSING}/packages" "${SAFE_MISSING}/apps/foo-api"
+cat >"${SAFE_MISSING}/apps/foo-api/wrangler.toml" <<'EOF'
+name = "foo-api"
+[[d1_databases]]
+binding = "DB"
+migrations_dir = "missing/../migrations"
+EOF
+assert_exit "missing local path → 0" 0 "${SAFE_MISSING}" "check-wrangler-migrations-dir: OK"
+
+LOOP="${TMP}/symlink-loop"
+mkdir -p "${LOOP}/packages" "${LOOP}/apps/foo-api"
+ln -s loop "${LOOP}/apps/foo-api/loop"
+cat >"${LOOP}/apps/foo-api/wrangler.toml" <<'EOF'
+name = "foo-api"
+[[d1_databases]]
+binding = "DB"
+migrations_dir = "loop/migrations"
+EOF
+assert_exit "symlink loop fails closed → 1" 1 "${LOOP}" "cannot resolve migrations_dir"
+
 # --- fixture: omitted migrations_dir with a real local apps/<api>/migrations ---
 OMIT_LOCAL="${TMP}/omit-local"
 mkdir -p "${OMIT_LOCAL}/packages/auth" "${OMIT_LOCAL}/apps/foo-api/migrations"
