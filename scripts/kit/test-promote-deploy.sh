@@ -1743,7 +1743,7 @@ CORRUPT="${TMP}/check-retain-corrupt-git"
 mkdir -p "${CORRUPT}/.git"
 plant_valid "$CORRUPT"
 check_tree "$CORRUPT"
-expect_refused "a present .git that is not a repository is refused" "not a git repository"
+expect_refused "a present .git that is not a repository is refused" "cannot read refs/remotes/origin/deploy/main:"
 
 # A valid product tree whose deploy-ref probe is SIGTERM'd must refuse. If the adapter treats a
 # null status as a missing ref, this same tree is bootstrap and prints check OK — so the case fails.

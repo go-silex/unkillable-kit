@@ -28,7 +28,14 @@ fi
 
 # Config discovery is shared with migrations-contract: scripts/kit/lib/wrangler-d1.ts --configs.
 CONFIGS="$(bun "${SCRIPT_DIR}/lib/wrangler-d1.ts" --configs "${ROOT}")" || exit 1
-mapfile -t FILES < <(printf '%s' "$CONFIGS" | sed '/^$/d')
+FILES=()
+FILE_COUNT=0
+while IFS= read -r file; do
+  if [[ -n "${file}" ]]; then
+    FILES[${FILE_COUNT}]="${file}"
+    FILE_COUNT=$((FILE_COUNT + 1))
+  fi
+done <<< "${CONFIGS}"
 
 # Print each migrations_dir string on its own line. Exit non-zero if unparseable.
 # One parser for every D1 gate: scripts/kit/lib/wrangler-d1.ts (also used by migrations-contract).
@@ -68,10 +75,11 @@ for file in "${FILES[@]+"${FILES[@]}"}"; do
   while IFS= read -r raw; do
     [[ -n "${raw}" ]] || continue
     CHECKED=$((CHECKED + 1))
-    case "${raw}" in
-      /*) resolved="$(cd / && realpath -m -- "${raw}")" ;;
-      *) resolved="$(cd "${config_dir}" && realpath -m -- "${raw}")" ;;
-    esac
+    if ! resolved="$(bun "${SCRIPT_DIR}/lib/wrangler-d1.ts" --resolve "${config_dir}" "${raw}")"; then
+      echo "error: ${file}: cannot resolve migrations_dir=${raw}" >&2
+      FAIL=1
+      continue
+    fi
     case "${resolved}" in
       "${PACKAGES}"|"${PACKAGES}"/*)
         echo "error: ${file}: migrations_dir=${raw} resolves to ${resolved}" >&2
@@ -87,5 +95,5 @@ if [[ "${FAIL}" -ne 0 ]]; then
   exit 1
 fi
 
-echo "check-wrangler-migrations-dir: OK (${#FILES[@]} wrangler files, ${CHECKED} migrations_dir)"
+echo "check-wrangler-migrations-dir: OK (${FILE_COUNT} wrangler files, ${CHECKED} migrations_dir)"
 exit 0

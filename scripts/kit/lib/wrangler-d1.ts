@@ -11,8 +11,8 @@
  *      `bun scripts/kit/lib/wrangler-d1.ts --configs <root>` prints one config path per line.
  *      Exit 1 + message on error.
  */
-import { readdirSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { lstatSync, readdirSync, readFileSync, readlinkSync } from 'node:fs'
+import { isAbsolute, join } from 'node:path'
 
 /** Wrangler config basenames: wrangler.toml|json|jsonc and wrangler.<name>.toml|json|jsonc. */
 const WRANGLER_CONFIG = /^wrangler(\.[^/]+)?\.(toml|json|jsonc)$/
@@ -71,9 +71,47 @@ export function d1MigrationDirs(file: string): string[] {
   return dirs
 }
 
+function isSymlinkOrMissing(candidate: string): boolean {
+  try {
+    return lstatSync(candidate).isSymbolicLink()
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code
+    if (code === 'ENOENT' || code === 'ENOTDIR') return false
+    throw error
+  }
+}
+
+// Resolve each component before applying the next `..`: lexical normalization before
+// following a symlink can turn a forbidden path into an apparently safe one.
+function resolveMissing(base: string, input: string): string {
+  const parts = (isAbsolute(input) ? input : `${base}/${input}`).split('/')
+  const resolved: string[] = []
+  let links = 0
+  while (parts.length > 0) {
+    const part = parts.shift()!
+    if (!part || part === '.') continue
+    if (part === '..') {
+      resolved.pop()
+      continue
+    }
+    const candidate = `/${[...resolved, part].join('/')}`
+    if (!isSymlinkOrMissing(candidate)) {
+      resolved.push(part)
+      continue
+    }
+    if (++links > 40) throw new Error(`too many symlinks resolving ${input}`)
+    const target = readlinkSync(candidate)
+    if (isAbsolute(target)) resolved.length = 0
+    parts.unshift(...target.split('/'))
+  }
+  return `/${resolved.join('/')}`
+}
+
 if (import.meta.main) {
   try {
-    if (process.argv[2] === '--configs') {
+    if (process.argv[2] === '--resolve') {
+      console.log(resolveMissing(process.argv[3] ?? '', process.argv[4] ?? ''))
+    } else if (process.argv[2] === '--configs') {
       for (const f of wranglerConfigs(process.argv[3] ?? '.')) console.log(f)
     } else {
       for (const d of d1MigrationDirs(process.argv[2] ?? '')) console.log(d)
