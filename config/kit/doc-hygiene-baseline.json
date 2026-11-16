@@ -67,7 +67,7 @@
   "docs/kit/architecture/adr/0019-notifications-rules-inbox-and-delivery.md": {
     "overLimitLines": 59,
     "maxLineBytes": 1272,
-    "fileBytes": 72276
+    "fileBytes": 72275
   },
   "docs/kit/architecture/adr/0020-notification-delivery-ownership.md": {
     "overLimitLines": 41,
