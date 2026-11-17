@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import { lstatSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
 import { mergeParts, runPart } from './root-gate-parts'
+import { joinTooling, runToolingShard, toolingPlan } from './root-gate-tooling'
 
 const root = resolve(import.meta.dirname, '../..')
 const hash = (data: string | Buffer) => createHash('sha256').update(data).digest('hex')
@@ -52,6 +53,7 @@ function recipe(args: string[]) {
   for (const task of tasks)
     if (typeof scripts[task] !== 'string' || !scripts[task]) fail(`missing script: ${task}`)
   return {
+    name,
     tasks,
     recipeHash: hash(source as string),
     runnerHash: hash(
@@ -352,6 +354,9 @@ try {
         core: selection(current.tasks, 'core'),
         coverage: selection(current.tasks, 'coverage'),
         recipeHash: current.recipeHash,
+        ...(current.name === 'validate:tooling'
+          ? { toolingShards: toolingPlan(current.tasks) }
+          : {}),
         runnerHash: current.runnerHash,
       }),
     )
@@ -363,6 +368,35 @@ try {
     const outcome = run(current.tasks)
     if (outcome.code === 0) console.log('root-gate: full Root passed')
     process.exitCode = outcome.code
+  } else if (
+    current.name === 'validate:tooling' &&
+    options.length === 4 &&
+    options[0] === '--ci-tooling-shard' &&
+    options[2] === '--receipt' &&
+    options[3]
+  ) {
+    process.exitCode = runToolingShard(
+      options[1],
+      options[3],
+      current.tasks,
+      identity(current.recipeHash, current.runnerHash),
+      run,
+    )
+  } else if (
+    current.name === 'validate:tooling' &&
+    options.length === 4 &&
+    options[0] === '--ci-tooling-join' &&
+    options[1] &&
+    options[2] === '--producers-result' &&
+    options[3]
+  ) {
+    joinTooling(
+      options[1],
+      options[3],
+      current.tasks,
+      identity(current.recipeHash, current.runnerHash),
+    )
+    console.log('root-gate: tooling passed by current-run join')
   } else if (
     options.length === 4 &&
     options[0] === '--ci-group' &&

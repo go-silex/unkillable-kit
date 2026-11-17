@@ -123,6 +123,25 @@ line_invokes_tooling() {
   [[ "${stripped}" =~ ^(run:[[:space:]]*)?bun[[:space:]]+run[[:space:]]+validate:tooling[[:space:]]*(#.*)?$ ]]
 }
 
+# CI can execute the canonical tooling recipe in fixed shards, but a shard
+# alone is not a verdict: the matching current-run join is also required.
+line_invokes_tooling_ci() {
+  local stripped="$1" mode="$2"
+  [[ "${stripped}" == \#* ]] && return 1
+  if [[ "${stripped}" == -* ]]; then
+    stripped="${stripped#-}"
+    stripped="${stripped#"${stripped%%[![:space:]]*}"}"
+  fi
+  stripped="${stripped#run: }"
+  local shard="bun run validate:tooling -- --ci-tooling-shard '\${{ matrix.shard.index }}/\${{ matrix.shard.count }}' --receipt \"\$RUNNER_TEMP/tooling-receipts/tooling-\${{ matrix.shard.index }}.json\""
+  local join='bun run validate:tooling -- --ci-tooling-join "$RUNNER_TEMP/tooling-receipts" --producers-result "$PRODUCERS_RESULT"'
+  if [[ "${mode}" == shard ]]; then
+    [[ "${stripped}" == "${shard}" ]]
+  else
+    [[ "${stripped}" == "${join}" ]]
+  fi
+}
+
 line_invokes_selector() {
   local stripped="$1"
   if [[ "${stripped}" == -* ]]; then
@@ -209,15 +228,18 @@ fi
 
 CI="${ROOT}/.github/workflows/ci.yml"
 if [[ -f "${CI}" ]]; then
-  found=0 tooling_found=0 selector_found=0
+  found=0 tooling_found=0 shard_found=0 tooling_join_found=0 selector_found=0
   while IFS= read -r line || [[ -n "${line}" ]]; do
     line="${line%$'\r'}"
     stripped="${line#"${line%%[![:space:]]*}"}"
     line_invokes_validate_full "${stripped}" ci && found=1
     line_invokes_tooling "${stripped}" && tooling_found=1
+    line_invokes_tooling_ci "${stripped}" shard && shard_found=1
+    line_invokes_tooling_ci "${stripped}" join && tooling_join_found=1
     line_invokes_selector "${stripped}" && selector_found=1
   done <"${CI}"
-  if [[ "${found}" -eq 0 || "${tooling_found}" -eq 0 || "${selector_found}" -eq 0 ]]; then
+  if [[ "${found}" -eq 0 || "${selector_found}" -eq 0 ]] ||
+    { [[ "${tooling_found}" -eq 0 ]] && [[ "${shard_found}" -eq 0 || "${tooling_join_found}" -eq 0 ]]; }; then
     echo "error: .github/workflows/ci.yml: must invoke both lanes and tooling selector" >&2
     FAIL=1
   fi

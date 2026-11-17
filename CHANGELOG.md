@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### CI tooling shards
+
+- Run selected tooling self-tests in three canonical round-robin CI shards, with sequential fail-fast execution per VM and current-run receipt admission in the existing `ci` check. Local tooling remains monolithic and ordered; no coverage policy changes.
+- The bar source-of-truth checker accepts CI's canonical shard invocation only together with its tooling receipt join; local hook invocation remains monolithic.
+
 ### Root gate task timings
 
 - Emit a JSON timing and status record for each attempted sequential Root gate task, including failures; planning output and receipt schemas remain unchanged.

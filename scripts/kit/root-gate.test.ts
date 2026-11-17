@@ -555,6 +555,123 @@ function toolingAndPlan() {
   })
 }
 
+function toolingShards() {
+  withFixture('bun run task.ts test:coverage', (fixture, env) => {
+    const manifestPath = join(fixture, 'package.json')
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+    const tasks = Array.from({ length: 33 }, (_, i) => `tooling:task${i}`)
+    for (const task of tasks) manifest.scripts[task] = `bun run task.ts ${task}`
+    const setRecipe = () => {
+      manifest.scripts['validate:tooling'] = `bun run scripts/kit/root-gate.ts ${tasks.join(' ')}`
+      writeFileSync(manifestPath, JSON.stringify(manifest))
+    }
+    setRecipe()
+    const invoke = (...args: string[]) =>
+      command(fixture, env, process.execPath, ['run', 'validate:tooling', '--', ...args])
+    const plan = invoke('--plan')
+    requireSuccess(plan)
+    assert.deepEqual(
+      JSON.parse(plan.stdout).toolingShards,
+      [1, 2, 3].map((index) => ({ index, count: 3, id: `tooling-${index}` })),
+    )
+    const directory = join(fixture, 'receipts')
+    mkdirSync(directory)
+    const runShard = (index: number) => {
+      const folder = join(directory, `tooling-12345-1-${index}`)
+      mkdirSync(folder)
+      const path = join(folder, `tooling-${index}.json`)
+      requireSuccess(invoke('--ci-tooling-shard', `${index}/3`, '--receipt', path))
+      return path
+    }
+    const paths = [1, 2, 3].map(runShard)
+    const receipts = paths.map((path) => JSON.parse(readFileSync(path, 'utf8')))
+    assert.deepEqual(
+      receipts.map((receipt) => receipt.tasks),
+      [0, 1, 2].map((index) => tasks.filter((_, offset) => offset % 3 === index)),
+    )
+    assert.equal(new Set(receipts.flatMap((receipt) => receipt.tasks)).size, 33)
+    const joinReceipts = (status = 'success') =>
+      invoke('--ci-tooling-join', directory, '--producers-result', status)
+    requireSuccess(joinReceipts())
+    assert.notEqual(joinReceipts('failure').status, 0)
+    for (const bad of ['0/3', '4/3', '1/2', '01/3', '1/4', '']) {
+      assert.notEqual(
+        invoke('--ci-tooling-shard', bad, '--receipt', join(fixture, 'tooling-1.json')).status,
+        0,
+      )
+    }
+    assert.notEqual(
+      command(fixture, env, process.execPath, [
+        'run',
+        'validate:full',
+        '--',
+        '--ci-tooling-shard',
+        '1/3',
+        '--receipt',
+        join(fixture, 'tooling-1.json'),
+      ]).status,
+      0,
+    )
+    assert.notEqual(invoke('--ci-tooling-shard', '1/3', '--receipt', paths[0]).status, 0)
+    const original = readFileSync(paths[0], 'utf8')
+    for (const mutation of [
+      { checkoutSha: '0'.repeat(40) },
+      { repository: 'other/repo' },
+      { runId: '999' },
+      { runAttempt: '2' },
+      { recipeHash: 'wrong' },
+      { runnerHash: 'wrong' },
+      { complete: false },
+      { index: 2 },
+      { count: 2 },
+      { results: [] },
+      {
+        results: receipts[0].results.map((result: { task: string; exitCode: number }, i: number) =>
+          i ? result : { ...result, exitCode: 1 },
+        ),
+      },
+      { tasks: [...receipts[0].tasks].reverse() },
+    ]) {
+      writeFileSync(paths[0], JSON.stringify({ ...receipts[0], ...mutation }))
+      assert.notEqual(joinReceipts().status, 0, JSON.stringify(mutation))
+    }
+    writeFileSync(paths[0], original)
+    const extra = join(directory, 'extra')
+    mkdirSync(extra)
+    assert.notEqual(joinReceipts().status, 0)
+    rmSync(extra, { recursive: true })
+    const duplicate = join(directory, 'tooling-12345-1-1', 'duplicate.json')
+    copyFileSync(paths[0], duplicate)
+    assert.notEqual(joinReceipts().status, 0)
+    rmSync(duplicate)
+    rmSync(paths[0])
+    assert.notEqual(joinReceipts().status, 0)
+    env.ROOT_FIXTURE_FAIL = tasks[3]
+    assert.notEqual(invoke('--ci-tooling-shard', '1/3', '--receipt', paths[0]).status, 0)
+    const partial = JSON.parse(readFileSync(paths[0], 'utf8'))
+    assert.equal(partial.complete, false)
+    assert.deepEqual(
+      partial.results.map((result: { task: string }) => result.task),
+      [tasks[0], tasks[3]],
+    )
+    assert.notEqual(joinReceipts().status, 0)
+    delete env.ROOT_FIXTURE_FAIL
+    rmSync(paths[0])
+    tasks.push('tooling:new')
+    manifest.scripts['tooling:new'] = 'bun run task.ts tooling:new'
+    setRecipe()
+    const newPlan = invoke('--plan')
+    requireSuccess(newPlan)
+    assert.deepEqual(JSON.parse(newPlan.stdout).tasks, tasks)
+    const newPath = join(fixture, 'tooling-1.json')
+    requireSuccess(invoke('--ci-tooling-shard', '1/3', '--receipt', newPath))
+    assert.equal(JSON.parse(readFileSync(newPath, 'utf8')).tasks.at(-1), 'tooling:new')
+    tasks.splice(1)
+    setRecipe()
+    assert.notEqual(invoke('--plan').status, 0, 'empty shards refused')
+  })
+}
+
 function coveragePlan() {
   withFixture('bun run task.ts test:coverage', (fixture, env) => {
     const listing = join(fixture, 'listing.txt')
@@ -1313,6 +1430,7 @@ liveCoverageShardJoin()
 consumerCoverageShardJoin()
 fullAndPlan()
 toolingAndPlan()
+toolingShards()
 coveragePlan()
 joinAdmission()
 emptyPartitionJoin()

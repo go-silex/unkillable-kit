@@ -29,27 +29,37 @@ After Biome, pre-commit restages the indexed ACMR paths as literal names using t
 
 For that proof, the authenticated `gh` API must return exactly one open PR for the destination branch, with the advertised old head SHA and ref, both repositories matching the push origin, and base `main` or `staging`. Zero or multiple PRs, API failure, observed fork, unknown or stale targets, and initial branches run the lane. This local optimization covers the configured push repository and the positively identified same-repository PR only; it does not attest unobserved external PRs. CI selects independently from the actual event.
 
-In Product mode the selector validates context before skipping inherited tooling self-tests. A zero-edit exception covering a tooling input or changes to Product configuration, manifests or the shared, unprotected `bun.lock` select the lane; uncertainty also runs it. The CI tooling job always validates selection and conditionally skips checkout, installation and tooling steps; the aggregate requires a successful job and valid selection, not a skipped job. Run `bun run validate:tooling` explicitly when needed. These self-tests do not replace live current-tree checks, Product validation or secret scanning.
+In Product mode the selector validates context before skipping inherited tooling self-tests.
+A tooling zero-edit exception or changes to Product configuration, manifests or the shared,
+unprotected `bun.lock` select the lane; uncertainty also runs it. CI assigns the canonical
+tooling recipe round-robin to three VMs, sequential and fail-fast within each shard; siblings
+continue on failure. The read-only plan refuses empty shards and assigns new tasks automatically.
+With selection false, all three jobs validate it and skip checkout, install, execution and receipts.
+Invalid selection or a failed, cancelled or skipped producer blocks `ci`. When selected, `ci`
+joins exactly three separate artifact directories, requiring complete ordered task results bound
+to the tooling recipe, checkout, run, attempt and runner. This is separate from the Root join.
+Run `bun run validate:tooling` explicitly when needed; local execution remains sequential and
+fail-fast. These self-tests do not replace live tree checks, Product validation or secret scanning.
 
 ### CI runtime budget
 
-The quality jobs and final `ci` join each request a five-minute execution timeout. The root `package.json` remains the gate's source of truth; meeting the budget must not remove controls, lower coverage floors or weaken test isolation.
+Quality jobs and final `ci` each request a five-minute timeout. Root `package.json` owns the gate; meeting the budget must not remove controls, lower coverage floors or weaken test isolation.
 
-The measured quality path includes every producer's queue, checkout, installation, all controls, report, artifact and receipt handling, and the final join and cleanup. Cancellation, `always()` steps and runner cleanup can outlive a timeout; use actual workflow and job timestamps and a complete success verdict to prove ≤300 seconds for the whole DAG. Per-job timeout settings are not that proof and do not change independent Product workflow timeouts.
+The measured path includes every producer's queue, checkout, install, controls, reports, artifacts and receipts, plus join and cleanup. Cancellation, `always()` and cleanup can outlive timeouts; actual job and workflow timestamps and a complete success verdict must prove ≤300 seconds for the DAG. Per-job timeouts do not prove it or change Product workflow timeouts.
 
-Distinguish cold task/transform caches from warm runs, and record the runner, cache state and complete exit status. A cached tool download is not a cached task result. Local measurements are not evidence of GitHub runner performance; successful real CI evidence is required separately in the kit and a product consumer.
+Record runner, cache state and exit status; distinguish cold task/transform caches from warm runs. A cached download is not a cached task result. Local measurements do not prove GitHub performance; real successful CI is required separately in Kit and Product.
 
-The measured multi-file Auth, Flows, UI, Example API and Example Web suites use all available CPUs only when the existing `CI` flag is non-empty. Without it, Vitest's run/watch worker defaults remain unchanged. Local Root executes each selected ordered recipe sequentially and fails fast. `COVERAGE_CHANGED_BASE` is a local seam and cannot execute the Root gate.
+The measured multi-file Auth, Flows, UI, Example API and Example Web suites use all available CPUs only when `CI` is non-empty. Otherwise Vitest run/watch defaults remain unchanged. Local Root runs each ordered recipe sequentially, fail-fast. `COVERAGE_CHANGED_BASE` is local and cannot execute Root.
 
-The Coverage plan runner checks inheritance and zero-edit with Node and full Git history before Bun setup, installation or matrix expansion. All other producers depend on that plan; the final `ci` join runs after a failed plan and requires its success and every required receipt. Missing, skipped or failed prerequisite evidence is never a successful join; a successful tooling job with valid selection may intentionally skip its tooling steps. Separate Product CI and Secret scan remain independent and blocking.
+The Coverage plan checks inheritance and zero-edit with Node and full Git history before Bun setup, installation or matrix expansion. All other producers depend on it; final `ci` runs after plan failure and requires its success and all required receipts. Missing, skipped or failed prerequisites never pass; valid tooling selection may skip tooling steps. Product CI and Secret scan remain independent and blocking.
 
-`test:dogfood-zero-edit` also exercises the canonical Product Dependabot configuration and Node-only inheritance preflight. Ownership fixtures reject protected Product manifest edits and noncanonical/disabled configurations; dependency-admission fixtures separately evaluate immutable Product identity and protected manifest paths while retaining whole-lock supply-chain checks. These local fixtures do not prove hosted Bun updater diffs, App-only shared-lock regeneration or GitHub runner savings.
+`test:dogfood-zero-edit` exercises canonical Product Dependabot configuration and Node-only inheritance preflight. Ownership fixtures reject protected Product manifest edits and noncanonical/disabled configurations; dependency-admission fixtures evaluate immutable Product identity and protected manifest paths while retaining whole-lock supply-chain checks. These local fixtures do not prove hosted Bun updater diffs, App-only shared-lock regeneration or GitHub runner savings.
 
 CI runs its ordered Core complement on one hosted VM. The read-only `--coverage-plan` and `--coverage-parts-plan` modes together partition the discovered Coverage bar. Each undeclared App gets its own job; Packages go round-robin, in relative order, into groups of up to four sharing a VM and filesystem, yet each workspace runs sequentially in its own canonical Root process through the same `bunx vitest run --coverage`, with unchanged per-file isolation and floors and no runner-level worker override of Product configurations. A declared App instead runs a reusable workflow call: native Vitest parts, then a merge that needs only them and writes the only receipt; capacity, not a budget guarantee. Local Root runs it monolithically: the reference ([ADR-0023](../architecture/adr/0023-ci-coverage-partitions.md)).
 
-Each workspace produces its own receipt; an ordinary failure keeps the group red without stopping later members. Before the next invocation clears `coverage/`, the available report tree, even after a failure, moves to a workspace-qualified directory; receipt and report artifacts stay separate.
+Each workspace produces a receipt; failure keeps the group red without stopping later members. Before the next invocation clears `coverage/`, its available report tree, even after failure, moves to a workspace-qualified directory; receipts and reports stay separate.
 
-The final `ci` check requires every producer to succeed and a substantive current-run receipt join, bound to the actual checkout, run, attempt, recipe and runner: one receipt per discovered workspace, however many share a runner; a monolithic Coverage receipt is refused. Fewer configured jobs prove neither a shorter workflow nor lower billed usage; only real CI measurements can.
+The final `ci` check requires every producer and a current-run receipt join bound to checkout, run, attempt, recipe and runner: one receipt per workspace, however many share a runner; monolithic Coverage receipts are refused. Fewer jobs prove neither shorter workflows nor lower billed usage; only real CI measurements can.
 
 Receipt binding detects accidental stale, foreign or incomplete execution, not malicious changes to trusted workflow code. The pinned official artifact downloader fails on a digest mismatch by default; digest validation does not replace the receipt join.
 
