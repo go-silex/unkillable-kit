@@ -71,13 +71,20 @@ Escape hatch : Postgres/Hyperdrive si un app dépasse D1 — documenté, pas def
 | **TanStack Virtual**                                           | listes virtualisées                                                                  | P1          | cible          | `@tanstack/react-virtual`                                                           |
 | **TanStack Pacer**                                             | debounce search/upload                                                               | P1          | cible          | `@tanstack/react-pacer`                                                             |
 | **TanStack Start**                                             | **optionnel** SSR/marketing only                                                     | non default | option produit | `@tanstack/react-start`                                                             |
-| TanStack DB / Charts                                           | non default (beta / deprecated)                                                      | —           | option produit | `@tanstack/react-db`                                                                |
 | **Tailwind v4** · **lucide** · **CVA** + clsx + tailwind-merge | style shadcn                                                                         | M3          | livré          | `tailwindcss`, `lucide-react`, `class-variance-authority`, `clsx`, `tailwind-merge` |
 | **sonner**                                                     | toasts (`@kit/ui`)                                                                   | M3          | livré          | `sonner`                                                                            |
 | **Recharts**                                                   | charts (`chart.tsx` shadcn)                                                          | M3+         | livré          | `recharts`                                                                          |
 | **react-day-picker** + **date-fns**                            | calendrier / dates (`@kit/ui`)                                                       | M3+         | livré          | `react-day-picker`, `date-fns`                                                      |
 
-**CVA** = Class Variance Authority — variants type-safe des classes Tailwind (Button `variant`/`size`). Standard shadcn.
+TanStack DB / Charts: non-default (beta / deprecated).
+
+| Statut         | Paquets              |
+| -------------- | -------------------- |
+| option produit | `@tanstack/react-db` |
+
+Organization mutations use submitted Organization and values for requests and cache invalidation, not the current view.
+
+**CVA** (Class Variance Authority): type-safe Tailwind variants.
 
 ---
 

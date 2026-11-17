@@ -129,7 +129,7 @@ export function AdminFlowsPage() {
         />
       ) : (
         <>
-          {canCreate ? <FlowsAuthoringCard orgId={orgId} /> : null}
+          {canCreate ? <FlowsAuthoringCard key={orgId} orgId={orgId} /> : null}
           <FlowsPlansCard
             orgId={orgId}
             orgName={activeOrg?.name}

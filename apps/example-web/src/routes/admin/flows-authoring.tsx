@@ -36,16 +36,17 @@ export function FlowsAuthoringCard({ orgId }: { orgId: string }) {
   const [yaml, setYaml] = useState(SAMPLE_YAML)
 
   const check = useMutation({
-    mutationFn: () => postFlowPlanCheck(orgId, yaml),
+    mutationFn: (input: { orgId: string; yaml: string }) =>
+      postFlowPlanCheck(input.orgId, input.yaml),
     onSuccess: () => toast.success(m.flowsCheckOk),
     onError: (err) => toast.error(m.error, { description: apiErrorToMessage(err, m) }),
   })
 
   const save = useMutation({
-    mutationFn: () => postFlowPlan(orgId, yaml),
-    onSuccess: async () => {
+    mutationFn: (input: { orgId: string; yaml: string }) => postFlowPlan(input.orgId, input.yaml),
+    onSuccess: async (_data, input) => {
       toast.success(m.flowsPlanSaved)
-      await qc.invalidateQueries({ queryKey: flowPlansQueryKey(orgId) })
+      await qc.invalidateQueries({ queryKey: flowPlansQueryKey(input.orgId) })
     },
     onError: (err) => toast.error(m.error, { description: apiErrorToMessage(err, m) }),
   })
@@ -74,14 +75,14 @@ export function FlowsAuthoringCard({ orgId }: { orgId: string }) {
             type="button"
             variant="secondary"
             disabled={check.isPending || !yaml.trim()}
-            onClick={() => check.mutate()}
+            onClick={() => check.mutate({ orgId, yaml })}
           >
             {m.flowsCheck}
           </Button>
           <Button
             type="button"
             disabled={save.isPending || !yaml.trim()}
-            onClick={() => save.mutate()}
+            onClick={() => save.mutate({ orgId, yaml })}
           >
             {m.flowsSavePlan}
           </Button>
