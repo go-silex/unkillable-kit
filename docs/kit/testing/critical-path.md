@@ -2,9 +2,12 @@
 
 ## Critical path inventory (CP-*)
 
-Machine-enforced today via current-tree validation, coverage, package tests and, when selected, tooling self-tests. Prefer tests whose names/files map to these IDs. When adding `test:critical`, filter this set.
-
-Inventory rows below preserve historical `(in validate:full)` annotations: consult root `package.json` for current membership. Moved gate self-tests now belong to `validate:tooling`, while their live checks remain in `validate:full`; a selected self-test lane is required to claim those self-tests ran.
+Current-tree validation, coverage, package tests and selected tooling self-tests enforce these paths.
+Prefer tests mapped to CP IDs; filter this set for `test:critical`. Historical
+`(in validate:full)` annotations remain; root `package.json` owns membership.
+Moved gate self-tests require `validate:tooling`; live checks remain in `validate:full`.
+CLI fixtures cover tooling shards and receipts; workflow fixtures cover selection and producer
+verdicts, not hosted artifact delivery or runner savings.
 
 **CP-LOCK-RANGES normalization:** the pinned Bun runs `--lockfile-only --offline --ignore-scripts` in an isolated snapshot of tracked manifests, root Bun configuration, patches and lock. Outside a merge the snapshot is committed `HEAD`; during an open merge it is the complete staged tree, including the lock, and conflicts must first be resolved. Unstaged and untracked files are excluded from normalization; ordinary range checking still reads the working lock outside a merge. A missing offline cache entry fails verification rather than passing. Three warm-cache runs of the complete gate took 0.02 seconds each locally; cost varies by machine and repository. Stage merge inputs before the check as described in [Pulling kit upgrades](.././product-consumer-contract.md#pulling-kit-upgrades).
 

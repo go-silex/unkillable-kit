@@ -131,7 +131,7 @@ function joinVerdict(
 ): string {
   const job = jobs.ci
   assert.ok(enabled(job, event, results), 'final ci must run after failure or skip')
-  const joinStep = job.steps?.find((step) => step.env?.PRODUCERS_RESULT !== undefined)
+  const joinStep = job.steps?.find((step) => step.name === 'Join Root receipts')
   assert.ok(joinStep?.run, 'missing receipt join step')
   assert.ok(
     joinStep.if && /\b(always|failure|cancelled)\s*\(/.test(joinStep.if),
@@ -293,6 +293,21 @@ function successfulPreflight() {
     assert.ok(toolingStep?.if, 'tooling execution must be conditional')
     assert.equal(evaluate(toolingStep.if, context(event, results, 'true'), true), 'true')
     assert.equal(evaluate(toolingStep.if, context(event, results, 'false'), true), 'false')
+    const toolingJoin = jobs.ci.steps?.find((step) => step.name === 'Join Tooling receipts')
+    assert.ok(toolingJoin?.if && toolingJoin.env?.PRODUCERS_RESULT)
+    assert.equal(evaluate(toolingJoin.if, context(event, results, 'true'), false), 'true')
+    assert.equal(evaluate(toolingJoin.if, context(event, results, 'false'), false), 'false')
+    for (const result of ['failure', 'skipped', 'cancelled'] as const) {
+      assert.equal(
+        evaluate(
+          toolingJoin.env.PRODUCERS_RESULT,
+          context(event, { ...results, tooling: result }, 'true'),
+          false,
+        ),
+        'failure',
+      )
+    }
+    assert.equal(joinVerdict(event, results, 'invalid'), 'failure')
     assert.equal(joinVerdict(event, results, 'false'), 'success')
     for (const result of ['failure', 'skipped', 'cancelled'] as const) {
       assert.equal(joinVerdict(event, { ...results, tooling: result }, 'false'), 'failure')

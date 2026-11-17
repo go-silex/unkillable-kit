@@ -31,6 +31,7 @@ jobs:
       groups: ${{ steps.plan.outputs.groups }}
       parts: ${{ steps.plan.outputs.parts }}
       tooling: ${{ steps.tooling.outputs.run }}
+      tooling-shards: ${{ steps.plan.outputs.tooling-shards }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -73,6 +74,9 @@ jobs:
           printf 'groups=%s\n' "$plan" >> "$GITHUB_OUTPUT"
           parts="$(bun run validate:full -- --coverage-parts-plan)"
           printf 'parts=%s\n' "$parts" >> "$GITHUB_OUTPUT"
+          tooling_plan="$(bun run validate:tooling -- --plan)"
+          tooling_shards="$(printf '%s' "$tooling_plan" | bun -e 'const plan = await Bun.stdin.json(); if (!Array.isArray(plan.toolingShards) || plan.toolingShards.length !== 3) throw new Error("invalid tooling plan"); console.log(JSON.stringify(plan.toolingShards))')"
+          printf 'tooling-shards=%s\n' "$tooling_shards" >> "$GITHUB_OUTPUT"
 
   quality:
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
@@ -230,8 +234,12 @@ jobs:
       indices: ${{ toJson(matrix.partition.indices) }}
 
   tooling:
-    name: Tooling
+    name: Tooling ${{ matrix.shard.id }}
     needs: coverage-plan
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJson(needs.coverage-plan.outputs.tooling-shards) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -261,7 +269,17 @@ jobs:
         run: bun install --frozen-lockfile --minimum-release-age 0
       - name: Validate tooling
         if: needs.coverage-plan.outputs.tooling == 'true'
-        run: bun run validate:tooling
+        run: |
+          mkdir -p "$RUNNER_TEMP/tooling-receipts"
+          bun run validate:tooling -- --ci-tooling-shard '${{ matrix.shard.index }}/${{ matrix.shard.count }}' --receipt "$RUNNER_TEMP/tooling-receipts/tooling-${{ matrix.shard.index }}.json"
+      - name: Upload tooling receipt
+        if: always() && needs.coverage-plan.outputs.tooling == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: tooling-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.shard.index }}
+          path: ${{ runner.temp }}/tooling-receipts/tooling-${{ matrix.shard.index }}.json
+          if-no-files-found: error
+          retention-days: 7
 
   ci:
     # Preserve the check display name consumed by merge-on-green and checkup.
@@ -293,6 +311,17 @@ jobs:
           pattern: root-coverage-${{ github.run_id }}-${{ github.run_attempt }}-*
           path: ${{ runner.temp }}/root-receipts
           merge-multiple: true
+      - name: Download Tooling receipts
+        if: always() && needs.coverage-plan.outputs.tooling == 'true'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: tooling-${{ github.run_id }}-${{ github.run_attempt }}-*
+          path: ${{ runner.temp }}/tooling-receipts
+      - name: Join Tooling receipts
+        if: always() && needs.coverage-plan.outputs.tooling == 'true'
+        env:
+          PRODUCERS_RESULT: ${{ (needs.coverage-plan.result == 'success' && needs.tooling.result == 'success') && 'success' || 'failure' }}
+        run: bun run validate:tooling -- --ci-tooling-join "$RUNNER_TEMP/tooling-receipts" --producers-result "$PRODUCERS_RESULT"
       - name: Join Root receipts
         if: always()
         env:
