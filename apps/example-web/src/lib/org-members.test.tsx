@@ -108,6 +108,83 @@ it('keeps the request and refresh with the submitted Organization until refresh 
   await waitFor(() => expect(view.getByRole('button').textContent).toBe('empty'))
 })
 
+function ConcurrentGrant({ orgId }: { orgId: string }) {
+  const [overlay, setOverlay] = useState<Record<string, OrgRoleGrantInput>>({})
+  const [events, setEvents] = useState('')
+  const patch = usePatchOrgRoleGrant({
+    onMutate: (input) => setOverlay((prev) => mergeOptimisticGrant(prev, input)),
+    onSuccess: (input) => {
+      setOverlay((prev) => clearOptimisticGrantIfCurrent(prev, input))
+      setEvents((prev) => `${prev}success:${input.orgId};`)
+    },
+    onError: (_error, input) => {
+      setOverlay((prev) => clearOptimisticGrantIfCurrent(prev, input))
+      setEvents((prev) => `${prev}error:${input.orgId};`)
+    },
+  })
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => patch.mutate({ orgId, roleId: 'r1', moduleId: 'notes', access: 'write' })}
+      >
+        submit
+      </button>
+      <output>
+        {overlay['r1:notes']?.access ?? 'empty'}|{events}
+      </output>
+    </>
+  )
+}
+
+it.each(['resolve', 'reject'] as const)(
+  'preserves newer identical overlay while earlier refresh %s after a switch',
+  async (outcome) => {
+    let finishB!: (value: unknown) => void
+    let finishRefresh!: () => void
+    let rejectRefresh!: (error: unknown) => void
+    const requestB = new Promise<unknown>((resolve) => {
+      finishB = resolve
+    })
+    const refresh = new Promise<void>((resolve, reject) => {
+      finishRefresh = resolve
+      rejectRefresh = reject
+    })
+    fetchMock.mockImplementation((path) => (path.includes('/a/') ? Promise.resolve({}) : requestB))
+    const qc = createTestQueryClient()
+    const invalidate = vi
+      .spyOn(qc, 'invalidateQueries')
+      .mockImplementation((filters) =>
+        filters?.queryKey?.[1] === 'a' ? refresh : Promise.resolve(),
+      )
+    const view = renderWithAppProviders(<ConcurrentGrant orgId="a" />, { queryClient: qc })
+    fireEvent.click(view.getByRole('button', { name: 'submit' }))
+    await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ['org-roles', 'a'] }))
+    view.rerender(<ConcurrentGrant orgId="b" />)
+    fireEvent.click(view.getByRole('button', { name: 'submit' }))
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/orgs/b/roles/r1/grants/notes',
+        expect.anything(),
+      ),
+    )
+    expect(view.getByText(/^write/)).toBeTruthy()
+    await act(async () => {
+      if (outcome === 'resolve') finishRefresh()
+      else rejectRefresh(new Error('refresh failed'))
+    })
+    await waitFor(() =>
+      expect(
+        view.getByText(new RegExp(`^write\\|${outcome === 'resolve' ? 'success' : 'error'}:a;`)),
+      ).toBeTruthy(),
+    )
+    await act(async () => {
+      finishB({})
+    })
+    await waitFor(() => expect(view.getByText(/empty\|.*success:b;/)).toBeTruthy())
+  },
+)
+
 describe('usePatchOrgRoleGrant', () => {
   beforeEach(() => {
     fetchMock.mockReset()

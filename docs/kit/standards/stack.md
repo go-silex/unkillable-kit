@@ -76,11 +76,15 @@ Escape hatch : Postgres/Hyperdrive si un app dépasse D1 — documenté, pas def
 | **Recharts**                                                   | charts (`chart.tsx` shadcn)                                                          | M3+         | livré          | `recharts`                                                                          |
 | **react-day-picker** + **date-fns**                            | calendrier / dates (`@kit/ui`)                                                       | M3+         | livré          | `react-day-picker`, `date-fns`                                                      |
 
-TanStack DB / Charts (`@tanstack/react-db`) is non-default (beta / deprecated), a product option.
+TanStack DB / Charts: non-default (beta / deprecated).
 
-Organization-scoped mutations capture Organization and submitted values in operation variables for requests and cache invalidation, not the current view.
+| Statut         | Paquets              |
+| -------------- | -------------------- |
+| option produit | `@tanstack/react-db` |
 
-**CVA** = Class Variance Authority — variants type-safe des classes Tailwind (Button `variant`/`size`). Standard shadcn.
+Organization mutations use submitted Organization and values for requests and cache invalidation, not the current view.
+
+**CVA** (Class Variance Authority): type-safe Tailwind variants.
 
 ---
 
