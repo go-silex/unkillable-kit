@@ -29,6 +29,25 @@ function requireSuccess(result: SpawnSyncReturns<string>) {
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`)
 }
 
+function assertTimings(
+  output: string,
+  expected: { task: string; status: 'passed' | 'failed'; exitCode: number }[],
+) {
+  const records = output
+    .split('\n')
+    .filter((line) => line.startsWith('{"event":"root-gate:task"'))
+    .map((line) => JSON.parse(line))
+  assert.equal(records.length, expected.length)
+  for (const [index, record] of records.entries()) {
+    assert.deepEqual(
+      { task: record.task, status: record.status, exitCode: record.exitCode },
+      expected[index],
+    )
+    assert.equal(typeof record.durationMs, 'number')
+    assert.ok(Number.isFinite(record.durationMs) && record.durationMs >= 0)
+  }
+}
+
 function withFixture(
   coverageScript: string,
   exercise: (fixture: string, env: NodeJS.ProcessEnv) => void,
@@ -44,7 +63,8 @@ function withFixture(
         key === 'COVERAGE_LIST_KIT' ||
         key === 'COVERAGE_ONLY' ||
         key === 'COVERAGE_CHANGED_BASE' ||
-        key === 'ROOT_FIXTURE_FAIL'
+        key === 'ROOT_FIXTURE_FAIL' ||
+        key === 'ROOT_FIXTURE_PROGRESS'
       )
         delete env[key]
     }
@@ -88,7 +108,7 @@ function withFixture(
     )
     writeFileSync(
       join(fixture, 'task.ts'),
-      "import { appendFileSync } from 'node:fs'\nappendFileSync('effects.txt', process.argv[2] + '\\n')\nif (process.env.ROOT_FIXTURE_FAIL === process.argv[2]) process.exit(17)\n",
+      "import { appendFileSync, writeSync } from 'node:fs'\nappendFileSync('effects.txt', process.argv[2] + '\\n')\nif (process.env.ROOT_FIXTURE_PROGRESS) writeSync(1, 'progress:' + process.argv[2])\nif (process.env.ROOT_FIXTURE_FAIL === process.argv[2]) process.exit(17)\n",
     )
 
     const git = (...args: string[]) => command(fixture, env, 'git', args)
@@ -444,17 +464,38 @@ function fullAndPlan() {
     const invoke = (...args: string[]) =>
       command(fixture, env, process.execPath, ['run', 'validate:full', ...args])
     const effects = join(fixture, 'effects.txt')
-    requireSuccess(invoke('--', '--plan'))
+    const plan = invoke('--', '--plan')
+    requireSuccess(plan)
+    assert.deepEqual(JSON.parse(plan.stdout).tasks, [
+      'core:first',
+      'test:coverage',
+      'core:last',
+      'core:tail',
+    ])
     assert.equal(existsSync(effects), false, 'plan must not execute tasks')
     const invalid = invoke('--', '--plan', '--ci-group', 'core')
     assert.ok(invalid.status !== null && invalid.status !== 0, 'mixed modes must fail')
     assert.equal(existsSync(effects), false, 'invalid CLI must not execute tasks')
-    requireSuccess(invoke())
+    const success = invoke()
+    requireSuccess(success)
+    assertTimings(
+      success.stdout,
+      ['core:first', 'test:coverage', 'core:last', 'core:tail'].map((task) => ({
+        task,
+        status: 'passed',
+        exitCode: 0,
+      })),
+    )
     assert.equal(readFileSync(effects, 'utf8'), 'core:first\ntest:coverage\ncore:last\ncore:tail\n')
     rmSync(effects)
     env.ROOT_FIXTURE_FAIL = 'core:last'
     const failed = invoke()
     assert.ok(failed.status !== null && failed.status !== 0, 'failed child must fail Root')
+    assertTimings(failed.stdout, [
+      { task: 'core:first', status: 'passed', exitCode: 0 },
+      { task: 'test:coverage', status: 'passed', exitCode: 0 },
+      { task: 'core:last', status: 'failed', exitCode: 17 },
+    ])
     assert.equal(readFileSync(effects, 'utf8'), 'core:first\ntest:coverage\ncore:last\n')
   })
 }
@@ -474,12 +515,24 @@ function toolingAndPlan() {
     const invalid = invoke('--', '--plan', '--ci-group', 'core')
     assert.ok(invalid.status !== null && invalid.status !== 0)
     assert.equal(existsSync(effects), false, 'invalid options must not execute tasks')
-    requireSuccess(invoke())
+    env.ROOT_FIXTURE_PROGRESS = '1'
+    const success = invoke()
+    requireSuccess(success)
+    assert.ok(success.stdout.includes('progress:tooling:last\n{"event":"root-gate:task"'))
+    assertTimings(
+      success.stdout,
+      parsed.tasks.map((task: string) => ({ task, status: 'passed', exitCode: 0 })),
+    )
     assert.equal(readFileSync(effects, 'utf8'), 'tooling:first\ntooling:last\ntooling:tail\n')
     rmSync(effects)
     env.ROOT_FIXTURE_FAIL = 'tooling:last'
     const failed = invoke()
     assert.ok(failed.status !== null && failed.status !== 0)
+    assert.ok(failed.stdout.includes('progress:tooling:last\n{"event":"root-gate:task"'))
+    assertTimings(failed.stdout, [
+      { task: 'tooling:first', status: 'passed', exitCode: 0 },
+      { task: 'tooling:last', status: 'failed', exitCode: 17 },
+    ])
     assert.equal(readFileSync(effects, 'utf8'), 'tooling:first\ntooling:last\n')
     rmSync(effects)
 

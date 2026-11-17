@@ -6,6 +6,10 @@
 
 - Run selected tooling self-tests in three canonical round-robin CI shards, with sequential fail-fast execution per VM and current-run receipt admission in the existing `ci` check. Local tooling remains monolithic and ordered; no coverage policy changes.
 
+### Root gate task timings
+
+- Emit a JSON timing and status record for each attempted sequential Root gate task, including failures; planning output and receipt schemas remain unchanged.
+
 ### Inbox read selection
 
 - `markRead` accepts an optional trusted server-authored, bound SELECT of Notification IDs, evaluated inside the read UPDATE to narrow the existing scope. Omitted selection preserves existing behavior; read-once semantics and newly marked row counts remain unchanged.
