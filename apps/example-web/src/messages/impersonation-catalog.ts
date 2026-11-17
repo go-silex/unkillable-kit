@@ -20,6 +20,8 @@ export type ImpersonationMessages = {
   impersonationRole: string
   impersonationSave: string
   impersonationSaved: string
+  impersonationConflict: string
+  impersonationReload: string
 }
 
 export const impersonationFr: ImpersonationMessages = {
@@ -46,6 +48,8 @@ export const impersonationFr: ImpersonationMessages = {
   impersonationRole: 'Rôle',
   impersonationSave: 'Enregistrer',
   impersonationSaved: 'Autorisations enregistrées',
+  impersonationConflict: 'Ces autorisations ont changé. Rechargez-les avant de les enregistrer.',
+  impersonationReload: 'Recharger',
 }
 
 export const impersonationEn: ImpersonationMessages = {
@@ -72,4 +76,6 @@ export const impersonationEn: ImpersonationMessages = {
   impersonationRole: 'Role',
   impersonationSave: 'Save',
   impersonationSaved: 'Permissions saved',
+  impersonationConflict: 'These permissions changed. Reload them before saving.',
+  impersonationReload: 'Reload',
 }

@@ -19,10 +19,10 @@ Organization and target boundaries, read/write business access, sensitive-route 
 live grant changes, stale-context refusal (including Bearer fallback attempts), mandatory
 pre-dispatch audit and return despite audit failure.
 
-Frontend contracts in `apps/example-web/src/lib/impersonation.test.ts`, `api.test.ts`
-and `components/auth-gates.test.tsx` protect identity transitions, cache/request fences,
-same-session synchronization and recovery-only behavior when `/me` fails. A successful
-business dispatch is not implied by an audit record: the recorded action is an attempt.
+Web tests `lib/impersonation.test.ts`, `api.test.ts` and `components/auth-gates.test.tsx`
+cover identity transitions, cache/request fences, same-session sync and `/me` recovery.
+Audit records attempts, not dispatch success. Permission-card tests cover pristine refresh,
+dirty conflict and explicit reload, not server-side atomic concurrency control.
 
 Local browser proof uses the actual example UI and API with Better Auth and disposable
 SQLite through the Node adapter. Observed paths include read-mode mutation refusal,
