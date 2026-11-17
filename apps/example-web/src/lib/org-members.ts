@@ -16,7 +16,7 @@ export type Invitation = {
   expiresAt: string | null
 }
 
-export type ModuleAccess = 'write' | 'read' | 'disabled'
+type ModuleAccess = 'write' | 'read' | 'disabled'
 
 export type OrgRoleGrantInput = {
   orgId: string
