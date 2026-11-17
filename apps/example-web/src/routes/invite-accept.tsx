@@ -38,12 +38,21 @@ function Invitation({ invitationId }: { invitationId: string }) {
     try {
       await queryClient.cancelQueries({ queryKey: meQueryKey, exact: true })
       if (!active.current) return
+      let receipt: AbortSignal | undefined
       await queryClient.fetchQuery({
         queryKey: meQueryKey,
-        queryFn: fetchMe,
+        queryFn: async (context) => {
+          const signal = context.signal
+          const profile = await fetchMe(context)
+          if (!signal.aborted) receipt = signal
+          return profile
+        },
         staleTime: 0,
         retry: false,
       })
+      // A reverted cancellation may fulfill fetchQuery with the previous cache.
+      const completed = receipt as AbortSignal | undefined
+      if (!completed || completed.aborted) throw new Error('Profile refresh was cancelled')
       if (active.current) await navigate({ to: '/app' })
     } catch {
       if (active.current) setPhase('recovery')

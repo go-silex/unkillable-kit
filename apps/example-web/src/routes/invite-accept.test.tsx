@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { apiFetch } from '../lib/api'
 import type { MeOrg } from '../lib/auth'
 import { ensureMe, fetchMe, meQueryKey } from '../lib/auth'
+import { configureImpersonation, refreshImpersonation } from '../lib/impersonation'
 import { en } from '../messages/en'
 import { createMe, createMeOrg } from '../test/factories'
 import { createTestQueryClient } from '../test/query-client'
@@ -157,5 +158,37 @@ describe('invitation acceptance', () => {
     await Promise.resolve()
     expect(router.state.location.pathname).toBe('/invite/accept')
     expect(api.mock.calls.filter(([path]) => path === '/api/me')).toHaveLength(0)
+  })
+  it('keeps accepted recovery when focus cancels the post-accept read', async () => {
+    let resolveOld!: (value: unknown) => void
+    const old = new Promise<unknown>((resolve) => {
+      resolveOld = resolve
+    })
+    let reads = 0
+    let firstSignal: AbortSignal | null | undefined
+    api.mockImplementation(async (path, init) => {
+      if (path !== '/api/me') return { org: b, membership: { role: 'member' } }
+      reads += 1
+      if (reads === 1) {
+        firstSignal = init?.signal
+        return old
+      }
+      if (reads === 2) throw new Error('offline')
+      return createMe({ orgs: [a, b] })
+    })
+    const { qc, router } = setup()
+    configureImpersonation(qc, async () => {})
+    await userEvent.click(await screen.findByRole('button', { name: en.inviteAcceptSubmit }))
+    await waitFor(() => expect(reads).toBe(1))
+    window.dispatchEvent(new Event('focus'))
+    await expect(refreshImpersonation()).rejects.toThrow('offline')
+    expect(firstSignal?.aborted).toBe(true)
+    expect(await screen.findByText(en.inviteRefreshFailed)).toBeInTheDocument()
+    expect(router.state.location.pathname).toBe('/invite/accept')
+    resolveOld(createMe({ orgs: [a] }))
+    await userEvent.click(screen.getByRole('button', { name: en.retry }))
+    expect(await screen.findByText('Alpha, Beta')).toBeInTheDocument()
+    expect(api.mock.calls.filter(([path]) => path !== '/api/me')).toHaveLength(1)
+    expect(reads).toBe(3)
   })
 })
