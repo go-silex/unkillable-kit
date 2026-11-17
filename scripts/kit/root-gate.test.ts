@@ -63,7 +63,8 @@ function withFixture(
         key === 'COVERAGE_LIST_KIT' ||
         key === 'COVERAGE_ONLY' ||
         key === 'COVERAGE_CHANGED_BASE' ||
-        key === 'ROOT_FIXTURE_FAIL'
+        key === 'ROOT_FIXTURE_FAIL' ||
+        key === 'ROOT_FIXTURE_PROGRESS'
       )
         delete env[key]
     }
@@ -107,7 +108,7 @@ function withFixture(
     )
     writeFileSync(
       join(fixture, 'task.ts'),
-      "import { appendFileSync } from 'node:fs'\nappendFileSync('effects.txt', process.argv[2] + '\\n')\nif (process.env.ROOT_FIXTURE_FAIL === process.argv[2]) process.exit(17)\n",
+      "import { appendFileSync, writeSync } from 'node:fs'\nappendFileSync('effects.txt', process.argv[2] + '\\n')\nif (process.env.ROOT_FIXTURE_PROGRESS) writeSync(1, `progress:${process.argv[2]}`)\nif (process.env.ROOT_FIXTURE_FAIL === process.argv[2]) process.exit(17)\n",
     )
 
     const git = (...args: string[]) => command(fixture, env, 'git', args)
@@ -514,8 +515,10 @@ function toolingAndPlan() {
     const invalid = invoke('--', '--plan', '--ci-group', 'core')
     assert.ok(invalid.status !== null && invalid.status !== 0)
     assert.equal(existsSync(effects), false, 'invalid options must not execute tasks')
+    env.ROOT_FIXTURE_PROGRESS = '1'
     const success = invoke()
     requireSuccess(success)
+    assert.ok(success.stdout.includes('progress:tooling:last\n{"event":"root-gate:task"'))
     assertTimings(
       success.stdout,
       parsed.tasks.map((task: string) => ({ task, status: 'passed', exitCode: 0 })),
@@ -525,6 +528,7 @@ function toolingAndPlan() {
     env.ROOT_FIXTURE_FAIL = 'tooling:last'
     const failed = invoke()
     assert.ok(failed.status !== null && failed.status !== 0)
+    assert.ok(failed.stdout.includes('progress:tooling:last\n{"event":"root-gate:task"'))
     assertTimings(failed.stdout, [
       { task: 'tooling:first', status: 'passed', exitCode: 0 },
       { task: 'tooling:last', status: 'failed', exitCode: 17 },

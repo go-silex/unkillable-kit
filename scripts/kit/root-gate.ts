@@ -130,13 +130,13 @@ function run(tasks: string[], shard?: string): { results: Result[]; code: number
     const failed = exitCode !== 0 || !!child.error || !!child.signal
     results.push({ task, exitCode })
     console.log(
-      JSON.stringify({
+      `\n${JSON.stringify({
         event: 'root-gate:task',
         task,
         durationMs,
         status: failed ? 'failed' : 'passed',
         exitCode,
-      }),
+      })}`,
     )
     if (failed) return { results, code: exitCode || 1 }
   }
