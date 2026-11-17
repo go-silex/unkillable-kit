@@ -136,6 +136,7 @@ its absence does not weaken the portable missing-dependency assertions.
 ### Org invites local E2E (B3 S2)
 
 Automated suite: `apps/example-api/src/invitations.test.ts` (≥ 8 cases: create, accept, email bind, ceiling, IDOR, sk_, 409, super deny, BA DENY).
+The web invitation route tests exercise fresh cached memberships, a stale in-flight profile read, POST rejection and profile-read recovery without repeating acceptance. They do not prove deployed API or email delivery.
 
 Manual dogfood (after `bun run db:seed` + API + web):
 
