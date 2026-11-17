@@ -123,4 +123,133 @@ describe('Impersonation permission drafts', () => {
     await act(async () => resolve(response(false, true)))
     await waitFor(() => expect(write).toBeEnabled())
   })
+
+  it('does not let an older pending GET undo a confirmed save', async () => {
+    let releaseGet!: (value: unknown) => void
+    let releasePatch!: (value: unknown) => void
+    const oldGet = new Promise<unknown>((resolve) => {
+      releaseGet = resolve
+    })
+    const firstPatch = new Promise<unknown>((resolve) => {
+      releasePatch = resolve
+    })
+    let gets = 0
+    let pendingSignal: AbortSignal | null | undefined
+    const patch = vi.fn((_body: string) =>
+      patch.mock.calls.length === 1 ? firstPatch : response(false, true),
+    )
+    const client = setup(patch, (signal) => {
+      if (++gets === 1) return response(true, false)
+      pendingSignal = signal
+      return oldGet
+    })
+    const user = userEvent.setup()
+    const read = await screen.findByRole('checkbox', { name: 'Read' })
+    await user.click(read)
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(patch).toHaveBeenCalledTimes(1))
+    act(() => {
+      void client.refetchQueries({ queryKey: key })
+    })
+    await waitFor(() => expect(gets).toBe(2))
+    await act(async () => releasePatch(response(false, false)))
+    expect(pendingSignal?.aborted).toBe(true)
+    await waitFor(() => expect(read).toBeEnabled())
+    await act(async () => releaseGet(response(true, false)))
+    expect(read).not.toBeChecked()
+    await user.click(screen.getByRole('checkbox', { name: 'Write' }))
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(patch).toHaveBeenCalledTimes(2))
+    expect(JSON.parse(patch.mock.calls[1]?.[0] ?? '')).toEqual({
+      role: 'staff',
+      read: false,
+      write: true,
+    })
+  })
+
+  it('retains a newer observed policy and conflict when an older PATCH arrives', async () => {
+    let releaseGet!: (value: unknown) => void
+    let releasePatch!: (value: unknown) => void
+    const newerGet = new Promise<unknown>((resolve) => {
+      releaseGet = resolve
+    })
+    const firstPatch = new Promise<unknown>((resolve) => {
+      releasePatch = resolve
+    })
+    let gets = 0
+    const patch = vi.fn((_body: string) =>
+      patch.mock.calls.length === 1 ? firstPatch : response(false, true),
+    )
+    const client = setup(patch, () =>
+      ++gets === 1 ? response(true, false) : gets === 2 ? newerGet : response(false, false),
+    )
+    const user = userEvent.setup()
+    const read = await screen.findByRole('checkbox', { name: 'Read' })
+    const write = screen.getByRole('checkbox', { name: 'Write' })
+    await user.click(write)
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(patch).toHaveBeenCalledTimes(1))
+    act(() => {
+      void client.refetchQueries({ queryKey: key })
+    })
+    await waitFor(() => expect(gets).toBe(2))
+    await act(async () => releaseGet(response(false, false)))
+    expect(await screen.findByRole('alert')).toBeInTheDocument()
+    await act(async () => releasePatch(response(true, true)))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Reload' })).toBeEnabled())
+    expect(read).toBeChecked()
+    expect(write).toBeChecked()
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
+    await user.click(screen.getByRole('button', { name: 'Reload' }))
+    expect(read).not.toBeChecked()
+    expect(write).not.toBeChecked()
+    await user.click(write)
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(patch).toHaveBeenCalledTimes(2))
+    expect(JSON.parse(patch.mock.calls[1]?.[0] ?? '')).toEqual({
+      role: 'staff',
+      read: false,
+      write: true,
+    })
+  })
+
+  it('reconciles simultaneous row saves without replacing the other row', async () => {
+    let releaseStaff!: (value: unknown) => void
+    let releaseSuper!: (value: unknown) => void
+    const staffSave = new Promise<unknown>((resolve) => {
+      releaseStaff = resolve
+    })
+    const superSave = new Promise<unknown>((resolve) => {
+      releaseSuper = resolve
+    })
+    const policies = (staff: boolean, superAdmin: boolean) => ({
+      permissions: [
+        { role: 'staff', read: staff, write: false },
+        { role: 'super_admin', read: superAdmin, write: false },
+      ],
+      requestId: 'test',
+    })
+    let gets = 0
+    const patch = vi.fn((body: string) =>
+      JSON.parse(body).role === 'staff' ? staffSave : superSave,
+    )
+    setup(patch, () => (++gets === 1 ? policies(false, false) : policies(true, true)))
+    const user = userEvent.setup()
+    const reads = await screen.findAllByRole('checkbox', { name: 'Read' })
+    await user.click(reads[0]!)
+    await user.click(reads[1]!)
+    const saves = screen.getAllByRole('button', { name: 'Save' })
+    await user.click(saves[0]!)
+    await user.click(saves[1]!)
+    await waitFor(() => expect(patch).toHaveBeenCalledTimes(2))
+    await act(async () => releaseStaff(policies(true, false)))
+    await waitFor(() => expect(reads[0]).toBeEnabled())
+    await act(async () => releaseSuper(policies(false, true)))
+    await waitFor(() => expect(gets).toBe(2))
+    expect(reads[0]).toBeChecked()
+    expect(await screen.findByRole('alert')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Reload' }))
+    expect(reads[1]).toBeChecked()
+    expect(reads[0]).toBeChecked()
+  })
 })
