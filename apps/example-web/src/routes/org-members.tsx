@@ -134,7 +134,7 @@ function OrgMembersManagedBody({
         </CardContent>
       </Card>
 
-      <OrgRolesCard orgId={orgId} roles={roles} />
+      <OrgRolesCard key={orgId} orgId={orgId} roles={roles} />
     </>
   )
 }

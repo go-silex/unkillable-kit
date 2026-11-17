@@ -1,5 +1,4 @@
 import { type UseQueryResult, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useRef } from 'react'
 import { apiFetch } from './api'
 
 export type Member = {
@@ -20,6 +19,7 @@ export type Invitation = {
 export type ModuleAccess = 'write' | 'read' | 'disabled'
 
 export type OrgRoleGrantInput = {
+  orgId: string
   roleId: string
   moduleId: string
   access: ModuleAccess
@@ -36,19 +36,19 @@ export function orgRoleGrantKey(roleId: string, moduleId: string): string {
 }
 
 export function mergeOptimisticGrant(
-  prev: Record<string, ModuleAccess>,
+  prev: Record<string, OrgRoleGrantInput>,
   input: OrgRoleGrantInput,
-): Record<string, ModuleAccess> {
-  return { ...prev, [orgRoleGrantKey(input.roleId, input.moduleId)]: input.access }
+): Record<string, OrgRoleGrantInput> {
+  return { ...prev, [orgRoleGrantKey(input.roleId, input.moduleId)]: input }
 }
 
 /** Drop overlay only when it still represents this mutation (not a newer one). */
 export function clearOptimisticGrantIfCurrent(
-  prev: Record<string, ModuleAccess>,
+  prev: Record<string, OrgRoleGrantInput>,
   input: OrgRoleGrantInput,
-): Record<string, ModuleAccess> {
+): Record<string, OrgRoleGrantInput> {
   const key = orgRoleGrantKey(input.roleId, input.moduleId)
-  if (prev[key] !== input.access) return prev
+  if (prev[key] !== input) return prev
   const next = { ...prev }
   delete next[key]
   return next
@@ -139,25 +139,23 @@ export function useCreateOrgRole(orgId: string) {
   })
 }
 
-export function usePatchOrgRoleGrant(orgId: string, handlers?: PatchOrgRoleGrantHandlers) {
+export function usePatchOrgRoleGrant(handlers?: PatchOrgRoleGrantHandlers) {
   const qc = useQueryClient()
-  const handlersRef = useRef(handlers)
-  handlersRef.current = handlers
   return useMutation({
     mutationFn: (input: OrgRoleGrantInput) =>
-      apiFetch(`/api/orgs/${orgId}/roles/${input.roleId}/grants/${input.moduleId}`, {
+      apiFetch(`/api/orgs/${input.orgId}/roles/${input.roleId}/grants/${input.moduleId}`, {
         method: 'PATCH',
         body: JSON.stringify({ access: input.access }),
       }),
     onMutate: (input) => {
-      handlersRef.current?.onMutate?.(input)
+      handlers?.onMutate?.(input)
     },
     onSuccess: async (_data, input) => {
-      await qc.invalidateQueries({ queryKey: orgRolesQueryKey(orgId) })
-      handlersRef.current?.onSuccess?.(input)
+      await qc.invalidateQueries({ queryKey: orgRolesQueryKey(input.orgId) })
+      handlers?.onSuccess?.(input)
     },
     onError: (error, input) => {
-      handlersRef.current?.onError?.(error, input)
+      handlers?.onError?.(error, input)
     },
   })
 }

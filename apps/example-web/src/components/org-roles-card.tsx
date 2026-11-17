@@ -30,8 +30,8 @@ import { apiErrorToMessage } from '../lib/api'
 import { useLocale } from '../lib/locale'
 import {
   clearOptimisticGrantIfCurrent,
-  type ModuleAccess,
   mergeOptimisticGrant,
+  type OrgRoleGrantInput,
   type OrgRolesQuery,
   orgRoleGrantKey,
   useCreateOrgRole,
@@ -46,7 +46,7 @@ export function OrgRolesCard({ orgId, roles }: { orgId: string; roles: OrgRolesQ
   const [newRoleName, setNewRoleName] = useState('')
   const [pendingDeleteRoleId, setPendingDeleteRoleId] = useState<string | null>(null)
   /** Optimistic grant access while PATCH is in flight — key `${roleId}:${moduleId}`. */
-  const [optimisticAccess, setOptimisticAccess] = useState<Record<string, ModuleAccess>>({})
+  const [optimisticAccess, setOptimisticAccess] = useState<Record<string, OrgRoleGrantInput>>({})
 
   const accessItems = useMemo(
     () =>
@@ -59,7 +59,7 @@ export function OrgRolesCard({ orgId, roles }: { orgId: string; roles: OrgRolesQ
   )
 
   const createRole = useCreateOrgRole(orgId)
-  const patchGrant = usePatchOrgRoleGrant(orgId, {
+  const patchGrant = usePatchOrgRoleGrant({
     onMutate: (input) => {
       setOptimisticAccess((prev) => mergeOptimisticGrant(prev, input))
     },
@@ -177,7 +177,7 @@ export function OrgRolesCard({ orgId, roles }: { orgId: string; roles: OrgRolesQ
                       <div className="flex flex-wrap gap-2">
                         {r.grants.map((g) => {
                           const grantKey = orgRoleGrantKey(r.id, g.moduleId)
-                          const displayAccess = optimisticAccess[grantKey] ?? g.access
+                          const displayAccess = optimisticAccess[grantKey]?.access ?? g.access
                           const patchingGrant =
                             patchingThis && patchGrant.variables?.moduleId === g.moduleId
                           if (r.isSystem) {
@@ -210,6 +210,7 @@ export function OrgRolesCard({ orgId, roles }: { orgId: string; roles: OrgRolesQ
                                     v !== displayAccess
                                   ) {
                                     patchGrant.mutate({
+                                      orgId,
                                       roleId: r.id,
                                       moduleId: g.moduleId,
                                       access: v,

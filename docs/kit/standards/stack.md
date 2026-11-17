@@ -77,6 +77,8 @@ Escape hatch : Postgres/Hyperdrive si un app dépasse D1 — documenté, pas def
 | **Recharts**                                                   | charts (`chart.tsx` shadcn)                                                          | M3+         | livré          | `recharts`                                                                          |
 | **react-day-picker** + **date-fns**                            | calendrier / dates (`@kit/ui`)                                                       | M3+         | livré          | `react-day-picker`, `date-fns`                                                      |
 
+Organization-scoped mutations capture the Organization and submitted values in operation variables; requests and cache invalidation use that identity rather than the currently displayed Organization.
+
 **CVA** = Class Variance Authority — variants type-safe des classes Tailwind (Button `variant`/`size`). Standard shadcn.
 
 ---
