@@ -1,6 +1,7 @@
-import { screen, waitFor } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ReactElement } from 'react'
+import { toast } from 'sonner'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { apiFetch } from '../lib/api'
 import type { MeResponse } from '../lib/auth'
@@ -109,5 +110,72 @@ describe('ItemsPage write chrome', () => {
     expect(post).toBeTruthy()
     const postInit = post?.[1] as { headers?: Record<string, string> } | undefined
     expect(postInit?.headers?.['X-Org-Id']).toBeUndefined()
+  })
+})
+
+describe('ItemsPage deletion', () => {
+  const first = { id: 'i1', code: 'ONE', label: 'First item', description: '', active: true }
+  const second = { id: 'i2', code: 'TWO', label: 'Second item', description: '', active: true }
+
+  async function confirmSecond() {
+    const user = userEvent.setup()
+    const row = (await screen.findByText('Second item')).closest('tr')!
+    await user.click(within(row).getAllByRole('button')[1]!)
+    const dialog = screen.getByRole('alertdialog')
+    expect(within(dialog).getByText('TWO — Second item')).toBeInTheDocument()
+    await user.click(within(dialog).getByRole('button', { name: en.delete }))
+  }
+
+  it('retains the item and confirmation on failure without an unhandled rejection', async () => {
+    const error = new Error('delete failed')
+    const errorToast = vi.spyOn(toast, 'error').mockImplementation(() => '')
+    const unhandled: unknown[] = []
+    const onUnhandled = (reason: unknown) => unhandled.push(reason)
+    process.on('unhandledRejection', onUnhandled)
+    try {
+      fetchMock.mockImplementation(
+        createApiDispatcher()
+          .on('GET', '/api/items', () => ({ items: [first, second] }))
+          .on('DELETE', '/api/items/i2', () => Promise.reject(error)).fetch,
+      )
+      wrap(meWith([adminOrg]), <ItemsPage />)
+      await confirmSecond()
+      await waitFor(() => expect(errorToast).toHaveBeenCalledTimes(1))
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(unhandled).not.toContain(error)
+      expect(unhandled).toEqual([])
+      expect(screen.getByText('Second item')).toBeInTheDocument()
+      expect(screen.getByRole('alertdialog')).toHaveTextContent('TWO — Second item')
+    } finally {
+      process.off('unhandledRejection', onUnhandled)
+      errorToast.mockRestore()
+    }
+  })
+
+  it('closes only after the successful deletion refreshes the list without an org header', async () => {
+    let releaseRefresh!: (value: { items: (typeof first)[] }) => void
+    const refresh = new Promise<{ items: (typeof first)[] }>((resolve) => {
+      releaseRefresh = resolve
+    })
+    let reads = 0
+    fetchMock.mockImplementation(
+      createApiDispatcher()
+        .on('GET', '/api/items', () => (++reads === 1 ? { items: [first, second] } : refresh))
+        .on('DELETE', '/api/items/i2', () => ({})).fetch,
+    )
+    wrap(meWith([adminOrg]), <ItemsPage />)
+    await confirmSecond()
+    await waitFor(() => expect(reads).toBe(2))
+    expect(screen.getByRole('alertdialog')).toBeInTheDocument()
+    expect(screen.getByText('Second item')).toBeInTheDocument()
+    const request = fetchMock.mock.calls.find(
+      ([path, init]) => path === '/api/items/i2' && init?.method === 'DELETE',
+    )
+    expect(request).toBeDefined()
+    expect(new Headers(request?.[1]?.headers).has('X-Org-Id')).toBe(false)
+    releaseRefresh({ items: [first] })
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
+    expect(screen.queryByText('Second item')).not.toBeInTheDocument()
+    expect(screen.getByText('First item')).toBeInTheDocument()
   })
 })
