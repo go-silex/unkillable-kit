@@ -108,7 +108,7 @@ function withFixture(
     )
     writeFileSync(
       join(fixture, 'task.ts'),
-      "import { appendFileSync, writeSync } from 'node:fs'\nappendFileSync('effects.txt', process.argv[2] + '\\n')\nif (process.env.ROOT_FIXTURE_PROGRESS) writeSync(1, `progress:${process.argv[2]}`)\nif (process.env.ROOT_FIXTURE_FAIL === process.argv[2]) process.exit(17)\n",
+      "import { appendFileSync, writeSync } from 'node:fs'\nappendFileSync('effects.txt', process.argv[2] + '\\n')\nif (process.env.ROOT_FIXTURE_PROGRESS) writeSync(1, 'progress:' + process.argv[2])\nif (process.env.ROOT_FIXTURE_FAIL === process.argv[2]) process.exit(17)\n",
     )
 
     const git = (...args: string[]) => command(fixture, env, 'git', args)
