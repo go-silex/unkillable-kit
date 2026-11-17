@@ -13,16 +13,31 @@ const queryKey = ['admin-impersonation-permissions'] as const
 function PermissionRow({ permission }: { permission: ImpersonationRolePermission }) {
   const { m } = useLocale()
   const qc = useQueryClient()
-  const [read, setRead] = useState(permission.read)
-  const [write, setWrite] = useState(permission.write)
+  const [draft, setDraft] = useState<{
+    base: { read: boolean; write: boolean }
+    values: { read: boolean; write: boolean }
+  } | null>(null)
+  const values = draft?.values ?? permission
+  const conflict =
+    draft !== null && (draft.base.read !== permission.read || draft.base.write !== permission.write)
+  function edit(field: 'read' | 'write', value: boolean) {
+    const base = draft?.base ?? { read: permission.read, write: permission.write }
+    const next = { read: values.read, write: values.write, [field]: value }
+    setDraft(
+      !conflict && next.read === base.read && next.write === base.write
+        ? null
+        : { base, values: next },
+    )
+  }
   const save = useMutation({
     mutationFn: () =>
       apiFetch<PermissionsResponse>('/api/admin/impersonation/permissions', {
         method: 'PATCH',
-        body: JSON.stringify({ role: permission.role, read, write }),
+        body: JSON.stringify({ role: permission.role, ...values }),
       }),
     onSuccess: async (data) => {
       qc.setQueryData(queryKey, data)
+      setDraft(null)
       await qc.invalidateQueries({ queryKey: meQueryKey })
       toast.success(m.impersonationSaved)
     },
@@ -34,8 +49,8 @@ function PermissionRow({ permission }: { permission: ImpersonationRolePermission
       <label className="flex items-center gap-2">
         <input
           type="checkbox"
-          checked={read}
-          onChange={(e) => setRead(e.target.checked)}
+          checked={values.read}
+          onChange={(e) => edit('read', e.target.checked)}
           disabled={save.isPending}
         />
         {m.impersonationRead}
@@ -43,8 +58,8 @@ function PermissionRow({ permission }: { permission: ImpersonationRolePermission
       <label className="flex items-center gap-2">
         <input
           type="checkbox"
-          checked={write}
-          onChange={(e) => setWrite(e.target.checked)}
+          checked={values.write}
+          onChange={(e) => edit('write', e.target.checked)}
           disabled={save.isPending}
         />
         {m.impersonationWrite}
@@ -52,11 +67,25 @@ function PermissionRow({ permission }: { permission: ImpersonationRolePermission
       <Button
         type="button"
         size="sm"
-        disabled={save.isPending || (read === permission.read && write === permission.write)}
+        disabled={save.isPending || draft === null || conflict}
         onClick={() => save.mutate()}
       >
         {m.impersonationSave}
       </Button>
+      {conflict && (
+        <div role="alert" className="flex flex-wrap items-center gap-2 text-destructive">
+          <span>{m.impersonationConflict}</span>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            disabled={save.isPending}
+            onClick={() => setDraft(null)}
+          >
+            {m.impersonationReload}
+          </Button>
+        </div>
+      )}
     </div>
   )
 }

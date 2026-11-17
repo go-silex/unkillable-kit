@@ -24,6 +24,10 @@ and `components/auth-gates.test.tsx` protect identity transitions, cache/request
 same-session synchronization and recovery-only behavior when `/me` fails. A successful
 business dispatch is not implied by an audit record: the recorded action is an attempt.
 
+The Example Web permission-card component tests own the draft contract: refreshed policy
+updates pristine rows, while a changed editing base blocks saving until explicit reload.
+This client-side check is not a server-side concurrency guarantee.
+
 Local browser proof uses the actual example UI and API with Better Auth and disposable
 SQLite through the Node adapter. Observed paths include read-mode mutation refusal,
 target-owned business writes, cross-tab return and recovery-only UI during a `/me`
