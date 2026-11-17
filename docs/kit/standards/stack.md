@@ -78,7 +78,7 @@ Escape hatch : Postgres/Hyperdrive si un app dépasse D1 — documenté, pas def
 
 TanStack DB / Charts (`@tanstack/react-db`) is non-default (beta / deprecated), a product option.
 
-Organization-scoped mutations capture Organization and submitted values in operation variables for requests and cache invalidation for each operation, not the current view.
+Organization-scoped mutations capture Organization and submitted values in operation variables for requests and cache invalidation, not the current view.
 
 **CVA** = Class Variance Authority — variants type-safe des classes Tailwind (Button `variant`/`size`). Standard shadcn.
 
