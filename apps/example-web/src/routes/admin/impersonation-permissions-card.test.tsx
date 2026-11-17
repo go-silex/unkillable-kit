@@ -213,9 +213,78 @@ describe('Impersonation permission drafts', () => {
     })
   })
 
+  it.each(['failure', 'success'] as const)(
+    'preserves mounted drafts when a pending refresh is cancelled before save (%s)',
+    async (outcome) => {
+      let releaseGet!: (value: unknown) => void
+      let resolvePatch!: (value: unknown) => void
+      let rejectPatch!: (error: Error) => void
+      const oldGet = new Promise<unknown>((resolve) => {
+        releaseGet = resolve
+      })
+      const pendingPatch = new Promise<unknown>((resolve, reject) => {
+        resolvePatch = resolve
+        rejectPatch = reject
+      })
+      const policies = (staff: boolean, superAdmin: boolean) => ({
+        permissions: [
+          { role: 'staff', read: staff, write: false },
+          { role: 'super_admin', read: superAdmin, write: false },
+        ],
+        requestId: 'test',
+      })
+      let gets = 0
+      let signal: AbortSignal | null | undefined
+      const patch = vi.fn(() => pendingPatch)
+      const client = setup(patch, (currentSignal) => {
+        if (++gets === 1) return policies(false, false)
+        signal = currentSignal
+        return oldGet
+      })
+      const user = userEvent.setup()
+      const initialReads = await screen.findAllByRole('checkbox', { name: 'Read' })
+      await user.click(initialReads[0]!)
+      await user.click(initialReads[1]!)
+      act(() => {
+        void client.refetchQueries({ queryKey: key })
+      })
+      await waitFor(() => expect(gets).toBe(2))
+      await user.click(screen.getAllByRole('button', { name: 'Save' })[0]!)
+      await waitFor(() => expect(patch).toHaveBeenCalledTimes(1))
+      expect(signal?.aborted).toBe(true)
+      expect(client.getQueryState(key)?.fetchStatus).toBe('idle')
+      expect(client.getQueryState(key)?.status).toBe('success')
+      expect(screen.getAllByRole('checkbox', { name: 'Read' })).toHaveLength(2)
+      expect(screen.getAllByRole('checkbox', { name: 'Read' })[0]).toBeChecked()
+      expect(screen.getAllByRole('checkbox', { name: 'Read' })[1]).toBeChecked()
+      expect(screen.getAllByRole('button', { name: 'Save' })[0]).toBeDisabled()
+      expect(screen.getAllByRole('button', { name: 'Save' })[1]).toBeEnabled()
+      if (outcome === 'failure') {
+        await act(async () => rejectPatch(new Error('failed')))
+      } else {
+        await act(async () => resolvePatch(policies(true, false)))
+      }
+      await waitFor(() =>
+        expect(screen.getAllByRole('checkbox', { name: 'Read' })[0]).toBeEnabled(),
+      )
+      await act(async () => releaseGet(policies(false, false)))
+      expect(screen.getAllByRole('checkbox', { name: 'Read' })[0]).toBeChecked()
+      expect(screen.getAllByRole('checkbox', { name: 'Read' })[1]).toBeChecked()
+      expect(screen.getAllByRole('button', { name: 'Save' })[0])[
+        outcome === 'failure' ? 'toBeEnabled' : 'toBeDisabled'
+      ]()
+      expect(screen.getAllByRole('button', { name: 'Save' })[1]).toBeEnabled()
+      expect(client.getQueryState(key)?.fetchStatus).toBe('idle')
+    },
+  )
+
   it('reconciles simultaneous row saves without replacing the other row', async () => {
     let releaseStaff!: (value: unknown) => void
     let releaseSuper!: (value: unknown) => void
+    let releaseGet!: (value: unknown) => void
+    const oldGet = new Promise<unknown>((resolve) => {
+      releaseGet = resolve
+    })
     const staffSave = new Promise<unknown>((resolve) => {
       releaseStaff = resolve
     })
@@ -233,7 +302,9 @@ describe('Impersonation permission drafts', () => {
     const patch = vi.fn((body: string) =>
       JSON.parse(body).role === 'staff' ? staffSave : superSave,
     )
-    setup(patch, () => (++gets === 1 ? policies(false, false) : policies(true, true)))
+    const client = setup(patch, () =>
+      ++gets === 1 ? policies(false, false) : gets === 2 ? oldGet : policies(true, true),
+    )
     const user = userEvent.setup()
     const reads = await screen.findAllByRole('checkbox', { name: 'Read' })
     await user.click(reads[0]!)
@@ -242,10 +313,15 @@ describe('Impersonation permission drafts', () => {
     await user.click(saves[0]!)
     await user.click(saves[1]!)
     await waitFor(() => expect(patch).toHaveBeenCalledTimes(2))
+    act(() => {
+      void client.refetchQueries({ queryKey: key })
+    })
+    await waitFor(() => expect(gets).toBe(2))
     await act(async () => releaseStaff(policies(true, false)))
     await waitFor(() => expect(reads[0]).toBeEnabled())
+    await act(async () => releaseGet(policies(false, false)))
     await act(async () => releaseSuper(policies(false, true)))
-    await waitFor(() => expect(gets).toBe(2))
+    await waitFor(() => expect(gets).toBe(3))
     expect(reads[0]).toBeChecked()
     expect(await screen.findByRole('alert')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Reload' }))

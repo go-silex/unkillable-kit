@@ -45,14 +45,15 @@ function PermissionRow({ permission }: { permission: ImpersonationRolePermission
         body: JSON.stringify(payload),
       }),
     onMutate: async () => {
-      await qc.cancelQueries({ queryKey, exact: true }, { revert: false })
+      // Default revert cancellation restores the latest cache state and leaves fetching idle.
+      await qc.cancelQueries({ queryKey, exact: true })
       const query = qc.getQueryCache().find({ queryKey, exact: true })
       return { query, updates: query?.state.dataUpdateCount }
     },
     onSuccess: async (data, _payload, context) => {
       const query = qc.getQueryCache().find({ queryKey, exact: true })
       if (query && query === context?.query) {
-        await qc.cancelQueries({ queryKey, exact: true }, { revert: false })
+        await qc.cancelQueries({ queryKey, exact: true })
         // The response covers every role; a newer cache write owns that whole snapshot.
         if (qc.getQueryCache().find({ queryKey, exact: true }) !== query) return
         if (query.state.dataUpdateCount === context.updates) {
