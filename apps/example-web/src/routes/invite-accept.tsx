@@ -1,10 +1,10 @@
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle } from '@kit/ui'
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate, useSearch } from '@tanstack/react-router'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { apiErrorToMessage, apiFetch } from '../lib/api'
-import { isUnauthorized, useMe } from '../lib/auth'
+import { fetchMe, isUnauthorized, meQueryKey, useMe } from '../lib/auth'
 import { parseInvitationId } from '../lib/invitation-id'
 import { useLocale } from '../lib/locale'
 
@@ -13,22 +13,61 @@ function inviteLoginNext(invitationId: string): string {
 }
 
 export function InviteAcceptPage() {
-  const { m } = useLocale()
-  const navigate = useNavigate()
-  const me = useMe()
   const search = useSearch({ from: '/invite/accept' })
   const invitationId = parseInvitationId(search.invitationId) ?? ''
-  const [done, setDone] = useState(false)
+  return <Invitation invitationId={invitationId} key={invitationId} />
+}
+
+function Invitation({ invitationId }: { invitationId: string }) {
+  const { m } = useLocale()
+  const navigate = useNavigate()
+  const queryClient = useQueryClient()
+  const me = useMe()
+  const [phase, setPhase] = useState<'ready' | 'refreshing' | 'recovery'>('ready')
+  const active = useRef(false)
 
   useEffect(() => {
-    if (me.isLoading || !invitationId) return
+    active.current = true
+    return () => {
+      active.current = false
+    }
+  }, [])
+
+  async function refreshProfile() {
+    setPhase('refreshing')
+    try {
+      await queryClient.cancelQueries({ queryKey: meQueryKey, exact: true })
+      if (!active.current) return
+      let receipt: AbortSignal | undefined
+      await queryClient.fetchQuery({
+        queryKey: meQueryKey,
+        queryFn: async (context) => {
+          const signal = context.signal
+          const profile = await fetchMe(context)
+          if (!signal.aborted) receipt = signal
+          return profile
+        },
+        staleTime: 0,
+        retry: false,
+      })
+      // A reverted cancellation may fulfill fetchQuery with the previous cache.
+      const completed = receipt as AbortSignal | undefined
+      if (!completed || completed.aborted) throw new Error('Profile refresh was cancelled')
+      if (active.current) await navigate({ to: '/app' })
+    } catch {
+      if (active.current) setPhase('recovery')
+    }
+  }
+
+  useEffect(() => {
+    if (phase !== 'ready' || me.isLoading || !invitationId) return
     if (isUnauthorized(me.error) || !(me.data || me.isError)) {
       void navigate({
         to: '/login',
         search: { next: inviteLoginNext(invitationId) },
       })
     }
-  }, [me.isLoading, me.error, me.data, me.isError, navigate, invitationId])
+  }, [phase, me.isLoading, me.error, me.data, me.isError, navigate, invitationId])
 
   const accept = useMutation({
     mutationFn: () =>
@@ -37,11 +76,13 @@ export function InviteAcceptPage() {
         { method: 'POST', body: '{}' },
       ),
     onSuccess: async (data) => {
-      setDone(true)
+      if (!active.current) return
       toast.success(m.inviteAccepted, { description: data.org.name })
-      await navigate({ to: '/app' })
+      await refreshProfile()
     },
-    onError: (e) => toast.error(m.error, { description: apiErrorToMessage(e, m) }),
+    onError: (e) => {
+      if (active.current) toast.error(m.error, { description: apiErrorToMessage(e, m) })
+    },
   })
 
   if (!invitationId) {
@@ -55,6 +96,28 @@ export function InviteAcceptPage() {
           <CardContent>
             <Button render={<Link to="/app" />}>{m.navAppHome}</Button>
           </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  if (phase !== 'ready') {
+    return (
+      <div className="flex min-h-svh items-center justify-center p-6">
+        <Card className="w-full max-w-md">
+          <CardHeader>
+            <CardTitle>{m.inviteAccepted}</CardTitle>
+            <CardDescription>
+              {phase === 'refreshing' ? m.inviteRefreshing : m.inviteRefreshFailed}
+            </CardDescription>
+          </CardHeader>
+          {phase === 'recovery' && (
+            <CardContent>
+              <Button type="button" onClick={() => void refreshProfile()}>
+                {m.retry}
+              </Button>
+            </CardContent>
+          )}
         </Card>
       </div>
     )
@@ -112,10 +175,10 @@ export function InviteAcceptPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
-          <Button type="button" disabled={accept.isPending || done} onClick={() => accept.mutate()}>
+          <Button type="button" disabled={accept.isPending} onClick={() => accept.mutate()}>
             {m.inviteAcceptSubmit}
           </Button>
-          <Button type="button" variant="outline" render={<Link to="/app" />}>
+          <Button type="button" variant="outline" nativeButton={false} render={<Link to="/app" />}>
             {m.navAppHome}
           </Button>
         </CardContent>

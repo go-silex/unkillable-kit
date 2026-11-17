@@ -276,6 +276,8 @@ export type Messages = {
   inviteAcceptSubmit: string
   inviteAcceptMissing: string
   inviteAccepted: string
+  inviteRefreshing: string
+  inviteRefreshFailed: string
   orgRolesTitle: string
   orgRolesDesc: string
   orgRoleKey: string
@@ -569,6 +571,9 @@ export const fr: Messages = {
   inviteAcceptSubmit: 'Rejoindre l’organisation',
   inviteAcceptMissing: 'Lien d’invitation invalide (invitationId manquant).',
   inviteAccepted: 'Invitation acceptée',
+  inviteRefreshing: 'Mise à jour de vos organisations…',
+  inviteRefreshFailed:
+    'Invitation acceptée, mais votre profil n’a pas pu être actualisé. Réessayez pour continuer.',
   orgRolesTitle: 'Rôles & grants (Phase B)',
   orgRolesDesc: 'Rôles système immuables · rôles custom + accès module (write|read|disabled)',
   orgRoleKey: 'Clé',

@@ -275,6 +275,9 @@ export const en: Messages = {
   inviteAcceptSubmit: 'Join organization',
   inviteAcceptMissing: 'Invalid invite link (missing invitationId).',
   inviteAccepted: 'Invitation accepted',
+  inviteRefreshing: 'Updating your memberships…',
+  inviteRefreshFailed:
+    'Invitation accepted, but your profile could not be updated. Retry to continue.',
   orgRolesTitle: 'Roles & grants (Phase B)',
   orgRolesDesc:
     'System roles are immutable · custom roles + per-module access (write|read|disabled)',
