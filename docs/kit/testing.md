@@ -25,6 +25,12 @@ running, so this install does not exercise a native compilation fallback. Prebui
 not prove source compilation. An explicit native source build is a separate proof and does not
 establish that an install fallback ran.
 
+The sequential Root gate writes a JSON line per attempted task, alongside its running logs and
+task output: `event` is `root-gate:task`, `task` names the task, `durationMs` is monotonic elapsed
+milliseconds rounded to three decimals, `status` is `passed` or `failed`, and `exitCode` is the
+child exit code (or 1 if unavailable). A failure is recorded before fail-fast stops execution;
+read-only plan modes emit no task timings.
+
 ---
 
 | What it answers                                        | Section                                                          |
