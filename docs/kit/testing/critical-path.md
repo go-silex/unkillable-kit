@@ -135,18 +135,16 @@ its absence does not weaken the portable missing-dependency assertions.
 
 ### Org invites local E2E (B3 S2)
 
-Automated suite: `apps/example-api/src/invitations.test.ts` (≥ 8 cases: create, accept, email bind, ceiling, IDOR, sk_, 409, super deny, BA DENY).
-The web invitation route tests exercise fresh cached memberships, a stale in-flight profile read, POST rejection and profile-read recovery without repeating acceptance. They do not prove deployed API or email delivery.
+Automated: `apps/example-api/src/invitations.test.ts` (create, accept, email bind, ceiling, IDOR, sk_, 409, super deny, BA DENY). New web route tests cover cached and racing profile reads, POST failure, and read-only recovery; not deployment or email.
 
 Manual dogfood (after `bun run db:seed` + API + web):
 
-1. Login `team-owner@kit.local` / `demo-password-change-me` → `/app`.
-2. Select org **Team Client** → **Members** → invite `solo@kit.local` as `member`.
-3. Inspect Worker log line `transport: "log"` for accept URL (`/invite/accept?invitationId=…`).
-4. Logout → login `solo@kit.local` → open accept URL → join → membership on `/api/me` orgs.
-5. Confirm `team-reader@` cannot open invite create (403).
+1. Login `team-owner@kit.local` / `demo-password-change-me` → `/app` → **Team Client** → **Members**; invite `solo@kit.local` as `member`.
+2. Find `/invite/accept?invitationId=…` in Worker `transport: "log"`.
+3. Log in as `solo@kit.local`, open the link, join; check `/api/me` orgs.
+4. Confirm `team-reader@` cannot invite (403).
 
-Email is **log transport** only on Workers (Mailpit/SMTP is Node `@kit/email/server` — optional later).
+Workers email uses log transport; Mailpit/SMTP is Node `@kit/email/server` only.
 
 ### Password reset local E2E (B3 S3)
 
