@@ -261,6 +261,39 @@ jobs:
 EOF
 assert_exit "ci run: bun run validate:full → 0" 0 "${OK_CI}"
 
+SHARDED_CI="${TMP}/sharded-ci"
+seed_ok "${SHARDED_CI}"
+mkdir -p "${SHARDED_CI}/.github/workflows"
+cat >"${SHARDED_CI}/.github/workflows/ci.yml" <<'EOF'
+jobs:
+  quality:
+    steps:
+      - run: bun run validate:full -- --ci-join "$RUNNER_TEMP/root-receipts" --producers-result "$PRODUCERS_RESULT"
+      - run: bun scripts/kit/select-tooling.ts
+      - run: |
+          bun run validate:tooling -- --ci-tooling-shard '${{ matrix.shard.index }}/${{ matrix.shard.count }}' --receipt "$RUNNER_TEMP/tooling-receipts/tooling-${{ matrix.shard.index }}.json"
+      - run: bun run validate:tooling -- --ci-tooling-join "$RUNNER_TEMP/tooling-receipts" --producers-result "$PRODUCERS_RESULT"
+EOF
+assert_exit "ci canonical shard and join → 0" 0 "${SHARDED_CI}"
+
+workflow="$(<"${SHARDED_CI}/.github/workflows/ci.yml")"
+shard="bun run validate:tooling -- --ci-tooling-shard '\${{ matrix.shard.index }}/\${{ matrix.shard.count }}' --receipt \"\$RUNNER_TEMP/tooling-receipts/tooling-\${{ matrix.shard.index }}.json\""
+join='bun run validate:tooling -- --ci-tooling-join "$RUNNER_TEMP/tooling-receipts" --producers-result "$PRODUCERS_RESULT"'
+for replacement in \
+  'bun run validate:tooling -- --plan' \
+  'bun run validate:tooling -- --ci-tooling-shard 1/3' \
+  "echo \"${shard}\""; do
+  printf '%s\n' "${workflow/"${shard}"/"${replacement}"}" >"${SHARDED_CI}/.github/workflows/ci.yml"
+  assert_exit "missing or non-executing tooling shard → 1" 1 "${SHARDED_CI}"
+done
+for replacement in \
+  'bun run validate:tooling -- --plan' \
+  "# ${join}" \
+  'bun run validate:tooling -- --ci-tooling-join receipts'; do
+  printf '%s\n' "${workflow/"${join}"/"${replacement}"}" >"${SHARDED_CI}/.github/workflows/ci.yml"
+  assert_exit "missing or non-executing tooling join → 1" 1 "${SHARDED_CI}"
+done
+
 BAD_TOOLING_LIST="${TMP}/bad-tooling-list"
 seed_ok "${BAD_TOOLING_LIST}"
 echo 'validate:tooling = tooling-one · tooling-two · tooling-three' >"${BAD_TOOLING_LIST}/AGENTS.md"
