@@ -1,7 +1,7 @@
 import type { ImpersonationRolePermission } from '@kit/api-client/me'
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle } from '@kit/ui'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { apiErrorToMessage, apiFetch } from '../../lib/api'
 import { hasPlatformRole, meQueryKey, useMe } from '../../lib/auth'
@@ -16,17 +16,26 @@ function PermissionRow({ permission }: { permission: ImpersonationRolePermission
   const [draft, setDraft] = useState<{
     base: { read: boolean; write: boolean }
     values: { read: boolean; write: boolean }
+    conflicted: boolean
   } | null>(null)
   const values = draft?.values ?? permission
-  const conflict =
+  const baseChanged =
     draft !== null && (draft.base.read !== permission.read || draft.base.write !== permission.write)
+  const conflict = baseChanged || (draft?.conflicted ?? false)
+  useEffect(() => {
+    if (baseChanged) {
+      setDraft((current) =>
+        current && !current.conflicted ? { ...current, conflicted: true } : current,
+      )
+    }
+  }, [baseChanged])
   function edit(field: 'read' | 'write', value: boolean) {
     const base = draft?.base ?? { read: permission.read, write: permission.write }
     const next = { read: values.read, write: values.write, [field]: value }
     setDraft(
       !conflict && next.read === base.read && next.write === base.write
         ? null
-        : { base, values: next },
+        : { base, values: next, conflicted: conflict },
     )
   }
   const save = useMutation({
