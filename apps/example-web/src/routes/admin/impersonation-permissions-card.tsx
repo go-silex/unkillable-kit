@@ -39,14 +39,29 @@ function PermissionRow({ permission }: { permission: ImpersonationRolePermission
     )
   }
   const save = useMutation({
-    mutationFn: () =>
+    mutationFn: (payload: ImpersonationRolePermission) =>
       apiFetch<PermissionsResponse>('/api/admin/impersonation/permissions', {
         method: 'PATCH',
-        body: JSON.stringify({ role: permission.role, ...values }),
+        body: JSON.stringify(payload),
       }),
-    onSuccess: async (data) => {
-      qc.setQueryData(queryKey, data)
-      setDraft(null)
+    onMutate: async () => {
+      await qc.cancelQueries({ queryKey, exact: true }, { revert: false })
+      const query = qc.getQueryCache().find({ queryKey, exact: true })
+      return { query, updates: query?.state.dataUpdateCount }
+    },
+    onSuccess: async (data, _payload, context) => {
+      const query = qc.getQueryCache().find({ queryKey, exact: true })
+      if (query && query === context?.query) {
+        await qc.cancelQueries({ queryKey, exact: true }, { revert: false })
+        // The response covers every role; a newer cache write owns that whole snapshot.
+        if (qc.getQueryCache().find({ queryKey, exact: true }) !== query) return
+        if (query.state.dataUpdateCount === context.updates) {
+          qc.setQueryData(queryKey, data)
+          setDraft(null)
+        } else {
+          await qc.invalidateQueries({ queryKey, exact: true })
+        }
+      }
       await qc.invalidateQueries({ queryKey: meQueryKey })
       toast.success(m.impersonationSaved)
     },
@@ -77,7 +92,9 @@ function PermissionRow({ permission }: { permission: ImpersonationRolePermission
         type="button"
         size="sm"
         disabled={save.isPending || draft === null || conflict}
-        onClick={() => save.mutate()}
+        onClick={() =>
+          save.mutate({ role: permission.role, read: values.read, write: values.write })
+        }
       >
         {m.impersonationSave}
       </Button>
@@ -105,7 +122,8 @@ export function ImpersonationPermissionsCard() {
   const enabled = hasPlatformRole(me.data, 'super_admin') && !me.data?.impersonation
   const permissions = useQuery({
     queryKey,
-    queryFn: () => apiFetch<PermissionsResponse>('/api/admin/impersonation/permissions'),
+    queryFn: ({ signal }) =>
+      apiFetch<PermissionsResponse>('/api/admin/impersonation/permissions', { signal }),
     enabled,
   })
   if (!enabled) return null

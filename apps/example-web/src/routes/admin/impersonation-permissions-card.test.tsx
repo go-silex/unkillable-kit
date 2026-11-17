@@ -17,7 +17,7 @@ vi.mock('../../lib/api', async () => {
 const path = '/api/admin/impersonation/permissions'
 const key = ['admin-impersonation-permissions']
 const response = (read: boolean, write: boolean) => ({
-  permissions: [{ role: 'admin', read, write }],
+  permissions: [{ role: 'staff', read, write }],
   requestId: 'test',
 })
 
@@ -26,13 +26,16 @@ beforeEach(() => {
   vi.mocked(apiFetch).mockReset()
 })
 
-function setup(patch: (body: string) => unknown = () => response(false, true)) {
+function setup(
+  patch: (body: string) => unknown = () => response(false, true),
+  get: (signal: AbortSignal | null | undefined) => unknown = () => response(true, false),
+) {
   const client = createTestQueryClient()
   client.setQueryData(meQueryKey, createMe({ platformRole: 'super_admin' }))
   vi.mocked(apiFetch).mockImplementation(
     createApiDispatcher()
       .on('GET', '/api/me', () => createMe({ platformRole: 'super_admin' }))
-      .on('GET', path, () => response(true, false))
+      .on('GET', path, ({ init }) => get(init?.signal))
       .on('PATCH', path, ({ init }) => patch(String(init?.body))).fetch,
   )
   renderWithAppProviders(<ImpersonationPermissionsCard />, { queryClient: client })
@@ -88,7 +91,7 @@ describe('Impersonation permission drafts', () => {
     expect(write).toBeChecked()
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
     expect(JSON.parse(patch.mock.calls[0]?.[0] ?? '')).toEqual({
-      role: 'admin',
+      role: 'staff',
       read: true,
       write: true,
     })
