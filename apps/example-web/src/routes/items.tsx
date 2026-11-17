@@ -334,9 +334,7 @@ export function ItemsPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{m.cancel}</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => pendingDelete && void deleteItem.mutateAsync(pendingDelete.id)}
-            >
+            <AlertDialogAction onClick={() => pendingDelete && deleteItem.mutate(pendingDelete.id)}>
               {m.delete}
             </AlertDialogAction>
           </AlertDialogFooter>

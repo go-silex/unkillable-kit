@@ -15,6 +15,9 @@ See [start a product](../../docs/kit/playbooks/start-product.md#architecture-def
 - Kit dependencies: `@kit/api-client`, `@kit/auth`, `@kit/flows`, `@kit/i18n`, `@kit/types`, `@kit/ui`.
 - This example is a deployable application, not a library.
 
+Deleting an item retains the confirmation and item on failure, with error feedback. On success,
+the confirmation closes after the item list refreshes.
+
 ## Local development
 
 - Configure the API's `.dev.vars` first: see [local onboarding](../../README.md#local-onboarding).
