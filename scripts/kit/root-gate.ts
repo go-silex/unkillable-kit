@@ -123,10 +123,22 @@ function run(tasks: string[], shard?: string): { results: Result[]; code: number
   const results: Result[] = []
   for (const task of tasks) {
     console.log(`root-gate: running ${task}`)
+    const started = performance.now()
     const child = spawnSync(process.execPath, ['run', task], { cwd: root, stdio: 'inherit' })
+    const durationMs = Math.round((performance.now() - started) * 1000) / 1000
     const exitCode = child.status ?? 1
+    const failed = exitCode !== 0 || !!child.error || !!child.signal
     results.push({ task, exitCode })
-    if (exitCode !== 0 || child.error || child.signal) return { results, code: exitCode || 1 }
+    console.log(
+      JSON.stringify({
+        event: 'root-gate:task',
+        task,
+        durationMs,
+        status: failed ? 'failed' : 'passed',
+        exitCode,
+      }),
+    )
+    if (failed) return { results, code: exitCode || 1 }
   }
   return { results, code: 0 }
 }
