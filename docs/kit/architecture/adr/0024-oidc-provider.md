@@ -65,10 +65,9 @@ validate logout tokens, keep their sessions short and periodically revalidate
 with the provider using `prompt=none`; logout is not an atomic global revocation
 guarantee.
 
-**Workers limitation:** The pinned Better Auth 1.7.23 uses `redirect: 'error'`
-for back-channel logout delivery, which Workers rejects. Better Auth 1.7.27
-uses `redirect: 'manual'` instead; do not rely on this provider on Workers
-until the Workers logout integration test passes with the version in use.
+The pinned Better Auth 1.7.27 uses `redirect: 'manual'` for back-channel
+logout delivery on Workers. Delivery remains best effort, not an atomic global
+revocation guarantee.
 
 ## Exclusions and consequences
 
