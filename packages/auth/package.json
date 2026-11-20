@@ -21,9 +21,9 @@
       "default": "./src/factory.ts"
     },
     "./oidc-provider": {
-      "types": "./src/oidc-provider.ts",
-      "import": "./src/oidc-provider.ts",
-      "default": "./src/oidc-provider.ts"
+      "types": "./src/oidc/oidc-provider.ts",
+      "import": "./src/oidc/oidc-provider.ts",
+      "default": "./src/oidc/oidc-provider.ts"
     },
     "./react": {
       "types": "./src/react/index.ts",
@@ -54,6 +54,7 @@
     "zod": "^4.6.7"
   },
   "peerDependencies": {
+    "@better-auth/core": "^1.7.23",
     "@better-auth/oauth-provider": "^1.7.23",
     "@kit/email": "workspace:*",
     "@kit/ui": "workspace:*",
@@ -65,6 +66,9 @@
     "react-dom": "^19.0.0"
   },
   "peerDependenciesMeta": {
+    "@better-auth/core": {
+      "optional": true
+    },
     "@better-auth/oauth-provider": {
       "optional": true
     },
@@ -94,6 +98,7 @@
     }
   },
   "devDependencies": {
+    "@better-auth/core": "1.7.23",
     "@better-auth/oauth-provider": "1.7.23",
     "@kit/email": "workspace:*",
     "@kit/ui": "workspace:*",

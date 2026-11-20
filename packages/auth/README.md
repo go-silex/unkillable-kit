@@ -53,6 +53,12 @@ the Worker. Sync the `oidc_provider` schema set in addition to the sets required
 by the Better Auth mount. The normal factory import does not require the provider
 peer; import `@kit/auth/oidc-provider` only in a Worker enabling it.
 
+### OIDC private JWK encryption
+
+The migration stores bytes; it does **not** encrypt private JWKs. Better Auth's JWT
+plugin encrypts them with the Better Auth secret before storage. Keep private-key
+encryption enabled and protect the secret; losing it makes stored keys unreadable.
+
 Create the provider configuration **for each request**, binding the Worker's
 execution context rather than retaining one from another request:
 
@@ -72,8 +78,9 @@ const auth = createBetterAuth({
 ```
 
 The App owns the login and consent pages and the Better Auth provider client
-plugin needed to resume authorization. The issuer is `<BETTER_AUTH_URL>/api/auth`
-and discovery is `{issuer}/.well-known/openid-configuration`; mount the auth
+plugin needed to resume authorization. The issuer is `<auth-origin>/api/auth`,
+where `<auth-origin>` is the scheme and host of `BETTER_AUTH_URL` (which may already include `/api/auth`).
+Discovery is `{issuer}/.well-known/openid-configuration`; mount the auth
 handler on its usual path. The hosted MCP shell retains its own reserved paths
 and OAuth server. Do not expose this provider at the root RFC 8414 metadata path,
 or accept one server's tokens at the other.

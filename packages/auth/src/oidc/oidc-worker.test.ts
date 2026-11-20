@@ -77,7 +77,7 @@ it('delivers a signed back-channel logout using the Workers execution context', 
       '0027_better_auth_oidc_provider.sql',
     ]) {
       const sql = readFileSync(
-        new URL(`../../../apps/example-api/migrations/${migration}`, import.meta.url),
+        new URL(`../../../../apps/example-api/migrations/${migration}`, import.meta.url),
         'utf8',
       )
       const statements = sql

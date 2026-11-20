@@ -1,7 +1,10 @@
+import { readFileSync } from 'node:fs'
 import { getOAuthApi } from '@cloudflare/workers-oauth-provider'
 import { createBetterAuth } from '@kit/auth/factory'
-import { createOidcProvider } from '@kit/auth/oidc-provider'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { createOidcProvider, registerOidcClient } from '@kit/auth/oidc-provider'
+import { createSqliteD1 } from '@kit/db/testing'
+import Database from 'better-sqlite3'
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { McpIdentity, McpIdentityPort } from '../identity'
 import {
   createHostedMcpWorker,
@@ -645,6 +648,156 @@ describe('hosted authorization-server contract', () => {
       ctx(),
     )
     expect(crossServer.status).toBe(401)
+  })
+
+  it('rejects a real OIDC access token at MCP while accepting an MCP token', async () => {
+    vi.stubGlobal('Cloudflare', { compatibilityFlags: { global_fetch_strictly_public: true } })
+    const sqlite = new Database(':memory:')
+    onTestFinished(() => {
+      sqlite.close()
+    })
+    for (const migration of [
+      '0005_better_auth.sql',
+      '0006_better_auth_organization.sql',
+      '0014_better_auth_1_7_additive.sql',
+      '0025_account_state.sql',
+      '0027_better_auth_oidc_provider.sql',
+    ]) {
+      sqlite.exec(
+        readFileSync(
+          new URL(`../../../../apps/example-api/migrations/${migration}`, import.meta.url),
+          'utf8',
+        ),
+      )
+    }
+    const database = createSqliteD1(sqlite)
+    const auth = createBetterAuth({
+      database,
+      secret: 'test-better-auth-secret-xxxxxxxx32c!!',
+      baseURL: LOCAL,
+      trustedOrigins: [LOCAL],
+      allowLoopbackOrigins: true,
+      allowPublicSignup: true,
+      oidcProvider: createOidcProvider({
+        loginPage: '/login',
+        waitUntil: (promise) => {
+          void promise
+        },
+      }),
+    })
+    const kv = new MemoryKv()
+    const signup = await auth.handler(
+      new Request(`${LOCAL}/api/auth/sign-up/email`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin: LOCAL },
+        body: JSON.stringify({
+          name: 'Example User',
+          email: 'user@example.test',
+          password: 'example-password-123',
+        }),
+      }),
+    )
+    expect(signup.status).toBe(200)
+    const { user } = (await signup.json()) as { user: { id: string; email: string } }
+    const cookie = signup.headers
+      .getSetCookie()
+      .map((value) => value.split(';')[0])
+      .join('; ')
+    expect(cookie).not.toBe('')
+    const oidcRedirect = 'https://client.example.test/callback'
+    const client = await registerOidcClient(auth, {
+      headers: new Headers({ cookie }),
+      redirectUris: [oidcRedirect],
+      firstParty: true,
+    })
+    expect(client.client_secret).toBeTruthy()
+    const hosted = worker({
+      identityPort: port({ userId: user.id, email: user.email }),
+      consent: { mode: 'demo-loopback', email: user.email },
+      fallthrough: (request) => auth.handler(request),
+      register(server) {
+        server.addTool({ name: 'who', description: 'caller', execute: async () => user.id })
+      },
+    })
+    const hostedEnv = env(kv, { DB: database as unknown as D1Database })
+    const { verifier, challenge } = await pkce()
+    const params = new URLSearchParams({
+      response_type: 'code',
+      client_id: client.client_id,
+      redirect_uri: oidcRedirect,
+      scope: 'openid email profile',
+      code_challenge: challenge,
+      code_challenge_method: 'S256',
+      nonce: 'test-nonce',
+    })
+    const authorize = await hosted.fetch(
+      new Request(`${LOCAL}/api/auth/oauth2/authorize?${params}`, {
+        headers: { cookie, accept: 'text/html' },
+      }),
+      hostedEnv,
+      ctx(),
+    )
+    expect(authorize.status).toBe(302)
+    const redirect = new URL(authorize.headers.get('location') ?? '', LOCAL)
+    expect(`${redirect.origin}${redirect.pathname}`).toBe(oidcRedirect)
+    const code = redirect.searchParams.get('code')
+    expect(code).toBeTruthy()
+    const token = await hosted.fetch(
+      new Request(`${LOCAL}/api/auth/oauth2/token`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/x-www-form-urlencoded',
+          authorization: `Basic ${Buffer.from(`${client.client_id}:${client.client_secret}`).toString('base64')}`,
+        },
+        body: new URLSearchParams({
+          grant_type: 'authorization_code',
+          code: code as string,
+          redirect_uri: oidcRedirect,
+          code_verifier: verifier,
+        }),
+      }),
+      hostedEnv,
+      ctx(),
+    )
+    expect(token.status).toBe(200)
+    const { access_token: oidcToken } = (await token.json()) as { access_token: string }
+    expect(oidcToken).toBeTruthy()
+    const userinfo = await hosted.fetch(
+      new Request(`${LOCAL}/api/auth/oauth2/userinfo`, {
+        headers: { authorization: `Bearer ${oidcToken}` },
+      }),
+      hostedEnv,
+      ctx(),
+    )
+    expect(userinfo.status).toBe(200)
+    expect(await userinfo.json()).toMatchObject({ sub: user.id })
+    const mcpCall = (accessToken: string) =>
+      hosted.fetch(
+        new Request(`${LOCAL}/mcp`, {
+          method: 'POST',
+          headers: {
+            authorization: `Bearer ${accessToken}`,
+            'content-type': 'application/json',
+            accept: 'application/json',
+          },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 1,
+            method: 'tools/call',
+            params: { name: 'who', arguments: {} },
+          }),
+        }),
+        hostedEnv,
+        ctx(),
+      )
+    const rejected = await mcpCall(oidcToken)
+    expect(rejected.status).toBe(401)
+    expect(await rejected.text()).not.toContain(user.id)
+    const mcpToken = await exchangeCode(hosted, kv)
+    expect(mcpToken.access_token).toBeTruthy()
+    const accepted = await mcpCall(mcpToken.access_token as string)
+    expect(accepted.status).toBe(200)
+    expect(await accepted.text()).toContain(user.id)
   })
 
   afterEach(() => {

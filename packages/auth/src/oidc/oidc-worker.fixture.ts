@@ -1,5 +1,5 @@
 import type { KitD1Database } from '@kit/db'
-import { createBetterAuth } from './better-auth-factory'
+import { createBetterAuth } from '../better-auth-factory'
 import { createOidcProvider, endOidcUserSessions, registerOidcClient } from './oidc-provider'
 
 const ORIGIN = 'https://auth.example.test'

@@ -17,7 +17,7 @@ The `notifications` set adds the `notifications` id from `0023_notifications.sql
 
 The additive `impersonation` id from `0024_impersonation.sql` belongs to `core`. It creates default-off Platform Role permissions and delegations tied to existing Better Auth session records; it grants no authority merely by being installed. Compose the tables through `kitAuthSchema` from `@kit/auth/schema`. Apps using the repositories retain `audit`, including for required start/configuration events and pre-dispatch request attempts.
 
-The opt-in `oidc_provider` set adds OAuth and JWT tables from `0027_better_auth_oidc_provider.sql`; see [`@kit/auth`](../../packages/auth/README.md#openid-provider-opt-in) for setup and encryption.
+The opt-in `oidc_provider` set adds OAuth/JWT tables; the migration stores bytes without encrypting them. See [encryption](../../packages/auth/README.md#oidc-private-jwk-encryption).
 
 ## Happy path (greenfield)
 

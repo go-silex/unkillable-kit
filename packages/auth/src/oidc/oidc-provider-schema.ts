@@ -1,8 +1,8 @@
 /** Optional Better Auth 1.7 OAuth provider and JWT tables (ADR-0008). */
 import { index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core'
-import { type BetterAuthTables, baSession, baUser } from './better-auth-schema'
+import { type BetterAuthTables, baSession, baUser } from '../better-auth-schema'
 
-export const oauthClient = sqliteTable(
+const oauthClient = sqliteTable(
   'oauth_client',
   {
     id: text('id').primaryKey(),
@@ -47,7 +47,7 @@ export const oauthClient = sqliteTable(
   (table) => [index('oauth_client_user_id_idx').on(table.userId)],
 )
 
-export const oauthResource = sqliteTable('oauth_resource', {
+const oauthResource = sqliteTable('oauth_resource', {
   id: text('id').primaryKey(),
   identifier: text('identifier').notNull().unique(),
   name: text('name').notNull(),
@@ -67,7 +67,7 @@ export const oauthResource = sqliteTable('oauth_resource', {
   metadata: text('metadata'),
 })
 
-export const oauthClientResource = sqliteTable(
+const oauthClientResource = sqliteTable(
   'oauth_client_resource',
   {
     id: text('id').primaryKey(),
@@ -87,7 +87,7 @@ export const oauthClientResource = sqliteTable(
   ],
 )
 
-export const oauthRefreshToken = sqliteTable(
+const oauthRefreshToken = sqliteTable(
   'oauth_refresh_token',
   {
     id: text('id').primaryKey(),
@@ -121,7 +121,7 @@ export const oauthRefreshToken = sqliteTable(
   ],
 )
 
-export const oauthAccessToken = sqliteTable(
+const oauthAccessToken = sqliteTable(
   'oauth_access_token',
   {
     id: text('id').primaryKey(),
@@ -151,7 +151,7 @@ export const oauthAccessToken = sqliteTable(
   ],
 )
 
-export const oauthConsent = sqliteTable(
+const oauthConsent = sqliteTable(
   'oauth_consent',
   {
     id: text('id').primaryKey(),
@@ -172,12 +172,12 @@ export const oauthConsent = sqliteTable(
   ],
 )
 
-export const oauthClientAssertion = sqliteTable('oauth_client_assertion', {
+const oauthClientAssertion = sqliteTable('oauth_client_assertion', {
   id: text('id').primaryKey(),
   expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
 })
 
-export const jwks = sqliteTable('jwks', {
+const jwks = sqliteTable('jwks', {
   id: text('id').primaryKey(),
   publicKey: text('public_key').notNull(),
   privateKey: text('private_key').notNull(),

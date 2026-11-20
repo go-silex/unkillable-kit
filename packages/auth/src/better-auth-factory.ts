@@ -34,9 +34,8 @@ import {
   googleRedirectOnlyPlugins,
 } from './google/sign-in'
 import { logBetterAuthEvent } from './logging/better-auth-logger'
-import { providerComposition } from './oidc-logout'
-import type { OidcProviderConfig } from './oidc-provider'
-import { withOptionalOidcSchema } from './oidc-provider-schema'
+import { type OidcProviderConfig, providerComposition } from './oidc/oidc-config'
+import { withOptionalOidcSchema } from './oidc/oidc-provider-schema'
 import { createKitOrganizationPlugin } from './org-plugin'
 import { createSessionAccountGuard, InactiveSessionError } from './policy/better-auth-session-guard'
 import { isAccountActive } from './repos/account-state'

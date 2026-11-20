@@ -21,7 +21,8 @@ This record is **proposed and non-normative**. It describes the decision targete
 
 An App may opt in to an OpenID Provider composed in `createBetterAuth` from Better Auth's OAuth 2.1 provider and JWT plugin. When omitted, existing authentication behavior, routes and tables in use remain unchanged. The JWT plugin operates in OAuth-provider mode: it does not expose a session-JWT `/token` route or emit a `set-auth-jwt` header.
 
-The issuer is `<BETTER_AUTH_URL>/api/auth`. OIDC discovery is served at
+The issuer is `<auth-origin>/api/auth`, where `<auth-origin>` is the scheme and
+host of `BETTER_AUTH_URL` (which may already include `/api/auth`). OIDC discovery is served at
 `{issuer}/.well-known/openid-configuration`. The hosted MCP shell of
 [ADR-0015](./0015-mcp-remote-oauth-worker.md) retains `/authorize`, `/token`,
 `/register` and `/.well-known/oauth-*`. The provider does not use the RFC 8414
@@ -32,9 +33,9 @@ neither an OIDC token nor an MCP token is a credential for the other server.
 Use **RS256** for identity and logout tokens: OpenID Connect Core §15.1 requires
 providers to support RS256, while the JWT plugin defaults to EdDSA. Configure
 `jwks.keyPairConfig.alg` explicitly. Relying Apps verify signatures against the
-issuer's public JWKS without sharing the signing secret. Private keys are
-encrypted at rest; JWKS and OAuth tables ship as an additive Kit schema module
-under [ADR-0008](./0008-kit-schema-identity-product-compose.md).
+issuer's public JWKS without sharing the signing secret. The JWT plugin encrypts
+private keys with the Better Auth secret; the migration only stores bytes. See the
+[encryption warning](../../../../packages/auth/README.md#oidc-private-jwk-encryption). JWKS and OAuth tables ship as an additive Kit schema module under [ADR-0008](./0008-kit-schema-identity-product-compose.md).
 
 Clients are registered only by server-side administration. V1 supports
 confidential web clients with exact redirect URIs and PKCE `S256`; neither
