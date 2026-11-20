@@ -15,3 +15,13 @@
 # Otherwise a reviewed fix younger than 3 days would break CI,
 # every Workers Build and every new worktree for its first 3 days.
 minimumReleaseAge = 259200
+
+# Exempt exact `name@version` entries only (including scoped names and prereleases):
+# no bare names, ranges or tags. Allow a security fix or an explicit operator decision
+# recorded in the PR. Review and list every young version needed, including transitives;
+# record the exact list, why it cannot wait and the date each version passes the gate
+# in the PR. Put the reason and `Refs:` beside each entry here.
+# Remove each entry once it passes the age gate or the package is updated again.
+# Products must not edit this Kit-owned file: use the one-shot
+# `--minimum-release-age-excludes` flag when resolving, or upstream the exemption.
+minimumReleaseAgeExcludes = []
