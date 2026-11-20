@@ -48,11 +48,11 @@ must sync and apply the account-state schema migration before deploying.
 
 ## OpenID provider (opt-in)
 
-**Not ready for use on Workers:** Better Auth 1.7.27 uses `redirect: 'error'`
-for back-channel logout delivery, which the Workers runtime rejects. Session
-termination therefore does not notify relying parties on Workers. Do not rely on
-this provider until that upstream incompatibility is fixed and the Workers
-logout integration test passes.
+**Not ready for use on Workers:** The pinned Better Auth 1.7.23 uses
+`redirect: 'error'` for back-channel logout delivery, which Workers rejects.
+Better Auth 1.7.27 uses `redirect: 'manual'` instead, but do not rely on this
+provider on Workers until the Workers logout integration test passes with the
+version in use.
 
 Install matching versions of `better-auth` and `@better-auth/oauth-provider` in
 the Worker. Sync the `oidc_provider` schema set in addition to the sets required
@@ -108,9 +108,16 @@ deviating from Better Auth's upstream `SET NULL`: deleting a session removes its
 associated access-token rows. This does not revoke self-contained tokens already
 accepted by a relying party without provider revalidation.
 
+Revoking an already-invalidated token may return HTTP 400 from the pinned Better
+Auth version; the relying party should treat that token as revoked.
+
 `endOidcUserSessions(auth, userId)` atomically deletes the user's sessions and
 then invokes Better Auth's back-channel logout hooks for at most the 25 most
 recent sessions. Notifications are best effort and truncated beyond that bound.
+If logout planning or the session snapshot fails, the result reports
+`success: true` and `coverage: 'unknown'`; do not interpret that as complete
+notification coverage. Its `truncated` value is a boolean when truncation can be
+determined, or `null` when the session snapshot fails.
 Use it before `disableAccount` or any other direct session deletion: once
 sessions are deleted directly, the provider cannot run those hooks for them.
 Better Auth's native bulk session revocation paths are not a substitute.

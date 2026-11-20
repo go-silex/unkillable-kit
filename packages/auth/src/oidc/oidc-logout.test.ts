@@ -10,7 +10,12 @@ import { createOidcProvider, endOidcUserSessions, registerOidcClient } from './o
 const ORIGIN = 'https://auth.example.test'
 const USER_ID = 'pagination-user'
 
-function setup(options: { beforeDelete?: (sqlite: Database.Database) => void } = {}) {
+function setup(
+  options: {
+    beforeDelete?: (sqlite: Database.Database) => void
+    beforeQuery?: (sql: string) => void
+  } = {},
+) {
   const sqlite = new Database(':memory:')
   sqlite.pragma('foreign_keys = ON')
   onTestFinished(() => {
@@ -47,6 +52,7 @@ function setup(options: { beforeDelete?: (sqlite: Database.Database) => void } =
   let queryCount = 0
   database.prepare = (sql) => {
     queryCount++
+    options.beforeQuery?.(sql)
     if (/delete\s+from\s+["`]?session["`]?/i.test(sql)) {
       options.beforeDelete?.(sqlite)
     }
@@ -186,8 +192,9 @@ it('batches more than 100 clients without exceeding D1 bind limits', async () =>
 
 it('cascades a token minted between planning and deletion', async () => {
   let insertToken: (() => void) | undefined
+  const beforeDelete = vi.fn(() => insertToken?.())
   const { sqlite, auth, pending, addSession, addClient, addToken } = setup({
-    beforeDelete: () => insertToken?.(),
+    beforeDelete,
   })
   addSession('session')
   addClient('client')
@@ -203,12 +210,62 @@ it('cascades a token minted between planning and deletion', async () => {
   sqlite.prepare('DELETE FROM oauth_access_token WHERE id = ?').run('late')
   insertToken = () => addToken('late', 'session', 'client')
   await endOidcUserSessions(auth, USER_ID)
+  expect(beforeDelete).toHaveBeenCalledTimes(1)
   await Promise.all(pending)
   expect(sqlite.prepare('SELECT count(*) AS count FROM oauth_access_token').get()).toEqual({
     count: 0,
   })
   expect((await userinfo()).status).toBe(401)
 })
+
+it.each([
+  { table: 'session', truncated: null },
+  { table: 'oauth_access_token', truncated: false },
+])(
+  'reports unknown coverage when $table planning fails, without leaking errors',
+  async ({ table, truncated }) => {
+    const secret = 'sensitive-adapter-error'
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const warnings = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const logs = vi.spyOn(console, 'log').mockImplementation(() => {})
+    onTestFinished(() => {
+      errors.mockRestore()
+      warnings.mockRestore()
+      logs.mockRestore()
+    })
+    let injected = false
+    const { sqlite, auth, pending, delivery, addSession, addClient, addToken } = setup({
+      beforeQuery: (sql) => {
+        if (!injected && new RegExp(`\\bfrom\\s+["\`]?${table}["\`]?`, 'i').test(sql)) {
+          injected = true
+          throw new Error(secret)
+        }
+      },
+    })
+    addSession('session')
+    addClient('client')
+    addToken('token', 'session', 'client')
+
+    expect(await endOidcUserSessions(auth, USER_ID)).toEqual({
+      success: true,
+      truncated,
+      coverage: 'unknown',
+    })
+    await Promise.all(pending)
+    expect(injected).toBe(true)
+    expect(sqlite.prepare('SELECT count(*) AS count FROM session').get()).toEqual({ count: 0 })
+    expect(sqlite.prepare('SELECT count(*) AS count FROM oauth_access_token').get()).toEqual({
+      count: 0,
+    })
+    expect(delivery).not.toHaveBeenCalled()
+    expect(errors).toHaveBeenCalledWith(
+      expect.stringContaining('OIDC logout notification planning failed'),
+    )
+    expect(JSON.stringify([errors.mock.calls, warnings.mock.calls, logs.mock.calls])).not.toContain(
+      secret,
+    )
+  },
+)
 
 it('leaves sessions and tokens intact and sends no notifications if deletion fails', async () => {
   const { sqlite, auth, pending, delivery, addSession, addClient, addToken } = setup()

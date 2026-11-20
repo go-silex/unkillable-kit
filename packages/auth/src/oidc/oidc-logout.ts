@@ -3,6 +3,7 @@ import {
   getCurrentDBAdapterAsyncLocalStorage,
   runWithAdapter,
 } from '@better-auth/core/context'
+import { createLogger } from '@kit/core'
 import { D1_IN_ARRAY_CHUNK } from '@kit/db'
 import type { DBAdapter } from 'better-auth'
 import { createAuthEndpoint } from 'better-auth/api'
@@ -10,6 +11,11 @@ import { z } from 'zod'
 import type { KitBetterAuth } from '../better-auth-factory'
 
 const MAX_NOTIFIED_SESSIONS = 25
+const log = createLogger({ component: 'oidc-logout' })
+
+type LogoutResult =
+  | { success: true; truncated: boolean; coverage?: never }
+  | { success: true; truncated: boolean | null; coverage: 'unknown' }
 
 type LogoutRow = { id: string; sessionId: string; clientId: string }
 type LogoutClient = { clientId: string }
@@ -17,7 +23,11 @@ type LogoutClient = { clientId: string }
 // Better Auth snapshots entities for its delete hooks before issuing deleteMany.
 // Bound that snapshot, but leave the actual userId deletion untouched so the
 // database cascades every session-bound access token in the same statement.
-function logoutAdapter(adapter: DBAdapter, onTruncated: () => void): DBAdapter {
+function logoutAdapter(
+  adapter: DBAdapter,
+  onTruncated: () => void,
+  onPlanningFailure: (sessionsKnown: boolean) => void,
+): DBAdapter {
   let access: LogoutRow[] = []
   let refresh: LogoutRow[] = []
   let clients: LogoutClient[] = []
@@ -27,14 +37,17 @@ function logoutAdapter(adapter: DBAdapter, onTruncated: () => void): DBAdapter {
   type FindQuery = Parameters<DBAdapter['findMany']>[0]
 
   async function snapshotSessions<T>(query: FindQuery): Promise<T[]> {
-    const sessions = await adapter.findMany<{ id: string }>({
-      ...query,
-      sortBy: { field: 'createdAt', direction: 'desc' },
-      limit: MAX_NOTIFIED_SESSIONS + 1,
-    })
-    if (sessions.length > MAX_NOTIFIED_SESSIONS) onTruncated()
-    const selected = sessions.slice(0, MAX_NOTIFIED_SESSIONS)
+    let selected: { id: string }[] = []
+    let sessionsKnown = false
     try {
+      const sessions = await adapter.findMany<{ id: string }>({
+        ...query,
+        sortBy: { field: 'createdAt', direction: 'desc' },
+        limit: MAX_NOTIFIED_SESSIONS + 1,
+      })
+      sessionsKnown = true
+      if (sessions.length > MAX_NOTIFIED_SESSIONS) onTruncated()
+      selected = sessions.slice(0, MAX_NOTIFIED_SESSIONS)
       if (selected.length) {
         const where = [
           { field: 'sessionId', operator: 'in' as const, value: selected.map((s) => s.id) },
@@ -60,9 +73,10 @@ function logoutAdapter(adapter: DBAdapter, onTruncated: () => void): DBAdapter {
           )
         }
       }
-    } catch (error) {
+    } catch {
       // Notifications are best-effort; deletion remains the security barrier.
-      console.error('OIDC logout notification planning failed', error)
+      onPlanningFailure(sessionsKnown)
+      log.error('OIDC logout notification planning failed')
       access = []
       refresh = []
       clients = []
@@ -145,10 +159,18 @@ export function createOidcLogoutPlugin() {
           const storage = await getCurrentDBAdapterAsyncLocalStorage()
           const current = storage.getStore()
           const adapter = await getCurrentAdapter(ctx.context.adapter)
-          let truncated = false
-          const bounded = logoutAdapter({ ...ctx.context.adapter, ...adapter }, () => {
-            truncated = true
-          })
+          let truncated: boolean | null = false
+          let coverageUnknown = false
+          const bounded = logoutAdapter(
+            { ...ctx.context.adapter, ...adapter },
+            () => {
+              truncated = true
+            },
+            (sessionsKnown) => {
+              coverageUnknown = true
+              if (!sessionsKnown) truncated = null
+            },
+          )
           const removeSessions = () =>
             ctx.context.internalAdapter.deleteUserSessions(ctx.body.userId)
           if (current) {
@@ -158,7 +180,11 @@ export function createOidcLogoutPlugin() {
           }
           if (truncated)
             ctx.context.logger.warn('OIDC logout notifications truncated to 25 sessions')
-          return ctx.json({ success: true, truncated })
+          return ctx.json(
+            coverageUnknown
+              ? { success: true as const, truncated, coverage: 'unknown' as const }
+              : { success: true as const, truncated: truncated as boolean },
+          )
         },
       ),
     },
@@ -168,9 +194,7 @@ export function createOidcLogoutPlugin() {
 /** Server-side API surface supplied by an auth instance with the logout plugin. */
 type OidcLogoutAuth = {
   api: {
-    endOidcUserSessions: (input: {
-      body: { userId: string }
-    }) => Promise<{ success: true; truncated: boolean }>
+    endOidcUserSessions: (input: { body: { userId: string } }) => Promise<LogoutResult>
   }
 }
 
@@ -178,6 +202,6 @@ type OidcLogoutAuth = {
 export async function endOidcUserSessions(
   auth: KitBetterAuth,
   userId: string,
-): Promise<{ success: true; truncated: boolean }> {
+): Promise<LogoutResult> {
   return (auth as unknown as OidcLogoutAuth).api.endOidcUserSessions({ body: { userId } })
 }
