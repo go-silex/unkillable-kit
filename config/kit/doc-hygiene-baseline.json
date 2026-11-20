@@ -135,14 +135,14 @@
     "fileBytes": 19886
   },
   "docs/kit/product-consumer-contract.md": {
-    "overLimitLines": 127,
+    "overLimitLines": 126,
     "maxLineBytes": 2129,
-    "fileBytes": 180771
+    "fileBytes": 180747
   },
   "docs/kit/security-dependabot.md": {
-    "overLimitLines": 36,
+    "overLimitLines": 28,
     "maxLineBytes": 732,
-    "fileBytes": 30075
+    "fileBytes": 28767
   },
   "docs/kit/standards/stack.md": {
     "overLimitLines": 51,
@@ -157,7 +157,7 @@
   "docs/kit/testing/critical-path.md": {
     "overLimitLines": 92,
     "maxLineBytes": 3787,
-    "fileBytes": 280183
+    "fileBytes": 280082
   },
   "docs/kit/testing/ops-model.md": {
     "overLimitLines": 32,

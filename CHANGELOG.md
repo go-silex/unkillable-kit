@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Young dependency exemptions
+
+- Allow reviewed security fixes or operator-approved changes to exempt exact young dependency versions, including necessary transitives, without disabling the release-age gate for the entire resolution. Validate the Kit list offline; Products use a one-shot flag or upstream the exemption.
+
 ### CI tooling shards
 
 - Run selected tooling self-tests in three canonical round-robin CI shards, with sequential fail-fast execution per VM and current-run receipt admission in the existing `ci` check. Local tooling remains monolithic and ordered; no coverage policy changes.
