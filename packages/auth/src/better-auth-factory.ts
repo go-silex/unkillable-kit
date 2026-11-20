@@ -7,6 +7,7 @@ import { betterAuth } from 'better-auth'
 import { drizzleAdapter } from 'better-auth/adapters/drizzle'
 import { APIError, isAPIError } from 'better-auth/api'
 import { magicLink } from 'better-auth/plugins'
+import { eq } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/d1'
 import {
   type AuthEmailConfig,
@@ -26,6 +27,12 @@ import {
 } from './better-auth-schema'
 import { sessionCookieName } from './cookie-name'
 import { createFirstSessionAfterHook, type FirstSessionHandler } from './first-session-hook'
+import {
+  type GoogleSignInOptions,
+  googleAccountHooks,
+  googleConfiguration,
+  googleRedirectOnlyPlugins,
+} from './google/sign-in'
 import { logBetterAuthEvent } from './logging/better-auth-logger'
 import { createKitOrganizationPlugin } from './org-plugin'
 import { createSessionAccountGuard, InactiveSessionError } from './policy/better-auth-session-guard'
@@ -61,6 +68,9 @@ export type CreateBetterAuthOpts = {
   cookieName?: string
   useSecureCookies?: boolean
   allowPublicSignup?: boolean
+  google?: GoogleSignInOptions
+  /** Absolute trusted App login URL for Google errors when OAuth state cannot supply one. */
+  googleErrorURL?: string
   /** Product typically wires audit `tryFirstLogin`. Omit if audit module is not mounted. */
   onFirstSession?: FirstSessionHandler
   magicLinkExpiresIn?: number
@@ -79,6 +89,38 @@ function assertEmailConfig(emailPort?: AuthEmailPort, emailConfig?: AuthEmailCon
   if (emailConfig && !emailPort) {
     throw new Error('emailPort is required when emailConfig is configured')
   }
+}
+
+function createSafeHandler(handler: (request: Request) => Response | Promise<Response>) {
+  return async (request: Request): Promise<Response> => {
+    try {
+      const response = await handler(request)
+      if (response.status >= 500) console.error('[Better Auth] server_error_response')
+      return response
+    } catch (error) {
+      if (isAPIError(error)) throw error
+      console.error('[Better Auth] handler_exception')
+      return new Response(null, { status: 500, statusText: 'Internal Server Error' })
+    }
+  }
+}
+
+function apiErrorOptions(google: boolean, origins: string[], configuredURL?: string) {
+  let errorURL = new URL('/login', origins[0]).toString()
+  if (configuredURL !== undefined) {
+    let parsed: URL
+    try {
+      parsed = new URL(configuredURL)
+    } catch {
+      throw new Error('googleErrorURL must be an absolute URL on a trusted origin')
+    }
+    const httpScheme = parsed.protocol === 'https:' || parsed.protocol === 'http:'
+    if (!httpScheme || parsed.username || parsed.password || !origins.includes(parsed.origin)) {
+      throw new Error('googleErrorURL must be an absolute URL on a trusted origin')
+    }
+    errorURL = parsed.toString()
+  }
+  return { throw: true, ...(google ? { errorURL } : {}) }
 }
 
 export function createBetterAuth(opts: CreateBetterAuthOpts): KitBetterAuth {
@@ -117,6 +159,7 @@ export function createBetterAuth(opts: CreateBetterAuthOpts): KitBetterAuth {
     allowedOrigins: [...linkOrigins],
     allowLoopbackHttp: opts.allowLoopbackOrigins === true,
   }
+  const google = opts.google !== undefined
 
   const auth = betterAuth({
     baseURL: opts.baseURL,
@@ -124,7 +167,7 @@ export function createBetterAuth(opts: CreateBetterAuthOpts): KitBetterAuth {
     // Leave Better Auth's default warn threshold intact; its messages and args are untrusted.
     logger: { log: logBetterAuthEvent },
     // Better Call otherwise logs the raw non-API error after Better Auth's logger returns.
-    onAPIError: { throw: true },
+    onAPIError: apiErrorOptions(google, trustedOrigins, opts.googleErrorURL),
     // The kit throttles in front, on D1 (`@kit/auth/repos/ba-throttle`). Better Auth's own limiter
     // is memory per isolate, keyed `ip|path`, and on only when NODE_ENV is 'production': pinned off.
     rateLimit: { enabled: false },
@@ -135,6 +178,7 @@ export function createBetterAuth(opts: CreateBetterAuthOpts): KitBetterAuth {
     }),
     hooks: { before: createSessionAccountGuard(db, schema) },
     databaseHooks: {
+      account: google ? googleAccountHooks : undefined,
       session: {
         create: {
           before: async (session) => {
@@ -145,7 +189,10 @@ export function createBetterAuth(opts: CreateBetterAuthOpts): KitBetterAuth {
               // An unreadable account state must never issue a session.
             }
             if (!active) {
-              throw new APIError('UNAUTHORIZED', { message: 'Invalid email or password' })
+              throw new APIError('UNAUTHORIZED', {
+                message: 'Invalid email or password',
+                ...(google ? { code: 'account_inactive' } : {}),
+              })
             }
           },
           after: createFirstSessionAfterHook(opts.onFirstSession),
@@ -153,6 +200,16 @@ export function createBetterAuth(opts: CreateBetterAuthOpts): KitBetterAuth {
       },
     },
     verification: { storeIdentifier: { hash: hashVerificationIdentifier } },
+    ...googleConfiguration(opts.google, async (id) => {
+      const [existing] = await db
+        .select({ email: schema.user.email })
+        .from(schema.user)
+        .where(eq(schema.user.id, id))
+        .limit(1)
+        .catch(() => [])
+      const active = await isAccountActive(db, id, schema.user).catch(() => false)
+      return existing && { email: existing.email, active }
+    }),
     emailAndPassword: {
       enabled: true,
       disableSignUp: !publicSignup,
@@ -174,6 +231,7 @@ export function createBetterAuth(opts: CreateBetterAuthOpts): KitBetterAuth {
     },
     plugins: [
       createKitOrganizationPlugin(),
+      ...googleRedirectOnlyPlugins(google),
       ...(emailPort && emailConfig
         ? [
             magicLink({
@@ -204,18 +262,7 @@ export function createBetterAuth(opts: CreateBetterAuthOpts): KitBetterAuth {
     },
     trustedOrigins,
   })
-  const handler = auth.handler
-  const safeHandler = async (request: Request): Promise<Response> => {
-    try {
-      const response = await handler(request)
-      if (response.status >= 500) console.error('[Better Auth] server_error_response')
-      return response
-    } catch (error) {
-      if (isAPIError(error)) throw error
-      console.error('[Better Auth] handler_exception')
-      return new Response(null, { status: 500, statusText: 'Internal Server Error' })
-    }
-  }
+  const safeHandler = createSafeHandler(auth.handler)
   auth.api.getSession = new Proxy(auth.api.getSession, {
     async apply(target, thisArg, args) {
       try {
