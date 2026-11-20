@@ -20,7 +20,11 @@ type BaAuth = ReturnType<typeof createBetterAuth> & {
     emailAndPassword?: {
       disableSignUp?: boolean
       resetPasswordTokenExpiresIn?: number
-      sendResetPassword?: (i: { user: { email: string }; url: string }) => Promise<void>
+      sendResetPassword?: (i: {
+        user: { email: string }
+        url: string
+        token: string
+      }) => Promise<void>
     }
     advanced?: {
       useSecureCookies?: boolean
@@ -243,8 +247,9 @@ describe('createBetterAuth', () => {
     const auth = factory({ emailPort: { send } })
     await auth.options.emailAndPassword?.sendResetPassword?.({
       user: { email: 'a@b.c' },
-      url: 'http://localhost:8787/api/auth/reset-password/tok',
-    } as never)
+      url: 'http://localhost:8787/api/auth/reset-password/tok?callbackURL=http%3A%2F%2Flocalhost%3A8787%2Freset-password',
+      token: 'tok',
+    })
     const magic = auth.options.plugins?.find((p: { id: string }) => p.id === 'magic-link') as {
       options?: { sendMagicLink?: (i: { email: string; url: string }) => Promise<void> }
     }
@@ -253,6 +258,51 @@ describe('createBetterAuth', () => {
       url: 'http://localhost:8787/api/auth/magic-link/verify?token=x',
     })
     expect(send).toHaveBeenCalledTimes(2)
+  })
+
+  it('emails the redirect page with the token in its query, preserving other parameters', async () => {
+    const send = vi.fn(async (_message: Parameters<EmailPort['send']>[0]) => ({
+      ok: true,
+      transport: 'log',
+    }))
+    const auth = factory({ emailPort: { send } })
+    const redirectTo = 'http://localhost:8787/reset-password?next=%2Fhome&token=old#section'
+    await auth.options.emailAndPassword?.sendResetPassword?.({
+      user: { email: 'a@b.c' },
+      url: `http://localhost:8787/api/auth/reset-password/secret?callbackURL=${encodeURIComponent(redirectTo)}`,
+      token: 'secret',
+    })
+    const message = send.mock.calls[0]?.[0]
+    expect(message?.text).toContain(
+      'http://localhost:8787/reset-password?next=%2Fhome&token=secret#section',
+    )
+    expect(message?.text).not.toContain('/reset-password/secret')
+  })
+
+  it('silently skips reset email when redirectTo is missing', async () => {
+    const send = vi.fn(async () => ({ ok: true, transport: 'log' }))
+    const auth = factory({ emailPort: { send } })
+    await expect(
+      auth.options.emailAndPassword?.sendResetPassword?.({
+        user: { email: 'a@b.c' },
+        url: 'http://localhost:8787/api/auth/reset-password/secret?callbackURL=',
+        token: 'secret',
+      }),
+    ).resolves.toBeUndefined()
+    expect(send).not.toHaveBeenCalled()
+  })
+
+  it('does not email an untrusted redirect target', async () => {
+    const send = vi.fn(async () => ({ ok: true, transport: 'log' }))
+    const auth = factory({ emailPort: { send } })
+    await expect(
+      auth.options.emailAndPassword?.sendResetPassword?.({
+        user: { email: 'a@b.c' },
+        url: 'http://localhost:8787/api/auth/reset-password/secret?callbackURL=https%3A%2F%2Fevil.test%2Freset',
+        token: 'secret',
+      }),
+    ).rejects.toThrow(/EMAIL_TOKEN_HREF_INVALID/)
+    expect(send).not.toHaveBeenCalled()
   })
 
   it('requires the email port and configuration together at runtime', () => {
@@ -296,7 +346,8 @@ describe('createBetterAuth', () => {
     })
     await auth.options.emailAndPassword?.sendResetPassword?.({
       user: { email: 'fr@example.com' },
-      url: 'http://localhost:8787/api/auth/reset-password/tok',
+      url: 'http://localhost:8787/api/auth/reset-password/tok?callbackURL=http%3A%2F%2Flocalhost%3A8787%2Freset-password',
+      token: 'tok',
     })
     const magic = auth.options.plugins?.find((p: { id: string }) => p.id === 'magic-link') as {
       options?: { sendMagicLink?: (i: { email: string; url: string }) => Promise<void> }

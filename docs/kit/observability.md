@@ -11,7 +11,9 @@ Better Auth 1.7.14's router otherwise forwards non-API errors to Better Call, wh
 
 This protects only this factory's Better Auth logger and HTTP handler paths. It does not sanitize direct `auth.api` callers, other App or library sinks, HTTP response bodies, Cloudflare serialization or independently constructed Better Auth instances; each remains its owner's responsibility.
 
-`[observability]` is a non-inheritable wrangler key: `example-api` repeats it under `[env.production.observability]` (the deployed Worker). `mcp-example` has no `[env.*]`. `example-web` is a Pages project of static assets (`pages_build_output_dir`, no Worker code or Pages Functions): nothing runs server-side to log, so it carries no `[observability]`. Lower `head_sampling_rate` (0–1) per product if volume or cost requires it.
+`[observability]` is not inherited: `example-api` repeats it under `[env.production.observability]`; `mcp-example` has no `[env.*]`; static `example-web` has none. Products may lower `head_sampling_rate` (0–1).
+
+Set `redact_query_string = true` there before enabling traces: it strips queries, not paths, from logs and traces. Kit emails carry one-time tokens only in queries; Kit KV keys hold digests, not cookie values.
 
 ## Product options (env-guarded — not shipped by the kit)
 

@@ -57,7 +57,7 @@ export async function expectTokenAbsentFromVerification(db: KitDb, token: string
 }
 
 export function resetTokenFromLink(link: URL): string {
-  const token = link.searchParams.get('token') ?? link.pathname.split('/').pop()
+  const token = link.searchParams.get('token')
   expect(Boolean(token), 'reset token delivered').toBe(true)
   return token!
 }

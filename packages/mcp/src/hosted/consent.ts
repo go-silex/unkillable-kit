@@ -36,6 +36,12 @@ function randomToken(): string {
   return [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
+async function consentKey(id: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(id))
+  const hex = [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
+  return `${CONSENT_KV_PREFIX}${hex}`
+}
+
 function parseCookie(header: string | null, name: string): string | null {
   if (!header) return null
   for (const part of header.split(';')) {
@@ -95,7 +101,7 @@ export async function putConsent(
 ): Promise<{ csrf: string; cookie: string }> {
   const id = randomToken()
   const csrf = randomToken()
-  await kv.put(`${CONSENT_KV_PREFIX}${id}`, JSON.stringify({ ...record, csrf }), {
+  await kv.put(await consentKey(id), JSON.stringify({ ...record, csrf }), {
     expirationTtl: CONSENT_TTL_SECONDS,
   })
   const { name, attributes } = consentCookie(requestUrl)
@@ -115,7 +121,7 @@ export async function readConsent(
   const { name } = consentCookie(new URL(request.url))
   const id = parseCookie(request.headers.get('Cookie'), name)
   if (!(id && CONSENT_ID.test(id))) return null
-  const key = `${CONSENT_KV_PREFIX}${id}`
+  const key = await consentKey(id)
   const raw = await kv.get(key)
   if (!raw) return null
   const record = parseConsent(raw)
