@@ -24,8 +24,8 @@ done
 shopt -u nullglob
 
 # ─── bun-install-warmup ──────────────────────────────────────────
-# --minimum-release-age 0: install the lock as reviewed. bunfig.toml's gate is meant for new resolutions,
-# but Bun 1.4.0 also rejects a lock entry younger than the gate (docs/kit/security-dependabot.md).
+# --minimum-release-age 0: install the lock as reviewed. bunfig.toml's gate is meant for new resolutions;
+# the pinned Bun does not re-check locked versions, but Bun 1.4.0 did (see bunfig.toml).
 lock_snapshot=$(mktemp)
 trap 'rm -f "$lock_snapshot"' EXIT
 cp bun.lock "$lock_snapshot"

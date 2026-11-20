@@ -18,6 +18,6 @@ if ! command -v bun >/dev/null 2>&1; then
 fi
 
 require_bun_version "$ROOT"
-# --minimum-release-age 0: reproduce the reviewed lock; bunfig.toml's gate would reject a lock entry < 3 d old
-# (a security update is not delayed by Dependabot's cooldown). docs/kit/security-dependabot.md § Install-time layers.
+# --minimum-release-age 0: reproduce the reviewed lock. The pinned Bun does not re-check locked versions;
+# the flag guards against a Bun that does, like 1.4.0. docs/kit/security-dependabot.md § Install-time layers.
 bun install --frozen-lockfile --minimum-release-age 0
