@@ -15,7 +15,7 @@ const log = createLogger({ component: 'oidc-logout' })
 
 type LogoutResult =
   | { success: true; truncated: boolean; coverage?: never }
-  | { success: true; truncated: boolean | null; coverage: 'unknown' }
+  | { success: true; truncated: null; coverage: 'unknown' }
 
 type LogoutRow = { id: string; sessionId: string; clientId: string }
 type LogoutClient = { clientId: string }
@@ -26,7 +26,7 @@ type LogoutClient = { clientId: string }
 function logoutAdapter(
   adapter: DBAdapter,
   onTruncated: () => void,
-  onPlanningFailure: (sessionsKnown: boolean) => void,
+  onPlanningFailure: () => void,
 ): DBAdapter {
   let access: LogoutRow[] = []
   let refresh: LogoutRow[] = []
@@ -38,14 +38,12 @@ function logoutAdapter(
 
   async function snapshotSessions<T>(query: FindQuery): Promise<T[]> {
     let selected: { id: string }[] = []
-    let sessionsKnown = false
     try {
       const sessions = await adapter.findMany<{ id: string }>({
         ...query,
         sortBy: { field: 'createdAt', direction: 'desc' },
         limit: MAX_NOTIFIED_SESSIONS + 1,
       })
-      sessionsKnown = true
       if (sessions.length > MAX_NOTIFIED_SESSIONS) onTruncated()
       selected = sessions.slice(0, MAX_NOTIFIED_SESSIONS)
       if (selected.length) {
@@ -75,7 +73,7 @@ function logoutAdapter(
       }
     } catch {
       // Notifications are best-effort; deletion remains the security barrier.
-      onPlanningFailure(sessionsKnown)
+      onPlanningFailure()
       log.error('OIDC logout notification planning failed')
       access = []
       refresh = []
@@ -159,16 +157,15 @@ export function createOidcLogoutPlugin() {
           const storage = await getCurrentDBAdapterAsyncLocalStorage()
           const current = storage.getStore()
           const adapter = await getCurrentAdapter(ctx.context.adapter)
-          let truncated: boolean | null = false
+          let truncated = false
           let coverageUnknown = false
           const bounded = logoutAdapter(
             { ...ctx.context.adapter, ...adapter },
             () => {
               truncated = true
             },
-            (sessionsKnown) => {
+            () => {
               coverageUnknown = true
-              if (!sessionsKnown) truncated = null
             },
           )
           const removeSessions = () =>
@@ -182,8 +179,8 @@ export function createOidcLogoutPlugin() {
             ctx.context.logger.warn('OIDC logout notifications truncated to 25 sessions')
           return ctx.json(
             coverageUnknown
-              ? { success: true as const, truncated, coverage: 'unknown' as const }
-              : { success: true as const, truncated: truncated as boolean },
+              ? { success: true as const, truncated: null, coverage: 'unknown' as const }
+              : { success: true as const, truncated },
           )
         },
       ),

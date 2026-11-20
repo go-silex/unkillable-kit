@@ -116,8 +116,8 @@ then invokes Better Auth's back-channel logout hooks for at most the 25 most
 recent sessions. Notifications are best effort and truncated beyond that bound.
 If logout planning or the session snapshot fails, the result reports
 `success: true` and `coverage: 'unknown'`; do not interpret that as complete
-notification coverage. Its `truncated` value is a boolean when truncation can be
-determined, or `null` when the session snapshot fails.
+notification coverage. Its `truncated` value is a boolean when coverage is
+known, and `null` whenever planning fails.
 Use it before `disableAccount` or any other direct session deletion: once
 sessions are deleted directly, the provider cannot run those hooks for them.
 Better Auth's native bulk session revocation paths are not a substitute.

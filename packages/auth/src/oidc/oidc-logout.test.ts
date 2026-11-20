@@ -218,12 +218,9 @@ it('cascades a token minted between planning and deletion', async () => {
   expect((await userinfo()).status).toBe(401)
 })
 
-it.each([
-  { table: 'session', truncated: null },
-  { table: 'oauth_access_token', truncated: false },
-])(
-  'reports unknown coverage when $table planning fails, without leaking errors',
-  async ({ table, truncated }) => {
+it.each(['session', 'oauth_access_token'])(
+  'reports unknown coverage when %s planning fails, without leaking errors',
+  async (table) => {
     const secret = 'sensitive-adapter-error'
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
     const warnings = vi.spyOn(console, 'warn').mockImplementation(() => {})
@@ -248,7 +245,7 @@ it.each([
 
     expect(await endOidcUserSessions(auth, USER_ID)).toEqual({
       success: true,
-      truncated,
+      truncated: null,
       coverage: 'unknown',
     })
     await Promise.all(pending)
