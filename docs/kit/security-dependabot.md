@@ -41,9 +41,13 @@ Need a migration / decision, not a Dependabot bump. An `ignore` with `update-typ
 
 The canonical Product file is not a free-form ignore list. Hold a particular update with Dependabot's `@dependabot ignore …` PR comment commands and record the decision; a shared scheduling/grouping-policy change belongs in the Kit renderer, followed by inheritance and regeneration.
 
-| Package                                                              | Why                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `trufflesecurity/trufflehog` (all version updates, `github-actions`) | Pin SSoT is `config/kit/trufflehog.version`. CI runs the shared script, not the action; `scripts/kit/trufflehog-check.sh --assert-pin` requires zero action `uses:` lines to prevent the unsafe range walk from returning. Update the version, release archive and extracted binary hashes for every supported target, historical `action_sha` metadata and workflow version annotation together. A security PR for the action cannot land on its own; close it and update the SSoT instead. The alert remains in the Security tab. |
+`trufflesecurity/trufflehog` (all version updates, `github-actions`): Pin SSoT is
+`config/kit/trufflehog.version`. CI runs the shared script, not the action;
+`scripts/kit/trufflehog-check.sh --assert-pin` requires zero action `uses:` lines to prevent
+the unsafe range walk from returning. Update the version, release archive and extracted binary
+hashes for every supported target, historical `action_sha` metadata and workflow version
+annotation together. A security PR for the action cannot land on its own; close it and update
+the SSoT instead. The alert remains in the Security tab.
 
 Kit maintainers removed the temporary Markdown version hold after real-document formatting and idempotence checks with Biome 2.6.7, with one accepted layout change: fenced code following text in two ordered lists makes those lists loose. Text, links, code and item order remain unchanged, but rendered paragraph spacing changes. Future tight lists containing adjacent fenced blocks can likewise become loose when the staged formatter runs; review those diffs.
 
@@ -82,12 +86,38 @@ GitHub docs: `cooldown` applies **only** to version updates, not security update
 
 Both are in the tree, so they bind every install path (CI, Workers Builds, worktrees, an agent's `bun add`).
 
-| Layer                   | Setting                                                                                                 | Catches                                                                                                                                                                                                                                                                | Does not catch                                                                                                                   |
-| ----------------------- | ------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| Age gate                | [`bunfig.toml`](../../bunfig.toml) `[install] minimumReleaseAge = 259200` (3 d = Dependabot `cooldown`) | A _new_ resolution of a version published < 3 d ago, by any tool: `bun add`, `bun update`, a non-frozen `bun install`. Rapid-fix pairs just outside the gate are skipped too (Bun's stability check, [docs](https://bun.com/docs/pm/cli/install#minimum-release-age)). | Anything older than 3 d. A security fix younger than 3 d: install it explicitly with `--minimum-release-age 0` after reading it. |
-| Install-script lockdown | `package.json` `trustedDependencies: []`                                                                | Any dependency `preinstall` / `install` / `postinstall`. Declaring the field **replaces** Bun's built-in allow list ([docs](https://bun.com/docs/pm/lifecycle#behavior-of-the-trustedDependencies-field)); `[]` means none.                                            | Code a package runs when you _import_ or execute it (all of it).                                                                 |
+- **Age gate:** [`bunfig.toml`](../../bunfig.toml) sets `[install] minimumReleaseAge = 259200`
+  (3 d = Dependabot `cooldown`). Ordinary resolutions gate versions under 3 d when publish
+  timestamps exist: `bun add`, `bun update`, non-frozen `bun install`. Bun's
+  [stability check](https://bun.com/docs/pm/cli/install#minimum-release-age) skips rapid-fix
+  pairs outside the gate. Older versions and exact exemptions pass.
+- **Install-script lockdown:** `package.json` `trustedDependencies: []` blocks dependency `preinstall`, `install` and `postinstall`. The field **replaces** Bun's [built-in allow list](https://bun.com/docs/pm/lifecycle#behavior-of-the-trustedDependencies-field); `[]` means none. It does not block code run by importing or executing a package.
 
-Frozen installs can also be blocked by the age gate, including a reviewed security fix younger than three days. Install paths reproducing a reviewed lock use `--minimum-release-age 0`; this does not relax the age gate for new resolutions. A native dependency that requires an install script must be added to `trustedDependencies` in the kit `package.json` with the reason in the same PR; products promote that change upstream.
+Frozen installs can be blocked, including reviewed security fixes under 3 d. Reproduce a reviewed lock
+with `--minimum-release-age 0`, not new resolutions. `bun audit fix` can install a young fix:
+review the resulting lock. Add native dependencies requiring install scripts to
+`trustedDependencies` in the kit `package.json`, with the reason in the same PR; products
+promote that change upstream.
+
+### Young-version exemptions
+
+Exempt security fixes or explicit operator decisions recorded in the PR.
+Review young versions, including transitives; exempt only exact `name@version`
+entries, e.g. `@scope/package@1.2.3` or `package@1.2.3-beta.1`. Bare names, ranges, tags,
+`||` lists and malformed entries are forbidden. Ordinary resolutions gate unlisted young versions
+when publish timestamps exist.
+
+The PR records the exact list including transitives, why the change cannot wait, and when each
+version passes the three-day gate. For a Kit change, add each entry to `minimumReleaseAgeExcludes`
+under `[install]` in `bunfig.toml` with its reason and `Refs:` beside it.
+Remove it once the version passes the gate or the package is updated again.
+`validate:full` checks the list offline for exact entries.
+
+`bunfig.toml` is Kit-owned. Products must not edit it: use Bun's one-shot
+`--minimum-release-age-excludes` flag with the same reviewed exact list, or upstream the
+exemption through the Kit. Never use `--minimum-release-age 0` for new resolutions: it disables
+the gate for the entire resolution, including transitives. The dependency guard's `TOO_YOUNG`
+finding still requires appropriate review and authorization; an exemption is not automatic admission.
 
 ## Auto-merge guard
 
