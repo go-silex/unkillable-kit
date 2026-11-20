@@ -117,7 +117,7 @@
   "docs/kit/kit-schema-sync.md": {
     "overLimitLines": 5,
     "maxLineBytes": 810,
-    "fileBytes": 9373
+    "fileBytes": 9353
   },
   "docs/kit/playbooks/create-product-day0.md": {
     "overLimitLines": 5,
@@ -147,7 +147,7 @@
   "docs/kit/standards/stack.md": {
     "overLimitLines": 51,
     "maxLineBytes": 867,
-    "fileBytes": 64059
+    "fileBytes": 63861
   },
   "docs/kit/testing/coverage.md": {
     "overLimitLines": 7,

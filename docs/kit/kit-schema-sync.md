@@ -11,11 +11,13 @@ Identity = catalog **module `id` + sha256 of kit source bytes** — not the exam
 Identity is catalog **module `id` + `kitSha256`**. Sync hashes the files under catalog `source_root` (today the dogfood journal `apps/example-api/migrations/*` — wrangler apply path, not a clone template).
 `packages/*/migrations/` contain README only (no `.sql`). Do not copy them into a product and do not point wrangler at them. `@kit/auth` does not export `./migrations/*`. Machine gate: `bun run wrangler-migrations:check` fails if any wrangler `migrations_dir` resolves under `packages/`.
 
-The `tasks` set includes the additive `kit_tasks_stage_org_guard` id, which protects task stage ownership without rebuilding `kit_tasks`. The catalog and local journal include the `0019` contract and subsequent stage guard; they do not prove application to any remote database. Follow the expand/deploy/contract ordering and inspect purge counts before any authorized contract apply. The organization FK rebuild scripts under `apps/example-api/migrations-pending/` are not journaled or catalogued and are not synced. Their headers specify the per-database counts, approvals and promotion steps required before any later release.
+The `tasks` set includes the additive `kit_tasks_stage_org_guard` id for stage ownership, plus the `0019` contract. Neither proves remote application. Follow expand/deploy/contract ordering and inspect purge counts before authorized contract apply. FK rebuild scripts in `apps/example-api/migrations-pending/` are not journaled, catalogued or synced; their headers specify per-database counts, approvals and promotion steps.
 
 The `notifications` set adds the `notifications` id from `0023_notifications.sql`, leaving pending `0021`/`0022` untouched. It is opt-in and does not add a governed Module or disable Inbox. Compose `notificationsDrizzleSchema` from `@kit/notifications/schema`; use `@kit/notifications/repos` for persistence. Include `audit` when composing administration writes, which commit into the existing `audit_events` table. The pure root needs no SQL; each consumer composes producer wiring and an external Delivery runtime separately from schema sync.
 
 The additive `impersonation` id from `0024_impersonation.sql` belongs to `core`. It creates default-off Platform Role permissions and delegations tied to existing Better Auth session records; it grants no authority merely by being installed. Compose the tables through `kitAuthSchema` from `@kit/auth/schema`. Apps using the repositories retain `audit`, including for required start/configuration events and pre-dispatch request attempts.
+
+The opt-in `oidc_provider` set adds OAuth/JWT tables; the migration stores bytes without encrypting them. See [encryption](../../packages/auth/README.md#oidc-private-jwk-encryption).
 
 ## Happy path (greenfield)
 

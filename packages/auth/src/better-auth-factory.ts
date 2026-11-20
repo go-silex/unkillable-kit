@@ -34,6 +34,8 @@ import {
   googleRedirectOnlyPlugins,
 } from './google/sign-in'
 import { logBetterAuthEvent } from './logging/better-auth-logger'
+import { type OidcProviderConfig, providerComposition } from './oidc/oidc-config'
+import { withOptionalOidcSchema } from './oidc/oidc-provider-schema'
 import { createKitOrganizationPlugin } from './org-plugin'
 import { createSessionAccountGuard, InactiveSessionError } from './policy/better-auth-session-guard'
 import { isAccountActive } from './repos/account-state'
@@ -77,6 +79,8 @@ export type CreateBetterAuthOpts = {
   resetPasswordTokenExpiresIn?: number
   /** Only for explicit development|test placeholders — never production. */
   allowKitPlaceholderSecret?: boolean
+  /** Opt-in provider composition, created by the separate @kit/auth/oidc-provider entry. */
+  oidcProvider?: OidcProviderConfig
 } & (
   | { emailPort: AuthEmailPort; emailConfig: AuthEmailConfig }
   | { emailPort?: never; emailConfig?: never }
@@ -130,12 +134,16 @@ export function createBetterAuth(opts: CreateBetterAuthOpts): KitBetterAuth {
   const trustedOrigins = assertTrustedOrigins(opts.trustedOrigins, {
     allowLoopback: opts.allowLoopbackOrigins === true,
   })
-  const schema =
+  const baseSchema =
     !opts.schema || opts.schema === betterAuthDrizzleSchema
       ? betterAuthDrizzleSchema
       : withBetterAuthRelations(opts.schema)
+  const schema = withOptionalOidcSchema(baseSchema, opts.oidcProvider !== undefined)
   // drizzle-orm/d1 names the workers `D1Database` type; the public contract is `@kit/db` `KitD1Database`.
   const db = drizzle(opts.database as never, { schema })
+  const provider = providerComposition(opts.oidcProvider, (userId) =>
+    isAccountActive(db, userId, schema.user),
+  )
   const cookieName = sessionCookieName({ name: opts.cookieName })
   const secure = opts.useSecureCookies ?? true
   const publicSignup = opts.allowPublicSignup ?? false
@@ -164,6 +172,7 @@ export function createBetterAuth(opts: CreateBetterAuthOpts): KitBetterAuth {
   const auth = betterAuth({
     baseURL: opts.baseURL,
     basePath: BA_BASE_PATH,
+    disabledPaths: provider.disabledPaths,
     // Leave Better Auth's default warn threshold intact; its messages and args are untrusted.
     logger: { log: logBetterAuthEvent },
     // Better Call otherwise logs the raw non-API error after Better Auth's logger returns.
@@ -172,10 +181,7 @@ export function createBetterAuth(opts: CreateBetterAuthOpts): KitBetterAuth {
     // is memory per isolate, keyed `ip|path`, and on only when NODE_ENV is 'production': pinned off.
     rateLimit: { enabled: false },
     secret: opts.secret,
-    database: drizzleAdapter(db, {
-      provider: 'sqlite',
-      schema,
-    }),
+    database: drizzleAdapter(db, { provider: 'sqlite', schema }),
     hooks: { before: createSessionAccountGuard(db, schema) },
     databaseHooks: {
       account: google ? googleAccountHooks : undefined,
@@ -243,6 +249,7 @@ export function createBetterAuth(opts: CreateBetterAuthOpts): KitBetterAuth {
     },
     plugins: [
       createKitOrganizationPlugin(),
+      ...provider.plugins,
       ...googleRedirectOnlyPlugins(google),
       ...(emailPort && emailConfig
         ? [
@@ -258,23 +265,19 @@ export function createBetterAuth(opts: CreateBetterAuthOpts): KitBetterAuth {
     ],
     advanced: {
       disableOriginCheck: false,
+      backgroundTasks: provider.backgroundTasks,
       database: { joins: true },
       useSecureCookies: secure,
       cookies: {
         session_token: {
           name: cookieName,
-          attributes: {
-            httpOnly: true,
-            sameSite: 'lax',
-            path: '/',
-            secure,
-          },
+          attributes: { httpOnly: true, sameSite: 'lax', path: '/', secure },
         },
       },
     },
     trustedOrigins,
   })
-  const safeHandler = createSafeHandler(auth.handler)
+  auth.fetch = auth.handler = createSafeHandler(auth.handler)
   auth.api.getSession = new Proxy(auth.api.getSession, {
     async apply(target, thisArg, args) {
       try {
@@ -283,18 +286,11 @@ export function createBetterAuth(opts: CreateBetterAuthOpts): KitBetterAuth {
         const options = args[0] as
           | { asResponse?: boolean; returnHeaders?: boolean; returnStatus?: boolean }
           | undefined
-        if (
-          error instanceof InactiveSessionError &&
-          !options?.asResponse &&
-          !options?.returnHeaders &&
-          !options?.returnStatus
-        )
-          return null
+        const rawSession = !(options?.asResponse || options?.returnHeaders || options?.returnStatus)
+        if (error instanceof InactiveSessionError && rawSession) return null
         throw error
       }
     },
   })
-  auth.handler = safeHandler
-  auth.fetch = safeHandler
   return auth
 }
