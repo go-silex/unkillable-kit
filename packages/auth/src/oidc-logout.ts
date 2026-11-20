@@ -1,6 +1,25 @@
 import { createAuthEndpoint } from 'better-auth/api'
 import { z } from 'zod'
 import type { KitBetterAuth } from './better-auth-factory'
+import type { OidcProviderConfig } from './oidc-provider'
+
+export function providerComposition(
+  provider: OidcProviderConfig | undefined,
+  isActive: (userId: string) => Promise<boolean>,
+) {
+  if (!provider) return { plugins: [] }
+  return {
+    disabledPaths: [
+      '/token',
+      '/oauth2/create-client',
+      '/oauth2/update-client',
+      '/oauth2/delete-client',
+      '/oauth2/client/rotate-secret',
+    ],
+    backgroundTasks: { handler: provider.waitUntil },
+    plugins: [...provider.plugins(isActive), createOidcLogoutPlugin()],
+  }
+}
 
 /** Deletes user sessions inside an auth endpoint so Better Auth's database hooks run. */
 export function createOidcLogoutPlugin() {

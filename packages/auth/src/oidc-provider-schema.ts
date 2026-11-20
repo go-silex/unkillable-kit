@@ -1,6 +1,6 @@
 /** Optional Better Auth 1.7 OAuth provider and JWT tables (ADR-0008). */
 import { index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core'
-import { baSession, baUser } from './better-auth-schema'
+import { type BetterAuthTables, baSession, baUser } from './better-auth-schema'
 
 export const oauthClient = sqliteTable(
   'oauth_client',
@@ -197,4 +197,8 @@ export const oidcProviderDrizzleSchema = {
   oauthConsent,
   oauthClientAssertion,
   jwks,
+}
+
+export function withOptionalOidcSchema(schema: BetterAuthTables, enabled: boolean) {
+  return enabled ? { ...schema, ...oidcProviderDrizzleSchema } : schema
 }
