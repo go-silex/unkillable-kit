@@ -111,7 +111,7 @@
   },
   "trustedDependencies": [],
   "overrides": {
-    "@better-auth/core": "1.7.23"
+    "@better-auth/core": "1.7.27"
   },
   "patchedDependencies": {
     "zod@4.6.7": "config/kit/patches/zod@4.6.7.patch"
