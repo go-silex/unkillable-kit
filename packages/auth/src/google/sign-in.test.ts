@@ -257,6 +257,19 @@ describe('Google sign-in through Better Auth', () => {
     expect(rows(sqlite, 'session')).toHaveLength(0)
   })
 
+  it('enforces the session guard if the user becomes inactive after the link check', async () => {
+    const { auth, sqlite } = setup()
+    sqlite.exec(`
+      CREATE TRIGGER disable_after_link AFTER INSERT ON account
+      BEGIN UPDATE user SET disabled = 1 WHERE id = NEW.user_id; END;
+    `)
+    googleBoundary({ email: 'person@example.com', email_verified: true, hd: 'example.com' })
+    const response = await callback(auth)
+    expect(response.headers.get('location')).toContain('/login?error=account_inactive')
+    expect(rows(sqlite, 'user')).toHaveLength(1)
+    expect(rows(sqlite, 'session')).toHaveLength(0)
+  })
+
   it('refuses a previously linked user after disablement without adding an account or session', async () => {
     const { auth, sqlite } = setup()
     googleBoundary({ email: 'person@example.com', email_verified: true, hd: 'example.com' })
