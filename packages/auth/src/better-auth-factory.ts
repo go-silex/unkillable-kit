@@ -114,7 +114,8 @@ function apiErrorOptions(google: boolean, origins: string[], configuredURL?: str
     } catch {
       throw new Error('googleErrorURL must be an absolute URL on a trusted origin')
     }
-    if (parsed.username || parsed.password || !origins.includes(parsed.origin)) {
+    const httpScheme = parsed.protocol === 'https:' || parsed.protocol === 'http:'
+    if (!httpScheme || parsed.username || parsed.password || !origins.includes(parsed.origin)) {
       throw new Error('googleErrorURL must be an absolute URL on a trusted origin')
     }
     errorURL = parsed.toString()

@@ -59,8 +59,8 @@ tokens are discarded before account persistence and are not logged.
 
 The App owns the sign-in button and must pass its login page as Better Auth's
 `errorCallbackURL` when starting sign-in. Also configure the top-level
-`createBetterAuth` option `googleErrorURL?: string` with an absolute URL on a
-trusted origin for the App login page. This fallback is used when OAuth state is
+`createBetterAuth` option `googleErrorURL?: string` with an absolute `https:` or
+`http:` URL on a trusted origin for the App login page. This fallback is used when OAuth state is
 missing or already consumed and when account lookup fails; it defaults to
 `/login` on the first trusted origin. It does not replace `errorCallbackURL`
 for normal initial sign-in.

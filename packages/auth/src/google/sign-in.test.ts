@@ -265,12 +265,13 @@ describe('Google sign-in through Better Auth', () => {
     expect(snapshot(sqlite)).toEqual(before)
   })
 
-  it.each(['/auth/sign-in', 'https://untrusted.example.test/auth/sign-in'])(
-    'rejects invalid Google error URL %s',
-    (url) => {
-      expect(() => setup({ googleErrorURL: url })).toThrow()
-    },
-  )
+  it.each([
+    '/auth/sign-in',
+    'https://untrusted.example.test/auth/sign-in',
+    `blob:${appOrigin}/auth/sign-in`,
+  ])('rejects invalid Google error URL %s', (url) => {
+    expect(() => setup({ googleErrorURL: url })).toThrow()
+  })
 
   it('rejects tokenless Google account linking without changing state', async () => {
     const { auth, sqlite } = setup()
