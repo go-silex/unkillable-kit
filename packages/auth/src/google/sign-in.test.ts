@@ -152,7 +152,7 @@ async function callback(auth: KitBetterAuth) {
   return result
 }
 
-function rows(sqlite: Database.Database, table: 'user' | 'account' | 'session') {
+function rows(sqlite: Database.Database, table: 'user' | 'account' | 'session' | 'verification') {
   return sqlite.prepare(`SELECT * FROM "${table}"`).all() as Record<string, unknown>[]
 }
 
@@ -285,27 +285,35 @@ describe('Google sign-in through Better Auth', () => {
   })
 
   it('does not expose Google sign-in when the option is absent', async () => {
-    const { auth, sqlite } = setup({ configured: false })
+    const { auth, sqlite } = setup({ configured: false, existing: false })
     const calls = googleBoundary({
       email: 'person@example.com',
       email_verified: true,
       hd: 'example.com',
     })
-    let response: Response
-    try {
-      response = await auth.handler(
-        new Request(`${origin}/api/auth/sign-in/social`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json', origin },
-          body: JSON.stringify({ provider: 'google', callbackURL: `${origin}/done` }),
-        }),
-      )
-    } catch (error) {
-      if (!isAPIError(error)) throw error
-      response = new Response(null, { status: error.statusCode })
-    }
-    expect(response.ok).toBe(false)
+    const callbackResponse = await auth.handler(
+      new Request(`${origin}/api/auth/callback/google?code=x&state=y`),
+    )
+    expect(callbackResponse.status).toBe(302)
+    expect(callbackResponse.headers.get('location')).toBe(
+      `${origin}/api/auth/error?error=state_mismatch`,
+    )
+    const signInResponse = await auth.handler(
+      new Request(`${origin}/api/auth/sign-in/social`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin },
+        body: JSON.stringify({ provider: 'google', callbackURL: `${origin}/done` }),
+      }),
+    )
+    expect(signInResponse.status).toBe(404)
+    expect(await signInResponse.json()).toMatchObject({
+      code: 'PROVIDER_NOT_FOUND',
+      message: 'Provider not found',
+    })
     expect(calls).toHaveLength(0)
     expect(rows(sqlite, 'session')).toHaveLength(0)
+    expect(rows(sqlite, 'user')).toHaveLength(0)
+    expect(rows(sqlite, 'account')).toHaveLength(0)
+    expect(rows(sqlite, 'verification')).toHaveLength(0)
   })
 })
