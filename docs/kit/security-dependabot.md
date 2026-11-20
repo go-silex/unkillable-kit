@@ -86,10 +86,18 @@ GitHub docs: `cooldown` applies **only** to version updates, not security update
 
 Both are in the tree, so they bind every install path (CI, Workers Builds, worktrees, an agent's `bun add`).
 
-- **Age gate:** [`bunfig.toml`](../../bunfig.toml) `[install] minimumReleaseAge = 259200` (3 d = Dependabot `cooldown`) blocks new resolutions younger than 3 d, including `bun add`, `bun update` and non-frozen `bun install`. Bun's [stability check](https://bun.com/docs/pm/cli/install#minimum-release-age) also skips rapid-fix pairs just outside the gate. Older versions and exact exemptions pass.
+- **Age gate:** [`bunfig.toml`](../../bunfig.toml) sets `[install] minimumReleaseAge = 259200`
+  (3 d = Dependabot `cooldown`). Ordinary resolutions gate versions under 3 d when publish
+  timestamps exist: `bun add`, `bun update`, non-frozen `bun install`. Bun's
+  [stability check](https://bun.com/docs/pm/cli/install#minimum-release-age) skips rapid-fix
+  pairs outside the gate. Older versions and exact exemptions pass.
 - **Install-script lockdown:** `package.json` `trustedDependencies: []` blocks dependency `preinstall`, `install` and `postinstall`. The field **replaces** Bun's [built-in allow list](https://bun.com/docs/pm/lifecycle#behavior-of-the-trustedDependencies-field); `[]` means none. It does not block code run by importing or executing a package.
 
-Frozen installs can also be blocked by the age gate, including a reviewed security fix younger than three days. Install paths reproducing a reviewed lock use `--minimum-release-age 0`; this does not relax the age gate for new resolutions. A native dependency that requires an install script must be added to `trustedDependencies` in the kit `package.json` with the reason in the same PR; products promote that change upstream.
+Frozen installs can be blocked, including reviewed security fixes under 3 d. Reproduce a reviewed lock
+with `--minimum-release-age 0`, not new resolutions. `bun audit --fix` can install a young fix:
+review the resulting lock. Add native dependencies requiring install scripts to
+`trustedDependencies` in the kit `package.json`, with the reason in the same PR; products
+promote that change upstream.
 
 ### Young-version exemptions
 
