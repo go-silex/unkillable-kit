@@ -6,6 +6,7 @@ import { createSqliteD1 } from '@kit/db/testing'
 import Database from 'better-sqlite3'
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { McpIdentity, McpIdentityPort } from '../identity'
+import { putConsent, readConsent } from './consent'
 import {
   createHostedMcpWorker,
   type HostedMcpWorker,
@@ -906,6 +907,38 @@ describe('hosted authorization-server contract', () => {
 })
 
 describe('hosted consent', () => {
+  it('stores and reads consent using the SHA-256 digest of the cookie id', async () => {
+    const kv = new MemoryKv()
+    const namespace = kv as unknown as KVNamespace
+    const id = '00000000000000000000000000000000'
+    const key = 'mcp_consent:84e0c0eafaa95a34c293f278ac52e45ce537bab5e752a00e6959a13ae103b65a'
+    const record: Parameters<typeof putConsent>[2] = {
+      identity: DEMO,
+      request: { clientId: 'client', redirectUri: REDIRECT } as Parameters<
+        typeof putConsent
+      >[2]['request'],
+      scope: ['mcp'],
+    }
+    const random = vi.spyOn(crypto, 'getRandomValues').mockReturnValue(new Uint8Array(16))
+    const put = vi.spyOn(kv, 'put')
+    let result: { csrf: string; cookie: string }
+    try {
+      result = await putConsent(namespace, new URL(LOCAL), record)
+    } finally {
+      random.mockRestore()
+    }
+    expect(result.cookie).toContain(`mcp_consent_id=${id};`)
+    expect(kv.consentKeys()).toEqual([key])
+    expect(put).toHaveBeenCalledWith(key, expect.any(String), { expirationTtl: 600 })
+    const request = (cookie: string) =>
+      new Request(`${LOCAL}/authorize`, { headers: { cookie: `mcp_consent_id=${cookie}` } })
+    expect(await readConsent(namespace, request(id))).toEqual({ ...record, csrf: result.csrf, key })
+    expect(await readConsent(namespace, request('11111111111111111111111111111111'))).toBeNull()
+    expect(await readConsent(namespace, request(`${id}x`))).toBeNull()
+    await kv.delete(key)
+    expect(await readConsent(namespace, request(id))).toBeNull()
+  })
+
   afterEach(() => {
     vi.unstubAllGlobals()
   })
@@ -922,12 +955,100 @@ describe('hosted consent', () => {
     expect(html).toContain('127.0.0.1:9999')
     expect(html).toContain('on your own computer')
     expect(html).toContain('action="/authorize"')
+    expect(html).toMatch(/<meta\b[^>]*name=["']viewport["']/i)
+    expect(html).not.toMatch(/<(?:img|picture|source)\b/i)
+    expect(html).not.toMatch(/\burl\s*\(/i)
+    expect(html).not.toMatch(/<link\b[^>]*rel=["']stylesheet["']/i)
+    expect(res.headers.get('content-security-policy')).not.toContain('img-src')
     expect(res.headers.get('content-security-policy')).toContain("frame-ancestors 'none'")
     expect(res.headers.get('x-frame-options')).toBe('DENY')
     expect(res.headers.get('cache-control')).toBe('no-store')
     expect(setCookie).toMatch(/^mcp_consent_id=[0-9a-f]+; Path=\/authorize; HttpOnly; SameSite=Lax/)
     expect(setCookie).toContain('Max-Age=600')
     expect(setCookie).not.toContain('Secure')
+  })
+  it('snapshots branding and allows same-origin images and one nonced style', async () => {
+    const kv = new MemoryKv()
+    const brand = {
+      logoPath: '/assets/v1.2/consent-logo.svg',
+      backdropPath: '/assets/consent-backdrop.webp',
+      accentColor: '#fffbeb',
+      serifHeading: true,
+    }
+    const hosted = worker({
+      identityPort: port(DEMO),
+      consentPresentation: { brand, serviceName: 'Example Service' },
+    })
+    brand.logoPath = '/assets/changed-logo.png'
+    brand.backdropPath = '/assets/changed-backdrop.png'
+    brand.accentColor = '#abcdef'
+    brand.serifHeading = false
+
+    const clientId = await registerClient(hosted, kv)
+    const { res, html, csrf } = await consentPage(hosted, kv, await authorizeUrl(clientId))
+    expect(res.status).toBe(200)
+    expect(html).toContain('/assets/v1.2/consent-logo.svg')
+    expect(html).toContain('/assets/consent-backdrop.webp')
+    expect(html).toContain('Example Service')
+    expect(html).toMatch(/--accent: #fffbeb; --button-ink: black;/)
+    expect(html).toMatch(/<main class="[^"]*\bserif\b/)
+    expect(html).not.toContain('/assets/changed-logo.png')
+    expect(html).not.toContain('/assets/changed-backdrop.png')
+    expect(html).not.toContain('#abcdef')
+
+    const csp = res.headers.get('content-security-policy') ?? ''
+    const directives = new Map(
+      csp.split(';').map((part) => {
+        const [name, ...values] = part.trim().split(/\s+/)
+        return [name, values] as const
+      }),
+    )
+    expect(directives.get('default-src')).toEqual(["'none'"])
+    expect(directives.get('img-src')).toEqual(["'self'"])
+    const styles = [...html.matchAll(/<style\b([^>]*)>/gi)]
+    expect(styles).toHaveLength(1)
+    const nonce = /\bnonce=["']([^"']+)["']/i.exec(styles[0]?.[1] ?? '')?.[1]
+    expect(nonce).toBeTruthy()
+    expect(nonce).not.toBe(csrf)
+    expect(directives.get('style-src')).toEqual([`'nonce-${nonce}'`])
+    expect(csp).not.toContain("'unsafe-inline'")
+    expect(html).not.toMatch(/<script\b/i)
+    expect(html.match(/<form\b/gi)).toHaveLength(1)
+    expect(html).toMatch(/<form\b[^>]*method="post"[^>]*action="\/authorize"/i)
+    for (const value of ['yes', 'no']) {
+      const control = html.match(
+        new RegExp(
+          `<button\\b(?=[^>]*\\bname=["']consent["'])(?=[^>]*\\bvalue=["']${value}["'])[^>]*>`,
+          'i',
+        ),
+      )?.[0]
+      expect(control).toBeTruthy()
+      expect(control).not.toMatch(/\bdisabled\b/i)
+    }
+    expect(csrf).toBeTruthy()
+    expect(csp).toContain("frame-ancestors 'none'")
+    expect(res.headers.get('x-frame-options')).toBe('DENY')
+    expect(res.headers.get('referrer-policy')).toBe('no-referrer')
+    expect(res.headers.get('cache-control')).toBe('no-store')
+  })
+
+  it.each([
+    { logoPath: 'https://other.example/logo.svg' },
+    { backdropPath: '/assets/document.html' },
+    { accentColor: 'red' },
+  ])('rejects invalid branding at construction: %o', (brand) => {
+    expect(() =>
+      worker({ identityPort: port(DEMO), consentPresentation: { brand, serviceName: 'Service' } }),
+    ).toThrow(TypeError)
+  })
+
+  it('requires a text service name when a logo identifies the service', () => {
+    expect(() =>
+      worker({
+        identityPort: port(DEMO),
+        consentPresentation: { brand: { logoPath: '/assets/logo.svg' } },
+      }),
+    ).toThrow(/serviceName/)
   })
 
   it('renders French presentation as text in one protected consent form and snapshots its data', async () => {
@@ -974,10 +1095,10 @@ describe('hosted consent', () => {
 
   it('keeps redirect-class warnings on French pages', async () => {
     const cimd = 'https://client.example.test/client.json'
-    for (const [redirect, hasWarning] of [
-      ['https://client.example.test/cb', false],
-      ['http://127.0.0.1:9/cb', true],
-      ['com.example.app:/cb', true],
+    for (const [redirect, warning] of [
+      ['https://client.example.test/cb', null],
+      ['http://127.0.0.1:9/cb', 'Le code est envoyé à un programme sur votre ordinateur'],
+      ['com.example.app:/cb', 'Le code est envoyé à une application sur cet appareil'],
     ] as const) {
       stubCimd(cimd, redirect)
       const kv = new MemoryKv()
@@ -985,8 +1106,11 @@ describe('hosted consent', () => {
       const { res, html } = await consentPage(hosted, kv, await authorizeUrl(cimd, { redirect }))
       expect(res.status, redirect).toBe(200)
       expect(html).toMatch(/<html\s+lang="fr"/)
-      expect(/<p>\s*<strong>/.test(html), redirect).toBe(hasWarning)
-      if (redirect.startsWith('com.example.app:')) expect(html).toContain('com.example.app:')
+      if (warning) expect(html, redirect).toContain(warning)
+      else expect(html, redirect).not.toContain('Le code est envoyé à')
+      if (redirect.startsWith('com.example.app:')) {
+        expect(html).toContain('<strong>com.example.app:</strong>')
+      }
     }
   })
 
@@ -1323,9 +1447,11 @@ describe('hosted consent', () => {
     const hosted = worker({ identityPort: port(OTHER) })
     const clientId = await registerClient(hosted, kv)
     const page = await consentPage(hosted, kv, await authorizeUrl(clientId))
+    expect(kv.consentKeys()).toHaveLength(1)
     const first = await postConsent(hosted, kv, `${LOCAL}/authorize`, page)
     expect(first.status).toBe(302)
     expect(first.headers.get('set-cookie')).toMatch(/^mcp_consent_id=; .*Max-Age=0/)
+    expect(kv.consentKeys()).toEqual([])
     const second = await postConsent(hosted, kv, `${LOCAL}/authorize`, page)
     expect(second.status).toBe(401)
   })

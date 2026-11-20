@@ -114,28 +114,35 @@ The ticket's User is checked again when redeemed; a ticket minted before disable
 
 > **Amendment (2026-11-09) — consent unchanged by `grantAdmission`.** The D2 admission seam never runs on `/authorize`: it cannot show, skip or force this page, and it changes no consent record, cookie, CSRF check, redirect-class warning or Deny redirect. A user can therefore Allow and the client still receive `invalid_grant` at the code exchange, which revokes that new OAuth grant.
 
-`HostedMcpWorkerOptions` accepts `consentPresentation?: ConsentPresentation`. The type is exported only from `@kit/mcp/hosted`:
+`@kit/mcp/hosted` exposes the static [`ConsentPresentation`](../../../../packages/mcp/README.md#hosted-shell) option. The factory validates
+branding and snapshots the data at construction; OAuth state never stores it.
+Kit renders a standalone, responsive, scriptless page. `locale` picks Kit labels
+(`en` by default, or `fr`); service name and disclosures are escaped plain text.
+Optional branding is limited to same-origin artwork, a hex accent with contrast
+chosen by Kit, and a system serif heading. Product files must be trusted static
+images served directly, not user-controlled or redirected. A logo requires a
+text service name so it is not the only way to identify the service.
 
-```ts
-export type ConsentPresentation = {
-  readonly locale?: 'en' | 'fr'
-  readonly serviceName?: string
-  readonly disclosures?: readonly { readonly label: string; readonly text: string }[]
-}
-```
+Presentation cannot override OAuth policy, labels, warnings, identity, scope,
+PKCE, CSRF, TTL, minting or revocation. No renderer, callbacks, CSS, external
+URLs or form overrides. Disclosure prose describes Product policy, not enforcement.
 
-The factory snapshots this static caller data once at construction, including disclosure entries, so subsequent caller mutation cannot change the pages. Presentation is not persisted in consent records, OAuth grants or tokens. An omitted locale means `en`; `fr` selects Kit-owned protocol/security labels. There is no request-language negotiation, switcher, new i18n framework or dependency. General error localization is outside this seam.
+`always` is the default. The page shows the client name and ID, the redirect
+scheme and host (scheme only for hostless URIs), and applicable warnings: locally
+running program (dotted `127/8`, `[::1]`, mapped loopback, `localhost` or its
+subdomains) or custom-scheme app. Remote HTTPS redirects need no warning.
 
-The service name and every disclosure label/text are escaped plain text, never Markdown or HTML. The option accepts no renderer, callbacks, links, CSS, form attributes or security-label overrides. Kit retains the authenticated identity, client ID and actual redirect facts, redirect-class warnings, fixed `/authorize` action, CSRF, Allow/Deny controls and response headers.
-
-UI content carries no authority: disclosures cannot change identity, scopes, PKCE, CSRF, consent policy, TTLs or minting. Duration or revocation prose must describe the caller's actual policy; it does not configure or enforce it. This amendment adds no revocation hooks.
-The shell does not auto-approve. `consent` defaults to `always`: it shows a page naming the client's `client_name`, its `client_id`, the `redirect_uri` scheme and host, and one warning for the redirect class: a program on this computer (dotted `127.0.0.0/8`, `[::1]`, IPv4-mapped `127.0.0.0/8`, `localhost`, `*.localhost`) or a custom-scheme app. A remote https redirect gets none; an http redirect off the provider's loopback hosts never reaches the page. The page sends `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'`, `X-Frame-Options: DENY`, `Cache-Control: no-store`, and `Referrer-Policy: no-referrer`.
+The fixed `/authorize` form keeps both Allow and Deny. CSP denies framing, base
+URLs and all resources except one Kit style block authorized by a fresh nonce
+independent of CSRF. Branded images add `img-src 'self'` (requests can carry
+cookies); the default loads no assets. No `form-action` that could block the OAuth
+redirect. `X-Frame-Options: DENY`, `Cache-Control: no-store`, `Referrer-Policy: no-referrer`.
 
 Provider 1.2 refuses cleartext HTTP redirects other than `localhost`, dotted `127.0.0.0/8` and `[::1]`, returning a local `400` before identity or consent. The shell enables `allowPrivateUseRedirectUris` for custom-scheme native apps.
 
 A URL `client_id` (CIMD, self-declared) always gets the page, in every mode. `skip` omits it only when a positive product-registration receipt is visible for that client. Products obtain the receipt through `createProductClient` (public `OAuthHelpers.createClient` plus a package-owned `OAUTH_KV` key). Open DCR and bare `createClient` write no receipt. A missing or not-yet-visible receipt shows the page: absence never means product-registered, including under Cloudflare KV eventual consistency and cached negative lookups. Temporary consent while a just-written receipt propagates is expected. Existing clients registered only with bare `createClient` must be re-registered through the helper before `skip` applies. `{ mode: 'demo-loopback', email }` omits the page only for that email on a loopback, non-production host, for any client registered there; that drive-by risk is accepted for the demo account only. Dogfood passes `{ mode: 'demo-loopback', email: 'demo@kit.local' }`; that email is not a package default. In every mode the identity port resolves identity only; the authorization server mints.
 
-The consent record lives in `OAUTH_KV` for 10 minutes and is found only through an HttpOnly, SameSite=Lax cookie. Loopback uses `mcp_consent_id; Path=/authorize`; elsewhere only `__Host-mcp_consent_id; Secure; Path=/` is read. The record holds identity, CSRF, the GET-validated authorization request, and granted scope. Its POST ignores its own query, compares CSRF in constant time, deletes the record before completion, and clears the cookie (`Max-Age=0`): consent stays bound to the client, redirect URI, and PKCE challenge that the user saw. Deny redirects `error=access_denied` to that client. `OAUTH_KV` write access can mint OAuth grants, so caller hooks that hold it are trusted code.
+The consent record lives in `OAUTH_KV` for 10 minutes, keyed by the SHA-256 digest of an HttpOnly, SameSite=Lax cookie. Loopback uses `mcp_consent_id; Path=/authorize`; elsewhere only `__Host-mcp_consent_id; Secure; Path=/` is read. The record holds identity, CSRF, GET-validated authorization request, and granted scope. Its POST ignores its own query, compares CSRF in constant time, deletes the record before completion, and clears the cookie (`Max-Age=0`): consent stays bound to the client, redirect URI, and PKCE challenge that the user saw. Deny redirects `error=access_denied` to that client. `OAUTH_KV` write access can mint OAuth grants, so caller hooks holding it are trusted code.
 
 **Non-claim:** single use is best effort at KV strength. KV get→delete is not atomic and a delete can take 60 seconds or more to appear elsewhere. A holder of both cookie and page CSRF can replay inside that window, but only for the same client, redirect URI, and PKCE challenge; only the original PKCE-verifier holder can redeem. This is the provider's own authorization-code redemption strength on KV. `/authorize` accepts GET and POST only; another method is `405`.
 

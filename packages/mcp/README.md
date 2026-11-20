@@ -79,6 +79,16 @@ const hosted = createHostedMcpWorker({
   register(server, { identity }) {
     createProductCatalogue({ identity }).registerAll(server)
   },
+  consentPresentation: {
+    locale: 'en',
+    serviceName: 'Product',
+    brand: {
+      logoPath: '/brand/product-logo.svg',
+      backdropPath: '/brand/product-backdrop.webp',
+      accentColor: '#243b53',
+      serifHeading: true,
+    },
+  },
   // Optional, deny-only: refuse an existing OAuth grant (ADR-0015 D2).
   // Throw when the answer is unknown; `false` denies, and a token-phase denial revokes.
   async grantAdmission({ userId, grantId }, env) {
@@ -94,6 +104,8 @@ const hosted = createHostedMcpWorker({
 // A dedicated Worker with no product handlers exports `hosted` itself.
 export default { ...productWorker, fetch: hosted.fetch }
 ```
+
+`consentPresentation` controls only the Kit-owned OAuth page. It is optional; by default the page is English, neutral and loads no assets. Set `locale: 'fr'` for French protocol labels; `serviceName` and `disclosures: [{ label, text }]` are escaped plain text. Each `brand` field is optional. Serve `logoPath` and `backdropPath` directly as trusted same-origin static SVG, PNG, JPEG, WebP or AVIF files: no redirect, query, fragment, or external URL. A logo requires a nonblank `serviceName`, which remains visible and accessible without the image. `accentColor` must be `#RRGGBB` (the Kit picks readable button text); `serifHeading` selects system serif fonts for the heading. The factory validates and snapshots the branding. Do not rewrite the resulting HTML or inject a Product stylesheet. Consent policy, security labels, CSRF, and the form remain Kit-owned.
 
 The hosted shell requires a `DB` D1 binding pointing at the product's Better Auth database. It calls the shared `isAccountActive` guard on identity resolution, consent submission, every code or refresh exchange, and every authenticated MCP request. Missing or disabled users are denied; database errors fail closed with `503`. This check is mandatory and independent of `grantAdmission`.
 

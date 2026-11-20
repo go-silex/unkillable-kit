@@ -50,9 +50,9 @@
     "fileBytes": 7523
   },
   "docs/kit/architecture/adr/0015-mcp-remote-oauth-worker.md": {
-    "overLimitLines": 33,
+    "overLimitLines": 31,
     "maxLineBytes": 1243,
-    "fileBytes": 34205
+    "fileBytes": 33810
   },
   "docs/kit/architecture/adr/0016-tasks-owner-org-tenancy.md": {
     "overLimitLines": 3,
@@ -119,11 +119,6 @@
     "maxLineBytes": 810,
     "fileBytes": 9353
   },
-  "docs/kit/observability.md": {
-    "overLimitLines": 2,
-    "maxLineBytes": 431,
-    "fileBytes": 3174
-  },
   "docs/kit/playbooks/create-product-day0.md": {
     "overLimitLines": 5,
     "maxLineBytes": 664,
@@ -150,9 +145,9 @@
     "fileBytes": 30075
   },
   "docs/kit/standards/stack.md": {
-    "overLimitLines": 52,
+    "overLimitLines": 51,
     "maxLineBytes": 867,
-    "fileBytes": 63879
+    "fileBytes": 63861
   },
   "docs/kit/testing/coverage.md": {
     "overLimitLines": 7,
@@ -162,7 +157,7 @@
   "docs/kit/testing/critical-path.md": {
     "overLimitLines": 92,
     "maxLineBytes": 3787,
-    "fileBytes": 280244
+    "fileBytes": 280183
   },
   "docs/kit/testing/ops-model.md": {
     "overLimitLines": 32,

@@ -27,11 +27,17 @@ export type HostedMcpEnv = {
  */
 export type ConsentPolicy = 'always' | 'skip' | { mode: 'demo-loopback'; email: string }
 
-/** Static, plain-text additions to the Kit-owned consent page. */
+/** Static text and bounded branding for the Kit-owned consent page. */
 export type ConsentPresentation = {
   readonly locale?: 'en' | 'fr'
   readonly serviceName?: string
   readonly disclosures?: readonly { readonly label: string; readonly text: string }[]
+  readonly brand?: {
+    readonly logoPath?: string
+    readonly backdropPath?: string
+    readonly accentColor?: string
+    readonly serifHeading?: boolean
+  }
 }
 
 /**

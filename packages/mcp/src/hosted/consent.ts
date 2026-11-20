@@ -1,9 +1,9 @@
 import type { AuthRequest } from '@cloudflare/workers-oauth-provider'
 import type { McpIdentity } from '../identity'
-import type { ConsentPresentation } from './env'
+import { CONSENT_STYLE } from './consent-style'
 import { AUTHORIZE_PATH, isLoopbackHostname } from './host-policy'
 import { normalizeIdentity } from './identity-props'
-import { CONSENT_LABELS } from './presentation'
+import { CONSENT_LABELS, type ResolvedConsentPresentation } from './presentation'
 
 const CONSENT_KV_PREFIX = 'mcp_consent:'
 const CONSENT_TTL_SECONDS = 600
@@ -34,6 +34,12 @@ function consentCookie(requestUrl: URL): ConsentCookie {
 function randomToken(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(16))
   return [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
+async function consentKey(id: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(id))
+  const hex = [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
+  return `${CONSENT_KV_PREFIX}${hex}`
 }
 
 function parseCookie(header: string | null, name: string): string | null {
@@ -95,7 +101,7 @@ export async function putConsent(
 ): Promise<{ csrf: string; cookie: string }> {
   const id = randomToken()
   const csrf = randomToken()
-  await kv.put(`${CONSENT_KV_PREFIX}${id}`, JSON.stringify({ ...record, csrf }), {
+  await kv.put(await consentKey(id), JSON.stringify({ ...record, csrf }), {
     expirationTtl: CONSENT_TTL_SECONDS,
   })
   const { name, attributes } = consentCookie(requestUrl)
@@ -115,18 +121,18 @@ export async function readConsent(
   const { name } = consentCookie(new URL(request.url))
   const id = parseCookie(request.headers.get('Cookie'), name)
   if (!(id && CONSENT_ID.test(id))) return null
-  const key = `${CONSENT_KV_PREFIX}${id}`
+  const key = await consentKey(id)
   const raw = await kv.get(key)
   if (!raw) return null
   const record = parseConsent(raw)
   return record ? { ...record, key } : null
 }
 
-/** Not framable, not cached, no referrer, no subresources. */
-export function consentPageHeaders(cookie: string): Headers {
+function consentPageHeaders(cookie: string, nonce: string, hasImages: boolean): Headers {
+  const images = hasImages ? "; img-src 'self'" : ''
   return new Headers({
     'content-type': 'text/html; charset=utf-8',
-    'content-security-policy': "default-src 'none'; frame-ancestors 'none'",
+    'content-security-policy': `default-src 'none'; frame-ancestors 'none'; base-uri 'none'; style-src 'nonce-${nonce}'${images}`,
     'x-frame-options': 'DENY',
     'cache-control': 'no-store',
     'referrer-policy': 'no-referrer',
@@ -145,10 +151,10 @@ const LOOPBACK_IP =
 function redirectWarning(redirect: URL, labels: (typeof CONSENT_LABELS)['en']): string {
   const host = redirect.hostname.toLowerCase().replace(/\.$/, '')
   if (redirect.protocol !== 'http:' && redirect.protocol !== 'https:') {
-    return `<p><strong>${labels.customSchemeBefore}${escapeHtml(redirect.protocol)}${labels.customSchemeAfter}</strong> ${labels.warningAdvice}</p>`
+    return `<p class="warning"><strong>${labels.customSchemeBefore}${escapeHtml(redirect.protocol)}${labels.customSchemeAfter}</strong> ${labels.warningAdvice}</p>`
   }
   if (LOOPBACK_IP.test(host) || host === 'localhost' || host.endsWith('.localhost')) {
-    return `<p><strong>${labels.loopbackWarning}</strong> ${labels.warningAdvice}</p>`
+    return `<p class="warning"><strong>${labels.loopbackWarning}</strong> ${labels.warningAdvice}</p>`
   }
   return ''
 }
@@ -157,18 +163,29 @@ function redirectWarning(redirect: URL, labels: (typeof CONSENT_LABELS)['en']): 
  * Names the client by its own label and by its id, and where the code goes.
  * Loopback and custom-scheme redirects each get their own warning.
  */
-export function consentHtml(opts: {
+export function consentResponse(opts: {
   clientName: string
   clientId: string
   redirectUri: string
   email: string
   csrf: string
-  presentation?: ConsentPresentation
-}): string {
+  cookie: string
+  presentation?: ResolvedConsentPresentation
+}): Response {
   const redirect = new URL(opts.redirectUri)
+  const destination = redirect.host ? `${redirect.protocol}//${redirect.host}` : redirect.protocol
   const locale = opts.presentation?.locale === 'fr' ? 'fr' : 'en'
   const labels = CONSENT_LABELS[locale]
-  const serviceName = opts.presentation?.serviceName
+  const { serviceName, brand } = opts.presentation ?? {}
+  const nonce = randomToken()
+  const brandStyle = brand?.accentColor
+    ? `\n:root { --accent: ${brand.accentColor}; --button-ink: ${brand.buttonInk}; }\n`
+    : ''
+  const logo = brand?.logoPath ? `<img class="logo" src="${brand.logoPath}" alt=""/>` : ''
+  const backdrop = brand?.backdropPath
+    ? `<img class="backdrop" src="${brand.backdropPath}" alt=""/>`
+    : ''
+  const classes = brand ? ` class="branded${brand.serifHeading ? ' serif' : ''}"` : ''
   const disclosures =
     opts.presentation?.disclosures
       ?.map(
@@ -176,21 +193,39 @@ export function consentHtml(opts: {
           `    <p><strong>${escapeHtml(label)}</strong> ${escapeHtml(text)}</p>\n`,
       )
       .join('') ?? ''
-  return `<!doctype html>
+  const html = `<!doctype html>
 <html lang="${locale}">
-  <head><meta charset="utf-8"/><title>${labels.title}</title></head>
+  <head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <title>${labels.title}</title>
+    <style nonce="${nonce}">${CONSENT_STYLE}${brandStyle}</style>
+  </head>
   <body>
-    <h1>${labels.title}</h1>
-    ${serviceName ? `<p>${escapeHtml(serviceName)}</p>\n    ` : ''}<p>${labels.signedInAs} ${escapeHtml(opts.email || labels.noEmail)}.</p>
-    <p>${labels.client}: ${escapeHtml(opts.clientName || opts.clientId)}</p>
-    <p>${labels.clientId}: <code>${escapeHtml(opts.clientId)}</code></p>
-    <p>${labels.destination}: <strong>${escapeHtml(`${redirect.protocol}//${redirect.host}`)}</strong></p>
-    ${redirectWarning(redirect, labels)}
-${disclosures}    <form method="post" action="${AUTHORIZE_PATH}">
-      <input type="hidden" name="csrf" value="${escapeHtml(opts.csrf)}"/>
-      <button type="submit" name="consent" value="yes">${labels.allow}</button>
-      <button type="submit" name="consent" value="no">${labels.deny}</button>
-    </form>
+    ${backdrop}
+    <main${classes}>
+      <header>
+        ${logo}
+        <h1>${labels.title}</h1>
+        ${serviceName ? `<p class="service">${escapeHtml(serviceName)}</p>` : ''}
+      </header>
+      <div class="details">
+        <p>${labels.signedInAs} ${escapeHtml(opts.email || labels.noEmail)}.</p>
+        <p>${labels.client}: ${escapeHtml(opts.clientName || opts.clientId)}</p>
+        <p>${labels.clientId}: <code>${escapeHtml(opts.clientId)}</code></p>
+        <p>${labels.destination}: <strong>${escapeHtml(destination)}</strong></p>
+        ${redirectWarning(redirect, labels)}
+        ${disclosures}
+      </div>
+      <form method="post" action="${AUTHORIZE_PATH}">
+        <input type="hidden" name="csrf" value="${escapeHtml(opts.csrf)}"/>
+        <button type="submit" name="consent" value="yes">${labels.allow}</button>
+        <button type="submit" name="consent" value="no">${labels.deny}</button>
+      </form>
+    </main>
   </body>
 </html>`
+  return new Response(html, {
+    headers: consentPageHeaders(opts.cookie, nonce, !!(logo || backdrop)),
+  })
 }

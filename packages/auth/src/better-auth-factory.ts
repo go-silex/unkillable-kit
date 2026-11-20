@@ -181,10 +181,7 @@ export function createBetterAuth(opts: CreateBetterAuthOpts): KitBetterAuth {
     // is memory per isolate, keyed `ip|path`, and on only when NODE_ENV is 'production': pinned off.
     rateLimit: { enabled: false },
     secret: opts.secret,
-    database: drizzleAdapter(db, {
-      provider: 'sqlite',
-      schema,
-    }),
+    database: drizzleAdapter(db, { provider: 'sqlite', schema }),
     hooks: { before: createSessionAccountGuard(db, schema) },
     databaseHooks: {
       account: google ? googleAccountHooks : undefined,
@@ -227,10 +224,22 @@ export function createBetterAuth(opts: CreateBetterAuthOpts): KitBetterAuth {
         opts.resetPasswordTokenExpiresIn ?? RESET_PASSWORD_TOKEN_EXPIRES_IN_SEC,
       ...(emailPort && emailConfig
         ? {
-            sendResetPassword: async ({ user, url }) => {
+            sendResetPassword: async ({ user, url, token }) => {
+              const callback = new URL(url)
+              const redirectTo = callback.searchParams.get('callbackURL')
+              // Better Auth invokes this only for known accounts. Returning silently
+              // preserves its generic response when no redirect was supplied.
+              if (!redirectTo) return
+              callback.pathname = callback.pathname.slice(
+                0,
+                callback.pathname.lastIndexOf('/reset-password/'),
+              )
+              callback.search = ''
+              const resetUrl = new URL(redirectTo, callback)
+              resetUrl.searchParams.set('token', token)
               await sendResetPasswordMail(emailPort, {
                 email: user.email,
-                url,
+                url: resetUrl.href,
                 emailConfig,
                 ...tokenHref,
               })
@@ -262,18 +271,13 @@ export function createBetterAuth(opts: CreateBetterAuthOpts): KitBetterAuth {
       cookies: {
         session_token: {
           name: cookieName,
-          attributes: {
-            httpOnly: true,
-            sameSite: 'lax',
-            path: '/',
-            secure,
-          },
+          attributes: { httpOnly: true, sameSite: 'lax', path: '/', secure },
         },
       },
     },
     trustedOrigins,
   })
-  const safeHandler = createSafeHandler(auth.handler)
+  auth.fetch = auth.handler = createSafeHandler(auth.handler)
   auth.api.getSession = new Proxy(auth.api.getSession, {
     async apply(target, thisArg, args) {
       try {
@@ -282,18 +286,11 @@ export function createBetterAuth(opts: CreateBetterAuthOpts): KitBetterAuth {
         const options = args[0] as
           | { asResponse?: boolean; returnHeaders?: boolean; returnStatus?: boolean }
           | undefined
-        if (
-          error instanceof InactiveSessionError &&
-          !options?.asResponse &&
-          !options?.returnHeaders &&
-          !options?.returnStatus
-        )
-          return null
+        const rawSession = !(options?.asResponse || options?.returnHeaders || options?.returnStatus)
+        if (error instanceof InactiveSessionError && rawSession) return null
         throw error
       }
     },
   })
-  auth.handler = safeHandler
-  auth.fetch = safeHandler
   return auth
 }
