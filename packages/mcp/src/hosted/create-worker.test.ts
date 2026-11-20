@@ -1,4 +1,6 @@
 import { getOAuthApi } from '@cloudflare/workers-oauth-provider'
+import { createBetterAuth } from '@kit/auth/factory'
+import { createOidcProvider } from '@kit/auth/oidc-provider'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { McpIdentity, McpIdentityPort } from '../identity'
 import {
@@ -576,6 +578,75 @@ describe('hosted worker routing', () => {
 })
 
 describe('hosted authorization-server contract', () => {
+  it('keeps MCP discovery and the code exchange when OIDC is mounted in fallthrough', async () => {
+    vi.stubGlobal('Cloudflare', { compatibilityFlags: { global_fetch_strictly_public: true } })
+    const statement = {
+      bind: (..._values: unknown[]) => statement,
+      first: async () => null,
+      run: async () => ({}),
+      all: async () => ({}),
+      raw: async <T = unknown>(): Promise<T[][]> => [],
+    }
+    const auth = createBetterAuth({
+      database: { prepare: () => statement },
+      secret: 'test-better-auth-secret-xxxxxxxx32c!!',
+      baseURL: LOCAL,
+      trustedOrigins: [LOCAL],
+      allowLoopbackOrigins: true,
+      oidcProvider: createOidcProvider({
+        loginPage: '/login',
+        waitUntil: (promise) => {
+          void promise
+        },
+      }),
+    })
+    const baseline = worker({ identityPort: port(DEMO), consent: DEMO_LOOPBACK })
+    const composed = worker({
+      identityPort: port(DEMO),
+      consent: DEMO_LOOPBACK,
+      fallthrough: (request) => auth.handler(request),
+    })
+    const baselineKv = new MemoryKv()
+    const composedKv = new MemoryKv()
+    const discoveryPath = '/.well-known/oauth-authorization-server'
+    const before = await baseline.fetch(
+      new Request(`${LOCAL}${discoveryPath}`),
+      env(baselineKv),
+      ctx(),
+    )
+    const after = await composed.fetch(
+      new Request(`${LOCAL}${discoveryPath}`),
+      env(composedKv),
+      ctx(),
+    )
+    expect(after.status).toBe(before.status)
+    expect(await after.json()).toEqual(await before.json())
+    const oidc = await composed.fetch(
+      new Request(`${LOCAL}/api/auth/.well-known/openid-configuration`),
+      env(composedKv),
+      ctx(),
+    )
+    expect(oidc.status).toBe(200)
+    expect(await oidc.json()).toMatchObject({
+      issuer: `${LOCAL}/api/auth`,
+      authorization_endpoint: `${LOCAL}/api/auth/oauth2/authorize`,
+      token_endpoint: `${LOCAL}/api/auth/oauth2/token`,
+    })
+    const beforeToken = await exchangeCode(baseline, baselineKv)
+    const afterToken = await exchangeCode(composed, composedKv)
+    expect(beforeToken.access_token).toBeTruthy()
+    expect(afterToken.access_token).toBeTruthy()
+    expect(afterToken.expires_in).toBe(beforeToken.expires_in)
+    const crossServer = await composed.fetch(
+      new Request(`${LOCAL}/api/auth/oauth2/userinfo`, {
+        headers: { authorization: `Bearer ${afterToken.access_token}` },
+      }),
+      env(composedKv),
+      ctx(),
+    )
+    expect(crossServer.status).toBe(401)
+  })
+
   afterEach(() => {
     vi.unstubAllGlobals()
   })

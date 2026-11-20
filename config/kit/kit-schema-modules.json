@@ -145,6 +145,12 @@
       "file": "0026_api_keys_scopes.sql",
       "set": "core",
       "kitSha256": "5f027ff014888d093632763f4aa61c2597cff85849b6ee753ac51a4baddfea94"
+    },
+    {
+      "id": "better_auth_oidc_provider",
+      "file": "0027_better_auth_oidc_provider.sql",
+      "set": "oidc_provider",
+      "kitSha256": "672b7ebb555cdc01413898d629d5d3d59d3224d2648fbe0f66d809a121868d5b"
     }
   ]
 }

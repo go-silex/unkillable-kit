@@ -27,6 +27,9 @@ import {
 import { sessionCookieName } from './cookie-name'
 import { createFirstSessionAfterHook, type FirstSessionHandler } from './first-session-hook'
 import { logBetterAuthEvent } from './logging/better-auth-logger'
+import { createOidcLogoutPlugin } from './oidc-logout'
+import type { OidcProviderConfig } from './oidc-provider'
+import { oidcProviderDrizzleSchema } from './oidc-provider-schema'
 import { createKitOrganizationPlugin } from './org-plugin'
 import { createSessionAccountGuard, InactiveSessionError } from './policy/better-auth-session-guard'
 import { isAccountActive } from './repos/account-state'
@@ -67,6 +70,8 @@ export type CreateBetterAuthOpts = {
   resetPasswordTokenExpiresIn?: number
   /** Only for explicit development|test placeholders — never production. */
   allowKitPlaceholderSecret?: boolean
+  /** Opt-in provider composition, created by the separate @kit/auth/oidc-provider entry. */
+  oidcProvider?: OidcProviderConfig
 } & (
   | { emailPort: AuthEmailPort; emailConfig: AuthEmailConfig }
   | { emailPort?: never; emailConfig?: never }
@@ -81,6 +86,24 @@ function assertEmailConfig(emailPort?: AuthEmailPort, emailConfig?: AuthEmailCon
   }
 }
 
+function providerComposition(
+  provider: OidcProviderConfig | undefined,
+  isActive: (userId: string) => Promise<boolean>,
+) {
+  if (!provider) return { plugins: [] }
+  return {
+    disabledPaths: [
+      '/token',
+      '/oauth2/create-client',
+      '/oauth2/update-client',
+      '/oauth2/delete-client',
+      '/oauth2/client/rotate-secret',
+    ],
+    backgroundTasks: { handler: provider.waitUntil },
+    plugins: [...provider.plugins(isActive), createOidcLogoutPlugin()],
+  }
+}
+
 export function createBetterAuth(opts: CreateBetterAuthOpts): KitBetterAuth {
   assertAuthSecret('BETTER_AUTH_SECRET', opts.secret, {
     allowKitPlaceholder: opts.allowKitPlaceholderSecret,
@@ -88,12 +111,16 @@ export function createBetterAuth(opts: CreateBetterAuthOpts): KitBetterAuth {
   const trustedOrigins = assertTrustedOrigins(opts.trustedOrigins, {
     allowLoopback: opts.allowLoopbackOrigins === true,
   })
-  const schema =
+  const baseSchema =
     !opts.schema || opts.schema === betterAuthDrizzleSchema
       ? betterAuthDrizzleSchema
       : withBetterAuthRelations(opts.schema)
+  const schema = opts.oidcProvider ? { ...baseSchema, ...oidcProviderDrizzleSchema } : baseSchema
   // drizzle-orm/d1 names the workers `D1Database` type; the public contract is `@kit/db` `KitD1Database`.
   const db = drizzle(opts.database as never, { schema })
+  const provider = providerComposition(opts.oidcProvider, (userId) =>
+    isAccountActive(db, userId, schema.user),
+  )
   const cookieName = sessionCookieName({ name: opts.cookieName })
   const secure = opts.useSecureCookies ?? true
   const publicSignup = opts.allowPublicSignup ?? false
@@ -121,6 +148,7 @@ export function createBetterAuth(opts: CreateBetterAuthOpts): KitBetterAuth {
   const auth = betterAuth({
     baseURL: opts.baseURL,
     basePath: BA_BASE_PATH,
+    disabledPaths: provider.disabledPaths,
     // Leave Better Auth's default warn threshold intact; its messages and args are untrusted.
     logger: { log: logBetterAuthEvent },
     // Better Call otherwise logs the raw non-API error after Better Auth's logger returns.
@@ -174,6 +202,7 @@ export function createBetterAuth(opts: CreateBetterAuthOpts): KitBetterAuth {
     },
     plugins: [
       createKitOrganizationPlugin(),
+      ...provider.plugins,
       ...(emailPort && emailConfig
         ? [
             magicLink({
@@ -188,6 +217,7 @@ export function createBetterAuth(opts: CreateBetterAuthOpts): KitBetterAuth {
     ],
     advanced: {
       disableOriginCheck: false,
+      backgroundTasks: provider.backgroundTasks,
       database: { joins: true },
       useSecureCookies: secure,
       cookies: {

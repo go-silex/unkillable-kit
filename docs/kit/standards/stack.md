@@ -103,11 +103,12 @@ Organization mutations use submitted Organization and values for requests and ca
 
 ### D. Auth + **cookies**
 
-| Élément                       | Choix                                                                                                                                                | Quand | Statut | Paquets                    |
-| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ----- | ------ | -------------------------- |
-| Sessions UI (**aujourd’hui**) | **Better Auth** cookies via `@kit/auth` SessionPort — [ADR-0002](../architecture/adr/0002-session-hmac-interim-vs-better-auth.md) (HMAC **retired**) | kit   | livré  | `better-auth`, `@kit/auth` |
-| API keys machine              | `sk_…` hash en D1, **per-user**                                                                                                                      | kit   | livré  | `@kit/auth`                |
-| Guards (kit)                  | Hono middleware dual-path `requireAuth` (Bearer **ou** cookie) dans `example-api`                                                                    | kit   | livré  |                            |
+| Élément                       | Choix                                                                                                                                                | Quand | Statut | Paquets                       |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ----- | ------ | ----------------------------- |
+| Sessions UI (**aujourd’hui**) | **Better Auth** cookies via `@kit/auth` SessionPort — [ADR-0002](../architecture/adr/0002-session-hmac-interim-vs-better-auth.md) (HMAC **retired**) | kit   | livré  | `better-auth`, `@kit/auth`    |
+| OpenID provider (opt-in)      | Better Auth OAuth provider + JWT, first-party web clients; separate from hosted MCP OAuth                                                            | kit   | livré  | `@better-auth/oauth-provider` |
+| API keys machine              | `sk_…` hash en D1, **per-user**                                                                                                                      | kit   | livré  | `@kit/auth`                   |
+| Guards (kit)                  | Hono middleware dual-path `requireAuth` (Bearer **ou** cookie) dans `example-api`                                                                    | kit   | livré  |                               |
 
 Le statut actif du User est vérifié à chaque résolution de session ou de clé :
 une clé est régie par son User propriétaire, pas par un état global de l'Organization.

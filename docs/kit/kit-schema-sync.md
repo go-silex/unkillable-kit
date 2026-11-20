@@ -17,6 +17,8 @@ The `notifications` set adds the `notifications` id from `0023_notifications.sql
 
 The additive `impersonation` id from `0024_impersonation.sql` belongs to `core`. It creates default-off Platform Role permissions and delegations tied to existing Better Auth session records; it grants no authority merely by being installed. Compose the tables through `kitAuthSchema` from `@kit/auth/schema`. Apps using the repositories retain `audit`, including for required start/configuration events and pre-dispatch request attempts.
 
+The `oidc_provider` set is opt-in and adds the Better Auth OAuth provider and JWT tables from `0027_better_auth_oidc_provider.sql`. Select it alongside `core` and the App's existing sets, for example `--modules core,audit,oidc_provider`. Compose `oidcProviderDrizzleSchema` from `@kit/auth/schema` into both the Drizzle database and the Better Auth adapter only when enabling the provider. The JWT plugin must encrypt signing private keys before storing them; the migration itself does not encrypt data.
+
 ## Happy path (greenfield)
 
 1. Create `apps/<product>-api` that **imports `@kit/*`** — do not `cp -R apps/example-api`.

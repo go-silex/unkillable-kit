@@ -20,6 +20,11 @@
       "import": "./src/factory.ts",
       "default": "./src/factory.ts"
     },
+    "./oidc-provider": {
+      "types": "./src/oidc-provider.ts",
+      "import": "./src/oidc-provider.ts",
+      "default": "./src/oidc-provider.ts"
+    },
     "./react": {
       "types": "./src/react/index.ts",
       "import": "./src/react/index.ts",
@@ -49,6 +54,7 @@
     "zod": "^4.6.7"
   },
   "peerDependencies": {
+    "@better-auth/oauth-provider": "^1.7.23",
     "@kit/email": "workspace:*",
     "@kit/ui": "workspace:*",
     "@tanstack/react-form": "^1.12.0",
@@ -59,6 +65,9 @@
     "react-dom": "^19.0.0"
   },
   "peerDependenciesMeta": {
+    "@better-auth/oauth-provider": {
+      "optional": true
+    },
     "@kit/email": {
       "optional": true
     },
@@ -85,6 +94,7 @@
     }
   },
   "devDependencies": {
+    "@better-auth/oauth-provider": "1.7.23",
     "@kit/email": "workspace:*",
     "@kit/ui": "workspace:*",
     "@tanstack/react-form": "^1.33.5",
@@ -98,8 +108,11 @@
     "better-auth": "^1.7.23",
     "better-sqlite3": "^13.1.1",
     "drizzle-orm": "^0.45.4",
+    "esbuild": "^0.28.2",
     "hono": "^4.13.18",
     "happy-dom": "^21.0.4",
+    "jose": "^6.2.3",
+    "miniflare": "5.20260925.0-alpha",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "vite": "^8.3.8",

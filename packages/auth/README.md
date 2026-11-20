@@ -7,6 +7,7 @@ Authentication primitives and integration surfaces; it does not own product-spec
 - `@kit/auth`: environment, sessions, keys and organization access helpers.
 - `@kit/auth/schema`: authentication database tables.
 - `@kit/auth/factory`: Worker authentication factory and email integration.
+- `@kit/auth/oidc-provider`: optional OpenID provider composition and administration helpers.
 - `@kit/auth/react`: React authentication forms and helpers.
 - `@kit/auth/hono`: Hono authentication middleware.
 - `@kit/auth/repos/*`: individual repository modules under `src/repos/`.
@@ -38,6 +39,61 @@ and API-key authentication. An Organization-bound key is governed by its
 subject (the User who owns the key), not by an Organization-wide status.
 Missing Users, disabled Users and state-read failures are refused. Products
 must sync and apply the account-state schema migration before deploying.
+
+## OpenID provider (opt-in)
+
+**Not ready for use on Workers:** Better Auth 1.7.23 uses `redirect: 'error'`
+for back-channel logout delivery, which the Workers runtime rejects. Session
+termination therefore does not notify relying parties on Workers. Do not rely on
+this provider until that upstream incompatibility is fixed and the Workers
+logout integration test passes.
+
+Install matching versions of `better-auth` and `@better-auth/oauth-provider` in
+the Worker. Sync the `oidc_provider` schema set in addition to the sets required
+by the Better Auth mount. The normal factory import does not require the provider
+peer; import `@kit/auth/oidc-provider` only in a Worker enabling it.
+
+Create the provider configuration **for each request**, binding the Worker's
+execution context rather than retaining one from another request:
+
+```ts
+import { createBetterAuth } from '@kit/auth/factory'
+import { createOidcProvider } from '@kit/auth/oidc-provider'
+
+const auth = createBetterAuth({
+  database, secret, baseURL, trustedOrigins,
+  oidcProvider: createOidcProvider({
+    loginPage: '/login',
+    consentPage: '/consent',
+    claims: async ({ user }) => ({ 'https://example.com/claim': user.id }),
+    waitUntil: (promise) => c.executionCtx.waitUntil(promise),
+  }),
+})
+```
+
+The App owns the login and consent pages and the Better Auth provider client
+plugin needed to resume authorization. The issuer is `<BETTER_AUTH_URL>/api/auth`
+and discovery is `{issuer}/.well-known/openid-configuration`; mount the auth
+handler on its usual path. The hosted MCP shell retains its own reserved paths
+and OAuth server. Do not expose this provider at the root RFC 8414 metadata path,
+or accept one server's tokens at the other.
+
+Use `registerOidcClient(auth, { headers, redirectUris, firstParty, ... })`
+from the same entry only in server code after checking administrator permission
+and request Origin. The response contains the client secret once; store it
+securely on the confidential web client. Setting `firstParty: true` skips
+consent; only the App may make that decision. Registration uses exact redirect
+URIs, authorization code and PKCE S256. Dynamic registration, CIMD, refresh
+tokens, pairwise subjects and front-channel logout are not supported.
+
+`endOidcUserSessions(auth, userId)` ends the user's sessions through Better
+Auth, invoking its back-channel logout hooks. Register a public HTTPS
+`backchannelLogoutUri` and optional `postLogoutRedirectUris` for each client.
+The provider schedules notifications with the supplied `waitUntil`; delivery is
+best effort, has a timeout and is not retried. Direct SQL session deletion does
+not notify clients. RP-initiated logout can end a browser session too. Clients
+must validate logout tokens and handle locally verified access tokens according
+to their own expiry; logout is not an atomic global revocation guarantee.
 
 ## Development
 

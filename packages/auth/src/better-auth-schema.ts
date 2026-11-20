@@ -215,6 +215,7 @@ export {
   impersonationRolePermissions,
   impersonationSessions,
 } from './impersonation-schema'
+export { oidcProviderDrizzleSchema } from './oidc-provider-schema'
 export {
   apiKeys,
   auditEvents,
