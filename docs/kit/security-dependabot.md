@@ -94,17 +94,18 @@ Both are in the tree, so they bind every install path (CI, Workers Builds, workt
 - **Install-script lockdown:** `package.json` `trustedDependencies: []` blocks dependency `preinstall`, `install` and `postinstall`. The field **replaces** Bun's [built-in allow list](https://bun.com/docs/pm/lifecycle#behavior-of-the-trustedDependencies-field); `[]` means none. It does not block code run by importing or executing a package.
 
 Frozen installs can be blocked, including reviewed security fixes under 3 d. Reproduce a reviewed lock
-with `--minimum-release-age 0`, not new resolutions. `bun audit --fix` can install a young fix:
+with `--minimum-release-age 0`, not new resolutions. `bun audit fix` can install a young fix:
 review the resulting lock. Add native dependencies requiring install scripts to
 `trustedDependencies` in the kit `package.json`, with the reason in the same PR; products
 promote that change upstream.
 
 ### Young-version exemptions
 
-An exemption is allowed for a security fix or an explicit operator decision recorded in the PR.
-Review every young version needed, including transitives, and exempt only exact `name@version`
-entries, such as `@scope/package@1.2.3` or `package@1.2.3-beta.1`. Bare names, ranges, tags,
-`||` lists and malformed entries are forbidden. Unlisted young dependencies remain gated.
+Exempt security fixes or explicit operator decisions recorded in the PR.
+Review young versions, including transitives; exempt only exact `name@version`
+entries, e.g. `@scope/package@1.2.3` or `package@1.2.3-beta.1`. Bare names, ranges, tags,
+`||` lists and malformed entries are forbidden. Ordinary resolutions gate unlisted young versions
+when publish timestamps exist.
 
 The PR records the exact list including transitives, why the change cannot wait, and when each
 version passes the three-day gate. For a Kit change, add each entry to `minimumReleaseAgeExcludes`

@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 
 const fix = 'Use a unique exact package@MAJOR.MINOR.PATCH[-prerelease] entry, or remove it.'
-const packageName = /^(?:@[a-z0-9._-]+\/[a-z0-9._-]+|[a-z0-9][a-z0-9._-]*)$/
+const packageName = /^(?:@[a-z0-9._-]+\/[a-z0-9_-][a-z0-9._-]*|[a-z0-9][a-z0-9._-]*)$/
 const version =
   /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*)?$/
 const maxComponent = '18446744073709551615'
