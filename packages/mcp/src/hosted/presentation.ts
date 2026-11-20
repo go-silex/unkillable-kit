@@ -3,7 +3,7 @@ import type { ConsentPresentation } from './env'
 type ConsentBrand = NonNullable<ConsentPresentation['brand']>
 
 export type ResolvedConsentPresentation = Omit<ConsentPresentation, 'brand'> & {
-  readonly brand?: ConsentBrand & { readonly buttonInk?: '#000' | '#fff' }
+  readonly brand?: ConsentBrand & { readonly buttonInk?: 'black' | 'white' }
 }
 
 const IMAGE_PATH = /^\/(?:[\w-]+(?:\.[\w-]+)*\/)*[\w-]+(?:\.[\w-]+)*\.(?:svg|png|jpe?g|webp|avif)$/i
@@ -23,7 +23,7 @@ function snapshotBrand(brand: ConsentBrand): NonNullable<ResolvedConsentPresenta
   const logoPath = imagePath(brand.logoPath, 'logoPath')
   const backdropPath = imagePath(brand.backdropPath, 'backdropPath')
   const { accentColor, serifHeading } = brand
-  let buttonInk: '#000' | '#fff' | undefined
+  let buttonInk: 'black' | 'white' | undefined
   if (accentColor !== undefined) {
     if (typeof accentColor !== 'string' || !/^#[0-9a-f]{6}$/i.test(accentColor)) {
       throw new TypeError('consentPresentation.brand.accentColor must be a six-digit hex color')
@@ -34,7 +34,7 @@ function snapshotBrand(brand: ConsentBrand): NonNullable<ResolvedConsentPresenta
     }
     const luminance = 0.2126 * channel(1) + 0.7152 * channel(3) + 0.0722 * channel(5)
     // Pick the higher WCAG contrast of black and white (at least 4.58:1).
-    buttonInk = luminance > Math.sqrt(1.05 * 0.05) - 0.05 ? '#000' : '#fff'
+    buttonInk = luminance > Math.sqrt(1.05 * 0.05) - 0.05 ? 'black' : 'white'
   }
   if (serifHeading !== undefined && typeof serifHeading !== 'boolean') {
     throw new TypeError('consentPresentation.brand.serifHeading must be a boolean')

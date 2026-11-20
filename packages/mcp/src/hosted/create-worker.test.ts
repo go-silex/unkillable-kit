@@ -733,7 +733,7 @@ describe('hosted consent', () => {
     expect(html).toContain('/assets/v1.2/consent-logo.svg')
     expect(html).toContain('/assets/consent-backdrop.webp')
     expect(html).toContain('Example Service')
-    expect(html).toMatch(/--accent: #fffbeb; --button-ink: #000;/)
+    expect(html).toMatch(/--accent: #fffbeb; --button-ink: black;/)
     expect(html).toMatch(/<main class="[^"]*\bserif\b/)
     expect(html).not.toContain('/assets/changed-logo.png')
     expect(html).not.toContain('/assets/changed-backdrop.png')

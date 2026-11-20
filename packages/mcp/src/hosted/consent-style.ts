@@ -38,7 +38,7 @@ main {
   background: #fff;
   border: 1px solid #d4d4d4;
   border-radius: .75rem;
-  box-shadow: 0 12px 32px #0002;
+  box-shadow: 0 12px 32px rgb(0 0 0 / 13%);
 }
 .branded { border-radius: 1.5rem; }
 header { text-align: center; }
