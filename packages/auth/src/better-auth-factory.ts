@@ -69,6 +69,8 @@ export type CreateBetterAuthOpts = {
   useSecureCookies?: boolean
   allowPublicSignup?: boolean
   google?: GoogleSignInOptions
+  /** Absolute trusted App login URL for Google errors when OAuth state cannot supply one. */
+  googleErrorURL?: string
   /** Product typically wires audit `tryFirstLogin`. Omit if audit module is not mounted. */
   onFirstSession?: FirstSessionHandler
   magicLinkExpiresIn?: number
@@ -103,8 +105,21 @@ function createSafeHandler(handler: (request: Request) => Response | Promise<Res
   }
 }
 
-function apiErrorOptions(google: boolean, origin: string) {
-  return { throw: true, ...(google ? { errorURL: new URL('/login', origin).toString() } : {}) }
+function apiErrorOptions(google: boolean, origins: string[], configuredURL?: string) {
+  let errorURL = new URL('/login', origins[0]).toString()
+  if (configuredURL !== undefined) {
+    let parsed: URL
+    try {
+      parsed = new URL(configuredURL)
+    } catch {
+      throw new Error('googleErrorURL must be an absolute URL on a trusted origin')
+    }
+    if (parsed.username || parsed.password || !origins.includes(parsed.origin)) {
+      throw new Error('googleErrorURL must be an absolute URL on a trusted origin')
+    }
+    errorURL = parsed.toString()
+  }
+  return { throw: true, ...(google ? { errorURL } : {}) }
 }
 
 export function createBetterAuth(opts: CreateBetterAuthOpts): KitBetterAuth {
@@ -151,7 +166,7 @@ export function createBetterAuth(opts: CreateBetterAuthOpts): KitBetterAuth {
     // Leave Better Auth's default warn threshold intact; its messages and args are untrusted.
     logger: { log: logBetterAuthEvent },
     // Better Call otherwise logs the raw non-API error after Better Auth's logger returns.
-    onAPIError: apiErrorOptions(google, trustedOrigins[0]),
+    onAPIError: apiErrorOptions(google, trustedOrigins, opts.googleErrorURL),
     // The kit throttles in front, on D1 (`@kit/auth/repos/ba-throttle`). Better Auth's own limiter
     // is memory per isolate, keyed `ip|path`, and on only when NODE_ENV is 'production': pinned off.
     rateLimit: { enabled: false },

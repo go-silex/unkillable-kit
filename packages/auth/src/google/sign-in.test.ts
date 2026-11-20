@@ -6,6 +6,8 @@ import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { createBetterAuth, type KitBetterAuth } from '../better-auth-factory'
 
 const origin = 'https://auth.example.test'
+const appOrigin = 'https://app.example.test'
+const googleErrorURL = `${appOrigin}/auth/sign-in`
 const clientId = 'google-client-id'
 const google = { clientId, clientSecret: 'google-client-secret', allowedDomains: ['example.test'] }
 const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 })
@@ -45,6 +47,7 @@ function setup(
     disabled?: boolean
     existing?: boolean
     allowedDomains?: string[]
+    googleErrorURL?: string
   } = {},
 ) {
   const sqlite = new Database(':memory:')
@@ -84,7 +87,8 @@ function setup(
     database: createSqliteD1(sqlite),
     secret: 'test-better-auth-secret-xxxxxxxx32c!!',
     baseURL: origin,
-    trustedOrigins: [origin],
+    trustedOrigins: [origin, appOrigin],
+    ...(options.googleErrorURL === undefined ? {} : { googleErrorURL: options.googleErrorURL }),
     useSecureCookies: false,
     allowPublicSignup: options.publicSignup ?? false,
     ...(options.configured === false
@@ -144,7 +148,7 @@ function responseCookies(response: Response) {
     .join('; ')
 }
 
-async function callback(auth: KitBetterAuth) {
+async function callbackRequest(auth: KitBetterAuth) {
   const start = await auth.handler(
     new Request(`${origin}/api/auth/sign-in/social`, {
       method: 'POST',
@@ -162,16 +166,17 @@ async function callback(auth: KitBetterAuth) {
     .getSetCookie()
     .map((cookie) => cookie.split(';', 1)[0])
     .join('; ')
+  return new Request(
+    `${origin}/api/auth/callback/google?${new URLSearchParams({ code: 'google-authorization-code', state: state! })}`,
+    { headers: { cookie: cookies } },
+  )
+}
+
+async function callback(auth: KitBetterAuth) {
+  const request = await callbackRequest(auth)
   let result: Response
   try {
-    result = await auth.handler(
-      new Request(
-        `${origin}/api/auth/callback/google?${new URLSearchParams({ code: 'google-authorization-code', state: state! })}`,
-        {
-          headers: { cookie: cookies },
-        },
-      ),
-    )
+    result = await auth.handler(request)
   } catch (error) {
     if (!isAPIError(error)) throw error
     result = new Response(null, { status: error.statusCode })
@@ -216,6 +221,79 @@ function captureLogs() {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('Google sign-in through Better Auth', () => {
+  it('uses the configured login URL for missing and replayed state', async () => {
+    const { auth, sqlite } = setup({ googleErrorURL })
+    const before = snapshot(sqlite)
+    const missing = await auth.handler(
+      new Request(`${origin}/api/auth/callback/google?code=google-authorization-code`),
+    )
+    expect(missing.status).toBe(302)
+    expect(missing.headers.get('location')).toBe(`${googleErrorURL}?error=state_not_found`)
+    expect(snapshot(sqlite)).toEqual(before)
+
+    googleBoundary({ email: 'person@example.test', email_verified: true, hd: 'example.test' })
+    const request = await callbackRequest(auth)
+    const initial = await auth.handler(request.clone())
+    expect(initial.status).toBe(302)
+    expect(initial.headers.get('location')).toBe(`${origin}/done`)
+    const afterSignIn = snapshot(sqlite)
+    const replay = await auth.handler(request)
+    expect(replay.status).toBe(302)
+    expect(replay.headers.get('location')).toBe(`${googleErrorURL}?error=state_mismatch`)
+    expect(snapshot(sqlite)).toEqual(afterSignIn)
+  })
+
+  it('uses the configured login URL when account lookup fails', async () => {
+    const { auth, sqlite } = setup({ googleErrorURL })
+    const before = snapshot(sqlite)
+    const { calls } = googleBoundary({
+      email: 'person@example.test',
+      email_verified: true,
+      hd: 'example.test',
+    })
+    const request = await callbackRequest(auth)
+    sqlite.exec('ALTER TABLE account RENAME TO unavailable_account')
+    let response: Response
+    try {
+      response = await auth.handler(request)
+    } finally {
+      sqlite.exec('ALTER TABLE unavailable_account RENAME TO account')
+    }
+    expect(calls).toContain('https://oauth2.googleapis.com/token')
+    expect(response.status).toBe(302)
+    expect(response.headers.get('location')).toBe(`${googleErrorURL}?error=internal_server_error`)
+    expect(snapshot(sqlite)).toEqual(before)
+  })
+
+  it.each(['/auth/sign-in', 'https://untrusted.example.test/auth/sign-in'])(
+    'rejects invalid Google error URL %s',
+    (url) => {
+      expect(() => setup({ googleErrorURL: url })).toThrow()
+    },
+  )
+
+  it('rejects tokenless Google account linking without changing state', async () => {
+    const { auth, sqlite } = setup()
+    googleBoundary({ email: 'person@example.test', email_verified: true, hd: 'example.test' })
+    const signedIn = await callback(auth)
+    expect(signedIn.headers.get('location')).toBe(`${origin}/done`)
+    const cookie = responseCookies(signedIn)
+    expect(cookie).toContain('kit_session=')
+    const before = snapshot(sqlite)
+    const response = await post(
+      auth,
+      '/link-social',
+      { provider: 'google', callbackURL: `${origin}/done` },
+      cookie,
+    )
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({
+      code: 'GOOGLE_REDIRECT_ONLY',
+      message: 'Google sign-in requires the redirect flow',
+    })
+    expect(snapshot(sqlite)).toEqual(before)
+  })
+
   it('links an existing user once and creates sessions on subsequent sign-ins', async () => {
     const assertSecret = captureLogs()
     const { auth, sqlite } = setup()

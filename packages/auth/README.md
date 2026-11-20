@@ -53,17 +53,26 @@ throws at construction; omit `google` to leave the provider unconfigured.
 Only existing users can sign in: the verified Google ID token must report
 `email_verified: true` and an `hd` matching both the email domain and the
 allowlist. Google accounts without a hosted-domain claim are refused. Google
-accounts link by the same email; inactive accounts cannot open a session.
-Provider tokens are discarded before account persistence and are not logged.
+accounts link by the same email; first-time implicit linking requires the local
+user's email to be verified. Inactive accounts cannot open a session. Provider
+tokens are discarded before account persistence and are not logged.
 
 The App owns the sign-in button and must pass its login page as Better Auth's
-`errorCallbackURL` when starting sign-in. Without it, the default is `/login`
-on the first trusted origin. The redirect flow supplies `error` codes:
-`unable_to_get_user_info` (invalid token or identity policy), `signup_disabled`
-(no existing user), `account_inactive` (disabled or unreadable account),
-and `google_email_mismatch` (a linked identity's email changed). Better Auth may
-also return protocol errors such as `invalid_code` or `state_not_found`.
-Direct Google ID-token sign-in and manual account linking are unsupported.
+`errorCallbackURL` when starting sign-in. Also configure the top-level
+`createBetterAuth` option `googleErrorURL?: string` with an absolute URL on a
+trusted origin for the App login page. This fallback is used when OAuth state is
+missing or already consumed and when account lookup fails; it defaults to
+`/login` on the first trusted origin. It does not replace `errorCallbackURL`
+for normal initial sign-in.
+
+The redirect flow supplies `error` codes: `unable_to_get_user_info` (invalid
+token or identity policy), `signup_disabled` (no existing user),
+`account_inactive` (disabled or unreadable account), `account_not_linked`
+(implicit linking refused), and `google_email_mismatch` (a linked identity's
+email changed). Better Auth may also return protocol errors such as
+`invalid_code` or `state_not_found`. Direct Google ID-token sign-in and manual
+account linking are unsupported; direct routes return HTTP 400 with
+`GOOGLE_REDIRECT_ONLY`.
 
 This option supplies no login UI, deployment secrets, or product domain list.
 
