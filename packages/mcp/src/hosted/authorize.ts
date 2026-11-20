@@ -6,17 +6,11 @@ import {
   type OAuthHelpers,
 } from '@cloudflare/workers-oauth-provider'
 import type { McpIdentity, McpIdentityPort } from '../identity'
-import {
-  clearConsentCookie,
-  consentHtml,
-  consentPageHeaders,
-  putConsent,
-  readConsent,
-  sameToken,
-} from './consent'
-import type { ConsentPolicy, ConsentPresentation, HostedMcpEnv } from './env'
+import { clearConsentCookie, consentResponse, putConsent, readConsent, sameToken } from './consent'
+import type { ConsentPolicy, HostedMcpEnv } from './env'
 import { grantedScope, isUrlClientId, shouldAutoApproveConsent } from './host-policy'
 import { grantMetadata, normalizeIdentity } from './identity-props'
+import type { ResolvedConsentPresentation } from './presentation'
 import { isProductRegistered } from './product-registered'
 
 export type AuthorizeEnv = HostedMcpEnv & { OAUTH_PROVIDER: OAuthHelpers }
@@ -26,7 +20,7 @@ export type AuthorizeDeps = {
   accountAdmission: (userId: string) => Promise<Response | null>
   apiBaseUrl: string
   consent: ConsentPolicy
-  consentPresentation?: ConsentPresentation
+  consentPresentation?: ResolvedConsentPresentation
 }
 
 function authorizationErrorResponse(
@@ -112,7 +106,7 @@ async function renderConsentPage(
   oauthRequest: AuthRequest,
   scope: string[],
   identity: McpIdentity,
-  presentation?: ConsentPresentation,
+  presentation?: ResolvedConsentPresentation,
 ): Promise<Response> {
   const client = await env.OAUTH_PROVIDER.lookupClient(oauthRequest.clientId)
   const { csrf, cookie } = await putConsent(env.OAUTH_KV, new URL(request.url), {
@@ -120,7 +114,8 @@ async function renderConsentPage(
     request: oauthRequest,
     scope,
   })
-  const html = consentHtml({
+  return consentResponse({
+    cookie,
     clientName: client?.clientName ?? '',
     clientId: oauthRequest.clientId,
     redirectUri: oauthRequest.redirectUri,
@@ -128,7 +123,6 @@ async function renderConsentPage(
     csrf,
     ...(presentation ? { presentation } : {}),
   })
-  return new Response(html, { status: 200, headers: consentPageHeaders(cookie) })
 }
 
 /**

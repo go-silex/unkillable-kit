@@ -28,6 +28,8 @@ Client-facing release notes belong in the Product App, not shared Kit paths.
 The Example App demonstrates an in-app changelog; it is not a shared patchlog
 Package. Promote a shared implementation only after at least two Products need it.
 
+**Hosted MCP consent is a standalone Kit document**, not a route in the Product SPA. Use `@kit/mcp/hosted`'s [static `consentPresentation` option](../../packages/mcp/README.md#hosted-shell) for branding, not Product stylesheets or `HTMLRewriter`. Keep the logo, background artwork and localized Product disclosures in the Product.
+
 ## Conventions for example-web
 
 | Concern             | Pattern                                                                                                                              |

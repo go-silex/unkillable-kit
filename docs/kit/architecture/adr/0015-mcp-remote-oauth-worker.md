@@ -121,15 +121,23 @@ export type ConsentPresentation = {
   readonly locale?: 'en' | 'fr'
   readonly serviceName?: string
   readonly disclosures?: readonly { readonly label: string; readonly text: string }[]
+  readonly brand?: {
+    readonly logoPath?: string
+    readonly backdropPath?: string
+    readonly accentColor?: string
+    readonly serifHeading?: boolean
+  }
 }
 ```
 
-The factory snapshots this static caller data once at construction, including disclosure entries, so subsequent caller mutation cannot change the pages. Presentation is not persisted in consent records, OAuth grants or tokens. An omitted locale means `en`; `fr` selects Kit-owned protocol/security labels. There is no request-language negotiation, switcher, new i18n framework or dependency. General error localization is outside this seam.
+The factory snapshots this static caller data once at construction, including disclosure entries and branding, so subsequent caller mutation cannot change the page. Presentation is not persisted in consent records, OAuth grants or tokens. An omitted locale means `en`; `fr` selects Kit-owned protocol/security labels. There is no request-language negotiation or switcher. General error localization is outside this seam.
 
-The service name and every disclosure label/text are escaped plain text, never Markdown or HTML. The option accepts no renderer, callbacks, links, CSS, form attributes or security-label overrides. Kit retains the authenticated identity, client ID and actual redirect facts, redirect-class warnings, fixed `/authorize` action, CSRF, Allow/Deny controls and response headers.
+The Kit renders a standalone responsive page with a neutral fallback, visible decision facts and native controls; it does not load a SPA or script. Service name and disclosures are escaped plain text. Optional `brand` accepts only root-relative same-origin image paths, a six-digit hex accent with Kit-selected contrast, and a system serif heading toggle. Hosts must serve the named assets directly as trusted static images. Invalid branding fails at factory construction. The option accepts no external URLs, renderer, callbacks, CSS, form attributes or security-label overrides. Kit retains the authenticated identity, client ID and actual redirect facts, redirect-class warnings, fixed `/authorize` action, CSRF and Allow/Deny controls.
 
 UI content carries no authority: disclosures cannot change identity, scopes, PKCE, CSRF, consent policy, TTLs or minting. Duration or revocation prose must describe the caller's actual policy; it does not configure or enforce it. This amendment adds no revocation hooks.
-The shell does not auto-approve. `consent` defaults to `always`: it shows a page naming the client's `client_name`, its `client_id`, the `redirect_uri` scheme and host, and one warning for the redirect class: a program on this computer (dotted `127.0.0.0/8`, `[::1]`, IPv4-mapped `127.0.0.0/8`, `localhost`, `*.localhost`) or a custom-scheme app. A remote https redirect gets none; an http redirect off the provider's loopback hosts never reaches the page. The page sends `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'`, `X-Frame-Options: DENY`, `Cache-Control: no-store`, and `Referrer-Policy: no-referrer`.
+The shell does not auto-approve. `consent` defaults to `always`: it shows a page naming the client's `client_name`, its `client_id`, the `redirect_uri` scheme and host (scheme alone for hostless redirects), and one warning for the redirect class: a program on this computer (dotted `127.0.0.0/8`, `[::1]`, IPv4-mapped `127.0.0.0/8`, `localhost`, `*.localhost`) or a custom-scheme app. A remote HTTPS redirect gets none; an HTTP redirect off the provider's loopback hosts never reaches the page.
+
+The page sends `X-Frame-Options: DENY`, `Cache-Control: no-store`, and `Referrer-Policy: no-referrer`. CSP denies resources, base URLs and framing by default and allows only the Kit stylesheet via a per-response nonce distinct from CSRF. Only a page with configured artwork adds `img-src 'self'`; same-origin requests can carry cookies, so no user-controlled asset endpoint or redirects are supported. The standalone default makes no asset requests. The form can redirect to the registered client on either decision; the page does not set a `form-action` directive that could block that redirect.
 
 Provider 1.2 refuses cleartext HTTP redirects other than `localhost`, dotted `127.0.0.0/8` and `[::1]`, returning a local `400` before identity or consent. The shell enables `allowPrivateUseRedirectUris` for custom-scheme native apps.
 
@@ -157,6 +165,8 @@ Missing hosted identity → domain status `missing_identity`, never a leaked `sk
 ### D8 — Shell is `@kit/mcp/hosted`
 
 > **Amendment (2026-11-07) — bounded consent presentation.** Adds only the static `consentPresentation` seam and its `ConsentPresentation` type (D5). For this narrow amendment, the second-consumer condition is supported by the two evidenced presentation cases below, not by claiming two external Products or prior adoption of the new option.
+
+The Kit standard extends that same static option with bounded branding (D5); it does not add an execution, authorization or rendering hook. The neutral page is used without any Product assets, and Products own their branding data. This decision does not assert two branded adopters.
 
 > **External rationale — source observations, not Kit defaults or deployment proof.** The existing [dogfood compose](../../../../apps/mcp-example/src/create-mcp-worker.ts) uses the default English presentation whenever its independent `demo-loopback` policy shows the page. The external Product Ether OS has a [French informative consent page](https://github.com/go-silex/extern-client-etherOs/blob/99bde5a03771bd38c7d1c54ef55d9d453e8ce923/apps/ether-mcp/src/consent-page.ts#L175-L193) explaining role-bound reads/writes, transfer of results to the AI provider, durations and revocation. These two existing presentation cases motivate this data-only seam. Product copy stays Product-owned. This is not a claim that Ether OS already imports the option or that new code is deployed; publication, inheritance and deployment require their own authorizations.
 
