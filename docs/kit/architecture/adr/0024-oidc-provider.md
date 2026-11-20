@@ -65,9 +65,10 @@ validate logout tokens, keep their sessions short and periodically revalidate
 with the provider using `prompt=none`; logout is not an atomic global revocation
 guarantee.
 
-The pinned Better Auth 1.7.27 uses `redirect: 'manual'` for back-channel
-logout delivery on Workers. Delivery remains best effort, not an atomic global
-revocation guarantee.
+The minimum matching pair for the OIDC provider on Workers is Better Auth
+and `@better-auth/oauth-provider` 1.7.27. Version 1.7.27 uses
+`redirect: 'manual'` for back-channel logout delivery on Workers. Delivery
+remains best effort, not an atomic global revocation guarantee.
 
 ## Exclusions and consequences
 

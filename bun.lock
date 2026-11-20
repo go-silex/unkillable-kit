@@ -186,7 +186,7 @@
       },
       "peerDependencies": {
         "@better-auth/core": "^1.7.23",
-        "@better-auth/oauth-provider": "^1.7.23",
+        "@better-auth/oauth-provider": "^1.7.27",
         "@kit/email": "workspace:*",
         "@kit/ui": "workspace:*",
         "@tanstack/react-form": "^1.12.0",

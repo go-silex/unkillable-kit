@@ -52,10 +52,11 @@ The pinned Better Auth 1.7.27 uses `redirect: 'manual'` for back-channel
 logout delivery on Workers. Delivery remains best effort; see the limitations
 below.
 
-Install matching versions of `better-auth` and `@better-auth/oauth-provider` in
-the Worker. Sync the `oidc_provider` schema set in addition to the sets required
-by the Better Auth mount. The normal factory import does not require the provider
-peer; import `@kit/auth/oidc-provider` only in a Worker enabling it.
+Install matching versions of `better-auth` and `@better-auth/oauth-provider`,
+both at least 1.7.27, in the Worker. Sync the `oidc_provider` schema set in
+addition to the sets required by the Better Auth mount. The normal factory
+import does not require the provider peer; import `@kit/auth/oidc-provider` only
+in a Worker enabling it.
 
 ### OIDC private JWK encryption
 
