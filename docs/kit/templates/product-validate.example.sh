@@ -39,6 +39,11 @@ bun run deploy-gate:check
 # Product mode: kit zones clean vs upstream (or inheritance.json in CI).
 bun run zero-edit
 
+# Kit schema: exit 2 when the same sync would write (run it without --check and commit), 1 on
+# refusal. Uses the inherited catalog, never a KIT_SCHEMA_CATALOG override. Files only: it does
+# not prove remote migrations were applied. Drop it only if the Product has no API.
+env -u KIT_SCHEMA_CATALOG bash scripts/kit/kit-schema-sync.sh --app apps/<product>-api --check
+
 # --- replace <product> with your app package names ---
 bun run --filter "@kit/<product>-api" typecheck
 bun run --filter "@kit/<product>-api" test

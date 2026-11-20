@@ -4,11 +4,9 @@
 **Catalog (kit):** `config/kit/kit-schema-modules.json`.  
 **Manifest (product, allowed new file):** `apps/<product>-api/kit-schema-manifest.json`.
 
-Identity = catalog **module `id` + sha256 of kit source bytes** — not the example-api `NNNN_` filename.
-
 ## Source bytes
 
-Identity is catalog **module `id` + `kitSha256`**. Sync hashes the files under catalog `source_root` (today the dogfood journal `apps/example-api/migrations/*` — wrangler apply path, not a clone template).
+Identity is catalog **module `id` + `kitSha256`**, not the example-api `NNNN_` filename. Sync hashes the files under catalog `source_root` (today the dogfood journal `apps/example-api/migrations/*` — wrangler apply path, not a clone template).
 `packages/*/migrations/` contain README only (no `.sql`). Do not copy them into a product and do not point wrangler at them. `@kit/auth` does not export `./migrations/*`. Machine gate: `bun run wrangler-migrations:check` fails if any wrangler `migrations_dir` resolves under `packages/`.
 
 The `tasks` set includes the additive `kit_tasks_stage_org_guard` id for stage ownership, plus the `0019` contract. Neither proves remote application. Follow expand/deploy/contract ordering and inspect purge counts before authorized contract apply. FK rebuild scripts in `apps/example-api/migrations-pending/` are not journaled, catalogued or synced; their headers specify per-database counts, approvals and promotion steps.
@@ -37,7 +35,7 @@ bash scripts/kit/kit-schema-sync.sh --app apps/<product>-api --modules core,audi
 bash scripts/kit/kit-schema-sync.sh --app apps/<product>-api --modules all   # every catalogued module — not default
 ```
 
-With no `--modules`, a fresh Product selects and records `core,audit`; an existing manifest selects `core` ∪ its recorded `sets`, never silently adding `audit` on upgrade. A manifest without `sets` derives them once from recorded ids and canonical headers. To add a set explicitly, name `core` and all recorded sets. A single non-core set exits 1 while any core id is absent. An explicit list that omits a recorded set exits 1 when that set has catalog ids absent from `modules`, and names those ids. Opt out by deleting the set from `sets` (applied module rows stay). A Product that mounts Better Auth cannot opt out of `audit`: its `rate_limit_buckets` table is required by the throttle, without which every non-exempt auth request returns 500. `all` records every catalog set at that run, not future sets.
+With no `--modules`, a fresh Product selects and records `core,audit`; an existing manifest selects `core` ∪ its recorded `sets`, never silently adding `audit` on upgrade. To add a set explicitly, name `core` and all recorded sets. A single non-core set exits 1 while any core id is absent. An explicit list that omits a recorded set exits 1 when that set has catalog ids absent from `modules`, and names those ids. Opt out by deleting the set from `sets` (applied module rows stay). A Product that mounts Better Auth cannot opt out of `audit`: its `rate_limit_buckets` table is required by the throttle, without which every non-exempt auth request returns 500. `all` records every catalog set at that run, not future sets.
 
 ## Existing clone (already copied example-api)
 
@@ -67,6 +65,10 @@ bash scripts/kit/kit-schema-sync.sh --app apps/<product>-api --modules core,audi
 
 If you cloned the dogfood app: run `--adopt` **immediately**, then follow the existing-clone rules. This is not day-0.
 
+## Check
+
+`--check` prints the sync plan and writes nothing. It exits 0 when the same sync would write nothing, 2 when it would write, 1 on a refusal below. It proves files, not applied migrations. The [validate template](./templates/product-validate.example.sh) runs it.
+
 ## Fail-closed (script)
 
 | Event                                                                                                  | Sync                                                                                                                                                                 |
@@ -88,9 +90,8 @@ Append-only: never rewrite an applied local file.
 
 ## Manifest
 
-Product-owned. JSON keys (see [`templates/kit-schema-manifest.example.json`](./templates/kit-schema-manifest.example.json)): `version`, `app`, `sets`, `modules.<id>.kitSha256`, `modules.<id>.productFile`. `sets` records the fresh default, explicit `--modules`, and `--adopt`. A manifest without `sets` is migrated once from recorded ids and canonical `-- kit-schema:` headers, then written. Deleting a name from `sets` is the opt-out. `kitSha256` is the hex sha256 of **kit source bytes** (not of the headed product copy). Do not dual-edit the catalog by hand in a product.
+Product-owned. JSON keys (see [`templates/kit-schema-manifest.example.json`](./templates/kit-schema-manifest.example.json)): `version`, `app`, `sets`, `modules.<id>.kitSha256`, `modules.<id>.productFile`. `sets` records the fresh default, explicit `--modules`, and `--adopt`. A manifest without `sets` is migrated once from recorded ids and canonical `-- kit-schema:` headers, then written. `kitSha256` is the hex sha256 of **kit source bytes** (not of the headed product copy). Do not dual-edit the catalog by hand in a product.
 
 ## Not this doc
 
 - Code glue: import `createBetterAuth` from `@kit/auth/factory` (ADR-0008 **D6**). Do not copy `example-api/src/lib/better-auth.ts` as the factory.
-- Do not port `demo` / `flows` / `tasks` SQL unless the product mounts those routes.

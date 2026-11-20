@@ -3,12 +3,14 @@
 # Identity is catalog id + sha256(source bytes). Product filenames stay local.
 # Never rewrite applied SQL; never copy kit NNNN onto a product NNNN.
 #
-# usage: kit-schema-sync.sh --app <apps/foo-api> [--modules core|all|<comma-sets>] [--adopt] [--dry-run]
+# usage: kit-schema-sync.sh --app <apps/foo-api> [--modules core|all|<comma-sets>] [--adopt] [--dry-run | --check]
 # Omitted --modules selects core,audit for a new manifest; existing manifests
 # retain core ∪ recorded sets. `sets` is written on first sync, explicit selection
 # and --adopt, and migrated once from recorded ids and canonical headers when
 # absent. Opt out by deleting a set from `sets`. An explicit list that omits a recorded set with new catalog ids
 # exits 1 and names those ids. --adopt names unclaimed files of an unselected set.
+# --dry-run and --check print the plan and write nothing. --check then exits 0 when the
+# same sync would write nothing, 2 when it would write; every refusal exits 1.
 set -euo pipefail
 shopt -s nullglob
 
@@ -24,7 +26,7 @@ die() {
 }
 
 usage() {
-  echo "usage: kit-schema-sync.sh --app <apps/foo-api> [--modules core|all|<comma-sets>] [--adopt] [--dry-run]" >&2
+  echo "usage: kit-schema-sync.sh --app <apps/foo-api> [--modules core|all|<comma-sets>] [--adopt] [--dry-run | --check]" >&2
 }
 
 file_sha256() {
@@ -65,6 +67,7 @@ MODULES="core"
 MODULES_EXPLICIT=0
 ADOPT=0
 DRY_RUN=0
+CHECK=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -87,6 +90,10 @@ while [[ $# -gt 0 ]]; do
       DRY_RUN=1
       shift
       ;;
+    --check)
+      CHECK=1
+      shift
+      ;;
     --help | -h)
       usage
       exit 0
@@ -97,6 +104,10 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+if [[ "${CHECK}" -eq 1 && "${DRY_RUN}" -eq 1 ]]; then
+  usage
+  die "--check and --dry-run are exclusive"
+fi
 
 if [[ -z "${APP_ARG}" ]]; then
   usage
@@ -131,6 +142,7 @@ done <<<"${kit_apps}"
 
 MIG_DIR="${APP_DIR}/migrations"
 MANIFEST="${APP_DIR}/kit-schema-manifest.json"
+[[ -d "${MIG_DIR}" || ! ( -e "${MIG_DIR}" || -L "${MIG_DIR}" ) ]] || die "migrations is not a directory: ${MIG_DIR}"
 
 # --- catalog ---
 SOURCE_ROOT=""
@@ -321,12 +333,13 @@ for (const [id, v] of Object.entries(mods)) {
   done <<< "${MANIFEST_TSV}"$'\n'
 fi
 if [[ "${SETS_PRESENT}" -eq 1 && ${#PERSISTED_SETS[@]} -gt 0 ]]; then
+  persisted_list="$(printf '%s\n' "${!PERSISTED_SETS[@]}" | LC_ALL=C sort)" || die "failed to list manifest sets"
   while IFS= read -r raw_set; do
     [[ -n "${raw_set}" ]] || continue
     if [[ -z "${VALID_SET[$raw_set]+x}" ]]; then
       die "manifest sets names unknown set: ${raw_set}"
     fi
-  done < <(printf '%s\n' "${!PERSISTED_SETS[@]}" | LC_ALL=C sort)
+  done <<< "${persisted_list}"
 fi
 
 
@@ -680,8 +693,8 @@ if [[ "${ADOPT}" -eq 1 || "${MANIFEST_EXISTS}" -eq 0 || "${SETS_PRESENT}" -eq 0 
     for s in "${!UNSEL_SET[@]}"; do
       HINT_SET["${s}"]=1
     done
-    unsel_names="$(printf '%s\n' "${!UNSEL_SET[@]}" | LC_ALL=C sort | paste -sd, -)"
-    hint_names="$(printf '%s\n' "${!HINT_SET[@]}" | LC_ALL=C sort | paste -sd, -)"
+    unsel_names="$(printf '%s\n' "${!UNSEL_SET[@]}" | LC_ALL=C sort | paste -sd, -)" || die "failed to list unselected sets"
+    hint_names="$(printf '%s\n' "${!HINT_SET[@]}" | LC_ALL=C sort | paste -sd, -)" || die "failed to list hint sets"
     die "unclaimed catalog files for unselected set ${unsel_names}: ${unsel_files[*]}; --adopt cannot append a missing id of a partial set; run without --adopt: --modules ${hint_names}"
   fi
   fi
@@ -769,14 +782,26 @@ write_module_file() {
   mv -f "${tmp}" "${dest}"
 }
 
-if [[ ${#PLAN_KIND[@]} -eq 0 ]]; then
-  if [[ "${SETS_DIRTY}" -eq 1 && "${DRY_RUN}" -eq 0 ]]; then
-    write_manifest
+# --dry-run and --check report the plan and write nothing.
+if [[ "${DRY_RUN}" -eq 1 || "${CHECK}" -eq 1 ]]; then
+  idx=0
+  while [[ $idx -lt ${#PLAN_KIND[@]} ]]; do
+    echo "kit-schema-sync: ${PLAN_KIND[$idx]} ${PLAN_REL[$idx]}"
+    idx=$((idx + 1))
+  done
+  if [[ "${SETS_DIRTY}" -eq 1 ]]; then
+    sets_csv="$(printf '%s\n' "${!PERSISTED_SETS[@]}" | LC_ALL=C sort | paste -sd, -)" || die "failed to list sets"
+    echo "kit-schema-sync: record sets ${sets_csv}"
   fi
+  [[ "${CHECK}" -eq 1 ]] || exit 0
+  if [[ ${#PLAN_KIND[@]} -gt 0 || "${SETS_DIRTY}" -eq 1 ]]; then
+    echo "kit-schema-sync: check failed: sync required; run the same command without --check" >&2
+    exit 2
+  fi
+  echo "kit-schema-sync: check ok"
   exit 0
 fi
 
-changed=0
 idx=0
 while [[ $idx -lt ${#PLAN_KIND[@]} ]]; do
   kind="${PLAN_KIND[$idx]}"
@@ -790,28 +815,14 @@ while [[ $idx -lt ${#PLAN_KIND[@]} ]]; do
   echo "kit-schema-sync: ${kind} ${rel}"
 
   if [[ "${kind}" == "write" ]]; then
-    if [[ "${DRY_RUN}" -eq 0 ]]; then
-      mkdir -p "${MIG_DIR}"
-      write_module_file "${MIG_DIR}/${rel#migrations/}" "${id}" "${sha}" "${src_rel}" "${kit_file}"
-      MANIFEST_SHA["${id}"]="${sha}"
-      MANIFEST_FILE["${id}"]="${rel}"
-      changed=1
-    fi
-    continue
+    mkdir -p "${MIG_DIR}"
+    write_module_file "${MIG_DIR}/${rel#migrations/}" "${id}" "${sha}" "${src_rel}" "${kit_file}"
   fi
-
-  if [[ "${DRY_RUN}" -eq 0 ]]; then
-    MANIFEST_SHA["${id}"]="${sha}"
-    MANIFEST_FILE["${id}"]="${rel}"
-    changed=1
-  fi
+  MANIFEST_SHA["${id}"]="${sha}"
+  MANIFEST_FILE["${id}"]="${rel}"
 done
 
-if [[ "${DRY_RUN}" -eq 1 ]]; then
-  exit 0
-fi
-
-if [[ "${changed}" -eq 1 || "${SETS_DIRTY}" -eq 1 ]]; then
+if [[ ${#PLAN_KIND[@]} -gt 0 || "${SETS_DIRTY}" -eq 1 ]]; then
   write_manifest
 fi
 

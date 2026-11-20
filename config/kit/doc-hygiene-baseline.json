@@ -116,8 +116,8 @@
   },
   "docs/kit/kit-schema-sync.md": {
     "overLimitLines": 5,
-    "maxLineBytes": 810,
-    "fileBytes": 9353
+    "maxLineBytes": 725,
+    "fileBytes": 9343
   },
   "docs/kit/playbooks/create-product-day0.md": {
     "overLimitLines": 5,

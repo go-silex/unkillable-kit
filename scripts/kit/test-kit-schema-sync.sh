@@ -1319,6 +1319,125 @@ else
     "exit=${RUN_EC} kept=${kept33} out=$(echo "${RUN_OUT}" | tr '\n' ' ')"
 fi
 
+# --- 34: --check verdicts: 0 current, 2 sync required, 1 refusal; never writes ---
+echo "-- 34 check verdicts --"
+tree_digest() {
+  local f
+  for f in "$1"/* "$1"/migrations/*; do
+    [[ -f "${f}" ]] && printf '%s %s\n' "$(file_sha256 "${f}")" "${f#"$1"/}"
+  done
+  return 0
+}
+A34S="${TMP}/case34-sets"
+cp -a "${A2}" "${A34S}"
+KIT_SCHEMA_MANIFEST="${A34S}/kit-schema-manifest.json" bun -e '
+const fs = require("fs"); const p = process.env.KIT_SCHEMA_MANIFEST;
+const m = JSON.parse(fs.readFileSync(p, "utf8")); delete m.sets;
+fs.writeFileSync(p, JSON.stringify(m, null, 2) + "\n");
+'
+cp "${A34S}/kit-schema-manifest.json" "${TMP}/case34-sets-before.json"
+run_sync --app "${A34S}" --check
+if [[ "${RUN_EC}" -eq 2 && "${RUN_OUT}" == *"record sets core"* ]] \
+  && cmp -s "${TMP}/case34-sets-before.json" "${A34S}/kit-schema-manifest.json"; then
+  pass "34 manifest-only change exits 2 and names the sets, writes nothing"
+else
+  fail_case "34 manifest-only change" "exit=${RUN_EC} out=$(echo "${RUN_OUT}" | tr '\n' ' ')"
+fi
+
+run_sync --app "${A34S}" --dry-run
+if [[ "${RUN_EC}" -eq 0 && "${RUN_OUT}" == *"record sets core"* ]] \
+  && cmp -s "${TMP}/case34-sets-before.json" "${A34S}/kit-schema-manifest.json"; then
+  pass "34 dry-run names a manifest-only change and still exits 0"
+else
+  fail_case "34 dry-run manifest-only change" "exit=${RUN_EC} out=$(echo "${RUN_OUT}" | tr '\n' ' ')"
+fi
+
+A34W="${TMP}/case34-writes"
+copy_sql_range "${A34W}/migrations" 1 8
+cp -a "${A34W}" "${TMP}/case34-writes-applied"
+digest34w="$(tree_digest "${A34W}")"
+run_sync --app "${TMP}/case34-writes-applied"
+applied34w_ec="${RUN_EC}"
+applied34w="$(printf '%s\n' "${RUN_OUT}" | grep -E '^kit-schema-sync: (write|record) migrations/' || true)"
+run_sync --app "${A34W}" --check
+planned34w="$(printf '%s\n' "${RUN_OUT}" | grep -E '^kit-schema-sync: (write|record) migrations/' || true)"
+if [[ "${applied34w_ec}" -eq 0 && -f "${TMP}/case34-writes-applied/kit-schema-manifest.json" \
+  && "${RUN_EC}" -eq 2 && -n "${planned34w}" && "${planned34w}" == "${applied34w}" \
+  && "${RUN_OUT}" == *"record sets audit,core"* && ! -e "${A34W}/kit-schema-manifest.json" \
+  && "$(tree_digest "${A34W}")" == "${digest34w}" ]]; then
+  pass "34 pending SQL exits 2, names every action the sync applies, writes nothing"
+else
+  fail_case "34 pending SQL" "exit=${RUN_EC} out=$(echo "${RUN_OUT}" | tr '\n' ' ')"
+fi
+
+# Recorded sets unchanged: a new catalog id in a recorded set, then a file the manifest omits.
+A34N="${TMP}/case34-new-id"
+mkdir -p "${A34N}/migrations"
+run_sync_cat "${CAT18A}" --app "${A34N}" --modules core,flows
+digest34n="$(tree_digest "${A34N}")"
+run_sync_cat "${CAT18B}" --app "${A34N}" --check
+if [[ "${RUN_EC}" -eq 2 && "${RUN_OUT}" == *"write migrations/0003_kit_flows_x.sql"* \
+  && "${RUN_OUT}" != *"record sets"* && "$(tree_digest "${A34N}")" == "${digest34n}" ]]; then
+  pass "34 new id in a recorded set exits 2 without a sets change"
+else
+  fail_case "34 new id in a recorded set" "exit=${RUN_EC} out=$(echo "${RUN_OUT}" | tr '\n' ' ')"
+fi
+
+A34R="${TMP}/case34-record"
+cp -a "${A2}" "${A34R}"
+KIT_SCHEMA_MANIFEST="${A34R}/kit-schema-manifest.json" bun -e '
+const fs = require("fs"); const p = process.env.KIT_SCHEMA_MANIFEST;
+const m = JSON.parse(fs.readFileSync(p, "utf8")); delete m.modules.init;
+fs.writeFileSync(p, JSON.stringify(m, null, 2) + "\n");
+'
+digest34r="$(tree_digest "${A34R}")"
+run_sync --app "${A34R}" --check
+if [[ "${RUN_EC}" -eq 2 && "${RUN_OUT}" == *"record migrations/0001_init.sql"* \
+  && "${RUN_OUT}" != *"record sets"* && "$(tree_digest "${A34R}")" == "${digest34r}" ]]; then
+  pass "34 unrecorded file exits 2 without a sets change"
+else
+  fail_case "34 unrecorded file" "exit=${RUN_EC} out=$(echo "${RUN_OUT}" | tr '\n' ' ')"
+fi
+
+run_sync --app "${A2}" --check --dry-run
+if [[ "${RUN_EC}" -eq 1 && "${RUN_OUT}" == *"exclusive"* ]]; then
+  pass "34 --check with --dry-run exits 1"
+else
+  fail_case "34 --check with --dry-run" "exit=${RUN_EC} out=$(echo "${RUN_OUT}" | tr '\n' ' ')"
+fi
+
+A34F="${TMP}/case34-file"
+mkdir -p "${A34F}"
+printf 'x\n' >"${A34F}/migrations"
+run_sync --app "${A34F}" --check
+ec34f="${RUN_EC}"
+out34f="${RUN_OUT}"
+A34L="${TMP}/case34-dangling"
+mkdir -p "${A34L}"
+ln -s "${TMP}/case34-absent" "${A34L}/migrations"
+run_sync --app "${A34L}" --check
+if [[ "${ec34f}" -eq 1 && "${out34f}" == *"migrations is not a directory"* \
+  && "${RUN_EC}" -eq 1 && "${RUN_OUT}" == *"migrations is not a directory"* ]]; then
+  pass "34 migrations as a file or dangling link exits 1 under --check"
+else
+  fail_case "34 migrations not a directory" "file=${ec34f} link=${RUN_EC} out=$(echo "${RUN_OUT}" | tr '\n' ' ')"
+fi
+
+run_sync --app "${A2}" --check
+if [[ "${RUN_EC}" -eq 0 && "${RUN_OUT}" == *"check ok"* ]] \
+  && cmp -s "${TMP}/case2-manifest-before.json" "${A2}/kit-schema-manifest.json"; then
+  pass "34 current app exits 0"
+else
+  fail_case "34 current app" "exit=${RUN_EC} out=$(echo "${RUN_OUT}" | tr '\n' ' ')"
+fi
+
+run_sync --app "${A15}" --check
+if [[ "${RUN_EC}" -eq 1 && "${RUN_OUT}" == *"body drifted"* ]]; then
+  pass "34 refusal keeps exit 1 under --check"
+else
+  fail_case "34 refusal under --check" "exit=${RUN_EC} out=$(echo "${RUN_OUT}" | tr '\n' ' ')"
+fi
+
 echo "== summary: ${PASS} pass, ${FAIL} fail =="
 if [[ "${FAIL}" -ne 0 ]]; then
   exit 1
