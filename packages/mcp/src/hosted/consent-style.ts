@@ -85,7 +85,6 @@ button {
   cursor: pointer;
 }
 .branded button { border-radius: 1.5rem; }
-.serif button { letter-spacing: .06em; text-transform: uppercase; }
 button:hover { background: #f5f5f5; }
 button[value="yes"] {
   background: var(--accent, #171717);

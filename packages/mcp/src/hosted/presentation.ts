@@ -6,7 +6,7 @@ export type ResolvedConsentPresentation = Omit<ConsentPresentation, 'brand'> & {
   readonly brand?: ConsentBrand & { readonly buttonInk?: '#000' | '#fff' }
 }
 
-const IMAGE_PATH = /^\/(?:[\w-]+\/)*[\w-]+(?:\.[\w-]+)*\.(?:svg|png|jpe?g|webp|avif)$/i
+const IMAGE_PATH = /^\/(?:[\w-]+(?:\.[\w-]+)*\/)*[\w-]+(?:\.[\w-]+)*\.(?:svg|png|jpe?g|webp|avif)$/i
 
 function imagePath(path: string | undefined, key: 'logoPath' | 'backdropPath'): string | undefined {
   if (path === undefined) return
@@ -53,13 +53,17 @@ export function snapshotPresentation(
   value?: ConsentPresentation,
 ): ResolvedConsentPresentation | undefined {
   if (!value) return undefined
+  const brand = value.brand === undefined ? undefined : snapshotBrand(value.brand)
+  if (brand?.logoPath && (typeof value.serviceName !== 'string' || !value.serviceName.trim())) {
+    throw new TypeError('consentPresentation.serviceName is required when a brand logo is set')
+  }
   return {
     ...(value.locale !== undefined ? { locale: value.locale } : {}),
     ...(value.serviceName !== undefined ? { serviceName: value.serviceName } : {}),
     ...(value.disclosures !== undefined
       ? { disclosures: value.disclosures.map(({ label, text }) => ({ label, text })) }
       : {}),
-    ...(value.brand !== undefined ? { brand: snapshotBrand(value.brand) } : {}),
+    ...(brand ? { brand } : {}),
   }
 }
 

@@ -713,12 +713,15 @@ describe('hosted consent', () => {
   it('snapshots branding and allows same-origin images and one nonced style', async () => {
     const kv = new MemoryKv()
     const brand = {
-      logoPath: '/assets/consent-logo.svg',
+      logoPath: '/assets/v1.2/consent-logo.svg',
       backdropPath: '/assets/consent-backdrop.webp',
-      accentColor: '#123456',
+      accentColor: '#fffbeb',
       serifHeading: true,
     }
-    const hosted = worker({ identityPort: port(DEMO), consentPresentation: { brand } })
+    const hosted = worker({
+      identityPort: port(DEMO),
+      consentPresentation: { brand, serviceName: 'Example Service' },
+    })
     brand.logoPath = '/assets/changed-logo.png'
     brand.backdropPath = '/assets/changed-backdrop.png'
     brand.accentColor = '#abcdef'
@@ -727,9 +730,10 @@ describe('hosted consent', () => {
     const clientId = await registerClient(hosted, kv)
     const { res, html, csrf } = await consentPage(hosted, kv, await authorizeUrl(clientId))
     expect(res.status).toBe(200)
-    expect(html).toContain('/assets/consent-logo.svg')
+    expect(html).toContain('/assets/v1.2/consent-logo.svg')
     expect(html).toContain('/assets/consent-backdrop.webp')
-    expect(html).toContain('#123456')
+    expect(html).toContain('Example Service')
+    expect(html).toMatch(/--accent: #fffbeb; --button-ink: #000;/)
     expect(html).toMatch(/<main class="[^"]*\bserif\b/)
     expect(html).not.toContain('/assets/changed-logo.png')
     expect(html).not.toContain('/assets/changed-backdrop.png')
@@ -776,7 +780,18 @@ describe('hosted consent', () => {
     { backdropPath: '/assets/document.html' },
     { accentColor: 'red' },
   ])('rejects invalid branding at construction: %o', (brand) => {
-    expect(() => worker({ identityPort: port(DEMO), consentPresentation: { brand } })).toThrow()
+    expect(() =>
+      worker({ identityPort: port(DEMO), consentPresentation: { brand, serviceName: 'Service' } }),
+    ).toThrow(TypeError)
+  })
+
+  it('requires a text service name when a logo identifies the service', () => {
+    expect(() =>
+      worker({
+        identityPort: port(DEMO),
+        consentPresentation: { brand: { logoPath: '/assets/logo.svg' } },
+      }),
+    ).toThrow(/serviceName/)
   })
 
   it('renders French presentation as text in one protected consent form and snapshots its data', async () => {
