@@ -333,15 +333,15 @@ describe('opt-in OpenID Provider', () => {
     },
   )
 
-  it('rejects missing openid, individual claim requests and resource indicators', async () => {
+  it('rejects unsupported scopes and individual claims at issuance, and token resource indicators', async () => {
     const { auth } = setup(true)
     const { client, cookie } = await clientSession(auth)
     for (const [overrides, error] of [
       [{ scope: 'email profile' }, 'invalid_scope'],
       [{ claims: JSON.stringify({ userinfo: { email: null } }) }, 'invalid_request'],
-      [{ resource: 'https://resource.example.test/' }, 'invalid_target'],
     ] as const) {
-      const response = await authorize(auth, client.client_id, cookie, overrides)
+      const code = await codeFor(auth, client.client_id, cookie, overrides)
+      const response = await exchange(auth, client, code, VERIFIER)
       expect(response.status).toBe(400)
       expect(await response.json()).toMatchObject({ error })
     }
@@ -351,6 +351,86 @@ describe('opt-in OpenID Provider', () => {
     })
     expect(token.status).toBe(400)
     expect(await token.json()).toMatchObject({ error: 'invalid_target' })
+  })
+
+  it.each([
+    ['userinfo', { userinfo: { email: null } }],
+    ['id_token', { id_token: { email: null } }],
+    ['empty', {}],
+  ])('rejects stored %s individual claims before writing tokens', async (_label, claims) => {
+    const { auth, sqlite } = setup(true)
+    const { client, cookie, userId } = await clientSession(auth)
+    const code = await codeFor(auth, client.client_id, cookie, { scope: 'openid' })
+    const updated = sqlite
+      .prepare(
+        "UPDATE verification SET value = json_set(value, '$.query.claims', json(?)) WHERE json_valid(value) AND json_extract(value, '$.userId') = ?",
+      )
+      .run(JSON.stringify(claims), userId)
+    expect(updated.changes).toBe(1)
+    const response = await exchange(auth, client, code, VERIFIER)
+    expect(response.status).toBe(400)
+    expect(await response.json()).toMatchObject({ error: 'invalid_request' })
+    expect(sqlite.prepare('SELECT count(*) AS count FROM oauth_access_token').get()).toEqual({
+      count: 0,
+    })
+    expect(sqlite.prepare('SELECT count(*) AS count FROM jwks').get()).toEqual({ count: 0 })
+  })
+
+  it('enforces stored scopes on concurrent legacy UserInfo claim requests', async () => {
+    const { auth, sqlite } = setup(true)
+    const { client, cookie } = await clientSession(auth)
+    const cases = [
+      { scope: 'openid', expected: [] },
+      { scope: 'openid email', expected: ['email', 'email_verified'] },
+      { scope: 'openid profile', expected: ['name'] },
+      { scope: 'openid email profile', expected: ['email', 'email_verified', 'name'] },
+    ]
+    const tokens = []
+    for (const { scope } of cases) {
+      const code = await codeFor(auth, client.client_id, cookie, { scope })
+      const response = await exchange(auth, client, code, VERIFIER)
+      expect(response.status).toBe(200)
+      tokens.push((await response.json()) as { access_token: string })
+    }
+    const updated = sqlite
+      .prepare('UPDATE oauth_access_token SET requested_user_info_claims = ?')
+      .run(JSON.stringify(['email', 'email_verified', 'name']))
+    expect(updated.changes).toBe(cases.length)
+    const responses = await Promise.all(
+      tokens.map(({ access_token }) =>
+        request(auth, '/api/auth/oauth2/userinfo', {
+          headers: { authorization: `Bearer ${access_token}` },
+        }),
+      ),
+    )
+    for (const [index, userinfo] of responses.entries()) {
+      expect(userinfo.status).toBe(200)
+      const info = (await userinfo.json()) as Record<string, unknown>
+      expect(Object.keys(info).sort()).toEqual(['sub', 'app_role', ...cases[index].expected].sort())
+    }
+  })
+
+  it('advertises only implemented standard claims and no individual claims parameter', async () => {
+    const { auth } = setup(true)
+    const response = await request(auth, '/api/auth/.well-known/openid-configuration')
+    expect(response.status).toBe(200)
+    const metadata = (await response.json()) as Record<string, unknown>
+    expect(metadata.claims_parameter_supported).toBe(false)
+    expect(metadata.claims_supported).toEqual([
+      'iss',
+      'sub',
+      'aud',
+      'exp',
+      'iat',
+      'auth_time',
+      'nonce',
+      'acr',
+      'sid',
+      'at_hash',
+      'email',
+      'email_verified',
+      'name',
+    ])
   })
 
   it('rejects a previously authorized resource-bound JWT before signing', async () => {

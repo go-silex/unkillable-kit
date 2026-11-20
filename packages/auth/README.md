@@ -34,6 +34,12 @@ revokes their existing sessions; enabling does not restore them. State is
 Deployment-wide for that User, including their memberships in other Organizations.
 When the audit set is mounted, pass its audit option to record the change.
 
+When the OpenID provider is enabled, authorize the operation first, then await
+`endOidcUserSessions(auth, targetUserId)` **before** calling `disableAccount`.
+The latter deletes sessions directly and cannot trigger provider logout hooks.
+Apply the same ordering before any other direct session deletion. Do not continue
+to direct deletion if the Kit logout call fails.
+
 Each request must use the live `isAccountActive` check when configuring session
 and API-key authentication. An Organization-bound key is governed by its
 subject (the User who owns the key), not by an Organization-wide status.
@@ -94,13 +100,19 @@ URIs, authorization code and PKCE S256. Dynamic registration, CIMD, refresh
 tokens, pairwise subjects and front-channel logout are not supported.
 
 `endOidcUserSessions(auth, userId)` ends the user's sessions through Better
-Auth, invoking its back-channel logout hooks. Register a public HTTPS
-`backchannelLogoutUri` and optional `postLogoutRedirectUris` for each client.
-The provider schedules notifications with the supplied `waitUntil`; delivery is
-best effort, has a timeout and is not retried. Direct SQL session deletion does
-not notify clients. RP-initiated logout can end a browser session too. Clients
-must validate logout tokens and handle locally verified access tokens according
-to their own expiry; logout is not an atomic global revocation guarantee.
+Auth, invoking its back-channel logout hooks. Use it before `disableAccount` or
+any other direct session deletion: once sessions are deleted directly, the
+provider cannot run those hooks for them. Better Auth's native bulk session
+revocation paths are not a substitute: their upstream hook snapshot is limited
+to 100 rows, so deletion can outpace logout notifications. Kit's helper
+paginates the relevant snapshots.
+
+Register a public HTTPS `backchannelLogoutUri` and optional
+`postLogoutRedirectUris` for each client. The provider schedules notifications
+with the supplied `waitUntil`; delivery is best effort, has a timeout and is
+not retried. RP-initiated logout can end a browser session too. Clients must
+validate logout tokens and handle locally verified access tokens according to
+their own expiry; logout is not an atomic global revocation guarantee.
 
 ## Google sign-in (opt-in)
 
