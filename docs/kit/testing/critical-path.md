@@ -157,8 +157,8 @@ BA 1.6 paths: `POST /api/auth/request-password-reset` · `POST /api/auth/reset-p
 
 Manual dogfood:
 
-1. Open `/forgot-password` → submit `demo@kit.local` (or seed persona).
-2. `transport: "log"` redacts the token: take the link from a real test inbox, never from logs.
+1. Open `/forgot-password` → submit an account whose inbox you control.
+2. Use a real transport: `log` sends nothing and redacts tokens (local: mail-capture tests).
 3. Open the emailed link `/reset-password?token=<token>` (query, not path).
 4. Set new password (≥ 8 chars) → redirect login → sign in with **new** password; old fails.
 5. Reuse token → error.

@@ -696,6 +696,7 @@ describe('hosted consent', () => {
       scope: ['mcp'],
     }
     const random = vi.spyOn(crypto, 'getRandomValues').mockReturnValue(new Uint8Array(16))
+    const put = vi.spyOn(kv, 'put')
     let result: { csrf: string; cookie: string }
     try {
       result = await putConsent(namespace, new URL(LOCAL), record)
@@ -704,8 +705,7 @@ describe('hosted consent', () => {
     }
     expect(result.cookie).toContain(`mcp_consent_id=${id};`)
     expect(kv.consentKeys()).toEqual([key])
-    expect(key).not.toContain(id)
-    expect(kv.secondsLeft(key)).toBe(600)
+    expect(put).toHaveBeenCalledWith(key, expect.any(String), { expirationTtl: 600 })
     const request = (cookie: string) =>
       new Request(`${LOCAL}/authorize`, { headers: { cookie: `mcp_consent_id=${cookie}` } })
     expect(await readConsent(namespace, request(id))).toEqual({ ...record, csrf: result.csrf, key })
