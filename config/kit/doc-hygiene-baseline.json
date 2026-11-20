@@ -117,7 +117,7 @@
   "docs/kit/kit-schema-sync.md": {
     "overLimitLines": 5,
     "maxLineBytes": 810,
-    "fileBytes": 9373
+    "fileBytes": 9368
   },
   "docs/kit/observability.md": {
     "overLimitLines": 2,
@@ -152,7 +152,7 @@
   "docs/kit/standards/stack.md": {
     "overLimitLines": 52,
     "maxLineBytes": 867,
-    "fileBytes": 64077
+    "fileBytes": 63985
   },
   "docs/kit/testing/coverage.md": {
     "overLimitLines": 7,
