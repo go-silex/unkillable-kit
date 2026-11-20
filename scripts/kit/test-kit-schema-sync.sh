@@ -1357,10 +1357,12 @@ copy_sql_range "${A34W}/migrations" 1 8
 cp -a "${A34W}" "${TMP}/case34-writes-applied"
 digest34w="$(tree_digest "${A34W}")"
 run_sync --app "${TMP}/case34-writes-applied"
+applied34w_ec="${RUN_EC}"
 applied34w="$(printf '%s\n' "${RUN_OUT}" | grep -E '^kit-schema-sync: (write|record) migrations/' || true)"
 run_sync --app "${A34W}" --check
 planned34w="$(printf '%s\n' "${RUN_OUT}" | grep -E '^kit-schema-sync: (write|record) migrations/' || true)"
-if [[ "${RUN_EC}" -eq 2 && -n "${planned34w}" && "${planned34w}" == "${applied34w}" \
+if [[ "${applied34w_ec}" -eq 0 && -f "${TMP}/case34-writes-applied/kit-schema-manifest.json" \
+  && "${RUN_EC}" -eq 2 && -n "${planned34w}" && "${planned34w}" == "${applied34w}" \
   && "${RUN_OUT}" == *"record sets audit,core"* && ! -e "${A34W}/kit-schema-manifest.json" \
   && "$(tree_digest "${A34W}")" == "${digest34w}" ]]; then
   pass "34 pending SQL exits 2, names every action the sync applies, writes nothing"
