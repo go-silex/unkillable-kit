@@ -24,4 +24,18 @@ minimumReleaseAge = 259200
 # Remove each entry once it passes the age gate or the package is updated again.
 # Products must not edit this Kit-owned file: use the one-shot
 # `--minimum-release-age-excludes` flag when resolving, or upstream the exemption.
-minimumReleaseAgeExcludes = []
+# OIDC back-channel logout on Workers needs the 1.7.27 fix; operator approved
+# the exemption. Better Auth entries pass 2026-11-23 10:56 UTC; better-call
+# passes 2026-11-21 15:18 UTC. Refs: go-silex/unkillable-kit#71
+minimumReleaseAgeExcludes = [
+  "better-auth@1.7.27",
+  "@better-auth/core@1.7.27",
+  "@better-auth/oauth-provider@1.7.27",
+  "@better-auth/telemetry@1.7.27",
+  "@better-auth/drizzle-adapter@1.7.27",
+  "@better-auth/kysely-adapter@1.7.27",
+  "@better-auth/memory-adapter@1.7.27",
+  "@better-auth/mongo-adapter@1.7.27",
+  "@better-auth/prisma-adapter@1.7.27",
+  "better-call@1.4.6",
+]
