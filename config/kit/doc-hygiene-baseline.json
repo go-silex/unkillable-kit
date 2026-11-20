@@ -152,7 +152,7 @@
   "docs/kit/standards/stack.md": {
     "overLimitLines": 52,
     "maxLineBytes": 867,
-    "fileBytes": 63985
+    "fileBytes": 63879
   },
   "docs/kit/testing/coverage.md": {
     "overLimitLines": 7,

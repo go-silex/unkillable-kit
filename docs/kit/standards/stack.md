@@ -103,11 +103,13 @@ Organization mutations use submitted Organization and values for requests and ca
 
 ### D. Auth + **cookies**
 
-| Élément                       | Choix                                                                                                                                                                                                  | Quand | Statut | Paquets                    |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----- | ------ | -------------------------- |
-| Sessions UI (**aujourd’hui**) | **Better Auth** cookies via `@kit/auth` SessionPort — [ADR-0002](../architecture/adr/0002-session-hmac-interim-vs-better-auth.md); optional [OIDC provider](../architecture/adr/0024-oidc-provider.md) | kit   | livré  | `better-auth`, `@kit/auth` |
-| API keys machine              | `sk_…` hash en D1, **per-user**                                                                                                                                                                        | kit   | livré  | `@kit/auth`                |
-| Guards (kit)                  | Hono middleware dual-path `requireAuth` (Bearer **ou** cookie) dans `example-api`                                                                                                                      | kit   | livré  |                            |
+| Élément                       | Choix                                                                                         | Quand | Statut | Paquets                 |
+| ----------------------------- | --------------------------------------------------------------------------------------------- | ----- | ------ | ----------------------- |
+| Sessions UI (**aujourd’hui**) | **Better Auth** — [ADR-0002](../architecture/adr/0002-session-hmac-interim-vs-better-auth.md) | kit   | livré  | `@kit/auth` SessionPort |
+| API keys machine              | `sk_…` hash en D1, **per-user**                                                               | kit   | livré  | `@kit/auth`             |
+| Guards (kit)                  | Hono middleware dual-path `requireAuth` (Bearer **ou** cookie) dans `example-api`             | kit   | livré  |                         |
+
+OpenID Provider opt-in : [ADR-0024](../architecture/adr/0024-oidc-provider.md) (proposé).
 
 Le statut actif du User est vérifié à chaque résolution de session ou de clé :
 une clé est régie par son User propriétaire, pas par un état global de l'Organization.
