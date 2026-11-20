@@ -43,7 +43,9 @@ must sync and apply the account-state schema migration before deploying.
 
 Pass `google: { clientId, clientSecret, allowedDomains }` to `createBetterAuth`.
 Use a Google OAuth **Web application** client and register
-`<BETTER_AUTH_URL>/api/auth/callback/google` as its redirect URI. The App supplies
+`<auth-origin>/api/auth/callback/google` as its redirect URI, where
+`<auth-origin>` is the scheme and host of `BETTER_AUTH_URL`. Do not append
+`/api/auth` twice if `BETTER_AUTH_URL` already includes it. The App supplies
 the client credentials from secret storage and a non-empty list of DNS domains.
 Domains are normalized to lowercase and matched exactly. Invalid configuration
 throws at construction; omit `google` to leave the provider unconfigured.
@@ -56,12 +58,12 @@ Provider tokens are discarded before account persistence and are not logged.
 
 The App owns the sign-in button and must pass its login page as Better Auth's
 `errorCallbackURL` when starting sign-in. Without it, the default is `/login`
-on the first trusted origin. The callback supplies `error` codes:
+on the first trusted origin. The redirect flow supplies `error` codes:
 `unable_to_get_user_info` (invalid token or identity policy), `signup_disabled`
 (no existing user), `account_inactive` (disabled or unreadable account),
 and `google_email_mismatch` (a linked identity's email changed). Better Auth may
 also return protocol errors such as `invalid_code` or `state_not_found`.
-Direct ID-token API sign-in returns API errors rather than browser redirects.
+Direct Google ID-token sign-in and manual account linking are unsupported.
 
 This option supplies no login UI, deployment secrets, or product domain list.
 

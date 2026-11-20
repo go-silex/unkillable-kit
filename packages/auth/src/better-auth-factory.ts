@@ -27,7 +27,12 @@ import {
 } from './better-auth-schema'
 import { sessionCookieName } from './cookie-name'
 import { createFirstSessionAfterHook, type FirstSessionHandler } from './first-session-hook'
-import { type GoogleSignInOptions, googleAccountHooks, googleConfiguration } from './google/sign-in'
+import {
+  type GoogleSignInOptions,
+  googleAccountHooks,
+  googleConfiguration,
+  googleRedirectOnlyPlugins,
+} from './google/sign-in'
 import { logBetterAuthEvent } from './logging/better-auth-logger'
 import { createKitOrganizationPlugin } from './org-plugin'
 import { createSessionAccountGuard, InactiveSessionError } from './policy/better-auth-session-guard'
@@ -210,6 +215,7 @@ export function createBetterAuth(opts: CreateBetterAuthOpts): KitBetterAuth {
     },
     plugins: [
       createKitOrganizationPlugin(),
+      ...googleRedirectOnlyPlugins(google),
       ...(emailPort && emailConfig
         ? [
             magicLink({

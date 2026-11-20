@@ -1,10 +1,47 @@
 import type { BetterAuthOptions } from 'better-auth'
-import { type GoogleProfile, verifyGoogleIdToken } from 'better-auth/social-providers'
+import { APIError, createAuthMiddleware } from 'better-auth/api'
+import type { GoogleProfile } from 'better-auth/social-providers'
 
 export type GoogleSignInOptions = {
   clientId: string
   clientSecret: string
   allowedDomains: string[]
+}
+
+function normalizeDomain(domain: string): string | undefined {
+  if (
+    !/^[\x20-\x7e]+$/.test(domain) ||
+    domain.length > 253 ||
+    !domain.includes('.') ||
+    !domain.split('.').every((label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(label))
+  )
+    return undefined
+  return domain.toLowerCase()
+}
+
+export function googleRedirectOnlyPlugins(enabled: boolean) {
+  return enabled ? [googleRedirectOnlyPlugin()] : []
+}
+
+function googleRedirectOnlyPlugin() {
+  return {
+    id: 'kit-google-redirect-only',
+    hooks: {
+      before: [
+        {
+          matcher: (ctx: { path?: string; body?: { provider?: string; idToken?: unknown } }) =>
+            ctx.body?.provider === 'google' &&
+            (ctx.path === '/link-social' || (ctx.path === '/sign-in/social' && !!ctx.body.idToken)),
+          handler: createAuthMiddleware(async () => {
+            throw new APIError('BAD_REQUEST', {
+              code: 'GOOGLE_REDIRECT_ONLY',
+              message: 'Google sign-in requires the redirect flow',
+            })
+          }),
+        },
+      ],
+    },
+  }
 }
 
 function createGoogleSignIn(options: GoogleSignInOptions) {
@@ -22,15 +59,8 @@ function createGoogleSignIn(options: GoogleSignInOptions) {
   const domains = new Set(
     options.allowedDomains.map((domain) => {
       if (typeof domain !== 'string') throw new Error('Invalid Google sign-in domain')
-      const normalized = domain.trim().toLowerCase()
-      if (
-        normalized.length > 253 ||
-        !normalized.includes('.') ||
-        !normalized
-          .split('.')
-          .every((label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label))
-      )
-        throw new Error('Invalid Google sign-in domain')
+      const normalized = normalizeDomain(domain.trim())
+      if (!normalized) throw new Error('Invalid Google sign-in domain')
       return normalized
     }),
   )
@@ -41,11 +71,17 @@ function createGoogleSignIn(options: GoogleSignInOptions) {
     disableSignUp: true,
     async getUserInfo(tokens: { idToken?: string; expectedIdTokenNonce?: string }) {
       if (!tokens.idToken) return null
-      const claims = await verifyGoogleIdToken({
-        token: tokens.idToken,
-        audience: clientId,
-        nonce: tokens.expectedIdTokenNonce,
-      })
+      // Older supported Better Auth peers do not export this; load it only for opt-in Google.
+      const idToken = tokens.idToken
+      const claims = await import('better-auth/social-providers')
+        .then(({ verifyGoogleIdToken }) =>
+          verifyGoogleIdToken({
+            token: idToken,
+            audience: clientId,
+            nonce: tokens.expectedIdTokenNonce,
+          }),
+        )
+        .catch(() => null)
       if (
         claims?.email_verified !== true ||
         typeof claims.email !== 'string' ||
@@ -55,12 +91,12 @@ function createGoogleSignIn(options: GoogleSignInOptions) {
       )
         return null
       const parts = claims.email.split('@')
-      const domain = parts[1]?.toLowerCase()
+      const domain = parts[1] && normalizeDomain(parts[1])
       if (
         parts.length !== 2 ||
         !parts[0] ||
         !domain ||
-        claims.hd.toLowerCase() !== domain ||
+        normalizeDomain(claims.hd) !== domain ||
         !domains.has(domain)
       )
         return null
@@ -81,7 +117,15 @@ export const googleAccountHooks: NonNullable<BetterAuthOptions['databaseHooks']>
   create: {
     before: async (account) =>
       account.providerId === 'google'
-        ? { data: { ...account, accessToken: null, refreshToken: null, idToken: null } }
+        ? {
+            data: {
+              ...account,
+              issuer: 'https://accounts.google.com',
+              accessToken: null,
+              refreshToken: null,
+              idToken: null,
+            },
+          }
         : undefined,
   },
   update: {
@@ -123,7 +167,15 @@ export function googleConfiguration(
         trustedProviders: ['google'],
         allowDifferentEmails: false,
         disableImplicitLinking: false,
-        requireLocalEmailVerified: false,
+        requireLocalEmailVerified: true,
+      },
+      additionalFields: {
+        issuer: {
+          type: 'string' as const,
+          required: true,
+          defaultValue: 'local:credential',
+          input: false,
+        },
       },
       updateAccountOnSignIn: false,
     },
