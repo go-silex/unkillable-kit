@@ -114,22 +114,29 @@ The ticket's User is checked again when redeemed; a ticket minted before disable
 
 > **Amendment (2026-11-09) — consent unchanged by `grantAdmission`.** The D2 admission seam never runs on `/authorize`: it cannot show, skip or force this page, and it changes no consent record, cookie, CSRF check, redirect-class warning or Deny redirect. A user can therefore Allow and the client still receive `invalid_grant` at the code exchange, which revokes that new OAuth grant.
 
-`HostedMcpWorkerOptions` accepts `consentPresentation?: ConsentPresentation`. The type is exported only from `@kit/mcp/hosted`:
+`@kit/mcp/hosted` exposes the static [`ConsentPresentation`](../../../../packages/mcp/README.md#hosted-shell) option. The factory validates
+branding and snapshots the data at construction; OAuth state never stores it.
+Kit renders a standalone, responsive, scriptless page. `locale` picks Kit labels
+(`en` by default, or `fr`); service name and disclosures are escaped plain text.
+Optional branding is limited to same-origin artwork, a hex accent with contrast
+chosen by Kit, and a system serif heading. Product files must be trusted static
+images served directly, not user-controlled or redirected. A logo requires a
+text service name so it is not the only way to identify the service.
 
-```ts
-export type ConsentPresentation = {
-  readonly locale?: 'en' | 'fr'
-  readonly serviceName?: string
-  readonly disclosures?: readonly { readonly label: string; readonly text: string }[]
-}
-```
+Presentation cannot override OAuth policy, labels, warnings, identity, scope,
+PKCE, CSRF, TTL, minting or revocation. No renderer, callbacks, CSS, external
+URLs or form overrides. Disclosure prose describes Product policy, not enforcement.
 
-The factory snapshots this static caller data once at construction, including disclosure entries, so subsequent caller mutation cannot change the pages. Presentation is not persisted in consent records, OAuth grants or tokens. An omitted locale means `en`; `fr` selects Kit-owned protocol/security labels. There is no request-language negotiation, switcher, new i18n framework or dependency. General error localization is outside this seam.
+`always` is the default. The page shows the client name and ID, the redirect
+scheme and host (scheme only for hostless URIs), and applicable warnings: locally
+running program (dotted `127/8`, `[::1]`, mapped loopback, `localhost` or its
+subdomains) or custom-scheme app. Remote HTTPS redirects need no warning.
 
-The service name and every disclosure label/text are escaped plain text, never Markdown or HTML. The option accepts no renderer, callbacks, links, CSS, form attributes or security-label overrides. Kit retains the authenticated identity, client ID and actual redirect facts, redirect-class warnings, fixed `/authorize` action, CSRF, Allow/Deny controls and response headers.
-
-UI content carries no authority: disclosures cannot change identity, scopes, PKCE, CSRF, consent policy, TTLs or minting. Duration or revocation prose must describe the caller's actual policy; it does not configure or enforce it. This amendment adds no revocation hooks.
-The shell does not auto-approve. `consent` defaults to `always`: it shows a page naming the client's `client_name`, its `client_id`, the `redirect_uri` scheme and host, and one warning for the redirect class: a program on this computer (dotted `127.0.0.0/8`, `[::1]`, IPv4-mapped `127.0.0.0/8`, `localhost`, `*.localhost`) or a custom-scheme app. A remote https redirect gets none; an http redirect off the provider's loopback hosts never reaches the page. The page sends `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'`, `X-Frame-Options: DENY`, `Cache-Control: no-store`, and `Referrer-Policy: no-referrer`.
+The fixed `/authorize` form keeps both Allow and Deny. CSP denies framing, base
+URLs and all resources except one Kit style block authorized by a fresh nonce
+independent of CSRF. Branded images add `img-src 'self'` (requests can carry
+cookies); the default loads no assets. No `form-action` that could block the OAuth
+redirect. `X-Frame-Options: DENY`, `Cache-Control: no-store`, `Referrer-Policy: no-referrer`.
 
 Provider 1.2 refuses cleartext HTTP redirects other than `localhost`, dotted `127.0.0.0/8` and `[::1]`, returning a local `400` before identity or consent. The shell enables `allowPrivateUseRedirectUris` for custom-scheme native apps.
 

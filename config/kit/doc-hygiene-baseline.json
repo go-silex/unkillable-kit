@@ -50,9 +50,9 @@
     "fileBytes": 7523
   },
   "docs/kit/architecture/adr/0015-mcp-remote-oauth-worker.md": {
-    "overLimitLines": 33,
+    "overLimitLines": 31,
     "maxLineBytes": 1243,
-    "fileBytes": 34205
+    "fileBytes": 33810
   },
   "docs/kit/architecture/adr/0016-tasks-owner-org-tenancy.md": {
     "overLimitLines": 3,
@@ -150,9 +150,9 @@
     "fileBytes": 30075
   },
   "docs/kit/standards/stack.md": {
-    "overLimitLines": 52,
+    "overLimitLines": 51,
     "maxLineBytes": 867,
-    "fileBytes": 64077
+    "fileBytes": 64059
   },
   "docs/kit/testing/coverage.md": {
     "overLimitLines": 7,

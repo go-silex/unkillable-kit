@@ -65,7 +65,7 @@ export type HostedMcpWorkerOptions<Env extends HostedMcpEnv> = {
   apiBaseUrl: (env: Env, request: Request) => string
   /** Default `always`. Not read from the request. */
   consent?: ConsentPolicy
-  /** Static locale and plain-text context for the Kit-owned consent page. */
+  /** Static text and bounded branding for the Kit-owned consent page. */
   consentPresentation?: ConsentPresentation
   /**
    * Omitted means the provider default. Never implied from the access TTL.

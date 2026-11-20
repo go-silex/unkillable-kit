@@ -1,14 +1,69 @@
 import type { ConsentPresentation } from './env'
 
+type ConsentBrand = NonNullable<ConsentPresentation['brand']>
+
+export type ResolvedConsentPresentation = Omit<ConsentPresentation, 'brand'> & {
+  readonly brand?: ConsentBrand & { readonly buttonInk?: 'black' | 'white' }
+}
+
+const IMAGE_PATH = /^\/(?:[\w-]+(?:\.[\w-]+)*\/)*[\w-]+(?:\.[\w-]+)*\.(?:svg|png|jpe?g|webp|avif)$/i
+
+function imagePath(path: string | undefined, key: 'logoPath' | 'backdropPath'): string | undefined {
+  if (path === undefined) return
+  if (typeof path !== 'string' || !IMAGE_PATH.test(path)) {
+    throw new TypeError(`consentPresentation.brand.${key} must be a root-relative image path`)
+  }
+  return path
+}
+
+function snapshotBrand(brand: ConsentBrand): NonNullable<ResolvedConsentPresentation['brand']> {
+  if (!brand || typeof brand !== 'object' || Array.isArray(brand)) {
+    throw new TypeError('consentPresentation.brand must be an object')
+  }
+  const logoPath = imagePath(brand.logoPath, 'logoPath')
+  const backdropPath = imagePath(brand.backdropPath, 'backdropPath')
+  const { accentColor, serifHeading } = brand
+  let buttonInk: 'black' | 'white' | undefined
+  if (accentColor !== undefined) {
+    if (typeof accentColor !== 'string' || !/^#[0-9a-f]{6}$/i.test(accentColor)) {
+      throw new TypeError('consentPresentation.brand.accentColor must be a six-digit hex color')
+    }
+    const channel = (offset: number) => {
+      const component = Number.parseInt(accentColor.slice(offset, offset + 2), 16) / 255
+      return component <= 0.04045 ? component / 12.92 : ((component + 0.055) / 1.055) ** 2.4
+    }
+    const luminance = 0.2126 * channel(1) + 0.7152 * channel(3) + 0.0722 * channel(5)
+    // Pick the higher WCAG contrast of black and white (at least 4.58:1).
+    buttonInk = luminance > Math.sqrt(1.05 * 0.05) - 0.05 ? 'black' : 'white'
+  }
+  if (serifHeading !== undefined && typeof serifHeading !== 'boolean') {
+    throw new TypeError('consentPresentation.brand.serifHeading must be a boolean')
+  }
+  return {
+    ...(logoPath ? { logoPath } : {}),
+    ...(backdropPath ? { backdropPath } : {}),
+    ...(accentColor ? { accentColor } : {}),
+    ...(buttonInk ? { buttonInk } : {}),
+    ...(serifHeading !== undefined ? { serifHeading } : {}),
+  }
+}
+
 /** Copy caller-owned data once, so later mutations cannot change a consent page. */
-export function snapshotPresentation(value?: ConsentPresentation): ConsentPresentation | undefined {
+export function snapshotPresentation(
+  value?: ConsentPresentation,
+): ResolvedConsentPresentation | undefined {
   if (!value) return undefined
+  const brand = value.brand === undefined ? undefined : snapshotBrand(value.brand)
+  if (brand?.logoPath && (typeof value.serviceName !== 'string' || !value.serviceName.trim())) {
+    throw new TypeError('consentPresentation.serviceName is required when a brand logo is set')
+  }
   return {
     ...(value.locale !== undefined ? { locale: value.locale } : {}),
     ...(value.serviceName !== undefined ? { serviceName: value.serviceName } : {}),
     ...(value.disclosures !== undefined
       ? { disclosures: value.disclosures.map(({ label, text }) => ({ label, text })) }
       : {}),
+    ...(brand ? { brand } : {}),
   }
 }
 
