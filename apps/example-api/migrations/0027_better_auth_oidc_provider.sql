@@ -98,7 +98,7 @@ CREATE TABLE oauth_access_token (
   id TEXT PRIMARY KEY NOT NULL,
   token TEXT NOT NULL UNIQUE,
   client_id TEXT NOT NULL REFERENCES oauth_client(client_id) ON DELETE CASCADE,
-  session_id TEXT REFERENCES session(id) ON DELETE SET NULL,
+  session_id TEXT REFERENCES session(id) ON DELETE CASCADE,
   user_id TEXT REFERENCES user(id) ON DELETE CASCADE,
   reference_id TEXT,
   authorization_code_id TEXT,

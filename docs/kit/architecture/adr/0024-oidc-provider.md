@@ -41,15 +41,34 @@ Clients are registered only by server-side administration. V1 supports
 confidential web clients with exact redirect URIs and PKCE `S256`; neither
 dynamic registration nor client metadata documents are enabled. Only
 App-designated first-party clients may skip consent. Scopes are `openid`, `email`
-and `profile`; `offline_access` and refresh tokens require explicit per-client
-enablement and are off in v1. Inactive Users cannot complete authorization;
-existing session guards remain in force.
+and `profile`. When an authorization request omits `scope`, Better Auth uses the
+client's registered scopes, which must contain `openid` for an OpenID request.
+`offline_access` and refresh tokens are disabled in v1; revisit session
+revocation and logout semantics before enabling either. Inactive Users cannot
+complete authorization; existing session guards remain in force.
 
 ID tokens and UserInfo carry `sub` as the User id, `email`, `email_verified` and
 `name`. An App-supplied hook may add claims; the Kit does not own Product claims.
 RP-initiated and back-channel logout use Workers background delivery bound to
-the request execution context. A Kit function ends all User sessions through
-Better Auth, triggering back-channel notification; direct SQL deletion does not.
+the request execution context. The Kit helper atomically deletes all User
+sessions, then invokes Better Auth's back-channel hooks for at most the 25 most
+recent sessions. Notifications are best effort and truncated beyond that bound.
+Authorize deactivation first and call `endOidcUserSessions` before
+`disableAccount` or any other direct session deletion; direct deletion cannot
+invoke those hooks. Do not continue to direct deletion if the helper fails.
+
+The access-token session foreign key uses `ON DELETE CASCADE`, deliberately
+deviating from upstream Better Auth's `SET NULL`, so deleting a session removes
+its associated access-token rows. Self-contained tokens already accepted by an
+RP without provider revalidation can remain usable until expiry. RPs must
+validate logout tokens, keep their sessions short and periodically revalidate
+with the provider using `prompt=none`; logout is not an atomic global revocation
+guarantee.
+
+**Workers limitation:** Better Auth 1.7.27 uses `redirect: 'error'` for
+back-channel logout delivery, which Workers rejects. Do not rely on this provider
+on Workers until the upstream incompatibility is fixed and the Workers logout
+integration test passes.
 
 ## Exclusions and consequences
 

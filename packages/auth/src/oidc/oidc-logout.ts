@@ -9,164 +9,126 @@ import { createAuthEndpoint } from 'better-auth/api'
 import { z } from 'zod'
 import type { KitBetterAuth } from '../better-auth-factory'
 
-// Better Auth catches planner errors and applies revocations after deletion.
-// Keep the snapshot and revocation barrier in this endpoint's adapter.
-function logoutAdapter(adapter: DBAdapter): DBAdapter {
-  const models: Record<string, true> = {
-    session: true,
-    oauthAccessToken: true,
-    oauthRefreshToken: true,
-    oauthClient: true,
-  }
-  let failure: unknown
-  let failed = false
-  let sessionIds: string[] = []
-  const chunks = <T>(values: T[]) => {
-    const result: T[][] = []
-    for (let i = 0; i < values.length; i += D1_IN_ARRAY_CHUNK) {
-      result.push(values.slice(i, i + D1_IN_ARRAY_CHUNK))
-    }
-    return result
-  }
+const MAX_NOTIFIED_SESSIONS = 25
+
+type LogoutRow = { id: string; sessionId: string; clientId: string }
+type LogoutClient = { clientId: string }
+
+// Better Auth snapshots entities for its delete hooks before issuing deleteMany.
+// Bound that snapshot, but leave the actual userId deletion untouched so the
+// database cascades every session-bound access token in the same statement.
+function logoutAdapter(adapter: DBAdapter, onTruncated: () => void): DBAdapter {
+  let access: LogoutRow[] = []
+  let refresh: LogoutRow[] = []
+  let clients: LogoutClient[] = []
+  let snapshotReady = false
+  let jwks: Promise<unknown[]> | undefined
+  let createdJwk: Promise<unknown> | undefined
   type FindQuery = Parameters<DBAdapter['findMany']>[0]
-  async function readPages<T>(query: FindQuery): Promise<T[]> {
-    const rows: T[] = []
-    let lastId: string | undefined
-    while (true) {
-      const where = [...(query.where ?? [])]
-      if (lastId !== undefined) where.push({ field: 'id', operator: 'gt', value: lastId })
-      const page = await adapter.findMany<T & { id: string }>({
-        ...query,
-        where,
-        sortBy: { field: 'id', direction: 'asc' },
-        limit: 100,
-        offset: 0,
-      })
-      rows.push(...page)
-      if (page.length < 100) return rows
-      lastId = page[page.length - 1].id
-    }
-  }
-  function finishLimited<T>(query: FindQuery, rows: T[], select: string[] | undefined): T[] {
-    const sortField = query.sortBy?.field
-    if (sortField) {
-      const direction = query.sortBy?.direction === 'desc' ? -1 : 1
-      rows.sort((a, b) => {
-        const left = (a as Record<string, unknown>)[sortField] as string | number
-        const right = (b as Record<string, unknown>)[sortField] as string | number
-        return left < right ? -direction : left > right ? direction : 0
-      })
-    }
-    const offset = query.offset ?? 0
-    const result = rows.slice(offset, offset + (query.limit ?? 0))
-    if (select !== query.select && sortField) {
-      for (const row of result) delete (row as Record<string, unknown>)[sortField]
-    }
-    return result
-  }
-  function includeSortField(query: FindQuery): string[] | undefined {
-    const field = query.sortBy?.field
-    if (query.select && field && !query.select.includes(field)) return [...query.select, field]
-    return query.select
-  }
-  async function readGroup<T>(query: FindQuery): Promise<T[]> {
-    if (query.limit === undefined) return readPages<T>(query)
-    return adapter.findMany<T>({
+
+  async function snapshotSessions<T>(query: FindQuery): Promise<T[]> {
+    const sessions = await adapter.findMany<{ id: string }>({
       ...query,
-      offset: 0,
-      limit: query.limit + (query.offset ?? 0),
+      sortBy: { field: 'createdAt', direction: 'desc' },
+      limit: MAX_NOTIFIED_SESSIONS + 1,
     })
-  }
-  async function readChunked<T>(query: FindQuery): Promise<T[]> {
-    const index = query.where?.findIndex((condition) => condition.operator === 'in') ?? -1
-    const condition = index < 0 ? undefined : query.where?.[index]
-    if (!(condition && Array.isArray(condition.value))) {
-      return query.limit === undefined ? readPages<T>(query) : adapter.findMany<T>(query)
-    }
-    const groups = chunks([...new Set(condition.value as (string | number)[])])
-    const rows: T[] = []
-    const select = includeSortField(query)
-    for (const group of groups) {
-      const where = [...(query.where ?? [])]
-      where[index] = { ...condition, value: group as string[] | number[] }
-      rows.push(...(await readGroup<T>({ ...query, where, select })))
-    }
-    if (query.limit === undefined) return rows
-    return finishLimited(query, rows, select)
-  }
-  const paginated: DBAdapter = {
-    ...adapter,
-    async findMany<T>(query: Parameters<DBAdapter['findMany']>[0]): Promise<T[]> {
-      if (!models[query.model]) return adapter.findMany<T>(query)
-      try {
-        const rows = await readChunked<T>(query)
-        if (query.model === 'session' && query.limit === undefined)
-          sessionIds = (rows as { id: string }[]).map((row) => row.id)
-        return rows
-      } catch (error) {
-        failed = true
-        failure = error
-        throw error
+    if (sessions.length > MAX_NOTIFIED_SESSIONS) onTruncated()
+    const selected = sessions.slice(0, MAX_NOTIFIED_SESSIONS)
+    try {
+      if (selected.length) {
+        const where = [
+          { field: 'sessionId', operator: 'in' as const, value: selected.map((s) => s.id) },
+        ]
+        ;[access, refresh] = await Promise.all([
+          adapter.findMany<LogoutRow>({ model: 'oauthAccessToken', where, limit: 2147483647 }),
+          adapter.findMany<LogoutRow>({ model: 'oauthRefreshToken', where, limit: 2147483647 }),
+        ])
+        const ids = [...new Set([...access, ...refresh].map((token) => token.clientId))]
+        for (let i = 0; i < ids.length; i += D1_IN_ARRAY_CHUNK) {
+          clients.push(
+            ...(await adapter.findMany<LogoutClient>({
+              model: 'oauthClient',
+              where: [
+                {
+                  field: 'clientId',
+                  operator: 'in',
+                  value: ids.slice(i, i + D1_IN_ARRAY_CHUNK),
+                },
+              ],
+              limit: D1_IN_ARRAY_CHUNK,
+            })),
+          )
+        }
       }
+    } catch (error) {
+      // Notifications are best-effort; deletion remains the security barrier.
+      console.error('OIDC logout notification planning failed', error)
+      access = []
+      refresh = []
+      clients = []
+    }
+    snapshotReady = true
+    return selected as T[]
+  }
+
+  function findSnapshot<T>(query: FindQuery): T[] | undefined {
+    if (!snapshotReady) return
+    if (query.model === 'oauthAccessToken' || query.model === 'oauthRefreshToken') {
+      const sessionId = query.where?.find((condition) => condition.field === 'sessionId')?.value
+      return (query.model === 'oauthAccessToken' ? access : refresh).filter(
+        (token) => token.sessionId === sessionId,
+      ) as T[]
+    }
+    if (query.model === 'oauthClient') {
+      const ids = query.where?.find((condition) => condition.field === 'clientId')?.value
+      if (Array.isArray(ids))
+        return clients.filter((client) => (ids as unknown[]).includes(client.clientId)) as T[]
+    }
+  }
+
+  return {
+    ...adapter,
+    async findMany<T>(query: FindQuery): Promise<T[]> {
+      if (query.model === 'session' && query.limit === undefined) return snapshotSessions<T>(query)
+      if (query.model === 'jwks' && !query.where && !query.select && !query.limit) {
+        jwks ??= adapter.findMany(query)
+        return (await jwks) as T[]
+      }
+      const snapshot = findSnapshot<T>(query)
+      if (snapshot) return snapshot
+      return adapter.findMany<T>(query)
+    },
+    async create<T extends Record<string, unknown>, R = T>(query: {
+      model: string
+      data: Omit<T, 'id'>
+      select?: string[]
+      forceAllowId?: boolean
+    }): Promise<R> {
+      if (query.model !== 'jwks') return adapter.create<T, R>(query)
+      createdJwk ??= adapter.create<T, R>(query)
+      const key = await createdJwk
+      jwks = Promise.resolve([key])
+      return key as R
     },
     async updateMany(query) {
+      if (query.model === 'oauthAccessToken') return 0
+      // The access-token rows were removed by the session FK cascade.
+      // Chunk any remaining provider writes (e.g. historical refresh tokens).
       const index = query.where.findIndex((condition) => condition.operator === 'in')
       const condition = query.where[index]
       if (!(condition && Array.isArray(condition.value))) return adapter.updateMany(query)
       let count = 0
-      for (const group of chunks(condition.value as (string | number)[])) {
+      for (let i = 0; i < condition.value.length; i += D1_IN_ARRAY_CHUNK) {
         const where = [...query.where]
-        where[index] = { ...condition, value: group as string[] | number[] }
+        where[index] = {
+          ...condition,
+          value: condition.value.slice(i, i + D1_IN_ARRAY_CHUNK) as string[] | number[],
+        }
         count += await adapter.updateMany({ ...query, where })
       }
       return count
     },
-    async deleteMany(query) {
-      if (query.model !== 'session') return adapter.deleteMany(query)
-      if (failed) throw failure
-      // Foreign keys clear sessionId on deletion; upstream's after-hook writes
-      // are best-effort and can run in the background, not a revocation barrier.
-      for (const ids of chunks(sessionIds)) {
-        const where = [{ field: 'sessionId', operator: 'in' as const, value: ids }]
-        const access = await paginated.findMany<{ id: string; revoked?: Date }>({
-          model: 'oauthAccessToken',
-          where,
-        })
-        const refresh = await paginated.findMany<{ id: string; revoked?: Date; scopes?: string[] }>(
-          {
-            model: 'oauthRefreshToken',
-            where,
-          },
-        )
-        const revoked = new Date()
-        for (const [model, tokenIds] of [
-          ['oauthAccessToken', access.filter((token) => !token.revoked).map((token) => token.id)],
-          [
-            'oauthRefreshToken',
-            refresh
-              .filter((token) => !(token.revoked || token.scopes?.includes('offline_access')))
-              .map((token) => token.id),
-          ],
-        ] as const) {
-          if (tokenIds.length)
-            await paginated.updateMany({
-              model,
-              where: [{ field: 'id', operator: 'in', value: tokenIds }],
-              update: { revoked },
-            })
-        }
-      }
-      let count = 0
-      for (const ids of chunks(sessionIds)) {
-        count += await adapter.deleteMany({
-          ...query,
-          where: [...query.where, { field: 'id', operator: 'in', value: ids }],
-        })
-      }
-      return count
-    },
   }
-  return paginated
 }
 
 /** Deletes user sessions inside an auth endpoint so Better Auth's database hooks run. */
@@ -183,15 +145,20 @@ export function createOidcLogoutPlugin() {
           const storage = await getCurrentDBAdapterAsyncLocalStorage()
           const current = storage.getStore()
           const adapter = await getCurrentAdapter(ctx.context.adapter)
-          const paginated = logoutAdapter({ ...ctx.context.adapter, ...adapter })
+          let truncated = false
+          const bounded = logoutAdapter({ ...ctx.context.adapter, ...adapter }, () => {
+            truncated = true
+          })
           const removeSessions = () =>
             ctx.context.internalAdapter.deleteUserSessions(ctx.body.userId)
           if (current) {
-            await storage.run({ ...current, adapter: paginated }, removeSessions)
+            await storage.run({ ...current, adapter: bounded }, removeSessions)
           } else {
-            await runWithAdapter(paginated, removeSessions)
+            await runWithAdapter(bounded, removeSessions)
           }
-          return ctx.json({ success: true })
+          if (truncated)
+            ctx.context.logger.warn('OIDC logout notifications truncated to 25 sessions')
+          return ctx.json({ success: true, truncated })
         },
       ),
     },
@@ -201,11 +168,16 @@ export function createOidcLogoutPlugin() {
 /** Server-side API surface supplied by an auth instance with the logout plugin. */
 type OidcLogoutAuth = {
   api: {
-    endOidcUserSessions: (input: { body: { userId: string } }) => Promise<unknown>
+    endOidcUserSessions: (input: {
+      body: { userId: string }
+    }) => Promise<{ success: true; truncated: boolean }>
   }
 }
 
 /** End all Better Auth sessions for a user, including provider logout hooks. */
-export async function endOidcUserSessions(auth: KitBetterAuth, userId: string): Promise<void> {
-  await (auth as unknown as OidcLogoutAuth).api.endOidcUserSessions({ body: { userId } })
+export async function endOidcUserSessions(
+  auth: KitBetterAuth,
+  userId: string,
+): Promise<{ success: true; truncated: boolean }> {
+  return (auth as unknown as OidcLogoutAuth).api.endOidcUserSessions({ body: { userId } })
 }

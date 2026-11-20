@@ -129,7 +129,8 @@ const oauthAccessToken = sqliteTable(
     clientId: text('client_id')
       .notNull()
       .references(() => oauthClient.clientId, { onDelete: 'cascade' }),
-    sessionId: text('session_id').references(() => baSession.id, { onDelete: 'set null' }),
+    // Intentional upstream deviation: deleting a session invalidates its access tokens.
+    sessionId: text('session_id').references(() => baSession.id, { onDelete: 'cascade' }),
     userId: text('user_id').references(() => baUser.id, { onDelete: 'cascade' }),
     referenceId: text('reference_id'),
     authorizationCodeId: text('authorization_code_id'),

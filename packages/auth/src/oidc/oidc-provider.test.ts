@@ -202,17 +202,80 @@ describe('opt-in OpenID Provider', () => {
     expect((await request(auth, '/api/auth/oauth2/token', { method: 'POST' })).status).toBe(404)
   })
 
+  it('rejects client registrations without the openid scope', async () => {
+    const { auth, sqlite } = setup(true)
+    const { cookie } = await clientSession(auth)
+    for (const scopes of [[], ['email', 'profile']]) {
+      await expect(
+        registerOidcClient(auth, {
+          headers: new Headers({ cookie }),
+          redirectUris: [REDIRECT],
+          firstParty: true,
+          scopes,
+        }),
+      ).rejects.toMatchObject({
+        body: { error: 'invalid_scope', error_description: 'openid scope is required' },
+      })
+    }
+    expect(sqlite.prepare('SELECT count(*) AS count FROM oauth_client').get()).toEqual({
+      count: 1,
+    })
+  })
+
+  it('uses registered scopes when authorization omits scope and issues an ID token', async () => {
+    const { auth } = setup(true)
+    const { cookie, userId } = await clientSession(auth)
+    const registered = await registerOidcClient(auth, {
+      headers: new Headers({ cookie }),
+      redirectUris: [REDIRECT],
+      firstParty: true,
+      scopes: ['openid', 'email'],
+    })
+    if (!registered.client_secret)
+      throw new Error('Confidential client registration returned no secret')
+    const url = new URL(await authorizationUrl(registered.client_id), ORIGIN)
+    url.searchParams.delete('scope')
+    const authorization = await request(auth, `${url.pathname}${url.search}`, {
+      headers: { cookie, accept: 'text/html' },
+    })
+    expect(authorization.status).toBe(302)
+    const redirect = new URL(authorization.headers.get('location') ?? '', ORIGIN)
+    expect(`${redirect.origin}${redirect.pathname}`).toBe(REDIRECT)
+    const code = redirect.searchParams.get('code')
+    expect(code).toBeTruthy()
+    const response = await exchange(
+      auth,
+      { ...registered, client_secret: registered.client_secret },
+      code as string,
+      VERIFIER,
+    )
+    expect(response.status).toBe(200)
+    const tokens = (await response.json()) as { id_token: string; scope: string }
+    expect(tokens.scope.split(' ').sort()).toEqual(['email', 'openid'])
+    const jwks = await request(auth, '/api/auth/jwks')
+    const claims = await verifyJwt(tokens.id_token, (await jwks.json()) as JSONWebKeySet)
+    expect(claims).toMatchObject({
+      sub: userId,
+      aud: registered.client_id,
+      email: 'user@example.test',
+    })
+    expect(claims.name).toBeUndefined()
+  })
+
   it('notifies the registered client with a signed back-channel logout token', async () => {
-    const { auth, pending } = setup(true)
+    const { auth, sqlite, pending } = setup(true)
     const { client, cookie, userId } = await clientSession(auth)
     const code = await codeFor(auth, client.client_id, cookie)
     expect((await exchange(auth, client, code, VERIFIER)).status).toBe(200)
+    const accessTokens = sqlite.prepare('SELECT count(*) AS count FROM oauth_access_token')
+    expect(accessTokens.get()).toEqual({ count: 1 })
     const delivery = vi.fn(async () => new Response(null, { status: 200 }))
     vi.stubGlobal('fetch', delivery)
     onTestFinished(() => {
       vi.unstubAllGlobals()
     })
     await endOidcUserSessions(auth, userId)
+    expect(accessTokens.get()).toEqual({ count: 0 })
     await Promise.all(pending)
     expect(delivery).toHaveBeenCalledTimes(1)
     const [url, options] = delivery.mock.calls[0] as unknown as [string, RequestInit]

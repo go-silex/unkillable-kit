@@ -48,7 +48,7 @@ must sync and apply the account-state schema migration before deploying.
 
 ## OpenID provider (opt-in)
 
-**Not ready for use on Workers:** Better Auth 1.7.23 uses `redirect: 'error'`
+**Not ready for use on Workers:** Better Auth 1.7.27 uses `redirect: 'error'`
 for back-channel logout delivery, which the Workers runtime rejects. Session
 termination therefore does not notify relying parties on Workers. Do not rely on
 this provider until that upstream incompatibility is fixed and the Workers
@@ -96,23 +96,32 @@ from the same entry only in server code after checking administrator permission
 and request Origin. The response contains the client secret once; store it
 securely on the confidential web client. Setting `firstParty: true` skips
 consent; only the App may make that decision. Registration uses exact redirect
-URIs, authorization code and PKCE S256. Dynamic registration, CIMD, refresh
-tokens, pairwise subjects and front-channel logout are not supported.
+URIs, authorization code and PKCE S256. If an authorization request omits
+`scope`, Better Auth uses the client's registered scopes; those scopes must
+contain `openid` for an OpenID request. Dynamic registration, CIMD, refresh
+tokens, `offline_access`, pairwise subjects and front-channel logout are not
+supported. Revisit session revocation and logout semantics before enabling
+refresh tokens or `offline_access`.
 
-`endOidcUserSessions(auth, userId)` ends the user's sessions through Better
-Auth, invoking its back-channel logout hooks. Use it before `disableAccount` or
-any other direct session deletion: once sessions are deleted directly, the
-provider cannot run those hooks for them. Better Auth's native bulk session
-revocation paths are not a substitute: their upstream hook snapshot is limited
-to 100 rows, so deletion can outpace logout notifications. Kit's helper
-paginates the relevant snapshots.
+The access-token session foreign key uses `ON DELETE CASCADE`, deliberately
+deviating from Better Auth's upstream `SET NULL`: deleting a session removes its
+associated access-token rows. This does not revoke self-contained tokens already
+accepted by a relying party without provider revalidation.
+
+`endOidcUserSessions(auth, userId)` atomically deletes the user's sessions and
+then invokes Better Auth's back-channel logout hooks for at most the 25 most
+recent sessions. Notifications are best effort and truncated beyond that bound.
+Use it before `disableAccount` or any other direct session deletion: once
+sessions are deleted directly, the provider cannot run those hooks for them.
+Better Auth's native bulk session revocation paths are not a substitute.
 
 Register a public HTTPS `backchannelLogoutUri` and optional
 `postLogoutRedirectUris` for each client. The provider schedules notifications
 with the supplied `waitUntil`; delivery is best effort, has a timeout and is
 not retried. RP-initiated logout can end a browser session too. Clients must
-validate logout tokens and handle locally verified access tokens according to
-their own expiry; logout is not an atomic global revocation guarantee.
+validate logout tokens, keep RP sessions short and periodically revalidate with
+the provider using `prompt=none`. Locally verified access tokens remain usable
+according to their expiry; logout is not an atomic global revocation guarantee.
 
 ## Google sign-in (opt-in)
 

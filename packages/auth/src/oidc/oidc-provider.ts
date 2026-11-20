@@ -18,50 +18,13 @@ export type OidcProviderOptions = {
   waitUntil: (promise: Promise<unknown>) => void
 }
 
-const protectedClaims = [
-  'iss',
-  'sub',
-  'aud',
-  'exp',
-  'nbf',
-  'iat',
-  'jti',
-  'auth_time',
-  'nonce',
-  'acr',
-  'amr',
-  'azp',
-  'sid',
-  'at_hash',
-  'c_hash',
-  's_hash',
-  'email',
-  'email_verified',
-  'name',
-  'picture',
-  'given_name',
-  'family_name',
-  'middle_name',
-  'nickname',
-  'preferred_username',
-  'profile',
-  'website',
-  'gender',
-  'birthdate',
-  'zoneinfo',
-  'locale',
-  'phone_number',
-  'phone_number_verified',
-  'address',
-  'updated_at',
-  'client_id',
-  'scope',
-  'cnf',
-  'events',
-  'token_type',
-  '__proto__',
-  'constructor',
-]
+const protectedClaims = (
+  'iss sub aud exp nbf iat jti auth_time nonce acr amr azp sid at_hash c_hash s_hash ' +
+  'email email_verified name picture given_name family_name middle_name nickname ' +
+  'preferred_username profile website gender birthdate zoneinfo locale phone_number ' +
+  'phone_number_verified address updated_at client_id scope cnf events token_type ' +
+  '__proto__ constructor'
+).split(' ')
 
 function withOidcMetadataPolicy(provider: ReturnType<typeof oauthProvider>) {
   const onRequest = provider.onRequest
@@ -255,6 +218,7 @@ type AdminClientApi = {
     body: {
       redirect_uris: string[]
       client_name?: string
+      scope: string
       token_endpoint_auth_method: 'client_secret_basic'
       application_type: 'web'
       grant_types: ['authorization_code']
@@ -276,16 +240,25 @@ export async function registerOidcClient(
     redirectUris: string[]
     name?: string
     firstParty: boolean
+    scopes?: string[]
     postLogoutRedirectUris?: string[]
     backchannelLogoutUri?: string
   },
 ) {
+  const scopes = input.scopes ?? ['openid', 'email', 'profile']
+  if (!scopes.includes('openid')) {
+    throw new APIError('BAD_REQUEST', {
+      error: 'invalid_scope',
+      error_description: 'openid scope is required',
+    })
+  }
   const api = auth.api as unknown as AdminClientApi
   return api.adminCreateOAuthClient({
     headers: input.headers,
     body: {
       redirect_uris: input.redirectUris,
       client_name: input.name,
+      scope: scopes.join(' '),
       token_endpoint_auth_method: 'client_secret_basic',
       application_type: 'web',
       grant_types: ['authorization_code'],

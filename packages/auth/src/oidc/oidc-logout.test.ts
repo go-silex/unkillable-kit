@@ -10,7 +10,7 @@ import { createOidcProvider, endOidcUserSessions, registerOidcClient } from './o
 const ORIGIN = 'https://auth.example.test'
 const USER_ID = 'pagination-user'
 
-function setup(options: { beforeSecondSessionPage?: (sqlite: Database.Database) => void } = {}) {
+function setup(options: { beforeDelete?: (sqlite: Database.Database) => void } = {}) {
   const sqlite = new Database(':memory:')
   sqlite.pragma('foreign_keys = ON')
   onTestFinished(() => {
@@ -31,7 +31,7 @@ function setup(options: { beforeSecondSessionPage?: (sqlite: Database.Database) 
       ),
     )
   }
-  const now = Math.floor(Date.now() / 1000)
+  const now = Date.now()
   sqlite
     .prepare(
       'INSERT INTO user (id, name, email, email_verified, created_at, updated_at) VALUES (?, ?, ?, 1, ?, ?)',
@@ -44,16 +44,11 @@ function setup(options: { beforeSecondSessionPage?: (sqlite: Database.Database) 
     },
   })
   const prepare = database.prepare
-  let removedEarlyRow = false
+  let queryCount = 0
   database.prepare = (sql) => {
-    if (
-      !removedEarlyRow &&
-      options.beforeSecondSessionPage &&
-      /from\s+["`]?session["`]?/i.test(sql) &&
-      /["`]?id["`]?\s*>/i.test(sql)
-    ) {
-      removedEarlyRow = true
-      options.beforeSecondSessionPage(sqlite)
+    queryCount++
+    if (/delete\s+from\s+["`]?session["`]?/i.test(sql)) {
+      options.beforeDelete?.(sqlite)
     }
     return prepare(sql)
   }
@@ -73,12 +68,12 @@ function setup(options: { beforeSecondSessionPage?: (sqlite: Database.Database) 
       new Response(null, { status: 200 }),
   )
   vi.stubGlobal('fetch', delivery)
-  const addSession = (id: string) =>
+  const addSession = (id: string, age = 0) =>
     sqlite
       .prepare(
         'INSERT INTO session (id, token, user_id, expires_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
       )
-      .run(id, `token-${id}`, USER_ID, now + 3600, now, now)
+      .run(id, `token-${id}`, USER_ID, now + 3_600_000, now + age, now + age)
   const addClient = (id: string) =>
     sqlite
       .prepare(
@@ -97,130 +92,138 @@ function setup(options: { beforeSecondSessionPage?: (sqlite: Database.Database) 
       )
       .run(
         id,
-        `access-${id}`,
+        createHash('sha256').update(`access-${id}`).digest('base64url'),
         clientId,
         sessionId,
         USER_ID,
-        now + 3600,
+        now + 3_600_000,
         now,
         JSON.stringify(['openid']),
       )
-  return { sqlite, auth, pending, delivery, addSession, addClient, addToken }
+  return {
+    sqlite,
+    auth,
+    pending,
+    delivery,
+    addSession,
+    addClient,
+    addToken,
+    queries: () => queryCount,
+  }
 }
 
-it('notifies the relying party on the last of more than 100 sessions', async () => {
+it('deletes all sessions and notifies only the 25 most recent', async () => {
   const { sqlite, auth, pending, delivery, addSession, addClient, addToken } = setup()
-  for (let i = 0; i < 101; i++) addSession(`session-${String(i).padStart(3, '0')}`)
-  addClient('last-client')
-  addToken('last-token', 'session-100', 'last-client')
-
-  await endOidcUserSessions(auth, USER_ID)
-  await Promise.all(pending)
-
-  expect(
-    sqlite.prepare('SELECT count(*) AS count FROM session WHERE user_id = ?').get(USER_ID),
-  ).toEqual({ count: 0 })
-  expect(delivery).toHaveBeenCalledTimes(1)
-  const [url, options] = delivery.mock.calls[0]
-  expect(url).toBe('https://client.example.test/logout/last-client')
-  const token = new URLSearchParams(options?.body as string).get('logout_token')
-  expect(token).toBeTruthy()
-  expect(decodeJwt(token as string)).toMatchObject({
-    aud: 'last-client',
-    sub: USER_ID,
-    sid: 'session-100',
+  const sessionCountsAtDelivery: number[] = []
+  delivery.mockImplementation(async () => {
+    const row = sqlite.prepare('SELECT count(*) AS count FROM session').get() as { count: number }
+    sessionCountsAtDelivery.push(row.count)
+    return new Response(null, { status: 200 })
   })
-})
-
-it('notifies and revokes tokens for more than 100 relying parties on one session', async () => {
-  const { sqlite, auth, pending, delivery, addSession, addClient, addToken } = setup()
-  addSession('shared-session')
+  addClient('client')
   for (let i = 0; i < 101; i++) {
-    const id = `client-${String(i).padStart(3, '0')}`
-    addClient(id)
-    addToken(`token-${id}`, 'shared-session', id)
+    addSession(`session-${i}`, i)
+    addToken(`token-${i}`, `session-${i}`, 'client')
   }
-
-  await endOidcUserSessions(auth, USER_ID)
-  await Promise.all(pending)
-
-  expect(delivery).toHaveBeenCalledTimes(101)
-  expect(delivery.mock.calls.map(([url]) => url)).toContain(
-    'https://client.example.test/logout/client-100',
-  )
-  expect(
-    sqlite
-      .prepare('SELECT count(*) AS count FROM oauth_access_token WHERE revoked IS NOT NULL')
-      .get(),
-  ).toEqual({ count: 101 })
-})
-
-it('revokes every non-offline refresh token without revoking offline access', async () => {
-  const { sqlite, auth, pending, addSession, addClient } = setup()
-  addSession('refresh-session')
-  addClient('refresh-client')
-  const now = Math.floor(Date.now() / 1000)
-  const insert = sqlite.prepare(
-    'INSERT INTO oauth_refresh_token (id, token, client_id, session_id, user_id, expires_at, created_at, scopes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-  )
-  for (let i = 0; i < 102; i++) {
-    insert.run(
-      `refresh-${i}`,
-      `refresh-token-${i}`,
-      'refresh-client',
-      'refresh-session',
-      USER_ID,
-      now + 3600,
-      now,
-      JSON.stringify(i === 101 ? ['offline_access'] : ['openid']),
+  const userinfo = (i: number) =>
+    auth.handler(
+      new Request(`${ORIGIN}/api/auth/oauth2/userinfo`, {
+        headers: { authorization: `Bearer access-token-${i}` },
+      }),
     )
-  }
-
-  await endOidcUserSessions(auth, USER_ID)
+  expect((await userinfo(0)).status).toBe(200)
+  expect(await endOidcUserSessions(auth, USER_ID)).toEqual({ success: true, truncated: true })
   await Promise.all(pending)
-
-  expect(
-    sqlite
-      .prepare('SELECT count(*) AS count FROM oauth_refresh_token WHERE revoked IS NOT NULL')
-      .get(),
-  ).toEqual({ count: 101 })
-  expect(
-    sqlite.prepare('SELECT revoked FROM oauth_refresh_token WHERE id = ?').get('refresh-101'),
-  ).toEqual({ revoked: null })
-})
-
-it('uses a stable cursor if an earlier session disappears between pages', async () => {
-  const beforeSecondSessionPage = vi.fn((db: Database.Database) => {
-    db.prepare('DELETE FROM session WHERE id = ?').run('session-000')
-  })
-  const { sqlite, auth, pending, delivery, addSession, addClient, addToken } = setup({
-    beforeSecondSessionPage,
-  })
-  for (let i = 0; i < 101; i++) addSession(`session-${String(i).padStart(3, '0')}`)
-  addClient('last-client')
-  addToken('last-token', 'session-100', 'last-client')
-
-  await endOidcUserSessions(auth, USER_ID)
-  await Promise.all(pending)
-  expect(beforeSecondSessionPage).toHaveBeenCalledOnce()
-
   expect(sqlite.prepare('SELECT count(*) AS count FROM session').get()).toEqual({ count: 0 })
-  expect(delivery).toHaveBeenCalledTimes(1)
-  expect(
-    sqlite.prepare('SELECT revoked FROM oauth_access_token WHERE id = ?').get('last-token'),
-  ).toMatchObject({ revoked: expect.any(Number) })
+  expect(sqlite.prepare('SELECT count(*) AS count FROM oauth_access_token').get()).toEqual({
+    count: 0,
+  })
+  for (let i = 0; i < 101; i++) expect((await userinfo(i)).status).toBe(401)
+  expect(delivery).toHaveBeenCalledTimes(25)
+  expect(sessionCountsAtDelivery).toEqual(Array(25).fill(0))
+  const sessions = delivery.mock.calls.map(([, options]) => {
+    const token = new URLSearchParams(options?.body as string).get('logout_token')
+    return decodeJwt(token as string).sid
+  })
+  expect(new Set(sessions)).toEqual(
+    new Set(Array.from({ length: 25 }, (_, i) => `session-${i + 76}`)),
+  )
 })
 
-it('keeps every session if a revocation write fails', async () => {
-  const { sqlite, auth, addSession, addClient, addToken } = setup()
-  addSession('session-one')
-  addClient('client-one')
-  addToken('token-one', 'session-one', 'client-one')
-  sqlite.exec(`CREATE TRIGGER reject_revocation BEFORE UPDATE OF revoked ON oauth_access_token
-    BEGIN SELECT RAISE(ABORT, 'revocation failed'); END`)
+it('uses the same bounded number of queries for 3 and 101 sessions including delivery', async () => {
+  const counts: number[] = []
+  for (const size of [3, 101]) {
+    const { auth, pending, addSession, addClient, addToken, queries } = setup()
+    addClient('client')
+    for (let i = 0; i < size; i++) {
+      addSession(`session-${i}`, i)
+      addToken(`token-${i}`, `session-${i}`, 'client')
+    }
+    const result = await endOidcUserSessions(auth, USER_ID)
+    await Promise.all(pending)
+    expect(result.truncated).toBe(size > 25)
+    counts.push(queries())
+  }
+  expect(counts[0]).toBeGreaterThan(0)
+  expect(counts[0]).toBeLessThanOrEqual(10)
+  expect(counts[0]).toBe(counts[1])
+})
 
+it('batches more than 100 clients without exceeding D1 bind limits', async () => {
+  const { sqlite, auth, pending, delivery, addSession, addClient, addToken } = setup()
+  addSession('shared')
+  for (let i = 0; i < 101; i++) {
+    addClient(`client-${i}`)
+    addToken(`token-${i}`, 'shared', `client-${i}`)
+  }
+  expect(await endOidcUserSessions(auth, USER_ID)).toEqual({ success: true, truncated: false })
+  await Promise.all(pending)
+  expect(delivery).toHaveBeenCalledTimes(101)
+  expect(sqlite.prepare('SELECT count(*) AS count FROM oauth_access_token').get()).toEqual({
+    count: 0,
+  })
+})
+
+it('cascades a token minted between planning and deletion', async () => {
+  let insertToken: (() => void) | undefined
+  const { sqlite, auth, pending, addSession, addClient, addToken } = setup({
+    beforeDelete: () => insertToken?.(),
+  })
+  addSession('session')
+  addClient('client')
+  addToken('planned', 'session', 'client')
+  addToken('late', 'session', 'client')
+  const userinfo = () =>
+    auth.handler(
+      new Request(`${ORIGIN}/api/auth/oauth2/userinfo`, {
+        headers: { authorization: 'Bearer access-late' },
+      }),
+    )
+  expect((await userinfo()).status).toBe(200)
+  sqlite.prepare('DELETE FROM oauth_access_token WHERE id = ?').run('late')
+  insertToken = () => addToken('late', 'session', 'client')
+  await endOidcUserSessions(auth, USER_ID)
+  await Promise.all(pending)
+  expect(sqlite.prepare('SELECT count(*) AS count FROM oauth_access_token').get()).toEqual({
+    count: 0,
+  })
+  expect((await userinfo()).status).toBe(401)
+})
+
+it('leaves sessions and tokens intact and sends no notifications if deletion fails', async () => {
+  const { sqlite, auth, pending, delivery, addSession, addClient, addToken } = setup()
+  addSession('session')
+  addClient('client')
+  addToken('token', 'session', 'client')
+  sqlite.exec(`CREATE TRIGGER reject_deletion BEFORE DELETE ON session
+    BEGIN SELECT RAISE(ABORT, 'deletion failed'); END`)
   await expect(endOidcUserSessions(auth, USER_ID)).rejects.toThrow()
+  await Promise.all(pending)
   expect(sqlite.prepare('SELECT count(*) AS count FROM session').get()).toEqual({ count: 1 })
+  expect(sqlite.prepare('SELECT count(*) AS count FROM oauth_access_token').get()).toEqual({
+    count: 1,
+  })
+  expect(delivery).not.toHaveBeenCalled()
 })
 
 it('refuses an issued bearer at userinfo after logout', async () => {
