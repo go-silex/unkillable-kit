@@ -39,6 +39,32 @@ subject (the User who owns the key), not by an Organization-wide status.
 Missing Users, disabled Users and state-read failures are refused. Products
 must sync and apply the account-state schema migration before deploying.
 
+## Google sign-in (opt-in)
+
+Pass `google: { clientId, clientSecret, allowedDomains }` to `createBetterAuth`.
+Use a Google OAuth **Web application** client and register
+`<BETTER_AUTH_URL>/api/auth/callback/google` as its redirect URI. The App supplies
+the client credentials from secret storage and a non-empty list of DNS domains.
+Domains are normalized to lowercase and matched exactly. Invalid configuration
+throws at construction; omit `google` to leave the provider unconfigured.
+
+Only existing users can sign in: the verified Google ID token must report
+`email_verified: true` and an `hd` matching both the email domain and the
+allowlist. Google accounts without a hosted-domain claim are refused. Google
+accounts link by the same email; inactive accounts cannot open a session.
+Provider tokens are discarded before account persistence and are not logged.
+
+The App owns the sign-in button and must pass its login page as Better Auth's
+`errorCallbackURL` when starting sign-in. Without it, the default is `/login`
+on the first trusted origin. The callback supplies `error` codes:
+`unable_to_get_user_info` (invalid token or identity policy), `signup_disabled`
+(no existing user), `account_inactive` (disabled or unreadable account),
+and `google_email_mismatch` (a linked identity's email changed). Better Auth may
+also return protocol errors such as `invalid_code` or `state_not_found`.
+Direct ID-token API sign-in returns API errors rather than browser redirects.
+
+This option supplies no login UI, deployment secrets, or product domain list.
+
 ## Development
 
 - Where to add: `src/org-roles.ts` for access roles; `src/react/` for forms; `src/repos/` for persistence.
