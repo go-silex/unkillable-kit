@@ -218,10 +218,22 @@ export function createBetterAuth(opts: CreateBetterAuthOpts): KitBetterAuth {
         opts.resetPasswordTokenExpiresIn ?? RESET_PASSWORD_TOKEN_EXPIRES_IN_SEC,
       ...(emailPort && emailConfig
         ? {
-            sendResetPassword: async ({ user, url }) => {
+            sendResetPassword: async ({ user, url, token }) => {
+              const callback = new URL(url)
+              const redirectTo = callback.searchParams.get('callbackURL')
+              // Better Auth invokes this only for known accounts. Returning silently
+              // preserves its generic response when no redirect was supplied.
+              if (!redirectTo) return
+              callback.pathname = callback.pathname.slice(
+                0,
+                callback.pathname.lastIndexOf('/reset-password/'),
+              )
+              callback.search = ''
+              const resetUrl = new URL(redirectTo, callback)
+              resetUrl.searchParams.set('token', token)
               await sendResetPasswordMail(emailPort, {
                 email: user.email,
-                url,
+                url: resetUrl.href,
                 emailConfig,
                 ...tokenHref,
               })

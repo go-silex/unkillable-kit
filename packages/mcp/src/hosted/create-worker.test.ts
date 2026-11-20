@@ -1,6 +1,7 @@
 import { getOAuthApi } from '@cloudflare/workers-oauth-provider'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { McpIdentity, McpIdentityPort } from '../identity'
+import { putConsent, readConsent } from './consent'
 import {
   createHostedMcpWorker,
   type HostedMcpWorker,
@@ -682,6 +683,38 @@ describe('hosted authorization-server contract', () => {
 })
 
 describe('hosted consent', () => {
+  it('stores and reads consent using the SHA-256 digest of the cookie id', async () => {
+    const kv = new MemoryKv()
+    const namespace = kv as unknown as KVNamespace
+    const id = '00000000000000000000000000000000'
+    const key = 'mcp_consent:84e0c0eafaa95a34c293f278ac52e45ce537bab5e752a00e6959a13ae103b65a'
+    const record: Parameters<typeof putConsent>[2] = {
+      identity: DEMO,
+      request: { clientId: 'client', redirectUri: REDIRECT } as Parameters<
+        typeof putConsent
+      >[2]['request'],
+      scope: ['mcp'],
+    }
+    const random = vi.spyOn(crypto, 'getRandomValues').mockReturnValue(new Uint8Array(16))
+    const put = vi.spyOn(kv, 'put')
+    let result: { csrf: string; cookie: string }
+    try {
+      result = await putConsent(namespace, new URL(LOCAL), record)
+    } finally {
+      random.mockRestore()
+    }
+    expect(result.cookie).toContain(`mcp_consent_id=${id};`)
+    expect(kv.consentKeys()).toEqual([key])
+    expect(put).toHaveBeenCalledWith(key, expect.any(String), { expirationTtl: 600 })
+    const request = (cookie: string) =>
+      new Request(`${LOCAL}/authorize`, { headers: { cookie: `mcp_consent_id=${cookie}` } })
+    expect(await readConsent(namespace, request(id))).toEqual({ ...record, csrf: result.csrf, key })
+    expect(await readConsent(namespace, request('11111111111111111111111111111111'))).toBeNull()
+    expect(await readConsent(namespace, request(`${id}x`))).toBeNull()
+    await kv.delete(key)
+    expect(await readConsent(namespace, request(id))).toBeNull()
+  })
+
   afterEach(() => {
     vi.unstubAllGlobals()
   })
@@ -1190,9 +1223,11 @@ describe('hosted consent', () => {
     const hosted = worker({ identityPort: port(OTHER) })
     const clientId = await registerClient(hosted, kv)
     const page = await consentPage(hosted, kv, await authorizeUrl(clientId))
+    expect(kv.consentKeys()).toHaveLength(1)
     const first = await postConsent(hosted, kv, `${LOCAL}/authorize`, page)
     expect(first.status).toBe(302)
     expect(first.headers.get('set-cookie')).toMatch(/^mcp_consent_id=; .*Max-Age=0/)
+    expect(kv.consentKeys()).toEqual([])
     const second = await postConsent(hosted, kv, `${LOCAL}/authorize`, page)
     expect(second.status).toBe(401)
   })

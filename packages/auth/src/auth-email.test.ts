@@ -3,7 +3,7 @@ import { describe, expect, expectTypeOf, it, vi } from 'vitest'
 import { type AuthEmailPort, sendMagicLinkMail, sendResetPasswordMail } from './auth-email'
 
 const LOOPBACK = 'http://localhost:8787/api/auth/magic-link/verify?token=abc'
-const RESET = 'http://localhost:8787/api/auth/reset-password/token'
+const RESET = 'http://localhost:8787/reset-password?token=token'
 const emailConfig = {
   productName: 'Acme',
   fallbackLocale: 'en' as const,

@@ -119,11 +119,6 @@
     "maxLineBytes": 810,
     "fileBytes": 9373
   },
-  "docs/kit/observability.md": {
-    "overLimitLines": 2,
-    "maxLineBytes": 431,
-    "fileBytes": 3174
-  },
   "docs/kit/playbooks/create-product-day0.md": {
     "overLimitLines": 5,
     "maxLineBytes": 664,
@@ -162,7 +157,7 @@
   "docs/kit/testing/critical-path.md": {
     "overLimitLines": 92,
     "maxLineBytes": 3787,
-    "fileBytes": 280244
+    "fileBytes": 280183
   },
   "docs/kit/testing/ops-model.md": {
     "overLimitLines": 32,

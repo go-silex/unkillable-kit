@@ -7,11 +7,15 @@
 - `x-request-id` + body `requestId` on API errors
 - `createBetterAuth` leaves Better Auth's default `warn` threshold in place and emits fixed `library_event` severity events rather than library messages, arguments or errors: database errors can contain bound credentials. Its HTTP handler and `fetch` alias also emit fixed `handler_exception` or `server_error_response` events for failures.
 
-Better Auth 1.7.14's router otherwise forwards non-API errors to Better Call, which logs the raw error independently of the Better Auth logger. The factory requests propagation and converts non-API handler exceptions to an empty 500; this also converts exceptions before the router that previously propagated. API errors and returned responses retain their behavior. Diagnostic causes are intentionally lost.
+Better Auth 1.7.14's router otherwise forwards non-API errors to Better Call, which logs the raw error independently of the Better Auth logger.
+The factory requests propagation and converts non-API handler exceptions to an empty 500; this also converts exceptions before the router that previously propagated. API errors and returned responses retain their behavior. Diagnostic causes are intentionally lost.
 
 This protects only this factory's Better Auth logger and HTTP handler paths. It does not sanitize direct `auth.api` callers, other App or library sinks, HTTP response bodies, Cloudflare serialization or independently constructed Better Auth instances; each remains its owner's responsibility.
 
-`[observability]` is a non-inheritable wrangler key: `example-api` repeats it under `[env.production.observability]` (the deployed Worker). `mcp-example` has no `[env.*]`. `example-web` is a Pages project of static assets (`pages_build_output_dir`, no Worker code or Pages Functions): nothing runs server-side to log, so it carries no `[observability]`. Lower `head_sampling_rate` (0–1) per product if volume or cost requires it.
+`[observability]` is not inherited: `example-api` repeats it under `[env.production.observability]`; `mcp-example` has no `[env.*]`; static `example-web` has none. Products may lower `head_sampling_rate` (0–1).
+
+Set `redact_query_string = true` there before enabling traces: it strips queries, not paths, from logs and traces. Kit emails carry one-time tokens only in queries; Kit KV keys hold digests, not cookie values.
+Reset links emailed before upgrading to this Kit still carry a path token: enable traces once they expire (one reset-token lifetime, one hour by default).
 
 ## Product options (env-guarded — not shipped by the kit)
 
