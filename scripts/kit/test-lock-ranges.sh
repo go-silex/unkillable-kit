@@ -482,7 +482,7 @@ else
 fi
 printf '%s\n' "$warm_ms" >"$TMP/probe-warm-ms.txt"
 
-# #42: missing trustedDependencies on the loopback fixture
+# go-silex/unkillable-kit#42: missing trustedDependencies on the loopback fixture
 TRUST="$TMP/trust-rewrite"
 rm -rf "$TRUST"
 cp -a "$HOIST" "$TRUST"
@@ -497,7 +497,7 @@ else
   FAIL=$((FAIL + 1))
 fi
 
-# #42: removed tracked workspace manifest
+# go-silex/unkillable-kit#42: removed tracked workspace manifest
 MISSING_WS="$TMP/missing-workspace"
 rm -rf "$MISSING_WS"
 cp -a "$HOIST" "$MISSING_WS"
@@ -600,7 +600,7 @@ else
   FAIL=$((FAIL + 1))
 fi
 
-# HOME/.bunfig.toml frozenLockfile must not hide #42
+# HOME/.bunfig.toml frozenLockfile must not hide go-silex/unkillable-kit#42
 FROZEN_HOME="$TMP/frozen-home"
 rm -rf "$FROZEN_HOME"
 mkdir -p "$FROZEN_HOME"
