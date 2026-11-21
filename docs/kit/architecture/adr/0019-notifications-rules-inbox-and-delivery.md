@@ -36,7 +36,7 @@ The Kit supplies `@kit/notifications`: a pure registry/resolver/Channel contract
 
 One stable-ID Cloudflare Workflow owns each external Delivery. Admission is bounded to 24 hours from intent creation, with retention of at least three days; only positive native evidence proves admission.
 Retry ambiguous admission with the same ID inside that window, never by restarting or replacing the execution. After the deadline uncertainty remains visible without automatic recreation.
-The Workflow owns retries and finalization; Cron only requests bounded admission or observes the owner. ADR-0020 details the protocol; ADR-0021 specifies Slack installation, secrets and adapter.
+The Workflow owns retries and finalization; Cron only requests bounded admission or observes the owner, and no generic outbox engine dispatches Deliveries. ADR-0020 details the protocol; ADR-0021 specifies Slack installation, secrets and adapter.
 
 ## D1 — Ownership and access
 
@@ -162,8 +162,6 @@ Types are catalogue metadata, never source parameters/Zod schema/renderers. `ava
 Unimplemented destination routes: [non-normative design note](../design-notes/0021-slack.md#routes-génériques-des-destinations).
 
 Organization admin routes require Organization context + capability; authenticated member/reader receive 403, another Organization receives 404. Inbox/read routes never enable a super_admin bypass. User rules are global subject-owned rows even when the UI previews the current Organization. Installation, Slack channel discovery and User-link routes are specified by ADR-0021; they do not duplicate these generic destination endpoints.
-
-Deployment-rule writes require `super_admin`. Cross-Organization Delivery listing is `super_admin`-only, not staff, and returns failed Deliveries only.
 
 ### Cursors, errors and UI
 

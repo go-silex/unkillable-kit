@@ -133,9 +133,9 @@ Run mutations and their events commit atomically; refused mutations append no ev
 
 #### Authn / authz
 
-Authentication uses session cookies or Bearer `sk_` (ADR-0002). V0 create, edit, enable,
-create-run, approval and cancellation are org admin or owner operations; later grants may
-open run or edit to members. Prefer API keys for reads until scoped keys support create-run.
+Flows routes require a session (ADR-0002); machine access through scoped keys is future
+policy. V0 create, edit, enable, create-run and approval are org admin or owner operations;
+later grants may open run or edit to members.
 Every plan/run belongs to an organization and list/detail require membership.
 Register `flows` in the platform module catalogue (ADR-0003).
 
@@ -149,8 +149,6 @@ Create-run seals an immutable runner view. Persist only that view on the executi
 Rehydration checks consistency, not grant provenance or a fresh grant mint. Blob tamper resistance depends on the trusted write path (an optional MAC may be added later); a sealed run retains its minted model IDs after a policy change. Implementation: `packages/flows/src/snapshot.ts`, `packages/flows/src/runner-view.ts`.
 
 Disabling a plan blocks new runs. Cancellation is a best-effort Workflow termination, not a transactional kill of side effects: a tool already past the port may still finish, and termination failure does not roll back cancellation. Implementation: `packages/flows/src/repos/cancel.ts`, `packages/flows/src/run/drive.ts`.
-Cancellation requires a session and an organization owner or admin role, with no
-`super_admin` shortcut; a Bearer `sk_` receives 403.
 
 Runner view shape is strict: a breaking change requires a version bump and dual-parse or migration, never silently loosen the parser. Older strict parsers reject views with the newer read-effect map; all-write views omit it for compatibility.
 
@@ -163,8 +161,6 @@ Static check ceilings are necessary, not sufficient. Every `infer` and any later
 Approval is an explicit, non-effectful task, not an unauthenticated Workflow continue. The app's principal-bound route requires a session, org admin or owner and matching run organization; `sk_` remains forbidden.
 
 The org-, run- and task-scoped D1 approval decision is the only authorization. The route writes that decision; a Workflow event only wakes the driver and its payload is ignored. The driver re-reads the row and proceeds only on approval; a missing decision never authorizes continuation and timeout fails closed.
-After eight wakes without an approval row, the driver attempts to record expiry and
-re-reads the decision; a concurrent decision may already have won.
 A lost wake after a decision can still proceed on a later read. An open approval suspends the run; independent ready tasks run after the decision.
 
 Implementations: `apps/example-api/src/routes/flows.ts`, `apps/example-api/src/services/flows-approval.ts`, `packages/flows/src/run/approve-step.ts`, `apps/example-api/src/flows-run/workflow.ts`.

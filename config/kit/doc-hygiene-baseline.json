@@ -12,17 +12,17 @@
   "docs/kit/architecture/adr/0018-durable-execution-ownership.md": {
     "overLimitLines": 3,
     "maxLineBytes": 516,
-    "fileBytes": 10403
+    "fileBytes": 10402
   },
   "docs/kit/architecture/adr/0019-notifications-rules-inbox-and-delivery.md": {
     "overLimitLines": 23,
     "maxLineBytes": 977,
-    "fileBytes": 28330
+    "fileBytes": 28229
   },
   "docs/kit/architecture/adr/0020-notification-delivery-ownership.md": {
     "overLimitLines": 20,
     "maxLineBytes": 735,
-    "fileBytes": 23738
+    "fileBytes": 23595
   },
   "docs/kit/architecture/adr/0021-slack-installations-and-notification-channel.md": {
     "overLimitLines": 38,

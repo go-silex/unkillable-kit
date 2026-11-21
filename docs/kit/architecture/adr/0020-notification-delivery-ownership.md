@@ -129,8 +129,7 @@ L’adaptateur Slack parse `Retry-After` en entier sûr non négatif; une valeur
 
 La classification précède le throw. Le protocole privé non secret accepte strictement les deux enveloppes natives observées ; une enveloppe malformée ou non reconnue arrête le retry au lieu de perdre un hint et d’envoyer trop tôt. Une interruption native sans namespace privé n’apporte aucun hint. La preuve ciblée doit démontrer le décodage réel, le délai planifié et le respect du minimum, pas seulement le résultat d’une fonction appelée directement.
 
-Sans hint, le délai est de 60, 120, 240 secondes, puis double ; avec hint, il vaut le maximum de cette base et du hint arrondi à la seconde supérieure, plafonné au plafond local de 86 400 secondes.
-Le backoff natif constant évite un second multiplicateur implicite. Pas de sleep, boucle de nouveaux steps, tableau D1 de tentatives ou remplacement d’instance pour reproduire le runtime.
+Le délai dynamique respecte le hint et le plafond local ; le backoff natif constant évite un second multiplicateur implicite. Pas de sleep, boucle de nouveaux steps, tableau D1 de tentatives ou remplacement d’instance pour reproduire le runtime.
 
 Implémentation : `apps/example-api/src/notifications-delivery/retry.ts` et `apps/example-api/src/notifications-delivery/workflow.ts`.
 

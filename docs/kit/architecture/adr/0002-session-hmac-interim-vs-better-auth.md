@@ -44,9 +44,6 @@ session stack adds cost, wrong defaults and divergent login surfaces.
 Browser sessions use Better Auth cookies, not SPA localStorage tokens;
 machine authentication uses Bearer `sk_` credentials hashed at rest.
 The frontend sends credentials with requests and retains the existing error envelope.
-The session cookie is HttpOnly, SameSite=Lax and Secure when not local.
-The stack standard describes `SameSite=None` + Secure as a cross-site alternative;
-the kit factory implements Lax.
 
 - Dual-path credential: **Bearer preferred when both present** (session cookie + `sk_`)
 

@@ -93,9 +93,6 @@ Discovery is `{issuer}/.well-known/openid-configuration`; mount the auth
 handler on its usual path. The hosted MCP shell retains its own reserved paths
 and OAuth server. Do not expose this provider at the root RFC 8414 metadata path,
 or accept one server's tokens at the other.
-The provider supports `openid`, `email` and `profile` scopes. Its JWT plugin
-does not expose a session-JWT `/token` endpoint or emit a `set-auth-jwt` header;
-the OAuth token endpoint remains available at `{issuer}/oauth2/token`.
 
 Use `registerOidcClient(auth, { headers, redirectUris, firstParty, ... })`
 from the same entry only in server code after checking administrator permission

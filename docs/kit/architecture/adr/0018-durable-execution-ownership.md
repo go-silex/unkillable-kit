@@ -26,10 +26,10 @@ Every durable execution has exactly one durable owner. This decision covers Kit 
 ## Context
 
 The principle is in the title of [ADR-0005 D2](./0005-flows-platform-agentic-workflows.md#d2--runtime--cloudflare-workflows-do-not-reimplement-durable-engine): « do not reimplement durable engine ». D2's Forbidden line then scoped it: « custom DO workflow engine when Workflows suffice ».
-The constitution kept the tool name and dropped the qualifier. Since Roxabi/roxabi-boilerplate-cf#412 that line forbids such engines even when Workflows do not suffice.
+The constitution kept the tool name and dropped the qualifier. Since Roxabi/roxabi-boilerplate-cf#412 that line forbade such engines even when Workflows did not suffice.
 
-Invariant 6 literally binds every Product execution to Cloudflare Workflows, even when a supplied durable conversation runtime already owns it.
-A Product cannot amend the inherited constitution; adding a Workflow on top would give one execution two owners.
+Literally, invariant 6 then bound every Product execution to Cloudflare Workflows, even one a supplied conversation runtime already owned.
+A Product cannot amend the inherited constitution, and a Workflow on top would have given one execution two owners.
 
 What the Kit composes today:
 

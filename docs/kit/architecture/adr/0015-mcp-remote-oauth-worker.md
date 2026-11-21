@@ -90,8 +90,7 @@ TTL or consent, and does not authorize individual tools. It runs on authenticate
 requests and code or refresh exchanges, not on authorization or revocation.
 Caller hooks with `OAUTH_KV` access are trusted code: KV write access can mint grants.
 
-A refused `/mcp` request returns 401 without revoking the grant. A refused
-code or refresh exchange returns `invalid_grant` and revokes the grant.
+A refusal on exchange revokes the grant; a refusal on `/mcp` does not.
 An undecidable predicate must throw rather than return `false`, so unavailability
 blocks without being mistaken for invalid credentials or revoking the grant.
 A client whose grant is revoked must authorize again. Implementation and exercised outcomes:
