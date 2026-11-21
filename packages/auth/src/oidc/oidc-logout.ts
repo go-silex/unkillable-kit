@@ -4,11 +4,17 @@ import {
   runWithAdapter,
 } from '@better-auth/core/context'
 import { createLogger } from '@kit/core'
-import { D1_IN_ARRAY_CHUNK } from '@kit/db'
+import { D1_IN_ARRAY_CHUNK, type KitD1Database } from '@kit/db'
 import type { DBAdapter } from 'better-auth'
 import { createAuthEndpoint } from 'better-auth/api'
 import { z } from 'zod'
 import type { KitBetterAuth } from '../better-auth-factory'
+import {
+  type LogoutRow,
+  loadDistinctSessionClients,
+  loadRevocableRefreshTokens,
+  logoutD1,
+} from './oidc-logout-planning'
 
 const MAX_NOTIFIED_SESSIONS = 25
 const log = createLogger({ component: 'oidc-logout' })
@@ -17,7 +23,6 @@ type LogoutResult =
   | { success: true; truncated: boolean; coverage?: never }
   | { success: true; truncated: null; coverage: 'unknown' }
 
-type LogoutRow = { id: string; sessionId: string; clientId: string }
 type LogoutClient = { clientId: string }
 
 // Better Auth snapshots entities for its delete hooks before issuing deleteMany.
@@ -27,6 +32,7 @@ function logoutAdapter(
   adapter: DBAdapter,
   onTruncated: () => void,
   onPlanningFailure: () => void,
+  d1: KitD1Database | undefined,
 ): DBAdapter {
   let access: LogoutRow[] = []
   let refresh: LogoutRow[] = []
@@ -47,13 +53,20 @@ function logoutAdapter(
       if (sessions.length > MAX_NOTIFIED_SESSIONS) onTruncated()
       selected = sessions.slice(0, MAX_NOTIFIED_SESSIONS)
       if (selected.length) {
-        const where = [
-          { field: 'sessionId', operator: 'in' as const, value: selected.map((s) => s.id) },
-        ]
-        ;[access, refresh] = await Promise.all([
-          adapter.findMany<LogoutRow>({ model: 'oauthAccessToken', where, limit: 2147483647 }),
-          adapter.findMany<LogoutRow>({ model: 'oauthRefreshToken', where, limit: 2147483647 }),
-        ])
+        const sessionIds = selected.map((s) => s.id)
+        if (d1) {
+          ;[access, refresh] = await Promise.all([
+            loadDistinctSessionClients(d1, sessionIds),
+            loadRevocableRefreshTokens(d1, sessionIds),
+          ])
+        } else {
+          log.warn('OIDC logout planning uses unbounded adapter fallback')
+          const where = [{ field: 'sessionId', operator: 'in' as const, value: sessionIds }]
+          ;[access, refresh] = await Promise.all([
+            adapter.findMany<LogoutRow>({ model: 'oauthAccessToken', where, limit: 2147483647 }),
+            adapter.findMany<LogoutRow>({ model: 'oauthRefreshToken', where, limit: 2147483647 }),
+          ])
+        }
         const ids = [...new Set([...access, ...refresh].map((token) => token.clientId))]
         for (let i = 0; i < ids.length; i += D1_IN_ARRAY_CHUNK) {
           clients.push(
@@ -157,16 +170,19 @@ export function createOidcLogoutPlugin() {
           const storage = await getCurrentDBAdapterAsyncLocalStorage()
           const current = storage.getStore()
           const adapter = await getCurrentAdapter(ctx.context.adapter)
+          const merged = { ...ctx.context.adapter, ...adapter }
+          const d1 = logoutD1(adapter)
           let truncated = false
           let coverageUnknown = false
           const bounded = logoutAdapter(
-            { ...ctx.context.adapter, ...adapter },
+            merged,
             () => {
               truncated = true
             },
             () => {
               coverageUnknown = true
             },
+            d1,
           )
           const removeSessions = () =>
             ctx.context.internalAdapter.deleteUserSessions(ctx.body.userId)

@@ -35,6 +35,7 @@ import {
 } from './google/sign-in'
 import { logBetterAuthEvent } from './logging/better-auth-logger'
 import { type OidcProviderConfig, providerComposition } from './oidc/oidc-config'
+import { registerLogoutD1 } from './oidc/oidc-logout-planning'
 import { withOptionalOidcSchema } from './oidc/oidc-provider-schema'
 import { createKitOrganizationPlugin } from './org-plugin'
 import { createSessionAccountGuard, InactiveSessionError } from './policy/better-auth-session-guard'
@@ -51,7 +52,6 @@ export type KitBetterAuth = BetterAuthLike & {
 }
 
 export type BetterAuthDatabase = KitD1Database
-
 export type CreateBetterAuthOpts = {
   /** `@kit/db` `KitD1Database` binding (or test double). */
   database: BetterAuthDatabase
@@ -181,7 +181,11 @@ export function createBetterAuth(opts: CreateBetterAuthOpts): KitBetterAuth {
     // is memory per isolate, keyed `ip|path`, and on only when NODE_ENV is 'production': pinned off.
     rateLimit: { enabled: false },
     secret: opts.secret,
-    database: drizzleAdapter(db, { provider: 'sqlite', schema }),
+    database: ((options) =>
+      registerLogoutD1(
+        drizzleAdapter(db, { provider: 'sqlite', schema })(options),
+        opts.database,
+      )) as ReturnType<typeof drizzleAdapter>,
     hooks: { before: createSessionAccountGuard(db, schema) },
     databaseHooks: {
       account: google ? googleAccountHooks : undefined,

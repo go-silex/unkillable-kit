@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
+import { runWithAdapter, runWithTransaction } from '@better-auth/core/context'
 import { createSqliteD1 } from '@kit/db/testing'
+import type { DBAdapter } from 'better-auth'
 import Database from 'better-sqlite3'
 import { decodeJwt } from 'jose'
 import { expect, it, onTestFinished, vi } from 'vitest'
@@ -9,6 +11,13 @@ import { createOidcProvider, endOidcUserSessions, registerOidcClient } from './o
 
 const ORIGIN = 'https://auth.example.test'
 const USER_ID = 'pagination-user'
+
+function notifiedClients(delivery: ReturnType<typeof vi.fn>): string[] {
+  return delivery.mock.calls.map(([url]) => {
+    const href = String(url)
+    return href.slice(href.lastIndexOf('/') + 1)
+  })
+}
 
 function setup(
   options: {
@@ -50,13 +59,52 @@ function setup(
   })
   const prepare = database.prepare
   let queryCount = 0
+  let tokenPlanRows = 0
   database.prepare = (sql) => {
     queryCount++
     options.beforeQuery?.(sql)
     if (/delete\s+from\s+["`]?session["`]?/i.test(sql)) {
       options.beforeDelete?.(sqlite)
     }
-    return prepare(sql)
+    const statement = prepare(sql)
+    const planningTokenSelect =
+      /^\s*select\b/i.test(sql) &&
+      /oauth_(?:access|refresh)_token/i.test(sql) &&
+      !/\bcount\s*\(/i.test(sql)
+    if (!planningTokenSelect) return statement
+    const instrument = (bound: ReturnType<typeof statement.bind>) => ({
+      ...bound,
+      async all() {
+        const result = (await bound.all()) as { results?: unknown[] }
+        tokenPlanRows += result.results?.length ?? 0
+        return result
+      },
+      async raw<T = unknown>() {
+        const rows = await bound.raw<T>()
+        tokenPlanRows += rows.length
+        return rows
+      },
+      async first<T = unknown>() {
+        const row = await Promise.resolve(bound.first<T>())
+        if (row) tokenPlanRows += 1
+        return row
+      },
+    })
+    return {
+      ...statement,
+      bind(...values: unknown[]) {
+        return instrument(statement.bind(...values))
+      },
+      async all() {
+        return instrument(statement).all()
+      },
+      async raw<T = unknown>() {
+        return instrument(statement).raw<T>()
+      },
+      async first<T = unknown>() {
+        return instrument(statement).first<T>()
+      },
+    }
   }
   const auth = createBetterAuth({
     database,
@@ -80,21 +128,32 @@ function setup(
         'INSERT INTO session (id, token, user_id, expires_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
       )
       .run(id, `token-${id}`, USER_ID, now + 3_600_000, now + age, now + age)
-  const addClient = (id: string) =>
+  const addClient = (
+    id: string,
+    opts: { disabled?: boolean; backchannelLogoutUri?: string | null } = {},
+  ) =>
     sqlite
       .prepare(
-        'INSERT INTO oauth_client (id, client_id, redirect_uris, backchannel_logout_uri) VALUES (?, ?, ?, ?)',
+        'INSERT INTO oauth_client (id, client_id, redirect_uris, backchannel_logout_uri, disabled) VALUES (?, ?, ?, ?, ?)',
       )
       .run(
         id,
         id,
         JSON.stringify(['https://client.example.test/callback']),
-        `https://client.example.test/logout/${id}`,
+        opts.backchannelLogoutUri === null
+          ? null
+          : (opts.backchannelLogoutUri ?? `https://client.example.test/logout/${id}`),
+        opts.disabled ? 1 : 0,
       )
-  const addToken = (id: string, sessionId: string, clientId: string) =>
+  const addToken = (
+    id: string,
+    sessionId: string,
+    clientId: string,
+    opts: { revoked?: number | null } = {},
+  ) =>
     sqlite
       .prepare(
-        'INSERT INTO oauth_access_token (id, token, client_id, session_id, user_id, expires_at, created_at, scopes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO oauth_access_token (id, token, client_id, session_id, user_id, expires_at, created_at, scopes, revoked) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
       )
       .run(
         id,
@@ -105,6 +164,28 @@ function setup(
         now + 3_600_000,
         now,
         JSON.stringify(['openid']),
+        opts.revoked ?? null,
+      )
+  const addRefresh = (
+    id: string,
+    sessionId: string,
+    clientId: string,
+    opts: { scopes?: string[]; revoked?: number | null } = {},
+  ) =>
+    sqlite
+      .prepare(
+        'INSERT INTO oauth_refresh_token (id, token, client_id, session_id, user_id, expires_at, created_at, scopes, revoked) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      )
+      .run(
+        id,
+        createHash('sha256').update(`refresh-${id}`).digest('base64url'),
+        clientId,
+        sessionId,
+        USER_ID,
+        now + 3_600_000,
+        now,
+        JSON.stringify(opts.scopes ?? ['openid']),
+        opts.revoked ?? null,
       )
   return {
     sqlite,
@@ -114,7 +195,10 @@ function setup(
     addSession,
     addClient,
     addToken,
+    addRefresh,
+    now,
     queries: () => queryCount,
+    tokenPlanRows: () => tokenPlanRows,
   }
 }
 
@@ -356,4 +440,187 @@ it('refuses an issued bearer at userinfo after logout', async () => {
   await Promise.all(pending)
 
   expect((await userinfo()).status).toBe(401)
+})
+
+it('does not scale planning row volume with duplicate tokens per client', async () => {
+  const { auth, pending, delivery, addSession, addClient, addToken, tokenPlanRows } = setup()
+  addClient('alpha')
+  addClient('beta')
+  for (const session of ['s1', 's2', 's3']) {
+    addSession(session)
+    for (let i = 0; i < 200; i++) {
+      addToken(`${session}-alpha-${i}`, session, 'alpha')
+      addToken(`${session}-beta-${i}`, session, 'beta')
+    }
+  }
+  expect(await endOidcUserSessions(auth, USER_ID)).toEqual({ success: true, truncated: false })
+  await Promise.all(pending)
+  expect(new Set(notifiedClients(delivery))).toEqual(new Set(['alpha', 'beta']))
+  // 3 sessions × 2 clients × 200 tokens = 1200 access rows. Distinct planning must
+  // stay near the destination count, not the token count.
+  expect(tokenPlanRows()).toBeLessThan(50)
+  expect(tokenPlanRows()).toBeGreaterThan(0)
+})
+
+it('revokes only non-revoked refresh tokens without offline_access', async () => {
+  const { sqlite, auth, pending, delivery, addSession, addClient, addRefresh, now } = setup()
+  addSession('session')
+  addClient('client')
+  addRefresh('live', 'session', 'client')
+  addRefresh('already', 'session', 'client', { revoked: now - 1_000 })
+  addRefresh('offline', 'session', 'client', { scopes: ['openid', 'offline_access'] })
+  expect(await endOidcUserSessions(auth, USER_ID)).toEqual({ success: true, truncated: false })
+  await Promise.all(pending)
+  expect(notifiedClients(delivery)).toEqual(['client'])
+  const rows = sqlite
+    .prepare('SELECT id, revoked IS NOT NULL AS is_revoked FROM oauth_refresh_token ORDER BY id')
+    .all() as Array<{ id: string; is_revoked: 0 | 1 }>
+  expect(rows).toEqual([
+    { id: 'already', is_revoked: 1 },
+    { id: 'live', is_revoked: 1 },
+    { id: 'offline', is_revoked: 0 },
+  ])
+})
+
+it('notifies a client that only has revoked tokens', async () => {
+  const { auth, pending, delivery, addSession, addClient, addToken, addRefresh, now } = setup()
+  addSession('session')
+  addClient('ghost')
+  addToken('access-revoked', 'session', 'ghost', { revoked: now - 1_000 })
+  addRefresh('refresh-revoked', 'session', 'ghost', { revoked: now - 1_000 })
+  expect(await endOidcUserSessions(auth, USER_ID)).toEqual({ success: true, truncated: false })
+  await Promise.all(pending)
+  expect(notifiedClients(delivery)).toEqual(['ghost'])
+})
+
+it('skips disabled clients and clients without backchannelLogoutUri', async () => {
+  const { auth, pending, delivery, addSession, addClient, addToken } = setup()
+  addSession('session')
+  addClient('ok')
+  addClient('disabled', { disabled: true })
+  addClient('silent', { backchannelLogoutUri: null })
+  addToken('t-ok', 'session', 'ok')
+  addToken('t-disabled', 'session', 'disabled')
+  addToken('t-silent', 'session', 'silent')
+  expect(await endOidcUserSessions(auth, USER_ID)).toEqual({ success: true, truncated: false })
+  await Promise.all(pending)
+  expect(notifiedClients(delivery)).toEqual(['ok'])
+})
+
+it('truncates notifications beyond 25 sessions while deleting all', async () => {
+  const { sqlite, auth, pending, delivery, addSession, addClient, addToken } = setup()
+  addClient('client')
+  for (let i = 0; i < 30; i++) {
+    addSession(`session-${i}`, i)
+    addToken(`token-${i}`, `session-${i}`, 'client')
+  }
+  expect(await endOidcUserSessions(auth, USER_ID)).toEqual({ success: true, truncated: true })
+  await Promise.all(pending)
+  expect(delivery).toHaveBeenCalledTimes(25)
+  expect(sqlite.prepare('SELECT count(*) AS count FROM session').get()).toEqual({ count: 0 })
+})
+
+it('reports unknown coverage when refresh planning fails', async () => {
+  const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+  onTestFinished(() => errors.mockRestore())
+  let injected = false
+  const { auth, pending, delivery, addSession, addClient, addRefresh } = setup({
+    beforeQuery: (sql) => {
+      if (!injected && /oauth_refresh_token/i.test(sql) && /select/i.test(sql)) {
+        injected = true
+        throw new Error('refresh-plan-failed')
+      }
+    },
+  })
+  addSession('session')
+  addClient('client')
+  addRefresh('refresh', 'session', 'client')
+  expect(await endOidcUserSessions(auth, USER_ID)).toEqual({
+    success: true,
+    truncated: null,
+    coverage: 'unknown',
+  })
+  await Promise.all(pending)
+  expect(injected).toBe(true)
+  expect(delivery).not.toHaveBeenCalled()
+})
+
+it('never forwards notification-only IDs after a queued hook', async () => {
+  const accessUpdates: string[] = []
+  const { auth, pending, delivery, addSession, addClient, addRefresh } = setup({
+    beforeQuery(sql) {
+      if (/^\s*update\s+["`]?oauth_access_token\b/i.test(sql)) accessUpdates.push(sql)
+    },
+  })
+  addSession('session')
+  addClient('refresh-only')
+  addRefresh('historical', 'session', 'refresh-only', { scopes: ['offline_access'] })
+  // The public KitBetterAuth type omits Better Auth's in-process context.
+  const contextAuth = auth as unknown as { $context: Promise<{ adapter: DBAdapter }> }
+  const { adapter } = await contextAuth.$context
+  const writes = vi.spyOn(adapter, 'updateMany')
+  await runWithTransaction(adapter, () => endOidcUserSessions(auth, USER_ID))
+  await Promise.all(pending)
+  expect(notifiedClients(delivery)).toEqual(['refresh-only'])
+  expect(accessUpdates).toEqual([])
+  expect(writes.mock.calls.map(([query]) => query.model)).not.toContain('oauthAccessToken')
+})
+
+it('matches adapter scope decoding for legacy refresh rows', async () => {
+  const { sqlite, auth, pending, delivery, addSession, addClient, addRefresh } = setup()
+  addSession('session')
+  addClient('client')
+  addRefresh('quoted', 'session', 'client', { scopes: ['openid', 'legacy"offline_access'] })
+  addRefresh('legacy', 'session', 'client')
+  addRefresh('offline', 'session', 'client', { scopes: ['offline_access'] })
+  sqlite
+    .prepare('UPDATE oauth_refresh_token SET scopes = ? WHERE id = ?')
+    .run('openid offline_access', 'legacy')
+  await endOidcUserSessions(auth, USER_ID)
+  await Promise.all(pending)
+  expect(notifiedClients(delivery)).toEqual(['client'])
+  expect(
+    sqlite
+      .prepare('SELECT id, revoked IS NOT NULL AS revoked FROM oauth_refresh_token ORDER BY id')
+      .all(),
+  ).toEqual([
+    { id: 'legacy', revoked: 1 },
+    { id: 'offline', revoked: 0 },
+    { id: 'quoted', revoked: 1 },
+  ])
+})
+
+it('preserves logout with a forwarding adapter without a D1 handle', async () => {
+  const { sqlite, auth, pending, delivery, addSession, addClient, addRefresh } = setup()
+  addSession('session')
+  addClient('client')
+  addRefresh('refresh', 'session', 'client')
+  const contextAuth = auth as unknown as { $context: Promise<{ adapter: DBAdapter }> }
+  const ctx = await contextAuth.$context
+  const { __kitOidcLogoutD1: _binding, ...wrapper } = ctx.adapter as DBAdapter & {
+    __kitOidcLogoutD1?: unknown
+  }
+  ctx.adapter = wrapper
+  expect(await runWithAdapter(wrapper, () => endOidcUserSessions(auth, USER_ID))).toEqual({
+    success: true,
+    truncated: false,
+  })
+  await Promise.all(pending)
+  expect(notifiedClients(delivery)).toEqual(['client'])
+  expect(
+    sqlite.prepare('SELECT revoked IS NOT NULL AS revoked FROM oauth_refresh_token').get(),
+  ).toEqual({
+    revoked: 1,
+  })
+})
+
+it('bounds returned refresh rows when most tokens are revoked', async () => {
+  const { auth, pending, addSession, addClient, addRefresh, now, tokenPlanRows } = setup()
+  addSession('session')
+  addClient('client')
+  for (let i = 0; i < 600; i++) addRefresh(`old-${i}`, 'session', 'client', { revoked: now })
+  addRefresh('live', 'session', 'client')
+  await endOidcUserSessions(auth, USER_ID)
+  await Promise.all(pending)
+  expect(tokenPlanRows()).toBeLessThan(10)
 })
