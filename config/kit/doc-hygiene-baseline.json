@@ -107,7 +107,7 @@
   "docs/kit/testing/critical-path.md": {
     "overLimitLines": 92,
     "maxLineBytes": 3787,
-    "fileBytes": 279956
+    "fileBytes": 279903
   },
   "docs/kit/testing/ops-model.md": {
     "overLimitLines": 32,

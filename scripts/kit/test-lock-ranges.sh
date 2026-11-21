@@ -40,6 +40,11 @@ write_lock() {
 
 TMP="$(mktemp -d -t lock-ranges.XXXXXX)"
 trap 'rm -rf "$TMP"' EXIT
+# Hermetic: empty HOME/cache for the whole suite. Stability cases warm SUITE_CACHE later.
+SUITE_HOME="$TMP/suite-home"
+SUITE_CACHE="$TMP/suite-cache"
+mkdir -p "$SUITE_HOME" "$SUITE_CACHE"
+export HOME="$SUITE_HOME" XDG_CONFIG_HOME="$SUITE_HOME" BUN_INSTALL_CACHE_DIR="$SUITE_CACHE"
 
 echo "== Lock ranges self-test =="
 
@@ -390,9 +395,10 @@ assert_case "a scan that checks no range fails" 1 "$BLIND" "no range checked —
 # the tree's own lock drifts. One tree per channel, so a failure names the channel left open.
 decoy_tree() {
   local tree="$1"
-  mkdir -p "$tree/scripts/kit" "$tree/config/kit" "$tree/decoy"
+  mkdir -p "$tree/scripts/kit/lib" "$tree/config/kit" "$tree/decoy"
   git -C "$tree" init -q
   cp "$SCANNER" "$tree/scripts/kit/"
+  cp "$ROOT/scripts/kit/lib/jsonc-strict.ts" "$tree/scripts/kit/lib/"
   cp "$ROOT/config/kit/bunfig.gates.toml" "$tree/config/kit/"
   cp "$CLEAN/bun.lock" "$tree/decoy/bun.lock"
   node -e '
@@ -443,27 +449,46 @@ commit_tree() {
   git -C "$tree" commit -qm "$msg"
 }
 
-NORMALIZATION="$TMP/normalization"
-mkdir -p "$NORMALIZATION"
-git -C "$ROOT" archive HEAD | tar -x -C "$NORMALIZATION"
-cp "$SCANNER" "$NORMALIZATION/scripts/kit/check-lock-ranges.ts"
-commit_tree "$NORMALIZATION" fixture
-output="$(cd "$NORMALIZATION" && env -u LOCK_RANGES_ROOT bun scripts/kit/check-lock-ranges.ts 2>&1)" && rc=0 || rc=$?
-if [[ "$rc" -eq 0 ]]; then
-  echo 'PASS: committed install-stable lock'
+copy_scanner() {
+  local tree="$1"
+  mkdir -p "$tree/scripts/kit/lib"
+  cp "$SCANNER" "$tree/scripts/kit/check-lock-ranges.ts"
+  cp "$ROOT/scripts/kit/lib/jsonc-strict.ts" "$tree/scripts/kit/lib/jsonc-strict.ts"
+}
+
+run_check() {
+  local tree="$1"
+  shift
+  (cd "$tree" && env -u LOCK_RANGES_ROOT "$@" bun scripts/kit/check-lock-ranges.ts)
+}
+
+HOIST="$TMP/hoist-stable"
+python3 "$ROOT/scripts/kit/lib/build-hoist-fixture.py" "$HOIST" "$SUITE_CACHE" "$SCANNER"
+printf '%s\n' 'node_modules/' '.pkg/' '.hermetic-home/' >"$HOIST/.gitignore"
+rm -rf "$HOIST/node_modules" "$HOIST"/apps/*/node_modules "$HOIST/.pkg" "$HOIST/.hermetic-home"
+copy_scanner "$HOIST"
+commit_tree "$HOIST" hoist-stable
+
+warm_start=$(date +%s%N)
+output="$(run_check "$HOIST" 2>&1)" && rc=0 || rc=$?
+warm_end=$(date +%s%N)
+warm_ms=$(( (warm_end - warm_start) / 1000000 ))
+if [[ "$rc" -eq 0 && "$output" == *'check-lock-ranges: OK'* ]]; then
+  echo "PASS: hoisting-only layout accepted (${warm_ms}ms warm)"
   PASS=$((PASS + 1))
 else
-  echo "FAIL: committed install-stable lock: $output" >&2
+  echo "FAIL: hoist accept (rc=$rc): $output" >&2
   FAIL=$((FAIL + 1))
 fi
+printf '%s\n' "$warm_ms" >"$TMP/probe-warm-ms.txt"
 
+# #42: missing trustedDependencies on the loopback fixture
 TRUST="$TMP/trust-rewrite"
 rm -rf "$TRUST"
-cp -a "$NORMALIZATION" "$TRUST"
-node -e 'const fs = require("node:fs"); const p = process.argv[1]; const s = fs.readFileSync(p, "utf8"); const t = s.replace(/  "trustedDependencies": \[\],\n/, ""); if (s === t) process.exit(1); fs.writeFileSync(p, t)' "$TRUST/bun.lock"
-git -C "$TRUST" add bun.lock
-git -C "$TRUST" commit -qm trust-mutant
-output="$(cd "$TRUST" && env -u LOCK_RANGES_ROOT bun scripts/kit/check-lock-ranges.ts 2>&1)" && rc=0 || rc=$?
+cp -a "$HOIST" "$TRUST"
+node -e 'const fs=require("fs"); const p=process.argv[1]; const s=fs.readFileSync(p,"utf8"); const t=s.replace(/  "trustedDependencies": \[\],\n/,""); if(t===s) process.exit(1); fs.writeFileSync(p,t)' "$TRUST/bun.lock"
+git -C "$TRUST" add bun.lock && git -C "$TRUST" commit -qm trust-mutant
+output="$(run_check "$TRUST" 2>&1)" && rc=0 || rc=$?
 if [[ "$rc" -eq 1 && "$output" == *'candidate bun.lock changes on install'* ]]; then
   echo 'PASS: missing trustedDependencies fails on rewrite'
   PASS=$((PASS + 1))
@@ -472,13 +497,13 @@ else
   FAIL=$((FAIL + 1))
 fi
 
+# #42: removed tracked workspace manifest
 MISSING_WS="$TMP/missing-workspace"
 rm -rf "$MISSING_WS"
-cp -a "$NORMALIZATION" "$MISSING_WS"
-rm -f "$MISSING_WS/apps/starter-web/package.json"
-git -C "$MISSING_WS" add -A
-git -C "$MISSING_WS" commit -qm missing-starter-web
-output="$(cd "$MISSING_WS" && env -u LOCK_RANGES_ROOT bun scripts/kit/check-lock-ranges.ts 2>&1)" && rc=0 || rc=$?
+cp -a "$HOIST" "$MISSING_WS"
+rm -f "$MISSING_WS/apps/a/package.json"
+git -C "$MISSING_WS" add -A && git -C "$MISSING_WS" commit -qm missing-a
+output="$(run_check "$MISSING_WS" 2>&1)" && rc=0 || rc=$?
 if [[ "$rc" -eq 1 && "$output" == *'candidate bun.lock changes on install'* ]]; then
   echo 'PASS: removed tracked workspace manifest fails on rewrite'
   PASS=$((PASS + 1))
@@ -491,17 +516,11 @@ PROBE_MUTANT="$TMP/probe-mutant"
 rm -rf "$PROBE_MUTANT"
 cp -a "$TRUST" "$PROBE_MUTANT"
 node -e '
-const fs = require("node:fs");
-const p = process.argv[1];
-let s = fs.readFileSync(p, "utf8");
-const t = s.replace(
-  "await checkStability(root, tree)",
-  "/* stability probe deleted */",
-);
-if (t === s) process.exit(1);
-fs.writeFileSync(p, t);
+const fs=require("fs"); const p=process.argv[1]; let s=fs.readFileSync(p,"utf8");
+const t=s.replace("checkStability(root, tree)","/* stability probe deleted */");
+if(t===s) process.exit(1); fs.writeFileSync(p,t);
 ' "$PROBE_MUTANT/scripts/kit/check-lock-ranges.ts"
-output="$(cd "$PROBE_MUTANT" && env -u LOCK_RANGES_ROOT bun scripts/kit/check-lock-ranges.ts 2>&1)" && rc=0 || rc=$?
+output="$(run_check "$PROBE_MUTANT" 2>&1)" && rc=0 || rc=$?
 if [[ "$rc" -eq 0 ]]; then
   echo 'PASS: deleting stability probe mutant killed'
   PASS=$((PASS + 1))
@@ -510,69 +529,69 @@ else
   FAIL=$((FAIL + 1))
 fi
 
-DUP="$TMP/duplicate-keys"
-rm -rf "$DUP"
-cp -a "$NORMALIZATION" "$DUP"
-node -e '
-const fs = require("node:fs");
-const p = process.argv[1];
-const text = fs.readFileSync(p, "utf8");
-const marker = "\"packages\": {";
-const i = text.indexOf(marker);
-if (i < 0) process.exit(1);
-const after = text.slice(i + marker.length);
-const km = after.match(/\n    ("(?:\\.|[^"\\])*"): \[/);
-if (!km) process.exit(1);
-const lineStart = text.indexOf(km[0], i);
-const lineEnd = text.indexOf("\n", lineStart + 1);
-const line = text.slice(lineStart, lineEnd);
-fs.writeFileSync(p, text.slice(0, lineEnd) + line + text.slice(lineEnd));
-' "$DUP/bun.lock"
-git -C "$DUP" add bun.lock
-git -C "$DUP" commit -qm duplicate-packages-key
-output="$(cd "$DUP" && env -u LOCK_RANGES_ROOT bun scripts/kit/check-lock-ranges.ts 2>&1)" && rc=0 || rc=$?
-if [[ "$rc" -eq 1 && "$output" == *'ambiguous bun.lock'* ]]; then
-  echo 'PASS: duplicate packages keys refused'
+for mode in literal escaped nested; do
+  DUP="$TMP/dup-$mode"
+  rm -rf "$DUP"
+  cp -a "$HOIST" "$DUP"
+  node "$ROOT/scripts/kit/lib/inject-lock-duplicate.mjs" "$DUP/bun.lock" "$mode"
+  git -C "$DUP" add bun.lock && git -C "$DUP" commit -qm "dup-$mode"
+  # Verdict must not depend on TMPDIR: escaped case under node_modules/.cache/tmp
+  if [[ "$mode" == escaped ]]; then
+    bad_tmp="$DUP/node_modules/.cache/tmp"
+    mkdir -p "$bad_tmp"
+    output="$(cd "$DUP" && env -u LOCK_RANGES_ROOT TMPDIR="$bad_tmp" bun scripts/kit/check-lock-ranges.ts 2>&1)" && rc=0 || rc=$?
+  else
+    output="$(run_check "$DUP" 2>&1)" && rc=0 || rc=$?
+  fi
+  if [[ "$rc" -eq 1 && "$output" == *'ambiguous bun.lock'* ]]; then
+    echo "PASS: duplicate keys refused ($mode)"
+    PASS=$((PASS + 1))
+  else
+    echo "FAIL: duplicate keys $mode (rc=$rc): $output" >&2
+    FAIL=$((FAIL + 1))
+  fi
+done
+
+# Malformed JSONC fails closed
+BAD="$TMP/bad-jsonc"
+rm -rf "$BAD"
+cp -a "$HOIST" "$BAD"
+printf '{ "lockfileVersion": 1, "workspaces": { "", },\n' >"$BAD/bun.lock"
+git -C "$BAD" add bun.lock && git -C "$BAD" commit -qm bad
+output="$(run_check "$BAD" 2>&1)" && rc=0 || rc=$?
+if [[ "$rc" -eq 1 && "$output" == *'unparseable bun.lock'* ]]; then
+  echo 'PASS: malformed JSONC fails closed'
   PASS=$((PASS + 1))
 else
-  echo "FAIL: duplicate keys (rc=$rc): $output" >&2
+  echo "FAIL: malformed JSONC (rc=$rc): $output" >&2
   FAIL=$((FAIL + 1))
 fi
 
 DUP_MUTANT="$TMP/dup-mutant"
 rm -rf "$DUP_MUTANT"
-cp -a "$DUP" "$DUP_MUTANT"
+cp -a "$TMP/dup-literal" "$DUP_MUTANT"
 node -e '
-const fs = require("node:fs");
-const p = process.argv[1];
-let s = fs.readFileSync(p, "utf8");
-let t = s.replace(/[ \t]*if \(tree\) await assertUnambiguousLock\(lockText\)\n/g, "");
-t = t.replace(/[ \t]*await assertUnambiguousLock\(lockText\)\n/g, "");
-if (t === s || /await assertUnambiguousLock\(/.test(t)) process.exit(1);
-fs.writeFileSync(p, t);
+const fs=require("fs"); const p=process.argv[1]; let s=fs.readFileSync(p,"utf8");
+let t=s.replace(/[ \t]*if \(tree\) assertUnambiguousLock\(lockText\)\n/g,"");
+t=t.replace(/[ \t]*assertUnambiguousLock\(lockText\)\n/g,"");
+if(t===s||/assertUnambiguousLock\(lockText\)/.test(t)) process.exit(1);
+fs.writeFileSync(p,t);
 ' "$DUP_MUTANT/scripts/kit/check-lock-ranges.ts"
-output="$(cd "$DUP_MUTANT" && env -u LOCK_RANGES_ROOT bun scripts/kit/check-lock-ranges.ts 2>&1)" && rc=0 || rc=$?
-# Kill = the 'ambiguous' refusal test would fail (message gone), even if rewrite still fails.
+output="$(run_check "$DUP_MUTANT" 2>&1)" && rc=0 || rc=$?
 if [[ "$output" != *'ambiguous bun.lock'* ]]; then
   echo 'PASS: no-strict-key mutant killed'
   PASS=$((PASS + 1))
 else
-  echo "FAIL: no-strict-key mutant survived (still ambiguous): $output" >&2
+  echo "FAIL: no-strict-key mutant survived: $output" >&2
   FAIL=$((FAIL + 1))
 fi
 
-EMPTY_CACHE="$TMP/empty-cache"
-rm -rf "$EMPTY_CACHE"
-cp -a "$NORMALIZATION" "$EMPTY_CACHE"
-empty_cache_dir="$TMP/bun-cache-empty"
-empty_home="$TMP/empty-home"
-rm -rf "$empty_cache_dir" "$empty_home"
-mkdir -p "$empty_cache_dir" "$empty_home"
-output="$(
-  cd "$EMPTY_CACHE" &&
-    env -u LOCK_RANGES_ROOT BUN_INSTALL_CACHE_DIR="$empty_cache_dir" HOME="$empty_home" \
-      bun scripts/kit/check-lock-ranges.ts 2>&1
-)" && rc=0 || rc=$?
+# Empty required cache fail-closed
+EMPTY_CACHE="$TMP/empty-cache-tree"
+rm -rf "$EMPTY_CACHE" "$TMP/empty-cache-dir"
+cp -a "$HOIST" "$EMPTY_CACHE"
+mkdir -p "$TMP/empty-cache-dir"
+output="$(cd "$EMPTY_CACHE" && env -u LOCK_RANGES_ROOT BUN_INSTALL_CACHE_DIR="$TMP/empty-cache-dir" bun scripts/kit/check-lock-ranges.ts 2>&1)" && rc=0 || rc=$?
 if [[ "$rc" -eq 1 && "$output" == *'warm the Bun cache'* ]]; then
   echo 'PASS: empty required cache fails closed with warming guidance'
   PASS=$((PASS + 1))
@@ -581,234 +600,160 @@ else
   FAIL=$((FAIL + 1))
 fi
 
-# Three-app hoisting layout: ordinary install keeps bytes; --lockfile-only would rewrite.
-HOIST="$TMP/hoist-stable"
-HOIST_CACHE="$TMP/hoist-cache"
-rm -rf "$HOIST" "$HOIST_CACHE"
-mkdir -p "$HOIST_CACHE"
-cat >"$TMP/build-hoist.py" <<'HOISTPY'
-#!/usr/bin/env python3
-"""Build a three-app hoisting-stable lock fixture with a loopback registry."""
-from __future__ import annotations
-import datetime as dt, json, os, shutil, subprocess, sys, tarfile, threading
-from base64 import b64encode
-from hashlib import sha512
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from io import BytesIO
-from pathlib import Path
-
-root = Path(sys.argv[1]).resolve()
-cache = Path(sys.argv[2]).resolve()
-scanner = Path(sys.argv[3]).resolve() if len(sys.argv) > 3 else None
-extra_files = {}  # filled by callers via env JSON if needed
-
-if root.exists():
-    shutil.rmtree(root)
-root.mkdir(parents=True)
-cache.mkdir(parents=True, exist_ok=True)
-
-bodies: dict[str, bytes] = {}
-records: dict[tuple[str, str], dict] = {}
-logs: list[str] = []
-port_box = {"port": 0}
-
-
-def make_tgz(name: str, version: str) -> tuple[str, bytes, str]:
-    raw = json.dumps({"name": name, "version": version}).encode()
-    buf = BytesIO()
-    with tarfile.open(fileobj=buf, mode="w:gz") as tar:
-        info = tarfile.TarInfo("package/package.json")
-        info.size = len(raw)
-        tar.addfile(info, BytesIO(raw))
-    blob = buf.getvalue()
-    path = f"{name}/-/{name}-{version}.tgz"
-    integrity = "sha512-" + b64encode(sha512(blob).digest()).decode()
-    return path, blob, integrity
-
-
-for version in ("1.0.0", "1.0.1"):
-    path, blob, integrity = make_tgz("kit-pin", version)
-    bodies[path] = blob
-    records[("kit-pin", version)] = {
-        "name": "kit-pin",
-        "version": version,
-        "dist": {"tarball": "", "integrity": integrity},
-    }
-
-
-class Registry(BaseHTTPRequestHandler):
-    def log_message(self, *args):  # noqa: A003
-        return
-
-    def do_GET(self):  # noqa: N802
-        path = self.path.strip("/")
-        logs.append(path)
-        if path == "kit-pin":
-            versions = ["1.0.0", "1.0.1"]
-            obj = {
-                "name": "kit-pin",
-                "dist-tags": {"latest": "1.0.1"},
-                "versions": {},
-                "time": {
-                    "modified": "2025-01-01T00:00:00.000Z",
-                    "created": "2025-01-01T00:00:00.000Z",
-                },
-            }
-            for v in versions:
-                meta = json.loads(json.dumps(records[("kit-pin", v)]))
-                meta["dist"]["tarball"] = f"http://127.0.0.1:{port_box['port']}/kit-pin/-/kit-pin-{v}.tgz"
-                obj["versions"][v] = meta
-                obj["time"][v] = "2025-01-01T00:00:00.000Z"
-            buf = json.dumps(obj).encode()
-            mime = "application/json"
-        elif path in bodies:
-            buf = bodies[path]
-            mime = "application/octet-stream"
-        else:
-            self.send_error(404)
-            return
-        self.send_response(200)
-        self.send_header("Content-Type", mime)
-        self.send_header("Content-Length", str(len(buf)))
-        self.end_headers()
-        self.wfile.write(buf)
-
-
-srv = ThreadingHTTPServer(("127.0.0.1", 0), Registry)
-port_box["port"] = srv.server_address[1]
-threading.Thread(target=srv.serve_forever, daemon=True).start()
-url = f"http://127.0.0.1:{port_box['port']}/"
-
-bun_version = subprocess.check_output(["bun", "-v"], text=True).strip()
-(root / "package.json").write_text(
-    json.dumps(
-        {
-            "name": "hoist-root",
-            "private": True,
-            "workspaces": ["apps/*"],
-            "trustedDependencies": [],
-            "packageManager": f"bun@{bun_version}",
-        },
-        indent=2,
-    )
-    + "\n"
-)
-(root / "bunfig.toml").write_text(f'[install]\nregistry = "{url}"\nminimumReleaseAge = 259200\n')
-for app, ver in (("a", "1.0.1"), ("b", "1.0.0"), ("c", "1.0.1")):
-    app_dir = root / "apps" / app
-    app_dir.mkdir(parents=True)
-    (app_dir / "package.json").write_text(json.dumps({"name": app, "dependencies": {"kit-pin": ver}}) + "\n")
-if scanner is not None:
-    scripts = root / "scripts" / "kit"
-    scripts.mkdir(parents=True)
-    shutil.copy(scanner, scripts / "check-lock-ranges.ts")
-
-env = {**os.environ, "BUN_INSTALL_CACHE_DIR": str(cache)}
-
-
-def run(*args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["bun", *args],
-        cwd=root,
-        env=env,
-        text=True,
-        capture_output=True,
-        timeout=60,
-    )
-
-
-r = run("install", "--lockfile-only", "--ignore-scripts")
-if r.returncode != 0:
-    sys.stderr.write(r.stdout + r.stderr)
-    raise SystemExit("initial lockfile-only failed")
-
-lock = json.loads(
-    subprocess.check_output(
-        ["bun", "-e", 'console.log(JSON.stringify(Bun.JSONC.parse(await Bun.file("bun.lock").text())))'],
-        cwd=root,
-        text=True,
-    )
-)
-high = next(v for v in lock["packages"].values() if v[0] == "kit-pin@1.0.1")
-low = next(v for v in lock["packages"].values() if v[0] == "kit-pin@1.0.0")
-next_packages = {k: v for k, v in lock["packages"].items() if k != "kit-pin" and not k.endswith("/kit-pin")}
-next_packages["kit-pin"] = low
-next_packages["a/kit-pin"] = high
-next_packages["c/kit-pin"] = high
-lock["packages"] = next_packages
-(root / "bun.lock").write_text(json.dumps(lock, indent=2) + "\n")
-before = (root / "bun.lock").read_bytes()
-
-r = run("install", "--frozen-lockfile", "--minimum-release-age", "0", "--ignore-scripts")
-if r.returncode != 0:
-    sys.stderr.write(r.stdout + r.stderr)
-    raise SystemExit("frozen warmup failed")
-srv.shutdown()
-if (root / "bun.lock").read_bytes() != before:
-    raise SystemExit("frozen rewrote lock")
-
-# Prove ordinary offline keeps bytes and lockfile-only would rewrite.
-r = run("install", "--offline", "--ignore-scripts")
-if r.returncode != 0 or (root / "bun.lock").read_bytes() != before:
-    raise SystemExit("ordinary offline did not keep lock")
-writer = root.parent / (root.name + "-writer")
-if writer.exists():
-    shutil.rmtree(writer)
-shutil.copytree(root, writer, ignore=shutil.ignore_patterns("node_modules", ".pkg"))
-r = subprocess.run(
-    ["bun", "install", "--lockfile-only", "--offline", "--ignore-scripts", "--minimum-release-age", "0"],
-    cwd=writer,
-    env=env,
-    text=True,
-    capture_output=True,
-    timeout=60,
-)
-if r.returncode != 0:
-    sys.stderr.write(r.stdout + r.stderr)
-    raise SystemExit("lockfile-only offline failed")
-if (writer / "bun.lock").read_bytes() == before:
-    raise SystemExit("lockfile-only did not rewrite hoisting layout")
-print("hoist fixture ready")
-print("registry_hits", len(logs))
-
-HOISTPY
-python3 "$TMP/build-hoist.py" "$HOIST" "$HOIST_CACHE" "$SCANNER"
-printf '%s\n' 'node_modules/' '.pkg/' >"$HOIST/.gitignore"
-rm -rf "$HOIST/node_modules" "$HOIST"/apps/*/node_modules "$HOIST/.pkg"
-commit_tree "$HOIST" hoist-stable
-warm_start=$(date +%s%N)
-output="$(
-  cd "$HOIST" &&
-    env -u LOCK_RANGES_ROOT BUN_INSTALL_CACHE_DIR="$HOIST_CACHE" bun scripts/kit/check-lock-ranges.ts 2>&1
-)" && rc=0 || rc=$?
-warm_end=$(date +%s%N)
-warm_ms=$(( (warm_end - warm_start) / 1000000 ))
-if [[ "$rc" -eq 0 && "$output" == *'check-lock-ranges: OK'* ]]; then
-  echo "PASS: hoisting-only layout accepted by ordinary-install oracle (${warm_ms}ms warm)"
+# HOME/.bunfig.toml frozenLockfile must not hide #42
+FROZEN_HOME="$TMP/frozen-home"
+rm -rf "$FROZEN_HOME"
+mkdir -p "$FROZEN_HOME"
+printf '%s\n' '[install]' 'frozenLockfile = true' >"$FROZEN_HOME/.bunfig.toml"
+output="$(cd "$TRUST" && env -u LOCK_RANGES_ROOT HOME="$FROZEN_HOME" XDG_CONFIG_HOME="$FROZEN_HOME" BUN_INSTALL_CACHE_DIR="$SUITE_CACHE" bun scripts/kit/check-lock-ranges.ts 2>&1)" && rc=0 || rc=$?
+if [[ "$rc" -eq 1 && "$output" == *'candidate bun.lock changes on install'* ]]; then
+  echo 'PASS: HOME frozenLockfile cannot hide trustedDependencies rewrite'
   PASS=$((PASS + 1))
 else
-  echo "FAIL: hoist accept (rc=$rc): $output" >&2
+  echo "FAIL: HOME frozenLockfile bypass (rc=$rc): $output" >&2
   FAIL=$((FAIL + 1))
 fi
-printf '%s\n' "$warm_ms" >"$TMP/probe-warm-ms.txt"
 
+# Tracked snapshot .env with BUN_INSTALL_CACHE_DIR must not change the verdict
+DOTENV="$TMP/dotenv-snapshot"
+rm -rf "$DOTENV"
+cp -a "$HOIST" "$DOTENV"
+printf 'BUN_INSTALL_CACHE_DIR=%s\n' "$TMP/empty-cache-dir" >"$DOTENV/.env"
+git -C "$DOTENV" add .env && git -C "$DOTENV" commit -qm dotenv
+output="$(cd "$DOTENV" && env -u LOCK_RANGES_ROOT BUN_INSTALL_CACHE_DIR="$SUITE_CACHE" bun scripts/kit/check-lock-ranges.ts 2>&1)" && rc=0 || rc=$?
+if [[ "$rc" -eq 0 ]]; then
+  echo 'PASS: snapshot .env BUN_INSTALL_CACHE_DIR ignored by probe'
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: snapshot .env affected verdict (rc=$rc): $output" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+# Snapshot bunfig frozenLockfile refused
+SNAP_FROZEN="$TMP/snap-frozen"
+rm -rf "$SNAP_FROZEN"
+cp -a "$HOIST" "$SNAP_FROZEN"
+printf '%s\n' '[install]' "registry = \"http://127.0.0.1:1/\"" 'minimumReleaseAge = 259200' 'frozenLockfile = true' >"$SNAP_FROZEN/bunfig.toml"
+git -C "$SNAP_FROZEN" add bunfig.toml && git -C "$SNAP_FROZEN" commit -qm frozen
+output="$(run_check "$SNAP_FROZEN" 2>&1)" && rc=0 || rc=$?
+if [[ "$rc" -eq 1 && "$output" == *'frozenLockfile'* ]]; then
+  echo 'PASS: snapshot bunfig frozenLockfile refused'
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: snapshot frozenLockfile (rc=$rc): $output" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+# export-ignore on a new workspace absent from the lock must fail
+EXPORT_IGNORE="$TMP/export-ignore"
+rm -rf "$EXPORT_IGNORE"
+cp -a "$HOIST" "$EXPORT_IGNORE"
+mkdir -p "$EXPORT_IGNORE/apps/d"
+printf '%s\n' '{"name":"d","dependencies":{"kit-pin":"1.0.1"}}' >"$EXPORT_IGNORE/apps/d/package.json"
+# Make d part of workspaces in package.json but not the lock
+node -e '
+const fs=require("fs"); const p=process.argv[1];
+const pkg=JSON.parse(fs.readFileSync(p,"utf8"));
+pkg.workspaces=["apps/*"];
+fs.writeFileSync(p, JSON.stringify(pkg,null,2)+"\n");
+' "$EXPORT_IGNORE/package.json"
+printf '%s\n' 'apps/d/ export-ignore' >"$EXPORT_IGNORE/.gitattributes"
+git -C "$EXPORT_IGNORE" add -A && git -C "$EXPORT_IGNORE" commit -qm export-ignore
+output="$(run_check "$EXPORT_IGNORE" 2>&1)" && rc=0 || rc=$?
+# Without export-ignore neutralization, archive would omit apps/d and pass; with neutralization it installs and rewrites.
+if [[ "$rc" -eq 1 && "$output" == *'candidate bun.lock changes on install'* ]]; then
+  echo 'PASS: export-ignore workspace still present in probe and fails'
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: export-ignore (rc=$rc): $output" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+# export-subst manifest keeps exact bytes
+SUBST="$TMP/export-subst"
+rm -rf "$SUBST"
+cp -a "$HOIST" "$SUBST"
+node -e '
+const fs=require("fs"); const p=process.argv[1];
+const pkg=JSON.parse(fs.readFileSync(p,"utf8"));
+pkg.description="$Format:%H$";
+fs.writeFileSync(p, JSON.stringify(pkg,null,2)+"\n");
+' "$SUBST/apps/a/package.json"
+printf '%s\n' 'apps/a/package.json export-subst' >"$SUBST/.gitattributes"
+git -C "$SUBST" add -A && git -C "$SUBST" commit -qm subst
+before_bytes=$(git -C "$SUBST" show HEAD:apps/a/package.json | sha256sum | awk '{print $1}')
+# Materialize the way the probe does (checkout-index), and assert blob bytes are unchanged.
+mat=$(mktemp -d)
+idx="$mat/index"
+snap="$mat/tree"
+mkdir -p "$snap"
+GIT_INDEX_FILE="$idx" GIT_NO_LAZY_FETCH=1 git -C "$SUBST" read-tree HEAD
+GIT_INDEX_FILE="$idx" GIT_NO_LAZY_FETCH=1 git -C "$SUBST" -c core.autocrlf=false \
+  -c filter.lfs.smudge= -c filter.lfs.process= -c filter.lfs.required=false \
+  checkout-index -a -f --prefix="$snap/"
+after_bytes=$(sha256sum "$snap/apps/a/package.json" | awk '{print $1}')
+rm -rf "$mat"
+if [[ "$before_bytes" == "$after_bytes" ]] && grep -q '\$Format:%H\$' <(git -C "$SUBST" show HEAD:apps/a/package.json); then
+  echo 'PASS: export-subst neutralized (manifest bytes kept)'
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: export-subst changed bytes ($before_bytes -> $after_bytes)" >&2
+  FAIL=$((FAIL + 1))
+fi
+output="$(run_check "$SUBST" 2>&1)" && rc=0 || rc=$?
+if [[ "$rc" -eq 0 ]]; then
+  echo 'PASS: export-subst tree still install-stable'
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: export-subst stability (rc=$rc): $output" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+# Symlinked manifest pointing outside the snapshot is refused
+SYMLINK="$TMP/symlink-escape"
+rm -rf "$SYMLINK"
+cp -a "$HOIST" "$SYMLINK"
+outside="$TMP/outside-manifest"
+mkdir -p "$outside"
+printf '%s\n' '{"name":"a","dependencies":{"kit-pin":"1.0.1"}}' >"$outside/package.json"
+rm -f "$SYMLINK/apps/a/package.json"
+ln -s "$outside/package.json" "$SYMLINK/apps/a/package.json"
+git -C "$SYMLINK" add -A && git -C "$SYMLINK" commit -qm symlink
+output="$(run_check "$SYMLINK" 2>&1)" && rc=0 || rc=$?
+if [[ "$rc" -eq 1 && "$output" == *'symlink escapes snapshot'* ]]; then
+  echo 'PASS: outside symlink refused'
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: outside symlink (rc=$rc): $output" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+# Large tracked file streams (no in-memory buffer limit)
+LARGE="$TMP/large-file"
+rm -rf "$LARGE"
+cp -a "$HOIST" "$LARGE"
+dd if=/dev/zero of="$LARGE/big.bin" bs=1M count=4 status=none
+git -C "$LARGE" add big.bin && git -C "$LARGE" commit -qm large
+output="$(run_check "$LARGE" 2>&1)" && rc=0 || rc=$?
+if [[ "$rc" -eq 0 ]]; then
+  echo 'PASS: large tracked file streams through materialize'
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: large file (rc=$rc): $output" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+# lockfile-only mutant
 LOCKFILE_ONLY_MUTANT="$TMP/lockfile-only-mutant"
 rm -rf "$LOCKFILE_ONLY_MUTANT"
 cp -a "$HOIST" "$LOCKFILE_ONLY_MUTANT"
 node -e '
-const fs = require("node:fs");
-const p = process.argv[1];
-let s = fs.readFileSync(p, "utf8");
-const from = "['\''install'\'', '\''--offline'\'', '\''--ignore-scripts'\'']";
-const to = "['\''install'\'', '\''--lockfile-only'\'', '\''--offline'\'', '\''--ignore-scripts'\'', '\''--minimum-release-age'\'', '\''0'\'']";
-const t = s.replace(from, to);
-if (t === s) process.exit(1);
-fs.writeFileSync(p, t);
+const fs=require("fs"); const p=process.argv[1]; let s=fs.readFileSync(p,"utf8");
+const from="['\''--no-env-file'\'', '\''install'\'', '\''--offline'\'', '\''--ignore-scripts'\'', '\''--cache-dir'\'', cacheDir]";
+const to="['\''--no-env-file'\'', '\''install'\'', '\''--lockfile-only'\'', '\''--offline'\'', '\''--ignore-scripts'\'', '\''--cache-dir'\'', cacheDir]";
+const t=s.replace(from,to); if(t===s) process.exit(1); fs.writeFileSync(p,t);
 ' "$LOCKFILE_ONLY_MUTANT/scripts/kit/check-lock-ranges.ts"
-output="$(
-  cd "$LOCKFILE_ONLY_MUTANT" &&
-    env -u LOCK_RANGES_ROOT BUN_INSTALL_CACHE_DIR="$HOIST_CACHE" bun scripts/kit/check-lock-ranges.ts 2>&1
-)" && rc=0 || rc=$?
+output="$(run_check "$LOCKFILE_ONLY_MUTANT" 2>&1)" && rc=0 || rc=$?
 if [[ "$rc" -eq 1 && "$output" == *'candidate bun.lock changes on install'* ]]; then
   echo 'PASS: --lockfile-only comparison mutant killed'
   PASS=$((PASS + 1))
@@ -818,26 +763,66 @@ else
 fi
 
 cold_cache="$TMP/hoist-cache-cold"
-cold_home="$TMP/hoist-home-cold"
-rm -rf "$cold_cache" "$cold_home"
-mkdir -p "$cold_cache" "$cold_home"
+rm -rf "$cold_cache"
+mkdir -p "$cold_cache"
 cold_start=$(date +%s%N)
-output="$(
-  cd "$HOIST" &&
-    env -u LOCK_RANGES_ROOT BUN_INSTALL_CACHE_DIR="$cold_cache" HOME="$cold_home" \
-      bun scripts/kit/check-lock-ranges.ts 2>&1
-)" && rc=0 || rc=$?
+output="$(cd "$HOIST" && env -u LOCK_RANGES_ROOT BUN_INSTALL_CACHE_DIR="$cold_cache" bun scripts/kit/check-lock-ranges.ts 2>&1)" && rc=0 || rc=$?
 cold_end=$(date +%s%N)
 cold_ms=$(( (cold_end - cold_start) / 1000000 ))
 printf '%s\n' "$cold_ms" >"$TMP/probe-cold-ms.txt"
 if [[ "$rc" -eq 1 && "$output" == *'warm the Bun cache'* ]]; then
-  echo "PASS: cold empty cache against hoist fixture fails closed (${cold_ms}ms)"
+  echo "PASS: cold empty cache fails closed (${cold_ms}ms)"
   PASS=$((PASS + 1))
 else
-  echo "FAIL: cold cache timing case (rc=$rc): $output" >&2
+  echo "FAIL: cold cache (rc=$rc): $output" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+# Staged unstable lock vs stable HEAD during an open merge must fail.
+STAGED="$TMP/staged-vs-head"
+rm -rf "$STAGED"
+cp -a "$HOIST" "$STAGED"
+# Create a second commit that restores a stable lock, then stage an unstable index during merge-ish write-tree
+node -e 'const fs=require("fs"); const p=process.argv[1]; const s=fs.readFileSync(p,"utf8"); const t=s.replace(/  "trustedDependencies": \[\],\n/,""); if(t===s) process.exit(1); fs.writeFileSync(p,t)' "$STAGED/bun.lock"
+git -C "$STAGED" add bun.lock && git -C "$STAGED" commit -qm unstable-head
+# Now HEAD is unstable. Make a stable staged tree by restoring trustedDependencies in the index only.
+cp "$HOIST/bun.lock" "$STAGED/bun.lock"
+git -C "$STAGED" add bun.lock
+# Simulate open merge: write MERGE_HEAD and keep staged stable? Assignment wants staged unstable, HEAD stable.
+git -C "$STAGED" reset --hard HEAD~1 >/dev/null
+# HEAD is stable (hoist). Stage unstable lock while MERGE_HEAD present.
+node -e 'const fs=require("fs"); const p=process.argv[1]; const s=fs.readFileSync(p,"utf8"); const t=s.replace(/  "trustedDependencies": \[\],\n/,""); if(t===s) process.exit(1); fs.writeFileSync(p,t)' "$STAGED/bun.lock"
+git -C "$STAGED" add bun.lock
+git -C "$STAGED" rev-parse HEAD >"$STAGED/.git/MERGE_HEAD"
+output="$(run_check "$STAGED" 2>&1)" && rc=0 || rc=$?
+if [[ "$rc" -eq 1 && "$output" == *'candidate bun.lock changes on install'* ]]; then
+  echo 'PASS: unstable staged lock fails despite stable HEAD'
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: staged-vs-head (rc=$rc): $output" >&2
+  FAIL=$((FAIL + 1))
+fi
+# Mutant: always HEAD instead of staged tree → killed (would pass)
+HEAD_MUTANT="$TMP/head-mutant"
+rm -rf "$HEAD_MUTANT"
+cp -a "$STAGED" "$HEAD_MUTANT"
+node -e '
+const fs=require("fs"); const p=process.argv[1]; let s=fs.readFileSync(p,"utf8");
+const from="if (!existsSync(resolve(root, merge.stdout.toString().trim()))) return '\''HEAD'\''\n  const tree = spawnSync('\''git'\'', ['\''write-tree'\''], { cwd: root })";
+const to="if (!existsSync(resolve(root, merge.stdout.toString().trim()))) return '\''HEAD'\''\n  return '\''HEAD'\''\n  const tree = spawnSync('\''git'\'', ['\''write-tree'\''], { cwd: root })";
+const t=s.replace(from,to);
+if(t===s) process.exit(1); fs.writeFileSync(p,t);
+' "$HEAD_MUTANT/scripts/kit/check-lock-ranges.ts"
+output="$(run_check "$HEAD_MUTANT" 2>&1)" && rc=0 || rc=$?
+if [[ "$rc" -eq 0 ]]; then
+  echo 'PASS: always-HEAD mutant killed'
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: always-HEAD mutant still failed (rc=$rc): $output" >&2
   FAIL=$((FAIL + 1))
 fi
 
 echo "== Lock ranges summary: $PASS pass, $FAIL fail =="
 echo "probe warm_ms=$(cat "$TMP/probe-warm-ms.txt") cold_ms=$(cat "$TMP/probe-cold-ms.txt")"
+echo "suite HOME=$HOME cache=$BUN_INSTALL_CACHE_DIR"
 [[ "$FAIL" -eq 0 ]]

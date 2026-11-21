@@ -6,6 +6,10 @@ source "${ROOT}/scripts/kit/lib/hermetic-git.sh"
 unset GITHUB_REPOSITORY
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
+SUITE_HOME="$tmp/suite-home"
+SUITE_CACHE="$tmp/suite-cache"
+mkdir -p "$SUITE_HOME" "$SUITE_CACHE"
+export HOME="$SUITE_HOME" XDG_CONFIG_HOME="$SUITE_HOME" BUN_INSTALL_CACHE_DIR="$SUITE_CACHE"
 cat > "$tmp/bun" <<'BUN'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$KIT_UPGRADE_TEST_LOG"
@@ -138,288 +142,20 @@ if FAIL_LOCK=1 run_upgrade; then exit 1; fi
 grep -q 'merge remains open' "$dir/out"
 pass 'lock-ranges failure leaves merge open without commit'
 
-stability_fixture() {
-  dir="$tmp/$1"
-  export KIT_UPGRADE_TEST_LOG="$dir/bun.log"
-  mkdir -p "$dir/seed"
-  git -C "$ROOT" archive HEAD | tar -x -C "$dir/seed"
-  cp "$ROOT/scripts/kit/kit-upgrade.sh" "$ROOT/scripts/kit/check-lock-ranges.ts" "$dir/seed/scripts/kit/"
-  cp "$ROOT/package.json" "$dir/seed/package.json"
-  git -C "$dir/seed" init -q -b main
-  git -C "$dir/seed" add .
-  git -C "$dir/seed" commit -qm initial
-  git clone -q --bare "$dir/seed" "$dir/upstream.git"
-  git clone -q "$dir/upstream.git" "$dir/product"
-  git -C "$dir/product" remote rename origin upstream
-  git -C "$dir/product" remote add origin product
-  mkdir -p "$dir/product/config/product"
-  printf '{"version":1,"upstreamCommit":"%s"}\n' "$(git -C "$dir/product" rev-parse HEAD)" > "$dir/product/config/product/inheritance.json"
-  git -C "$dir/product" add config/product/inheritance.json
-  git -C "$dir/product" commit -qm product
-}
 
-stability_fixture stable-merge
-advance
-REAL_LOCK=1 run_upgrade
-[[ ! -f "$dir/product/.git/MERGE_HEAD" ]]
-git -C "$dir/product" show HEAD:bun.lock | cmp - "$ROOT/bun.lock"
-pass 'upgrade commits install-stable staged lock'
-
-stability_fixture frozen-fail
-advance
-before=$(git -C "$dir/product" rev-parse HEAD)
-if FAIL_FROZEN=1 REAL_LOCK=1 run_upgrade; then exit 1; fi
-[[ $(git -C "$dir/product" rev-parse HEAD) == "$before" && -f "$dir/product/.git/MERGE_HEAD" ]]
-grep -q 'merge remains open' "$dir/out"
-pass 'frozen install failure leaves merge open'
-
-stability_fixture check-fail
-advance
-before=$(git -C "$dir/product" rev-parse HEAD)
-if FAIL_LOCK=1 REAL_LOCK=1 run_upgrade; then exit 1; fi
-[[ $(git -C "$dir/product" rev-parse HEAD) == "$before" && -f "$dir/product/.git/MERGE_HEAD" ]]
-grep -q 'merge remains open' "$dir/out"
-pass 'lock-ranges check failure leaves merge open'
-
-stability_fixture dirty-after-check
-advance
-DIRTY_AFTER_CHECK=1 REAL_LOCK=1 run_upgrade
-[[ ! -f "$dir/product/.git/MERGE_HEAD" ]]
-[[ -n $(git -C "$dir/product" status --porcelain -- bun.lock) ]]
-git -C "$dir/product" show HEAD:bun.lock | cmp - "$ROOT/bun.lock"
-pass 'working bun.lock dirty after staging is not committed'
-
-stability_fixture decoy-env
-advance
-mkdir -p "$dir/decoy"
-printf '%s\n' '{"lockfileVersion":1,"workspaces":{"":{"name":"decoy","dependencies":{"left-pad":"^1.0.0"}}},"packages":{"left-pad":["left-pad@2.0.0","",{},"sha512-x"]}}' >"$dir/decoy/bun.lock"
-LOCK_RANGES_ROOT="$dir/decoy" REAL_LOCK=1 run_upgrade
-[[ ! -f "$dir/product/.git/MERGE_HEAD" ]]
-if grep -q 'left-pad' "$dir/out"; then
-  echo 'FAIL: decoy LOCK_RANGES_ROOT was consulted' >&2
-  exit 1
-fi
-pass 'inherited LOCK_RANGES_ROOT decoy is ignored'
-
-stability_fixture out-of-range
-node -e '
-const fs=require("fs");
-const lockPath=process.argv[1], pkgPath=process.argv[2];
-const pkg=JSON.parse(fs.readFileSync(pkgPath,"utf8"));
-pkg.overrides={...(pkg.overrides||{}), lefthook:"^2.3.0"};
-fs.writeFileSync(pkgPath,JSON.stringify(pkg,null,2)+"\n");
-const lock=fs.readFileSync(lockPath,"utf8");
-const old="  \"overrides\": {\n    \"@better-auth/core\": \"1.7.27\",\n  },";
-const next=lock.replace(old,"  \"overrides\": {\n    \"@better-auth/core\": \"1.7.27\",\n    \"lefthook\": \"^2.3.0\",\n  },");
-if(next===lock||!next.includes("lefthook@2.2.2")) process.exit(1);
-fs.writeFileSync(lockPath,next);
-' "$dir/seed/bun.lock" "$dir/seed/package.json"
-advance
-before=$(git -C "$dir/product" rev-parse HEAD)
-if REAL_LOCK=1 run_upgrade; then exit 1; fi
-[[ $(git -C "$dir/product" rev-parse HEAD) == "$before" && -f "$dir/product/.git/MERGE_HEAD" ]]
-grep -q 'does not satisfy the range\|does not satisfy\|lefthook' "$dir/out"
-pass 'out-of-range staged resolution leaves merge open'
-
-# Hoisting-only three-app product: ordinary-stable lock commits through kit-upgrade.
-build_hoist_product() {
-  dir="$tmp/hoist-upgrade"
+# Product fixture rooted on the loopback hoist lock (hermetic cache).
+hoist_product_fixture() {
+  local name=$1
+  dir="$tmp/$name"
   export KIT_UPGRADE_TEST_LOG="$dir/bun.log"
   mkdir -p "$dir"
-  hoist_cache="$dir/cache"
-  mkdir -p "$hoist_cache"
-  cat >"$dir/build-hoist.py" <<'HOISTPY'
-#!/usr/bin/env python3
-"""Build a three-app hoisting-stable lock fixture with a loopback registry."""
-from __future__ import annotations
-import datetime as dt, json, os, shutil, subprocess, sys, tarfile, threading
-from base64 import b64encode
-from hashlib import sha512
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from io import BytesIO
-from pathlib import Path
-
-root = Path(sys.argv[1]).resolve()
-cache = Path(sys.argv[2]).resolve()
-scanner = Path(sys.argv[3]).resolve() if len(sys.argv) > 3 else None
-extra_files = {}  # filled by callers via env JSON if needed
-
-if root.exists():
-    shutil.rmtree(root)
-root.mkdir(parents=True)
-cache.mkdir(parents=True, exist_ok=True)
-
-bodies: dict[str, bytes] = {}
-records: dict[tuple[str, str], dict] = {}
-logs: list[str] = []
-port_box = {"port": 0}
-
-
-def make_tgz(name: str, version: str) -> tuple[str, bytes, str]:
-    raw = json.dumps({"name": name, "version": version}).encode()
-    buf = BytesIO()
-    with tarfile.open(fileobj=buf, mode="w:gz") as tar:
-        info = tarfile.TarInfo("package/package.json")
-        info.size = len(raw)
-        tar.addfile(info, BytesIO(raw))
-    blob = buf.getvalue()
-    path = f"{name}/-/{name}-{version}.tgz"
-    integrity = "sha512-" + b64encode(sha512(blob).digest()).decode()
-    return path, blob, integrity
-
-
-for version in ("1.0.0", "1.0.1"):
-    path, blob, integrity = make_tgz("kit-pin", version)
-    bodies[path] = blob
-    records[("kit-pin", version)] = {
-        "name": "kit-pin",
-        "version": version,
-        "dist": {"tarball": "", "integrity": integrity},
-    }
-
-
-class Registry(BaseHTTPRequestHandler):
-    def log_message(self, *args):  # noqa: A003
-        return
-
-    def do_GET(self):  # noqa: N802
-        path = self.path.strip("/")
-        logs.append(path)
-        if path == "kit-pin":
-            versions = ["1.0.0", "1.0.1"]
-            obj = {
-                "name": "kit-pin",
-                "dist-tags": {"latest": "1.0.1"},
-                "versions": {},
-                "time": {
-                    "modified": "2025-01-01T00:00:00.000Z",
-                    "created": "2025-01-01T00:00:00.000Z",
-                },
-            }
-            for v in versions:
-                meta = json.loads(json.dumps(records[("kit-pin", v)]))
-                meta["dist"]["tarball"] = f"http://127.0.0.1:{port_box['port']}/kit-pin/-/kit-pin-{v}.tgz"
-                obj["versions"][v] = meta
-                obj["time"][v] = "2025-01-01T00:00:00.000Z"
-            buf = json.dumps(obj).encode()
-            mime = "application/json"
-        elif path in bodies:
-            buf = bodies[path]
-            mime = "application/octet-stream"
-        else:
-            self.send_error(404)
-            return
-        self.send_response(200)
-        self.send_header("Content-Type", mime)
-        self.send_header("Content-Length", str(len(buf)))
-        self.end_headers()
-        self.wfile.write(buf)
-
-
-srv = ThreadingHTTPServer(("127.0.0.1", 0), Registry)
-port_box["port"] = srv.server_address[1]
-threading.Thread(target=srv.serve_forever, daemon=True).start()
-url = f"http://127.0.0.1:{port_box['port']}/"
-
-bun_version = subprocess.check_output(["bun", "-v"], text=True).strip()
-(root / "package.json").write_text(
-    json.dumps(
-        {
-            "name": "hoist-root",
-            "private": True,
-            "workspaces": ["apps/*"],
-            "trustedDependencies": [],
-            "packageManager": f"bun@{bun_version}",
-        },
-        indent=2,
-    )
-    + "\n"
-)
-(root / "bunfig.toml").write_text(f'[install]\nregistry = "{url}"\nminimumReleaseAge = 259200\n')
-for app, ver in (("a", "1.0.1"), ("b", "1.0.0"), ("c", "1.0.1")):
-    app_dir = root / "apps" / app
-    app_dir.mkdir(parents=True)
-    (app_dir / "package.json").write_text(json.dumps({"name": app, "dependencies": {"kit-pin": ver}}) + "\n")
-if scanner is not None:
-    scripts = root / "scripts" / "kit"
-    scripts.mkdir(parents=True)
-    shutil.copy(scanner, scripts / "check-lock-ranges.ts")
-
-env = {**os.environ, "BUN_INSTALL_CACHE_DIR": str(cache)}
-
-
-def run(*args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["bun", *args],
-        cwd=root,
-        env=env,
-        text=True,
-        capture_output=True,
-        timeout=60,
-    )
-
-
-r = run("install", "--lockfile-only", "--ignore-scripts")
-if r.returncode != 0:
-    sys.stderr.write(r.stdout + r.stderr)
-    raise SystemExit("initial lockfile-only failed")
-
-lock = json.loads(
-    subprocess.check_output(
-        ["bun", "-e", 'console.log(JSON.stringify(Bun.JSONC.parse(await Bun.file("bun.lock").text())))'],
-        cwd=root,
-        text=True,
-    )
-)
-high = next(v for v in lock["packages"].values() if v[0] == "kit-pin@1.0.1")
-low = next(v for v in lock["packages"].values() if v[0] == "kit-pin@1.0.0")
-next_packages = {k: v for k, v in lock["packages"].items() if k != "kit-pin" and not k.endswith("/kit-pin")}
-next_packages["kit-pin"] = low
-next_packages["a/kit-pin"] = high
-next_packages["c/kit-pin"] = high
-lock["packages"] = next_packages
-(root / "bun.lock").write_text(json.dumps(lock, indent=2) + "\n")
-before = (root / "bun.lock").read_bytes()
-
-r = run("install", "--frozen-lockfile", "--minimum-release-age", "0", "--ignore-scripts")
-if r.returncode != 0:
-    sys.stderr.write(r.stdout + r.stderr)
-    raise SystemExit("frozen warmup failed")
-srv.shutdown()
-if (root / "bun.lock").read_bytes() != before:
-    raise SystemExit("frozen rewrote lock")
-
-# Prove ordinary offline keeps bytes and lockfile-only would rewrite.
-r = run("install", "--offline", "--ignore-scripts")
-if r.returncode != 0 or (root / "bun.lock").read_bytes() != before:
-    raise SystemExit("ordinary offline did not keep lock")
-writer = root.parent / (root.name + "-writer")
-if writer.exists():
-    shutil.rmtree(writer)
-shutil.copytree(root, writer, ignore=shutil.ignore_patterns("node_modules", ".pkg"))
-r = subprocess.run(
-    ["bun", "install", "--lockfile-only", "--offline", "--ignore-scripts", "--minimum-release-age", "0"],
-    cwd=writer,
-    env=env,
-    text=True,
-    capture_output=True,
-    timeout=60,
-)
-if r.returncode != 0:
-    sys.stderr.write(r.stdout + r.stderr)
-    raise SystemExit("lockfile-only offline failed")
-if (writer / "bun.lock").read_bytes() == before:
-    raise SystemExit("lockfile-only did not rewrite hoisting layout")
-print("hoist fixture ready")
-print("registry_hits", len(logs))
-
-HOISTPY
-  python3 "$dir/build-hoist.py" "$dir/seed" "$hoist_cache" "$ROOT/scripts/kit/check-lock-ranges.ts"
-  printf '%s\n' 'node_modules/' '.pkg/' >"$dir/seed/.gitignore"
-  rm -rf "$dir/seed/node_modules" "$dir/seed"/apps/*/node_modules "$dir/seed/.pkg"
-  mkdir -p "$dir/seed/scripts/kit" "$dir/seed/config/kit" "$dir/seed/config/product"
+  python3 "$ROOT/scripts/kit/lib/build-hoist-fixture.py" "$dir/seed" "$SUITE_CACHE" "$ROOT/scripts/kit/check-lock-ranges.ts"
+  printf '%s\n' 'node_modules/' '.pkg/' '.hermetic-home/' >"$dir/seed/.gitignore"
+  rm -rf "$dir/seed/node_modules" "$dir/seed"/apps/*/node_modules "$dir/seed/.pkg" "$dir/seed/.hermetic-home"
+  mkdir -p "$dir/seed/scripts/kit/lib" "$dir/seed/config/kit" "$dir/seed/config/product"
   cp "$ROOT/scripts/kit/kit-upgrade.sh" "$ROOT/scripts/kit/resolve-tree-identity.mjs" "$dir/seed/scripts/kit/"
   cp "$ROOT/scripts/kit/check-lock-ranges.ts" "$dir/seed/scripts/kit/"
+  cp "$ROOT/scripts/kit/lib/jsonc-strict.ts" "$dir/seed/scripts/kit/lib/"
   : >"$dir/seed/config/kit/bunfig.gates.toml"
   printf '%s\n' '{"version":1,"kit_origin_allowlist":["kit"]}' >"$dir/seed/config/kit/zero-edit-zones.json"
   node -e '
@@ -444,18 +180,83 @@ fs.writeFileSync(p, JSON.stringify(pkg,null,2)+"\n");
   printf '{"version":1,"upstreamCommit":"%s"}\n' "$(git -C "$dir/product" rev-parse HEAD)" > "$dir/product/config/product/inheritance.json"
   git -C "$dir/product" add config/product/inheritance.json
   git -C "$dir/product" commit -qm product
-  echo change > "$dir/seed/change"
+}
+
+advance_seed() {
+  echo "change-$RANDOM" > "$dir/seed/change"
   git -C "$dir/seed" add change
   git -C "$dir/seed" commit -qm update
   git -C "$dir/seed" push -q "$dir/upstream.git" main
 }
 
-build_hoist_product
-export BUN_INSTALL_CACHE_DIR="$dir/cache"
+hoist_product_fixture stable-merge
+advance_seed
+REAL_LOCK=1 run_upgrade
+[[ ! -f "$dir/product/.git/MERGE_HEAD" ]]
+pass 'upgrade commits install-stable staged lock'
+
+hoist_product_fixture frozen-fail
+advance_seed
+before=$(git -C "$dir/product" rev-parse HEAD)
+if FAIL_FROZEN=1 REAL_LOCK=1 run_upgrade; then exit 1; fi
+[[ $(git -C "$dir/product" rev-parse HEAD) == "$before" && -f "$dir/product/.git/MERGE_HEAD" ]]
+grep -q 'frozen install of the merged lock failed' "$dir/out"
+pass 'frozen install failure leaves merge open with its own stop'
+
+hoist_product_fixture check-fail
+advance_seed
+before=$(git -C "$dir/product" rev-parse HEAD)
+if FAIL_LOCK=1 REAL_LOCK=1 run_upgrade; then exit 1; fi
+[[ $(git -C "$dir/product" rev-parse HEAD) == "$before" && -f "$dir/product/.git/MERGE_HEAD" ]]
+grep -q 'merge remains open' "$dir/out"
+pass 'lock-ranges check failure leaves merge open'
+
+hoist_product_fixture dirty-after-check
+advance_seed
+DIRTY_AFTER_CHECK=1 REAL_LOCK=1 run_upgrade
+[[ ! -f "$dir/product/.git/MERGE_HEAD" ]]
+[[ -n $(git -C "$dir/product" status --porcelain -- bun.lock) ]]
+pass 'working bun.lock dirty after staging is not committed'
+
+hoist_product_fixture decoy-env
+advance_seed
+mkdir -p "$dir/decoy"
+printf '%s\n' '{"lockfileVersion":1,"workspaces":{"":{"name":"decoy","dependencies":{"left-pad":"^1.0.0"}}},"packages":{"left-pad":["left-pad@2.0.0","",{},"sha512-x"]}}' >"$dir/decoy/bun.lock"
+LOCK_RANGES_ROOT="$dir/decoy" REAL_LOCK=1 run_upgrade
+[[ ! -f "$dir/product/.git/MERGE_HEAD" ]]
+if grep -q 'left-pad' "$dir/out"; then
+  echo 'FAIL: decoy LOCK_RANGES_ROOT was consulted' >&2
+  exit 1
+fi
+pass 'inherited LOCK_RANGES_ROOT decoy is ignored'
+
+hoist_product_fixture out-of-range
+# Force an out-of-range resolution: pin kit-pin workspace range to 9.0.0 while lock keeps 1.0.x
+node -e '
+const fs=require("fs");
+const lockPath=process.argv[1], pkgPath=process.argv[2];
+const lock=JSON.parse(fs.readFileSync(lockPath,"utf8"));
+lock.workspaces["apps/a"].dependencies["kit-pin"]="9.0.0";
+fs.writeFileSync(lockPath, JSON.stringify(lock,null,2)+"\n");
+const pkg=JSON.parse(fs.readFileSync(pkgPath,"utf8"));
+fs.writeFileSync(pkgPath, JSON.stringify(pkg,null,2)+"\n");
+' "$dir/seed/bun.lock" "$dir/seed/apps/a/package.json"
+# Also update the workspace package.json that the lock mirrors for honesty of the tree
+printf '%s\n' '{"name":"a","dependencies":{"kit-pin":"9.0.0"}}' >"$dir/seed/apps/a/package.json"
+git -C "$dir/seed" add -A && git -C "$dir/seed" commit -qm out-of-range
+git -C "$dir/seed" push -q "$dir/upstream.git" main
+before=$(git -C "$dir/product" rev-parse HEAD)
+if REAL_LOCK=1 run_upgrade; then exit 1; fi
+[[ $(git -C "$dir/product" rev-parse HEAD) == "$before" && -f "$dir/product/.git/MERGE_HEAD" ]]
+grep -q 'does not satisfy the range\|kit-pin' "$dir/out"
+pass 'out-of-range staged resolution leaves merge open'
+
+hoist_product_fixture hoist-upgrade
+advance_seed
 REAL_LOCK=1 run_upgrade
 [[ ! -f "$dir/product/.git/MERGE_HEAD" ]]
 [[ $(git -C "$dir/product" rev-list --parents -n 1 HEAD | wc -w) == 3 ]]
-(cd "$dir/product" && BUN_INSTALL_CACHE_DIR="$dir/cache" bun --no-env-file --config=config/kit/bunfig.gates.toml run scripts/kit/check-lock-ranges.ts) >/dev/null
+(cd "$dir/product" && bun --no-env-file --config=config/kit/bunfig.gates.toml run scripts/kit/check-lock-ranges.ts) >/dev/null
 pass 'hoisting-only layout commits through kit-upgrade'
 
 fixture check

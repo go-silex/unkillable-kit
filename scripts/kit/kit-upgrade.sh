@@ -60,7 +60,7 @@ printf '{\n  "version": 1,\n  "upstreamCommit": "%s"\n}\n' "$(git rev-parse upst
 bun_cmd=${KIT_UPGRADE_BUN:-bun}
 git add bun.lock config/product/inheritance.json
 if ! "$bun_cmd" install --frozen-lockfile --minimum-release-age 0; then
-  echo 'stop: merge remains open; resolve lock-ranges findings by owner and resume as documented in Pulling kit upgrades' >&2
+  echo 'stop: merge remains open; frozen install of the merged lock failed (see the error above); repair the lock and resume as documented in Pulling kit upgrades' >&2
   exit 1
 fi
 if ! "$bun_cmd" run lock-ranges:check; then
