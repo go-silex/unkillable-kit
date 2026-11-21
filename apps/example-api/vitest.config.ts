@@ -1,6 +1,7 @@
 import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vitest/config'
 import { makeCoverage } from '../../packages/config/vitest-coverage.mts'
+import { ciMaxWorkers } from '../../packages/config/vitest-workers.mts'
 
 export default defineConfig({
   resolve: {
@@ -14,7 +15,7 @@ export default defineConfig({
     },
   },
   test: {
-    maxWorkers: process.env.CI ? '100%' : undefined,
+    maxWorkers: ciMaxWorkers,
     environment: 'node',
     include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
     // Backend kit bar — keep high; raise further when adding domains.

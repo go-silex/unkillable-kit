@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Vitest CI workers
+
+- Kit and newly generated Product Apps use all available Vitest workers in CI, without changing local defaults.
+- Root lint rejects Kit-owned Vitest configs that omit the shared setting and warns for existing Product Apps.
+
 ### Module catalogue reads
 
 - The Example App reads module availability from `platform_modules` only and no longer falls back to the legacy `kit_modules` table. The table, its catalog ids and `@kit/auth/repos/modules` remain; dropping the table will be a separate contract migration (ADR-0003 D7).
