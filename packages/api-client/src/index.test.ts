@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  type ApiClientOptions,
   ApiError,
+  type ApiFetchInit,
   apiErrorFieldErrors,
   apiErrorToMessage,
   apiFetch,
@@ -355,5 +357,90 @@ describe('apiFetch / createApiClient', () => {
   it('rejects invalid JSON on success', async () => {
     const fetch = vi.fn().mockResolvedValue({ ok: true, status: 200, text: async () => 'not JSON' })
     await expect(apiFetch('/test', undefined, { fetch })).rejects.toThrow('Invalid JSON response')
+  })
+})
+
+describe('apiFetch body content-type', () => {
+  async function requestFromApiFetch(
+    init: ApiFetchInit,
+    opts: ApiClientOptions = {},
+  ): Promise<Request> {
+    let captured: Request | undefined
+    const fetch = vi.fn(async (input: RequestInfo | URL, fetchInit?: RequestInit) => {
+      captured = new Request(input, fetchInit)
+      return { ok: true, status: 200, text: async () => 'null' }
+    })
+    await apiFetch('/upload', init, {
+      baseUrl: 'https://api.example',
+      ...opts,
+      fetch: fetch as unknown as typeof globalThis.fetch,
+    })
+    if (!captured) throw new Error('fetch was not called')
+    return captured
+  }
+
+  it('lets fetch derive multipart/form-data for FormData bodies', async () => {
+    const body = new FormData()
+    body.append('title', 'report')
+    body.append('file', new File(['hello'], 'hello.txt', { type: 'text/plain' }))
+    const request = await requestFromApiFetch({ method: 'POST', body })
+    const contentType = request.headers.get('content-type')
+    expect(contentType).toMatch(/^multipart\/form-data;\s*boundary=/)
+    const formData = await request.formData()
+    expect(formData.get('title')).toBe('report')
+    const file = formData.get('file')
+    expect(file).toBeInstanceOf(File)
+    if (!(file instanceof File)) throw new Error('expected File')
+    expect(file.name).toBe('hello.txt')
+    expect(await file.text()).toBe('hello')
+  })
+
+  it('lets fetch derive urlencoded content-type for URLSearchParams', async () => {
+    const request = await requestFromApiFetch({
+      method: 'POST',
+      body: new URLSearchParams({ q: 'kit' }),
+    })
+    expect(request.headers.get('content-type')).toBe(
+      'application/x-www-form-urlencoded;charset=UTF-8',
+    )
+  })
+
+  it('keeps a typed Blob content-type', async () => {
+    const request = await requestFromApiFetch({
+      method: 'POST',
+      body: new Blob(['{"a":1}'], { type: 'application/vnd.kit+json' }),
+    })
+    expect(request.headers.get('content-type')).toBe('application/vnd.kit+json')
+  })
+
+  it('sends binary bodies without a content-type', async () => {
+    const request = await requestFromApiFetch({
+      method: 'POST',
+      body: new TextEncoder().encode('{"a":1}').buffer,
+    })
+    expect(request.headers.get('content-type')).toBeNull()
+    expect(await request.text()).toBe('{"a":1}')
+  })
+
+  it('defaults string bodies to application/json', async () => {
+    const request = await requestFromApiFetch({ method: 'POST', body: '{"ok":true}' })
+    expect(request.headers.get('content-type')).toBe('application/json')
+  })
+
+  it('keeps an explicit request content-type', async () => {
+    const request = await requestFromApiFetch({
+      method: 'POST',
+      body: '{"ok":true}',
+      headers: { 'content-type': 'application/vnd.custom+json' },
+    })
+    expect(request.headers.get('content-type')).toBe('application/vnd.custom+json')
+  })
+
+  it('keeps defaultHeaders content-type', async () => {
+    const request = await requestFromApiFetch(
+      { method: 'POST', body: '{"ok":true}' },
+      { defaultHeaders: { 'content-type': 'application/vnd.default+json' } },
+    )
+    expect(request.headers.get('content-type')).toBe('application/vnd.default+json')
   })
 })
