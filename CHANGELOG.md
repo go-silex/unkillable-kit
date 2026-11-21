@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### API client body content type
+
+- `apiFetch` / `createApiClient` set `content-type: application/json` only for string bodies with no content type already set. `FormData`, `URLSearchParams`, and typed `Blob` bodies keep the content type `fetch` derives. Binary bodies (`ArrayBuffer`, typed arrays, streams) are now sent without a content type: a caller sending JSON that way must set `content-type` explicitly.
+
 ### Shared CI install recipe
 
 - Root core, grouped coverage and the maintained Product CI template call Kit-owned `scripts/kit/ci-install.sh` for the frozen Bun install with the selected Node's bundled `node-gyp` shim. Existing Products opt in once after upstream merge by matching that Install step (and pinned Node setup if missing), keeping Product-specific checks.
