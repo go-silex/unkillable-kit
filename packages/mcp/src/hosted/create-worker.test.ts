@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { getOAuthApi } from '@cloudflare/workers-oauth-provider'
 import { createBetterAuth } from '@kit/auth/factory'
 import { createOidcProvider, registerOidcClient } from '@kit/auth/oidc-provider'
+import { createSiteFetch } from '@kit/core'
 import { createSqliteD1 } from '@kit/db/testing'
 import Database from 'better-sqlite3'
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
@@ -278,6 +279,60 @@ async function exchangeCode(
 }
 
 describe('hosted worker routing', () => {
+  it('composes site fallthrough without serving the SPA on reserved OAuth or MCP paths', async () => {
+    const kv = new MemoryKv()
+    const assetPaths: string[] = []
+    const assets = {
+      async fetch(request: Request) {
+        const path = new URL(request.url).pathname
+        assetPaths.push(path)
+        return path === '/'
+          ? new Response('<html>site shell</html>', { headers: { 'content-type': 'text/html' } })
+          : new Response('Not found', { status: 404 })
+      },
+    }
+    type SiteEnv = HostedMcpEnv & { ASSETS: typeof assets }
+    const hosted = createHostedMcpWorker<SiteEnv>({
+      name: 'hosted-site-test',
+      identityPort: port(DEMO),
+      apiBaseUrl: () => 'http://127.0.0.1:8787',
+      register() {},
+      fallthrough: createSiteFetch<SiteEnv, ExecutionContext>({
+        api: () => new Response('product api'),
+        assets: (siteEnv) => siteEnv.ASSETS,
+      }),
+    })
+    const siteEnv = { ...env(kv), ASSETS: assets }
+
+    const dashboard = await hosted.fetch(
+      new Request(`${LOCAL}/dashboard`, { headers: { accept: 'text/html' } }),
+      siteEnv,
+      ctx(),
+    )
+    expect(dashboard.status).toBe(200)
+    expect(await dashboard.text()).toBe('<html>site shell</html>')
+    expect(assetPaths).toEqual(['/dashboard', '/'])
+
+    const api = await hosted.fetch(new Request(`${LOCAL}/api/example`), siteEnv, ctx())
+    expect(await api.text()).toBe('product api')
+
+    const mcp = await hosted.fetch(new Request(`${LOCAL}/mcp`, { method: 'POST' }), siteEnv, ctx())
+    expect(mcp.status).toBe(401)
+    expect(mcp.headers.get('www-authenticate')).toContain('Bearer')
+    for (const path of [
+      '/authorize',
+      '/token',
+      '/register',
+      '/.well-known/oauth-protected-resource/mcp',
+      '/.well-known/oauth-authorization-server',
+      '/%6Dcp-admin',
+    ]) {
+      const response = await hosted.fetch(new Request(`${LOCAL}${path}`), siteEnv, ctx())
+      expect(await response.text(), path).not.toContain('site shell')
+    }
+    expect(assetPaths).toEqual(['/dashboard', '/'])
+  })
+
   it('keeps /mcp behind the provider when a fallthrough hook is installed', async () => {
     const kv = new MemoryKv()
     const seen: string[] = []

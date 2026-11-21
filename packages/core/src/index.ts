@@ -13,3 +13,4 @@ export {
 export { createLogger, type LogFields, type Logger, type LogLevel } from './logger'
 export { isLoopbackHost } from './loopback-host'
 export { parseOrThrow, zodFieldErrors } from './parse'
+export { createSiteFetch, type SiteAssets, type SiteFetchOptions } from './site'

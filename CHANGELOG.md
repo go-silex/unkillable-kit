@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### One Worker site
+
+- `@kit/core` exports `createSiteFetch`, which serves a SPA and its API from one Worker. It routes API paths to the API, never as HTML, and fetches built files without the page query. It serves the shell only for navigations, keeps a 404 for missing built files, and passes through when no `ASSETS` binding exists. The starter API composes it, and the [playbook](docs/kit/playbooks/one-worker-site.md) carries the tested Wrangler `[assets]` recipe.
+
 ### Kit schema check
 
 - `kit-schema-sync.sh --check` prints the sync plan, writes nothing, and exits 0 when the same sync would write nothing, 2 when it would write, and 1 on any existing refusal. It cannot be combined with `--dry-run`. The product validate template runs it against the inherited catalog. `--dry-run` keeps exit 0 and now also prints a manifest `sets` change. A real sync is unchanged, except that a `migrations` path that is not a directory is now refused before planning.
