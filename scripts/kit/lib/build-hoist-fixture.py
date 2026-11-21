@@ -115,9 +115,10 @@ if scanner is not None:
     scripts.mkdir(parents=True)
     lib.mkdir(parents=True)
     shutil.copy(scanner, scripts / "check-lock-ranges.ts")
-    strict = scanner.parent / "lib" / "jsonc-strict.ts"
-    if strict.exists():
-        shutil.copy(strict, lib / "jsonc-strict.ts")
+    for name in ("jsonc-strict.ts", "materialize-tree.ts"):
+        src = scanner.parent / "lib" / name
+        if src.exists():
+            shutil.copy(src, lib / name)
 
 home = root / ".hermetic-home"
 home.mkdir(parents=True, exist_ok=True)

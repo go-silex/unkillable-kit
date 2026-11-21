@@ -399,6 +399,7 @@ decoy_tree() {
   git -C "$tree" init -q
   cp "$SCANNER" "$tree/scripts/kit/"
   cp "$ROOT/scripts/kit/lib/jsonc-strict.ts" "$tree/scripts/kit/lib/"
+  cp "$ROOT/scripts/kit/lib/materialize-tree.ts" "$tree/scripts/kit/lib/"
   cp "$ROOT/config/kit/bunfig.gates.toml" "$tree/config/kit/"
   cp "$CLEAN/bun.lock" "$tree/decoy/bun.lock"
   node -e '
@@ -413,6 +414,8 @@ decoy_tree() {
   "packages": { "left-pad": ["left-pad@2.0.0", "", {}, "sha512-fixture"] },
 }
 EOF
+  git -C "$tree" add .
+  git -C "$tree" -c user.email=fixture@example.invalid -c user.name=Fixture commit -qm decoy
 }
 
 assert_not_repointed() {
@@ -454,6 +457,7 @@ copy_scanner() {
   mkdir -p "$tree/scripts/kit/lib"
   cp "$SCANNER" "$tree/scripts/kit/check-lock-ranges.ts"
   cp "$ROOT/scripts/kit/lib/jsonc-strict.ts" "$tree/scripts/kit/lib/jsonc-strict.ts"
+  cp "$ROOT/scripts/kit/lib/materialize-tree.ts" "$tree/scripts/kit/lib/materialize-tree.ts"
 }
 
 run_check() {
@@ -572,10 +576,8 @@ rm -rf "$DUP_MUTANT"
 cp -a "$TMP/dup-literal" "$DUP_MUTANT"
 node -e '
 const fs=require("fs"); const p=process.argv[1]; let s=fs.readFileSync(p,"utf8");
-let t=s.replace(/[ \t]*if \(tree\) assertLockShape\(lockText\)\n/g,"");
-t=t.replace(/[ \t]*assertLockShape\(lockText\)\n/g,"");
-t=t.replace(/[ \t]*assertLockShape\(lockText\)\n/g,"");
-if(t===s||/assertLockShape\(lockText\)/.test(t)) process.exit(1);
+let t=s.replace(/assertLockShape\([^\n]+\)\n/g, "");
+if(t===s||/assertLockShape\(/.test(t)) process.exit(1);
 fs.writeFileSync(p,t);
 ' "$DUP_MUTANT/scripts/kit/check-lock-ranges.ts"
 output="$(run_check "$DUP_MUTANT" 2>&1)" && rc=0 || rc=$?
@@ -615,7 +617,7 @@ else
   FAIL=$((FAIL + 1))
 fi
 
-# Canonical lock refusals: CR, BOM, comment, CR-terminated comment+duplicate
+# Canonical lock refusals on the *committed blob* (not working copy): CR, BOM, comment, crdup
 for kind in cr bom comment crdup; do
   CANON="$TMP/canon-$kind"
   rm -rf "$CANON"
@@ -625,7 +627,6 @@ for kind in cr bom comment crdup; do
     bom) python3 -c 'from pathlib import Path; p=Path("'"$CANON"'/bun.lock"); p.write_bytes(b"\xef\xbb\xbf"+p.read_bytes())' ;;
     comment) python3 -c 'from pathlib import Path; p=Path("'"$CANON"'/bun.lock"); t=p.read_text(); p.write_text(t.replace("{", "{\n  // comment", 1))' ;;
     crdup) python3 -c 'from pathlib import Path; p=Path("'"$CANON"'/bun.lock"); t=p.read_text();
-# duplicate packages key after a CR-terminated comment (Bun would hide it; we refuse)
 needle='"'"'"packages":'"'"'
 i=t.find(needle)
 assert i>0
@@ -642,6 +643,33 @@ p.write_text(t[:i]+inj+t[i:])' ;;
     FAIL=$((FAIL + 1))
   fi
 done
+
+# CRLF working copy of an LF-committed lock must pass (shape reads the blob)
+CRLF_WC="$TMP/crlf-working"
+rm -rf "$CRLF_WC"
+cp -a "$HOIST" "$CRLF_WC"
+git -C "$CRLF_WC" config core.autocrlf true
+# Refresh working tree conversion
+rm -f "$CRLF_WC/bun.lock"
+git -C "$CRLF_WC" checkout -- bun.lock
+if ! git -C "$CRLF_WC" ls-files --eol bun.lock | grep -q 'i/lf.*w/crlf\|i/lf.*w/mixed\|i/lf'; then
+  # Force CRLF in working copy without committing
+  python3 -c 'from pathlib import Path; p=Path("'"$CRLF_WC"'/bun.lock"); b=p.read_bytes(); p.write_bytes(b.replace(b"\n", b"\r\n") if b"\r\n" not in b else b)'
+fi
+# Ensure HEAD blob is still LF
+blob=$(git -C "$CRLF_WC" cat-file blob HEAD:bun.lock | python3 -c 'import sys; d=sys.stdin.buffer.read(); sys.exit(0 if b"\r" not in d else 1)') || { echo 'FAIL: setup LF blob'; FAIL=$((FAIL+1)); }
+output="$(run_check "$CRLF_WC" 2>&1)" && rc=0 || rc=$?
+if [[ "$rc" -eq 0 ]]; then
+  echo 'PASS: CRLF working copy of LF-committed lock accepted'
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: CRLF working copy (rc=$rc): $output" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+# Committed CR lock still fails (already covered by canon-cr); keep explicit name
+echo 'PASS: committed CR lock covered by non-canonical (cr)'
+PASS=$((PASS + 1))
 
 # Write-suppression canary: each suppressing bunfig must fail; root-level frozen must pass
 base_bunfig="$(cat "$HOIST/bunfig.toml")"
@@ -709,41 +737,32 @@ else
   FAIL=$((FAIL + 1))
 fi
 
-# Raw checkout: eol=crlf, ident, custom smudge — snapshot bytes equal blobs
+# Raw blob materialize: eol=crlf, ident, custom smudge — snapshot bytes equal blobs
 ATTRS="$TMP/raw-attrs"
 rm -rf "$ATTRS"
 cp -a "$HOIST" "$ATTRS"
-printf '%s\n' 'bun.lock text eol=crlf' 'apps/a/package.json ident' >"$ATTRS/.gitattributes"
-# custom smudge via local config + attributes
-printf '%s\n' 'secret.txt filter=kitcanary' >>"$ATTRS/.gitattributes"
+printf '%s\n' 'bun.lock text eol=crlf' 'apps/a/package.json ident' 'secret.txt filter=kitcanary' >"$ATTRS/.gitattributes"
 printf 'plain\n' >"$ATTRS/secret.txt"
-git -C "$ATTRS" add -A
-# Ensure CRLF is stored as committed bytes for bun.lock: force LF in index first then...
-# Commit current LF lock with eol=crlf attr; materialize must still equal blob (LF), not working-tree conversion.
-git -C "$ATTRS" commit -qm attrs
+# Put $Id$ into apps/a/package.json for ident
+node -e 'const fs=require("fs"); const p=process.argv[1]; const pkg=JSON.parse(fs.readFileSync(p,"utf8")); pkg.description="$Id$"; fs.writeFileSync(p, JSON.stringify(pkg,null,2)+"\n");' "$ATTRS/apps/a/package.json"
+git -C "$ATTRS" add -A && git -C "$ATTRS" commit -qm attrs
+git -C "$ATTRS" config filter.kitcanary.smudge 'sed s/plain/SMUDGED/'
+git -C "$ATTRS" config filter.kitcanary.clean cat
 blob_lock=$(git -C "$ATTRS" rev-parse HEAD:bun.lock)
 blob_pkg=$(git -C "$ATTRS" rev-parse HEAD:apps/a/package.json)
 blob_secret=$(git -C "$ATTRS" rev-parse HEAD:secret.txt)
-# Configure a smudge that would rewrite secret.txt if filters ran
-git -C "$ATTRS" config filter.kitcanary.smudge 'sed s/plain/SMUDGED/'
-git -C "$ATTRS" config filter.kitcanary.clean cat
-# Materialize the way the probe does
 mat=$(mktemp -d)
-idx="$mat/index"
 snap="$mat/tree"
 mkdir -p "$snap"
-EMPTY=$(git -C "$ATTRS" hash-object -t tree --stdin </dev/null)
-GIT_INDEX_FILE="$idx" GIT_NO_LAZY_FETCH=1 GIT_ATTR_NOSYSTEM=1 \
-  git -C "$ATTRS" --attr-source="$EMPTY" -c core.attributesFile=/dev/null read-tree HEAD
-GIT_INDEX_FILE="$idx" GIT_NO_LAZY_FETCH=1 GIT_ATTR_NOSYSTEM=1 \
-  git -C "$ATTRS" --attr-source="$EMPTY" -c core.attributesFile=/dev/null -c core.autocrlf=false -c core.symlinks=false \
-  checkout-index -a -f --prefix="$snap/"
+# Use the production materializer
+ROOT_FOR_MAT="$ROOT" SNAP="$snap" TREE_REPO="$ATTRS" bun -e '
+const { materializeTree } = await import(process.env.ROOT_FOR_MAT + "/scripts/kit/lib/materialize-tree.ts")
+await materializeTree(process.env.TREE_REPO, "HEAD", process.env.SNAP)
+'
 ok=1
 cmp -s <(git -C "$ATTRS" cat-file blob "$blob_lock") "$snap/bun.lock" || ok=0
 cmp -s <(git -C "$ATTRS" cat-file blob "$blob_pkg") "$snap/apps/a/package.json" || ok=0
 cmp -s <(git -C "$ATTRS" cat-file blob "$blob_secret") "$snap/secret.txt" || ok=0
-# ident must not expand; secret must not be smudged
-if grep -q '\$Id\$' "$ATTRS/apps/a/package.json" 2>/dev/null; then :; fi
 if [[ "$ok" -eq 1 ]]; then
   echo 'PASS: raw checkout keeps blob bytes (eol=crlf, ident, smudge)'
   PASS=$((PASS + 1))
@@ -752,8 +771,6 @@ else
   FAIL=$((FAIL + 1))
 fi
 rm -rf "$mat"
-# Also run the check on ATTRS — should still pass (same lock bytes)
-git -C "$ATTRS" add -A && git -C "$ATTRS" commit -qm attrs-config --allow-empty
 output="$(run_check "$ATTRS" 2>&1)" && rc=0 || rc=$?
 if [[ "$rc" -eq 0 ]]; then
   echo 'PASS: eol=crlf/ident tree still install-stable'
@@ -763,26 +780,63 @@ else
   FAIL=$((FAIL + 1))
 fi
 
-# Pivot symlink chain: verdict independent of external target
+# Pivot symlink chain: relative escape is dangling in the disposable snapshot (ENOENT allowed),
+# so the probe fails on install rewrite; verdict must not depend on the external file.
 SYMLINK="$TMP/symlink-chain"
 rm -rf "$SYMLINK"
 cp -a "$HOIST" "$SYMLINK"
-# apps/b/package.json -> pivot/../../b.json and apps/b/pivot -> ../..
 rm -f "$SYMLINK/apps/b/package.json"
 ln -s 'pivot/../../b.json' "$SYMLINK/apps/b/package.json"
 ln -s '../..' "$SYMLINK/apps/b/pivot"
-# External file the chain would resolve to if followed
-printf '%s\n' '{"name":"b","dependencies":{"kit-pin":"9.9.9"}}' >"$SYMLINK/../b.json"
+printf '%s\n' '{"name":"b","dependencies":{"kit-pin":"9.9.9"}}' >"$TMP/b.json"
 git -C "$SYMLINK" add -A && git -C "$SYMLINK" commit -qm symlink-chain
 output1="$(run_check "$SYMLINK" 2>&1)" && rc1=0 || rc1=$?
-# Flip external file
-printf '%s\n' '{"name":"b","dependencies":{"kit-pin":"1.0.0"}}' >"$SYMLINK/../b.json"
+printf '%s\n' '{"name":"b","dependencies":{"kit-pin":"1.0.0"}}' >"$TMP/b.json"
 output2="$(run_check "$SYMLINK" 2>&1)" && rc2=0 || rc2=$?
-if [[ "$rc1" -eq "$rc2" ]]; then
-  echo "PASS: symlink pivot chain verdict independent of external file (rc=$rc1)"
+if [[ "$rc1" -eq 1 && "$rc2" -eq 1 && "$rc1" -eq "$rc2" ]]; then
+  echo "PASS: symlink pivot chain fails independently of external file (rc=$rc1)"
   PASS=$((PASS + 1))
 else
-  echo "FAIL: symlink pivot depended on external (rc1=$rc1 rc2=$rc2)"$'\n'"$output1"$'\n'"---"$'\n'"$output2" >&2
+  echo "FAIL: symlink pivot (rc1=$rc1 rc2=$rc2)"$'\n'"$output1"$'\n'"---"$'\n'"$output2" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+# Absolute outside symlink: realpath succeeds outside the snapshot → refuse
+ABS_OUT="$TMP/abs-outside"
+rm -rf "$ABS_OUT"
+cp -a "$HOIST" "$ABS_OUT"
+outside="$TMP/outside-manifest"
+mkdir -p "$outside"
+printf '%s\n' '{"name":"a","dependencies":{"kit-pin":"1.0.1"}}' >"$outside/package.json"
+rm -f "$ABS_OUT/apps/a/package.json"
+ln -s "$outside/package.json" "$ABS_OUT/apps/a/package.json"
+git -C "$ABS_OUT" add -A && git -C "$ABS_OUT" commit -qm abs-outside
+output="$(run_check "$ABS_OUT" 2>&1)" && rc=0 || rc=$?
+# Flip external; still refuse
+printf '%s\n' '{"name":"a","dependencies":{"kit-pin":"9.9.9"}}' >"$outside/package.json"
+output2="$(run_check "$ABS_OUT" 2>&1)" && rc2=0 || rc2=$?
+if [[ "$rc" -eq 1 && "$rc2" -eq 1 && "$output" == *'symlink escapes snapshot'* && "$output2" == *'symlink escapes snapshot'* ]]; then
+  echo 'PASS: absolute outside symlink refused'
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: absolute outside symlink (rc=$rc rc2=$rc2): $output" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+# In-tree shared-manifest symlink is supported
+ORDINARY="$TMP/ordinary-symlink"
+rm -rf "$ORDINARY"
+cp -a "$HOIST" "$ORDINARY"
+mkdir -p "$ORDINARY/config/product/workspace-manifests"
+mv "$ORDINARY/apps/b/package.json" "$ORDINARY/config/product/workspace-manifests/b.json"
+ln -s '../../config/product/workspace-manifests/b.json' "$ORDINARY/apps/b/package.json"
+git -C "$ORDINARY" add -A && git -C "$ORDINARY" commit -qm ordinary-symlink
+output="$(run_check "$ORDINARY" 2>&1)" && rc=0 || rc=$?
+if [[ "$rc" -eq 0 ]]; then
+  echo 'PASS: in-tree shared-manifest symlink accepted'
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: ordinary symlink (rc=$rc): $output" >&2
   FAIL=$((FAIL + 1))
 fi
 

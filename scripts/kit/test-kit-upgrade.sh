@@ -186,6 +186,7 @@ hoist_product_fixture() {
   cp "$ROOT/scripts/kit/kit-upgrade.sh" "$ROOT/scripts/kit/resolve-tree-identity.mjs" "$dir/seed/scripts/kit/"
   cp "$ROOT/scripts/kit/check-lock-ranges.ts" "$dir/seed/scripts/kit/"
   cp "$ROOT/scripts/kit/lib/jsonc-strict.ts" "$dir/seed/scripts/kit/lib/"
+  cp "$ROOT/scripts/kit/lib/materialize-tree.ts" "$dir/seed/scripts/kit/lib/"
   : >"$dir/seed/config/kit/bunfig.gates.toml"
   printf '%s\n' '{"version":1,"kit_origin_allowlist":["kit"]}' >"$dir/seed/config/kit/zero-edit-zones.json"
   node -e '

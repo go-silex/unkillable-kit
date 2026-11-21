@@ -8,11 +8,12 @@ import { spawnSync } from 'node:child_process'
  * `bunfig.toml` (`preload`, `define`) can set the override. That launch is the
  * guarantee: running this file with a bare `bun` gives no such protection.
  * Stability materializes the tracked candidate tree (HEAD, or the staged merge
- * tree) with a raw attr-neutral checkout, then an ordinary offline install in a
- * neutral child env using the same cache as a normal `bun pm cache` (honours
- * tree `.env`). A write-suppression canary follows. Non-canonical locks (CR,
- * BOM, comments) fail closed. Forced `--lockfile-only` is not the oracle.
- * Duplicate decoded keys are refused. Offline verification may need the local
+ * tree) as raw blobs via `ls-tree` + `cat-file --batch` (no checkout filters),
+ * then an ordinary offline install in a neutral child env using the same cache
+ * as `bun pm cache` (honours tree `.env`). A write-suppression canary follows.
+ * Shape checks (CR/BOM/comments, duplicate keys) read the candidate blob, not
+ * the working copy. Tracked symlinks must resolve inside the snapshot. Forced
+ * `--lockfile-only` is not the oracle. Offline verification may need the local
  * Bun cache. A lock without root workspace `""`, or a blind scan, fails.
  *
  * Scope: every `workspaces` entry in bun.lock, root `""` included. For each of
@@ -50,8 +51,9 @@ import { spawnSync } from 'node:child_process'
  */
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve, sep } from 'node:path'
+import { join, resolve } from 'node:path'
 import { assertLockShape, parseJsoncStrict } from './lib/jsonc-strict.ts'
+import { materializeTree } from './lib/materialize-tree.ts'
 
 const SECTIONS = ['dependencies', 'devDependencies', 'optionalDependencies'] as const
 
@@ -358,83 +360,13 @@ function resolveOperatorCache(root: string): string {
   return result.stdout.toString().trim()
 }
 
-function assertNoInfoAttributes(root: string): void {
-  const pathResult = spawnSync('git', ['rev-parse', '--git-path', 'info/attributes'], {
+function readCandidateLockBlob(root: string, tree: string): string {
+  const result = spawnSync('git', ['cat-file', 'blob', `${tree}:bun.lock`], {
     cwd: root,
-    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
   })
-  if (pathResult.status !== 0) throw new Error('cannot resolve git info/attributes path')
-  const attrPath = resolve(root, pathResult.stdout.toString().trim())
-  if (existsSync(attrPath) && readFileSync(attrPath, 'utf8').trim()) {
-    throw new Error(
-      'candidate snapshot refused: non-empty $GIT_DIR/info/attributes can override filters; clear it before lock-ranges:check',
-    )
-  }
-}
-
-function emptyTreeOid(root: string): string {
-  const result = spawnSync('git', ['hash-object', '-t', 'tree', '--stdin'], {
-    cwd: root,
-    input: '',
-    encoding: 'utf8',
-  })
-  const oid = result.stdout.toString().trim()
-  if (result.status !== 0 || !oid) throw new Error('cannot compute empty tree oid')
-  return oid
-}
-
-function materializeFailure(detail: string): never {
-  if (/unknown option|attr-source|invalid option/i.test(detail)) {
-    throw new Error(
-      `cannot materialize candidate tree: git rejects --attr-source (${detail || 'upgrade Git'})`,
-    )
-  }
-  if (/lazy|partial|promisor|filter/i.test(detail)) {
-    throw new Error(
-      `cannot materialize candidate tree without fetching (partial clone); ${detail || 'set GIT_NO_LAZY_FETCH'}`,
-    )
-  }
-  throw new Error(
-    detail ? `cannot materialize candidate tree: ${detail}` : 'cannot materialize candidate tree',
-  )
-}
-
-function materializeCandidate(
-  root: string,
-  tree: string,
-  snapshot: string,
-  indexFile: string,
-): void {
-  assertNoInfoAttributes(root)
-  const attr = [`--attr-source=${emptyTreeOid(root)}`, '-c', 'core.attributesFile=/dev/null']
-  const env = {
-    ...process.env,
-    GIT_INDEX_FILE: indexFile,
-    GIT_NO_LAZY_FETCH: '1',
-    GIT_ATTR_NOSYSTEM: '1',
-  }
-  const read = spawnSync('git', [...attr, 'read-tree', tree], { cwd: root, env, encoding: 'utf8' })
-  if (read.status !== 0) materializeFailure(`${read.stderr || read.stdout || ''}`.trim())
-  const checkout = spawnSync(
-    'git',
-    [
-      ...attr,
-      '-c',
-      'core.autocrlf=false',
-      '-c',
-      'core.symlinks=false',
-      'checkout-index',
-      '-a',
-      '-f',
-      `--prefix=${snapshot}${sep}`,
-    ],
-    { cwd: root, env, encoding: 'utf8' },
-  )
-  if (checkout.status !== 0)
-    materializeFailure(`${checkout.stderr || checkout.stdout || ''}`.trim())
-  if (!(existsSync(join(snapshot, 'bun.lock')) && existsSync(join(snapshot, 'package.json')))) {
-    throw new Error('candidate lock inputs are missing')
-  }
+  if (result.status !== 0) fail('missing candidate bun.lock')
+  return Buffer.from(result.stdout).toString('utf8')
 }
 
 function runOfflineInstall(snapshot: string, cacheDir: string, home: string) {
@@ -467,6 +399,8 @@ function probeOfflineInstall(
   }
 }
 
+const CANARY_SENTINEL = '__lock_ranges_canary__'
+
 /** Add a root override Bun drops unless the install config suppresses lock writes. */
 function assertLockWritesEnabled(
   snapshot: string,
@@ -480,11 +414,12 @@ function assertLockWritesEnabled(
     parsed.overrides && typeof parsed.overrides === 'object' && !Array.isArray(parsed.overrides)
       ? { ...(parsed.overrides as Record<string, unknown>) }
       : {}
-  parsed.overrides = { ...prior, __lock_ranges_canary__: '0.0.0' }
+  parsed.overrides = { ...prior, [CANARY_SENTINEL]: '0.0.0' }
   const perturbed = Buffer.from(`${JSON.stringify(parsed, null, 2)}\n`)
   writeFileSync(lockPath, perturbed)
-  runOfflineInstall(snapshot, cacheDir, home)
-  if (readFileSync(lockPath).equals(perturbed)) {
+  const child = runOfflineInstall(snapshot, cacheDir, home)
+  const after = readFileSync(lockPath)
+  if (child.status !== 0 || after.equals(perturbed) || after.includes(CANARY_SENTINEL)) {
     throw new Error(
       "the candidate's Bun configuration suppresses lock writes; the stability probe cannot run",
     )
@@ -492,23 +427,23 @@ function assertLockWritesEnabled(
   writeFileSync(lockPath, original)
 }
 
-function checkStability(root: string, tree: string): void {
+async function checkStability(root: string, tree: string): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), 'lock-stability-'))
   const snapshot = join(dir, 'tree')
   const home = join(dir, 'home')
-  const indexFile = join(dir, 'index')
   try {
     if (spawnSync('mkdir', ['-p', snapshot, home]).status !== 0) {
       throw new Error('cannot prepare stability workspace')
     }
     const cacheDir = resolveOperatorCache(root)
-    materializeCandidate(root, tree, snapshot, indexFile)
+    await materializeTree(root, tree, snapshot)
     const manifest = JSON.parse(readFileSync(join(snapshot, 'package.json'), 'utf8')) as {
       packageManager?: string
     }
     if (manifest.packageManager !== `bun@${Bun.version}`) {
       throw new Error('cannot verify lock stability without the pinned Bun version')
     }
+    // Shape already checked on the candidate blob in main; re-check snapshot bytes.
     const lockText = readFileSync(join(snapshot, 'bun.lock'), 'utf8')
     assertLockShape(lockText)
     const before = Buffer.from(lockText)
@@ -522,16 +457,13 @@ function checkStability(root: string, tree: string): void {
   }
 }
 
-function main(): void {
+async function main(): Promise<void> {
   const root = treeRoot()
   const tree = process.env.LOCK_RANGES_ROOT === undefined ? candidateTree(root) : undefined
-  const stagedLock =
-    tree && tree !== 'HEAD'
-      ? spawnSync('git', ['show', `${tree}:bun.lock`], { cwd: root })
-      : undefined
-  if (stagedLock && stagedLock.status !== 0) fail('missing staged merge bun.lock')
-  const lockText = stagedLock ? stagedLock.stdout.toString() : readLock(root)
-  if (tree) assertLockShape(lockText)
+  // Range scan: staged blob during merge; working lock outside a merge (unchanged).
+  const lockText = tree && tree !== 'HEAD' ? readCandidateLockBlob(root, tree) : readLock(root)
+  // Shape checks always use the raw candidate blob when stability applies.
+  if (tree) assertLockShape(readCandidateLockBlob(root, tree))
   const lock = parseLock(lockText)
   const tally: Tally = { checked: 0, skipped: 0, findings: [] }
   const keys = Object.keys(lock.workspaces).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
@@ -544,10 +476,10 @@ function main(): void {
     console.error(`check-lock-ranges: FAIL (${tally.findings.length} finding(s))`)
     process.exit(1)
   }
-  if (tree) checkStability(root, tree)
+  if (tree) await checkStability(root, tree)
   console.log(
     `check-lock-ranges: OK (${keys.length} workspace(s), ${tally.checked} range(s) checked, ${tally.skipped} skipped)`,
   )
 }
 
-main()
+await main()
