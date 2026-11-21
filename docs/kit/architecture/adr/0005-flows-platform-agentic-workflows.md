@@ -95,7 +95,7 @@ Cloudflare Workflows owns durable steps, retries and hibernation; `@kit/flows` o
 Server-configured model IDs are minted into grants; plans only narrow them. Checking is the gate: the runner does not re-check the model at the provider call, and sealed runs keep their model IDs until they end even if the list changes. Implementation: `apps/example-api/src/services/flows-grant.ts`, `packages/flows/src/check-issues.ts`, `packages/flows/src/run/infer-step.ts`.
 
 Every durable execution has exactly one supplied general-purpose owner. Kit or Product code may compose admission and steps but must not resume from its own progress record, deliberately retry to continue work that could have proceeded, replace an execution to reset its budget, or add a second owner.
-Distinct executions may compose. Governed plan runs use Cloudflare Workflows; choosing another owner for them requires a new Kit ADR. Other Product execution/owner pairings require a Product ADR. Shell execution is not a Kit verb.
+Distinct executions may compose. Governed plan runs use Cloudflare Workflows; choosing another owner for them requires a new Kit ADR. Other execution/owner pairings follow [ADR-0018 D5](./0018-durable-execution-ownership.md). Shell execution is not a Kit verb.
 
 ### D3 — Plan contract (Nika-inspired, not Nika binary)
 
