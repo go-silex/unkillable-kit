@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Shared CI install recipe
+
+- Root core, grouped coverage and the maintained Product CI template call Kit-owned `scripts/kit/ci-install.sh` for the frozen Bun install with the selected Node's bundled `node-gyp` shim. Existing Products opt in once after upstream merge by matching that Install step (and pinned Node setup if missing), keeping Product-specific checks.
+
 ### Vitest CI workers
 
 - Kit and newly generated Product Apps use all available Vitest workers in CI, without changing local defaults.
