@@ -17,7 +17,8 @@ SSoT for **how we test** this monorepo. Complements the [`AGENTS.md`](../../AGEN
 
 **Anti-slogan:** “We deprioritized coverage for quality” must never mean “we lowered T0 floors” or “we deleted negative cases.”
 
-Root core and grouped coverage select Node from `.node-version` and expose its npm-bundled
+Root core, grouped coverage and the Product CI template call `scripts/kit/ci-install.sh` after
+selecting Node from `.node-version` and Bun from `package.json`. That script exposes npm-bundled
 `node-gyp` through a temporary job-local PATH shim only during the frozen Bun install. A missing
 executable or failed install fails the job; no global package or lockfile change is involved.
 The current lock's `trustedDependencies: []` prevents dependency install lifecycle scripts from

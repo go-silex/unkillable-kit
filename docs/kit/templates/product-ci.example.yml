@@ -8,6 +8,10 @@
 # Pair with scripts/product/validate.sh (or app-local product-validate.sh)
 # copied from docs/kit/templates/product-validate.example.sh
 #
+# Existing Products (one-time after Kit upgrade ships `scripts/kit/ci-install.sh`):
+# add the pinned `setup-node` step below if missing; set Install to `bash scripts/kit/ci-install.sh`.
+# Keep Product-specific steps (dependency resolution / SQLite / validation). Do not edit Kit files.
+#
 # See: docs/kit/product-consumer-contract.md · docs/kit/playbooks/start-product.md §8
 name: Product CI
 
@@ -38,12 +42,16 @@ jobs:
         with:
           fetch-depth: 0
 
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version-file: package.json
 
       - name: Install
-        run: bun install --frozen-lockfile --minimum-release-age 0
+        run: bash scripts/kit/ci-install.sh
 
       # Product CI on Actions has no `upstream` remote — zero-edit uses
       # config/product/inheritance.json (full history required above).
