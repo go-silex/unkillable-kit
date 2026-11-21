@@ -110,10 +110,14 @@ Kit dogfood plans are generic; product-domain plans belong in the product app, D
 #### Authority split (adversarial fatal fix)
 
 Organization/admin grants are the sole maximum power; plan permits only narrow them. Effective tools are the intersection of grant, permits and pinned registry. Every granted tool must have `grantClass: 'mintable'` in that registry; checking verifies this ceiling rather than trusting its producer.
+Each registry tool declares `grantClass` explicitly; the pinned registry digest includes
+tool names and grant classes, so same-version reclassification changes the digest.
 
 Absent or empty permits fail closed for any effectful `invoke` or `infer`; an approve-only plan may have empty permits. Inference also requires explicit `allowsInfer: true`; a dummy tool permit does not grant inference.
 
 Apps derive policy facts from the server session and organization module policy, never from client input, a plan or agent self-description. Only kit-minted grants and kit-built registries may seal a run. Constructor provenance is not proof that app-supplied policy facts are true; `checkPlan` checks conformity, not provenance.
+The sealing boundary rejects unmarked grant and registry objects; copying either object
+does not preserve provenance, and a matching version cannot substitute for it.
 
 Credentials never belong in plan bodies; tools use Worker bindings and secrets. V0 advertises only tool permits, not `net` or `r2` until wrappers enforce them. Whole-value task-output bindings resolve from receipts, never environment or secrets; partial interpolation and secret-shaped argument keys are rejected.
 
@@ -129,7 +133,11 @@ Run mutations and their events commit atomically; refused mutations append no ev
 
 #### Authn / authz
 
-Authentication uses session cookies or Bearer `sk_` (ADR-0002). V0 create, edit, enable, create-run and approval are org admin or owner operations; later grants may open run or edit to members. Prefer API keys for reads until scoped keys support create-run. Every plan/run belongs to an organization and list/detail require membership. Register `flows` in the platform module catalogue (ADR-0003).
+Authentication uses session cookies or Bearer `sk_` (ADR-0002). V0 create, edit, enable,
+create-run, approval and cancellation are org admin or owner operations; later grants may
+open run or edit to members. Prefer API keys for reads until scoped keys support create-run.
+Every plan/run belongs to an organization and list/detail require membership.
+Register `flows` in the platform module catalogue (ADR-0003).
 
 Sensitive tool output is redacted at write time, not on read; step returns are not a secret channel and D1 logs must contain no secrets or tokens. Sensitivity is read from the live Worker registry, not sealed into the runner view or digest, so changes apply to later writes of in-flight runs. Unflagged tools retain capped raw text.
 Implementation: `packages/flows/src/run/step-io.ts`, `apps/example-api/src/flows-run/workflow.ts`.
@@ -141,6 +149,8 @@ Create-run seals an immutable runner view. Persist only that view on the executi
 Rehydration checks consistency, not grant provenance or a fresh grant mint. Blob tamper resistance depends on the trusted write path (an optional MAC may be added later); a sealed run retains its minted model IDs after a policy change. Implementation: `packages/flows/src/snapshot.ts`, `packages/flows/src/runner-view.ts`.
 
 Disabling a plan blocks new runs. Cancellation is a best-effort Workflow termination, not a transactional kill of side effects: a tool already past the port may still finish, and termination failure does not roll back cancellation. Implementation: `packages/flows/src/repos/cancel.ts`, `packages/flows/src/run/drive.ts`.
+Cancellation requires a session and an organization owner or admin role, with no
+`super_admin` shortcut; a Bearer `sk_` receives 403.
 
 Runner view shape is strict: a breaking change requires a version bump and dual-parse or migration, never silently loosen the parser. Older strict parsers reject views with the newer read-effect map; all-write views omit it for compatibility.
 
@@ -153,6 +163,8 @@ Static check ceilings are necessary, not sufficient. Every `infer` and any later
 Approval is an explicit, non-effectful task, not an unauthenticated Workflow continue. The app's principal-bound route requires a session, org admin or owner and matching run organization; `sk_` remains forbidden.
 
 The org-, run- and task-scoped D1 approval decision is the only authorization. The route writes that decision; a Workflow event only wakes the driver and its payload is ignored. The driver re-reads the row and proceeds only on approval; a missing decision never authorizes continuation and timeout fails closed.
+After eight wakes without an approval row, the driver attempts to record expiry and
+re-reads the decision; a concurrent decision may already have won.
 A lost wake after a decision can still proceed on a later read. An open approval suspends the run; independent ready tasks run after the decision.
 
 Implementations: `apps/example-api/src/routes/flows.ts`, `apps/example-api/src/services/flows-approval.ts`, `packages/flows/src/run/approve-step.ts`, `apps/example-api/src/flows-run/workflow.ts`.

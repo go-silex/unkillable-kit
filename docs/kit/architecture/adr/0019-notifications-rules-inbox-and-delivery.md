@@ -24,21 +24,21 @@ supersedes_notes: >
 
 # ADR-0019 — Notifications: rules, Inbox and external Delivery
 
-Accepted on 2026-10-22. The repository contains `packages/notifications`, its schema and repositories, the catalogued `0023_notifications.sql`, and notification routes and services in `example-api`. The App composes `createNotificationService` and wires Task and Flow producers; regression suites for this composition and producers are present. User/email Delivery Workflow admission, reconciliation and execution are implemented; Slack and Organization/email remain uncomposed. These are partial implementation evidence, not proof that every contract below or its integration proofs is delivered. Live or deployed delivery remains unproven; acceptance is not deployment proof.
+Accepted on 2026-10-22. The repository implements User/email Delivery admission, reconciliation and execution, and Task and Flow producers; Slack and Organization/email remain uncomposed. Acceptance and regression suites do not prove live deployment or every contract below.
 
 Amendment 2026-11-14: absent-code specifications linked below are non-normative design notes; the decisions remain binding.
 
 ## Context and decision
 
-Apps need one extractible Notifications capability for action-required notices, rather than separate implementations of preferences, recipient isolation and delivery guards. The first consumers are task assignment and flow approval in `example-api`. Product Notification types remain in Product Apps.
+Apps need an extractible Notifications capability; the first consumers are task assignment and flow approval. Product Notification types remain in Product Apps.
 
 The Kit supplies `@kit/notifications`: a pure registry/resolver/Channel contract, an email layout, and separate schema/repository exports. The App owns its registry and copy, source authorization, `notify`/`resolve` composition, HTTP routes, bindings and producer wiring. **Access first, then Inbox always, then external Channels.**
 
-A Cloudflare Workflow owns each complete external Delivery, with a stable instance identity. Automatic admission is bounded to 24 hours from intent creation, with retention of at least three days; only positive native evidence proves admission. Ambiguous admission is retried with the same ID inside that window, never by restarting or replacing the execution; after the deadline uncertainty remains visible without automatic recreation. The Workflow owns retries and finalization, and Cron only requests bounded admission or observes the owner. There is no Notifications Queue, generic outbox engine or `@kit/jobs` extraction for a fictitious second Queue consumer. ADR-0020 details that protocol; Slack installation, secrets and adapter are specified in ADR-0021.
+One stable-ID Cloudflare Workflow owns each external Delivery. Admission is bounded to 24 hours from intent creation, with retention of at least three days; only positive native evidence proves admission.
+Retry ambiguous admission with the same ID inside that window, never by restarting or replacing the execution. After the deadline uncertainty remains visible without automatic recreation.
+The Workflow owns retries and finalization; Cron only requests bounded admission or observes the owner. ADR-0020 details the protocol; ADR-0021 specifies Slack installation, secrets and adapter.
 
 ## D1 — Ownership and access
-
-Implementation: `packages/notifications/src/resolve.ts` and `apps/example-api/src/services/notifications/service.ts`.
 
 The Kit owns pure registration, resolution and Channel contracts, plus separate schema and repositories; the App owns authority, registry, routes and composition. Cloudflare Workflows own complete external Delivery.
 
@@ -54,15 +54,11 @@ A User's Inbox is scoped by `orgId + subject`, without support bypass. Organizat
 
 ### Registry
 
-Implementation: `packages/notifications/src/registry.ts`.
-
 Zod validates frozen, JSON-serializable display parameters both at admission and consumption. No secrets, tokens, private comments, rendered HTML snapshots or arbitrary provider payloads enter stored parameters. Parameter schemas must survive their JSON round-trip. Type changes must preserve retained rows; incompatible changes require an explicit data migration or a new type key, not an automatic legacy fallback. Missing types/renderers or corrupted parameters are configuration/data errors, never an invented authorized `on` result.
 
 External Channels retain a declared order, but V0 executes fan-out: one Channel's failure never triggers another or suppresses Inbox. No escalation, digest or fallback chain is implemented.
 
 ### User rules
-
-Implementation: `packages/notifications/src/resolve.ts`.
 
 1. Denied Organization/membership/Module access returns `admitted:false`: no Notification or Delivery. For a type without a Module, `moduleReadable=true` is supplied explicitly.
 2. Otherwise admit one Inbox Notification **before and independently of external rules**. No rule targets Inbox; there is no `in_app` Delivery.
@@ -74,8 +70,6 @@ Implementation: `packages/notifications/src/resolve.ts`.
 
 ### Organization destinations
 
-Implementation: `packages/notifications/src/resolve.ts`.
-
 A destination must still exist and match its selector, the type must opt in, and the Organization's Module must be available/enabled. The selected Deployment **locked-off** rule is a ceiling. Unlocked defaults do not veto an explicitly configured destination; locked-on cannot create a missing destination or bypass type opt-in. Organization/User rules govern Users, not collective destinations.
 
 Collective delivery is independent of recipient count, including zero. One destination produces one Delivery, not one per User. Each configured address has one selector; several distinct destinations are allowed. A destination is not an artificial User, has no Inbox and does not borrow an administrator's Role. Slack channels may contain guests/Slack Connect members; opting in is a reviewed disclosure decision. `tasks.assigned` never opts in; flow destination copy excludes prompts, tool arguments, receipts and private source content.
@@ -83,8 +77,6 @@ Collective delivery is independent of recipient count, including zero. One desti
 ## D3 — Channel, rendering and App service
 
 ### External Channel
-
-Implementation: `apps/example-api/src/notifications-delivery/email-channel.ts`.
 
 The App resolves the address/current installation after access/rules, before `send`; unavailable means a stored skipped Delivery, not a fourth Channel result or false sent. Inputs remain org-scoped and provider-specific: the Slack input may require installation/generation/address/content without pushing those types into the core.
 
@@ -113,8 +105,6 @@ admission is post-commit; flows are best-effort.
 
 ## D4 — Producers and best-effort flow ports
 
-Implementation: `apps/example-api/src/lib/notifications-dogfood.ts`, `apps/example-api/src/services/notifications/task-producer.ts` and `apps/example-api/src/services/notifications/flow-producer.ts`.
-
 Task assignments notify added assignees only after their object ACL is checked; task types do not opt into Organization destinations. Flow approvals notify eligible decision makers, including a sole owner, and opt into Organization destinations. The dogfood payloads retain only a task display title or generic approval copy, never plan prompts or private instructions.
 
 Task source is `{kind:'task',id:taskId}`. Approval source is `{kind:'flow_approval',id:JSON.stringify([runId,taskId])}`: simultaneous approvals in one run are distinct. Cancellation resolves each approval source from the immutable Runner View, never a live plan or an ambiguous prefix query. Source links still enforce current source-route auth/ACL.
@@ -139,15 +129,11 @@ Thus successful `opened → closed/resolve → replay(opened)` observes the term
 
 Applied SQL in the App journal is SSoT under ADR-0012; `notificationsDrizzleSchema` is exported from `@kit/notifications/schema` and composed by the App. Add catalog id/set `notifications`, opt-in by Products. This catalog id is **not a new governed Module that can turn Inbox off**. SQL migration numbering is independent of this ADR number and must not reuse the reserved pending tasks contract migration.
 
-Implementation: `apps/example-api/migrations/0023_notifications.sql` and `packages/notifications/src/schema/`.
-
 Slack owns installation, identity and credential tables, not a second destination configuration table. Changing the installation or channel creates a new destination identity; selector changes recheck pending delivery without redirecting it. Deleting a destination must not cascade away its Delivery history; pending deliveries observe absence and skip.
 
 A fan-out spanning several batches has per-batch, not global, atomicity.
 
 ### State transitions and idempotence
-
-Implementation: `packages/notifications/src/repos/`.
 
 Read and resolved are independent: resolution never fabricates a read. Active duplicate notifications preserve the original parameters and read state; a resolved notification may be created anew, as reassignment requires. Approval opening still requires the D4 lifecycle guard. Admission uncertainty is independent of Delivery status and is not provider failure.
 
@@ -177,9 +163,9 @@ Unimplemented destination routes: [non-normative design note](../design-notes/00
 
 Organization admin routes require Organization context + capability; authenticated member/reader receive 403, another Organization receives 404. Inbox/read routes never enable a super_admin bypass. User rules are global subject-owned rows even when the UI previews the current Organization. Installation, Slack channel discovery and User-link routes are specified by ADR-0021; they do not duplicate these generic destination endpoints.
 
-### Cursors, errors and UI
+Deployment-rule writes require `super_admin`. Cross-Organization Delivery listing is `super_admin`-only, not staff, and returns failed Deliveries only.
 
-Implementation: `apps/example-api/src/routes/notifications/`.
+### Cursors, errors and UI
 
 Pagination is not snapshot-isolated: concurrent writes may skip or repeat items. Cursor scope is not authorization; future key or grammar changes must preserve encode-to-request closure. User rules are global even when the UI previews an Organization. Catalogue parity must cover API and web; the existing web-only check does not prove API parity.
 
@@ -199,7 +185,16 @@ The guarantee is durable, at-least-once processing **after successful admission*
 
 The final recheck is not atomic with an external POST: a decision/rule may change in flight. Guarantee no new attempt after a recheck **observes** denial/resolution, not no external message after the wall-clock instant of decision. A failed resolution callback can leave stale notices. Source routes always enforce current authority regardless.
 
-Tests for the implemented paths live alongside `packages/notifications/src/` and `apps/example-api/src/notifications-delivery/`; these do not prove a live deployment or the unimplemented Slack and Organization delivery paths.
+At implementation delivery, the root gate and these targeted proofs are required:
+
+- Pure interface: lock/specificity table, email lock rejection, Inbox independence, destination ceiling, opt-in and zero-User cases; no I/O.
+- SQL/repos: concurrent active uniqueness, Notification+Delivery admission rollback, admission after resolution, independent read/resolved axes, owner/User/global scopes, cross-org composite-FK negatives, admission CAS/monotonicity, fair org-page contract and purge.
+- Producers: added/removed ids, recipient ACL, optional actor exclusion, sole owner notification, closed approval replay with no fresh rows/owner refs, post-notify close race, independent approvals, failed-wake replay guard, bounded callback failure retries and reassignment after resolution.
+- HTTP/security: CP-IDOR/CP-UNAUTH per resource, session-only, no Inbox bypass, metadata-only admin, unaudited User rules, atomic admin audit, exact keysets/OpenAPI and API/web catalogue parity.
+- Cursor proofs: maximum-length ASCII keysets round-trip through cursor≤512; Unicode identifier keys rejected without restricting localized content; invalid newId rejected before batch write.
+- Delivery/crash: repeated notify, terminal replay, lost provider receipt duplication, observed access/rule/resolution skips, no redirect after destination removal/replacement, admission ambiguity and retention boundaries; independent durable-ownership review.
+
+These proofs do not establish live deployment or the unimplemented Slack and Organization delivery paths.
 
 ## Existing seams and alternatives
 

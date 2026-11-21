@@ -166,7 +166,8 @@ route is denied before throttle or handler, including future routes under the pr
 those routes skip the kit's role ceiling, org-status check and audit, so kit organization
 APIs replace them. See the [Better Auth mount contract](../../product-consumer-contract.md#better-auth-mount).
 
-Invites cannot grant owner or platform roles; the inviter's role limits assignable roles.
+Invites cannot grant owner or platform roles: owners may assign admin, member or reader;
+admins may assign member or reader only.
 Acceptance is email-bound, invitations are single-use with a seven-day TTL, and mutations
 require sessions rather than `sk_`. Cross-tenant deletion returns 404, create/accept are
 rate-limited, and an email send failure cancels the invitation and returns an error.

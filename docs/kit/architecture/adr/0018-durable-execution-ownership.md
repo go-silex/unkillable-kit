@@ -28,7 +28,8 @@ Every durable execution has exactly one durable owner. This decision covers Kit 
 The principle is in the title of [ADR-0005 D2](./0005-flows-platform-agentic-workflows.md#d2--runtime--cloudflare-workflows-do-not-reimplement-durable-engine): « do not reimplement durable engine ». D2's Forbidden line then scoped it: « custom DO workflow engine when Workflows suffice ».
 The constitution kept the tool name and dropped the qualifier. Since Roxabi/roxabi-boilerplate-cf#412 that line forbids such engines even when Workflows do not suffice.
 
-Read literally, invariant 6 binds every durable execution of every Product to Cloudflare Workflows. A Kit consumer that runs its conversations on a general-purpose durable conversation runtime built on Durable Objects respects the principle, since it writes no persistence or recovery of its own, and breaks the letter. A Product cannot amend the constitution it inherits ([`product-consumer-contract.md`](../../product-consumer-contract.md)). The letter then leaves two exits: drive each conversation turn through a Workflow on top of the conversation runtime, which gives one execution two owners, or amend the Kit.
+Invariant 6 literally binds every Product execution to Cloudflare Workflows, even when a supplied durable conversation runtime already owns it.
+A Product cannot amend the inherited constitution; adding a Workflow on top would give one execution two owners.
 
 What the Kit composes today:
 
@@ -86,7 +87,7 @@ Kit or Product code may define steps, conditions and retry policy on top of the 
 | Job message           | Cloudflare Queues; Cron only triggers, and a Product's consumer sets retries and a dead-letter queue | [`stack.md`](../../standards/stack.md), row _Jobs_, for Queues and Cron; D2 for the trigger and dead-letter conditions |
 | Notification Delivery | Cloudflare Workflows, one Workflow per Delivery with a stable instance ID                            | [ADR-0020](./0020-notification-delivery-ownership.md)                                                                  |
 
-Another owner for governed plan runs requires a new Kit ADR. In an accepted ADR under `docs/product/`, a Product records every other pairing of a durable execution type with an owner that this table does not list.
+Another owner for governed plan runs requires a new Kit ADR. A Product records every other unlisted execution-type/owner pairing in an accepted ADR under `docs/product/`; that ADR maps each of its durable execution types to its owner.
 
 ## Non-claims
 

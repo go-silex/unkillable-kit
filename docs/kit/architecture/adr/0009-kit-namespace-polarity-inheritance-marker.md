@@ -82,6 +82,8 @@ Entries today: `docs/agents/issue-tracker.md` (omp-build `/feature`, `dev-review
   Every other `apps/` directory is a product app, `apps/example-acme-api` included; adding or retiring a kit app is one edit of the list.
   `check-zero-edit-zones`, `check-migrations-contract`, `extract-dry-run`, `check-banned-strings` and `kit-schema-sync` read that list; shell gates read it through `scripts/kit/lib/kit-apps.sh`.
   Not yet migrated: the product exemption registers (`check_file_length.sh`, `check_folder_size.sh`, `check-import-boundaries.ts`) still recognise a product-app path by name (Roxabi/roxabi-boilerplate-cf#327).
+  The optional `config/product/{file_exemptions,folder_exemptions,import-boundary-exemptions}.txt` registers fail closed on paths outside `apps/<product>-{api,web,mcp}/`,
+  wildcards, duplicate entries and duplicates of Kit entries. File- and folder-size exemptions require explicit caps; an absent register is accepted.
 - `apps/<product>-*`: product.
 - `tooling/`: kit-owned prefix; its taxonomy is left to a later decision.
 - `tools/`: not a polarity root. It stays absent or empty; there is no `tools/kit`, no `tools/product` and no permanent wrapper. `extract-dry-run` fails closed on any entry.

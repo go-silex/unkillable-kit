@@ -10,19 +10,19 @@
     "fileBytes": 7523
   },
   "docs/kit/architecture/adr/0018-durable-execution-ownership.md": {
-    "overLimitLines": 4,
-    "maxLineBytes": 617,
-    "fileBytes": 10743
+    "overLimitLines": 3,
+    "maxLineBytes": 516,
+    "fileBytes": 10403
   },
   "docs/kit/architecture/adr/0019-notifications-rules-inbox-and-delivery.md": {
-    "overLimitLines": 25,
+    "overLimitLines": 23,
     "maxLineBytes": 977,
-    "fileBytes": 28388
+    "fileBytes": 28330
   },
   "docs/kit/architecture/adr/0020-notification-delivery-ownership.md": {
-    "overLimitLines": 21,
+    "overLimitLines": 20,
     "maxLineBytes": 735,
-    "fileBytes": 23826
+    "fileBytes": 23738
   },
   "docs/kit/architecture/adr/0021-slack-installations-and-notification-channel.md": {
     "overLimitLines": 38,

@@ -56,7 +56,9 @@ App-only checks cannot protect direct repository callers. The task repositories 
 Catalogued migrations add the database side: `0018` assignee organization ownership, `0019` composite task/organization foreign keys for assignees and links, `0020` stage-organization guards.
 The example API validates assignees against the owning organization's membership; removing a member does not erase old assignee rows.
 Never rebuild the `kit_tasks` parent: on D1, dropping a parent fires `ON DELETE CASCADE` on product-owned children unknown to the kit. Future rebuilds keep the `0020` guards, which do not validate pre-existing rows.
-Applied migration history is deployment-specific; the files' presence does not establish that any database applied them. Contract migration `0019` deletes mismatched rows: operators inspect its preflight counts (queries in its header) before applying it, and recovery is D1 Time Travel.
+Applied migration history is deployment-specific; file presence does not prove application. Deploy the expanded Worker before contract migration `0019`.
+Before applying it to each live database, inspect both purge counts in its header; a nonzero count requires inspection and explicit purge approval.
+The purge is irreversible except through D1 Time Travel.
 
 ### D3 — AudiencePort
 

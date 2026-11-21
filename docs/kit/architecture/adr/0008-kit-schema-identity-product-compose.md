@@ -69,11 +69,11 @@ Manifest JSON keys (sync script): `modules.<id>.kitSha256`, `modules.<id>.produc
 
 ### D3 — Catalog identity and applied SQL
 
-| Tree                                 | Status in this ADR                                                                                   |
-| ------------------------------------ | ---------------------------------------------------------------------------------------------------- |
-| `config/kit/kit-schema-modules.json` | **Identity SSoT** — module `id` + `kitSha256`                                                        |
-| `apps/example-api/migrations/*`      | **Dogfood wrangler journal** — sync hashes these bytes today; not a product scaffold                 |
-| `packages/*/migrations/*`            | **Sketches only** — not the product apply path. Gate: `scripts/kit/check-wrangler-migrations-dir.sh` |
+| Tree                                 | Status in this ADR                                                                                                                  |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `config/kit/kit-schema-modules.json` | **Identity SSoT** — module `id` + `kitSha256`                                                                                       |
+| `apps/example-api/migrations/*`      | **Dogfood wrangler journal** — sync hashes these bytes today; not a product scaffold                                                |
+| `packages/*/migrations/*`            | **README only** — sketches removed; not the product apply path or hash source. Gate: `scripts/kit/check-wrangler-migrations-dir.sh` |
 
 `@kit/auth` does **not** export `./migrations/*`. The product apply path is `kit-schema-sync` (catalog) into `apps/<product>-api/migrations`.
 
@@ -142,7 +142,7 @@ SQL identity is still D1–D5 (this ADR). D6 does **not** move applied SQL into 
 | Rename applied migration files to “make room”                                                                      | Same — journal = filename                                                                                                     |
 | `--modules all` / port `demo_items` · flows · tasks “to stay current” when the product does not mount those routes | Records those sets in `sets` (dead schema + merge noise). Leaving one later is a `sets` edit, not a narrower `--modules` list |
 | Dual-edit kit `better-auth.ts` (or kit migrations) in the product                                                  | Forever-conflicts; import `@kit/auth/factory`                                                                                 |
-| Treat `packages/*/migrations` as applied SSoT                                                                      | Sketches; hashes would drift from example-api                                                                                 |
+| Treat `packages/*/migrations` as applied SSoT                                                                      | README only; catalogued hashes come from example-api                                                                          |
 
 ## Non-goals
 

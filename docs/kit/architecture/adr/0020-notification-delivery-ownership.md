@@ -23,7 +23,8 @@ supersedes_notes: >
 
 # ADR-0020 — Un Workflow complet à identité stable par Delivery
 
-Contrat accepté le 2026-10-22 : un Workflow complet par Delivery et une fenêtre d’admission automatique de 24 h depuis la création de l’intention. Le dépôt contient `NotificationDeliveryWorkflow`, l'admission et la réconciliation pour User/email ; Slack et Organization/email restent non composés. Les preuves et leurs limites figurent dans [testing](../../testing/ownership.md#notifications-email-delivery-owner) et ne prouvent pas une exécution déployée. La configuration demo retries/DLQ décrite en D2 est également une cible : elle n'est pas configurée dans le `wrangler.toml` actuel.
+Contrat accepté le 2026-10-22 : un Workflow par Delivery, admission automatique sous 24 h. User/email est implémenté ; Slack et Organization/email restent non composés.
+Les [preuves](../../testing/ownership.md#notifications-email-delivery-owner) ne prouvent pas un déploiement. La configuration demo retries/DLQ de D2 reste une cible, absente du `wrangler.toml` actuel.
 
 Mickael a [explicitement accepté le 2026-11-06](https://github.com/Roxabi/roxabi-boilerplate-cf/issues/480#issuecomment-6685989031) l’amendement de D6 pour E5 : décodage strict des enveloppes natives observées et neutralisation du backoff implicite. Le minimum `retryAfterSeconds`, les cinq retries, les trois steps, le Durable owner unique et l’horizon d’admission de 24 h restent inchangés; les preuves et la revue indépendante restent requises.
 
@@ -128,7 +129,8 @@ L’adaptateur Slack parse `Retry-After` en entier sûr non négatif; une valeur
 
 La classification précède le throw. Le protocole privé non secret accepte strictement les deux enveloppes natives observées ; une enveloppe malformée ou non reconnue arrête le retry au lieu de perdre un hint et d’envoyer trop tôt. Une interruption native sans namespace privé n’apporte aucun hint. La preuve ciblée doit démontrer le décodage réel, le délai planifié et le respect du minimum, pas seulement le résultat d’une fonction appelée directement.
 
-Le délai dynamique respecte le hint et le plafond local ; le backoff natif constant évite un second multiplicateur implicite. Pas de sleep, boucle de nouveaux steps, tableau D1 de tentatives ou remplacement d’instance pour reproduire le runtime.
+Sans hint, le délai est de 60, 120, 240 secondes, puis double ; avec hint, il vaut le maximum de cette base et du hint arrondi à la seconde supérieure, plafonné au plafond local de 86 400 secondes.
+Le backoff natif constant évite un second multiplicateur implicite. Pas de sleep, boucle de nouveaux steps, tableau D1 de tentatives ou remplacement d’instance pour reproduire le runtime.
 
 Implémentation : `apps/example-api/src/notifications-delivery/retry.ts` et `apps/example-api/src/notifications-delivery/workflow.ts`.
 

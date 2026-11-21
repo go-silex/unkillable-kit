@@ -90,10 +90,11 @@ TTL or consent, and does not authorize individual tools. It runs on authenticate
 requests and code or refresh exchanges, not on authorization or revocation.
 Caller hooks with `OAUTH_KV` access are trusted code: KV write access can mint grants.
 
-A refusal on exchange revokes the grant; an undecidable predicate must throw
-rather than return `false`, so unavailability blocks without being mistaken for
-invalid credentials or revoking the grant. A client whose grant is refused must
-authorize again. Implementation and exercised outcomes:
+A refused `/mcp` request returns 401 without revoking the grant. A refused
+code or refresh exchange returns `invalid_grant` and revokes the grant.
+An undecidable predicate must throw rather than return `false`, so unavailability
+blocks without being mistaken for invalid credentials or revoking the grant.
+A client whose grant is revoked must authorize again. Implementation and exercised outcomes:
 `packages/mcp/src/hosted/create-worker.ts` and
 `packages/mcp/src/hosted/grant-admission.test.ts`.
 
@@ -104,8 +105,8 @@ predicate again, so a denial keyed on user and grant prevails while it lasts.
 For targeted revocation, that denial must last until no code, access token or
 refresh token of the grant can still be redeemed, including credentials a
 concurrent refresh re-saved. Absence of the grant record alone is not proof of
-cleanup. Ether OS keeps its barrier without a TTL (D8), but the seam does not
-require every refusal to have a permanent denial. The caller owns the denial's
+cleanup. One Product consumer keeps its barrier without a TTL (D8), but the seam
+does not require every refusal to have a permanent denial. The caller owns the denial's
 storage and consistency; provider revocation is KV-strength, not atomic.
 
 ### D3 — Identity port never mints
@@ -182,23 +183,19 @@ Implementation and options: `packages/mcp/src/hosted/create-worker.ts` and
 `packages/mcp/README.md`.
 
 The static `consentPresentation` seam has a bounded second-consumer basis:
-dogfood's English presentation and Ether OS's
-[French informative page](https://github.com/go-silex/extern-client-etherOs/blob/99bde5a03771bd38c7d1c54ef55d9d453e8ce923/apps/ether-mcp/src/consent-page.ts#L175-L193).
+dogfood's English presentation and one Product consumer's French informative page.
 This does not claim two external Products, adoption of the option or deployment.
 Product copy stays Product-owned.
 
 The owner authorized a separate exception to the second-consumer condition for
-the deny-only `grantAdmission` seam alone. Ether OS is the one evidenced Product
-consumer: its [request check](https://github.com/go-silex/extern-client-etherOs/blob/2bc7b17d2ee5f1da06c482871a73f827b5c4dc95/apps/ether-mcp/src/create-mcp-worker.ts#L62-L95)
-and [exchange check](https://github.com/go-silex/extern-client-etherOs/blob/2bc7b17d2ee5f1da06c482871a73f827b5c4dc95/apps/ether-mcp/src/create-mcp-worker.ts#L118-L122)
-implement the barrier required by its
-[D-108](https://github.com/go-silex/extern-client-etherOs/blob/8a30d413e6cb2848e13fa96248a27b57489ac47b/docs/product/decisions.md#L1023-L1028).
+the deny-only `grantAdmission` seam alone. One evidenced Product consumer checks
+requests and exchanges to implement its Product-owned barrier.
 No second Product with that barrier was found in the inspected trees; this says
 nothing about other trees. The barrier and its storage remain Product-owned.
 Tests, fixtures and dogfood prove behavior, not consumer provenance.
 
 A further, separate owner exception covers only the `isReservedPath` export.
-Ether OS's planned single-Worker containment needs to refuse reserved paths
+One Product's planned single-Worker containment needs to refuse reserved paths
 before delegation without duplicating classification; this is not a claim of
 an implemented consumer or deployment. A caller may refuse early, but must
 never implement OAuth or MCP or serve SPA content on a reserved path.
