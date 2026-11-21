@@ -576,7 +576,7 @@ The script runs only in a clean product clone, refuses an in-progress merge, and
 
 1. Fetch `upstream`, report a `packageManager` move, and stop before merging a new `actions/create-github-app-token` pin; exit if already current.
 2. Merge without committing (resolve conflicts only if Product violated zones), restore the pre-merge root `LICENSE` presence and bytes, and record the incoming tip in the inheritance marker.
-3. Install dependencies (this does not re-check versions the merge kept), stage `bun.lock`, and check the staged merge tree's lock ranges and normalization; a failure leaves the merge open for owner-directed repair.
+3. Stage `bun.lock` and the inheritance marker, frozen-install (`--minimum-release-age 0`), then `lock-ranges:check` with `LOCK_RANGES_ROOT` unset; failure leaves the merge open. Ordinary-install-stable locks pass even if `--lockfile-only` would re-serialize.
 4. Commit the merge, refresh the Product Dependabot scan in a separate commit if needed, and run `zero-edit`, which must stay green or have exceptions refreshed intentionally.
 
 For a new token pin, merge conflict, lock-ranges resume, or independent-lineage join, run the lines of `scripts/kit/kit-upgrade.sh` by hand from `git merge --no-ff --no-commit` onward as applicable, including its `LICENSE` lines.
@@ -587,7 +587,7 @@ A clone whose pin predates this script performs its first upgrade with the previ
 A range that sets a new pin of `actions/create-github-app-token` stops before the merge. Establish the effective `CI_APP_ID` mode using [CI App setup](./ci-app-setup.md#trust-and-setup):
 verified absence permits the inactive, separately authorized manual-merge path; a nonempty value requires the installed App's Client ID, valid authorization configuration and a successful mint established through a separately authorized exercise.
 A missing key or unknown state stops. Then run the script's merge lines by hand. Neither path waives review, local gates or CI.
-After a merge conflict, resolve and stage all merge inputs, refresh the existing inheritance marker to the tip actually merged, then run the script's remaining lines by hand: the merge commit waits for `lock-ranges:check`. During an open merge the check uses the staged tree, not pre-merge `HEAD` or unstaged files; outside a merge normalization checks committed `HEAD`. Missing offline cache data fails the check.
+After a merge conflict, resolve and stage all merge inputs, refresh the inheritance marker to the tip actually merged, then run the script's remaining lines by hand: the merge commit waits for `lock-ranges:check`. An open merge uses the staged tree; outside a merge the stability probe checks committed `HEAD`. Missing offline cache data fails the check.
 
 If `lock-ranges:check` fails, the merge is still open (no merge commit yet). Each finding names its workspace; resume by owner:
 
@@ -599,12 +599,10 @@ git add bun.lock apps/<product>-web/package.json
 # STOP on that finding: inspect the complete pre-merge, incoming and merged locks;
 # resolve without losing/re-resolving Product entries or changing protected manifest ranges.
 # If that preservation cannot be demonstrated, obtain a reviewed Kit-side resolution before continuing.
-# Stage all resolved manifests, patches and the lock before checking the merge candidate:
-git add bun.lock
-bun run lock-ranges:check &&
-  bun install --frozen-lockfile --minimum-release-age 0 &&
-  git add bun.lock config/product/inheritance.json && git commit --no-edit
-# Then run the conditional Product scan refresh and final zero-edit from scripts/kit/kit-upgrade.sh.
+# Stage resolved manifests/patches/lock, then the script validation tail (no re-add before commit):
+unset LOCK_RANGES_ROOT && git add bun.lock config/product/inheritance.json &&
+  bun install --frozen-lockfile --minimum-release-age 0 && bun run lock-ranges:check && git commit --no-edit
+# Then the conditional Product scan refresh and final zero-edit from scripts/kit/kit-upgrade.sh.
 ```
 
 If conflict in a **kit zone**, restore the Kit version and move the Product change to a Product path / design override, **except** the bounded `.github/dependabot.yml` customization: preserve the Product scan and regenerate it after the upgrade merge as above. A conflict on that customization does not justify restoring the legacy root scan.

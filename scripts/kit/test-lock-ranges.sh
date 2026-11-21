@@ -433,34 +433,411 @@ printf 'preload = ["./preload.ts"]\n' >"$BUNFIG/bunfig.toml"
 printf 'process.env.LOCK_RANGES_ROOT = "decoy"\n' >"$BUNFIG/preload.ts"
 assert_not_repointed "a tree bunfig.toml preload" "$BUNFIG"
 
+export GIT_AUTHOR_NAME=Fixture GIT_AUTHOR_EMAIL=fixture@example.invalid
+export GIT_COMMITTER_NAME=Fixture GIT_COMMITTER_EMAIL=fixture@example.invalid
+
+commit_tree() {
+  local tree="$1" msg="$2"
+  git -C "$tree" init -q
+  git -C "$tree" add .
+  git -C "$tree" commit -qm "$msg"
+}
+
 NORMALIZATION="$TMP/normalization"
 mkdir -p "$NORMALIZATION"
 git -C "$ROOT" archive HEAD | tar -x -C "$NORMALIZATION"
 cp "$SCANNER" "$NORMALIZATION/scripts/kit/check-lock-ranges.ts"
-git -C "$NORMALIZATION" init -q
-git -C "$NORMALIZATION" add .
-export GIT_AUTHOR_NAME=Fixture GIT_AUTHOR_EMAIL=fixture@example.invalid
-export GIT_COMMITTER_NAME=Fixture GIT_COMMITTER_EMAIL=fixture@example.invalid
-git -C "$NORMALIZATION" commit -qm fixture
+commit_tree "$NORMALIZATION" fixture
 output="$(cd "$NORMALIZATION" && env -u LOCK_RANGES_ROOT bun scripts/kit/check-lock-ranges.ts 2>&1)" && rc=0 || rc=$?
 if [[ "$rc" -eq 0 ]]; then
-  echo 'PASS: committed normalized lock'
+  echo 'PASS: committed install-stable lock'
   PASS=$((PASS + 1))
 else
-  echo "FAIL: committed normalized lock: $output" >&2
+  echo "FAIL: committed install-stable lock: $output" >&2
   FAIL=$((FAIL + 1))
 fi
-node -e 'const fs = require("node:fs"); const p = process.argv[1]; const s = fs.readFileSync(p, "utf8"); const t = s.replace(/  "trustedDependencies": \[\],\n/, ""); if (s === t) process.exit(1); fs.writeFileSync(p, t)' "$NORMALIZATION/bun.lock"
-git -C "$NORMALIZATION" add bun.lock
-git -C "$NORMALIZATION" commit -qm mutant
-output="$(cd "$NORMALIZATION" && env -u LOCK_RANGES_ROOT bun scripts/kit/check-lock-ranges.ts 2>&1)" && rc=0 || rc=$?
+
+TRUST="$TMP/trust-rewrite"
+rm -rf "$TRUST"
+cp -a "$NORMALIZATION" "$TRUST"
+node -e 'const fs = require("node:fs"); const p = process.argv[1]; const s = fs.readFileSync(p, "utf8"); const t = s.replace(/  "trustedDependencies": \[\],\n/, ""); if (s === t) process.exit(1); fs.writeFileSync(p, t)' "$TRUST/bun.lock"
+git -C "$TRUST" add bun.lock
+git -C "$TRUST" commit -qm trust-mutant
+output="$(cd "$TRUST" && env -u LOCK_RANGES_ROOT bun scripts/kit/check-lock-ranges.ts 2>&1)" && rc=0 || rc=$?
 if [[ "$rc" -eq 1 && "$output" == *'candidate bun.lock changes on install'* ]]; then
-  echo 'PASS: committed lock normalization drift detected'
+  echo 'PASS: missing trustedDependencies fails on rewrite'
   PASS=$((PASS + 1))
 else
-  echo "FAIL: committed lock normalization drift (rc=$rc): $output" >&2
+  echo "FAIL: missing trustedDependencies (rc=$rc): $output" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+MISSING_WS="$TMP/missing-workspace"
+rm -rf "$MISSING_WS"
+cp -a "$NORMALIZATION" "$MISSING_WS"
+rm -f "$MISSING_WS/apps/starter-web/package.json"
+git -C "$MISSING_WS" add -A
+git -C "$MISSING_WS" commit -qm missing-starter-web
+output="$(cd "$MISSING_WS" && env -u LOCK_RANGES_ROOT bun scripts/kit/check-lock-ranges.ts 2>&1)" && rc=0 || rc=$?
+if [[ "$rc" -eq 1 && "$output" == *'candidate bun.lock changes on install'* ]]; then
+  echo 'PASS: removed tracked workspace manifest fails on rewrite'
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: removed workspace manifest (rc=$rc): $output" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+PROBE_MUTANT="$TMP/probe-mutant"
+rm -rf "$PROBE_MUTANT"
+cp -a "$TRUST" "$PROBE_MUTANT"
+node -e '
+const fs = require("node:fs");
+const p = process.argv[1];
+let s = fs.readFileSync(p, "utf8");
+const t = s.replace(
+  "await checkStability(root, tree)",
+  "/* stability probe deleted */",
+);
+if (t === s) process.exit(1);
+fs.writeFileSync(p, t);
+' "$PROBE_MUTANT/scripts/kit/check-lock-ranges.ts"
+output="$(cd "$PROBE_MUTANT" && env -u LOCK_RANGES_ROOT bun scripts/kit/check-lock-ranges.ts 2>&1)" && rc=0 || rc=$?
+if [[ "$rc" -eq 0 ]]; then
+  echo 'PASS: deleting stability probe mutant killed'
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: probe-deleted mutant still failed (rc=$rc): $output" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+DUP="$TMP/duplicate-keys"
+rm -rf "$DUP"
+cp -a "$NORMALIZATION" "$DUP"
+node -e '
+const fs = require("node:fs");
+const p = process.argv[1];
+const text = fs.readFileSync(p, "utf8");
+const marker = "\"packages\": {";
+const i = text.indexOf(marker);
+if (i < 0) process.exit(1);
+const after = text.slice(i + marker.length);
+const km = after.match(/\n    ("(?:\\.|[^"\\])*"): \[/);
+if (!km) process.exit(1);
+const lineStart = text.indexOf(km[0], i);
+const lineEnd = text.indexOf("\n", lineStart + 1);
+const line = text.slice(lineStart, lineEnd);
+fs.writeFileSync(p, text.slice(0, lineEnd) + line + text.slice(lineEnd));
+' "$DUP/bun.lock"
+git -C "$DUP" add bun.lock
+git -C "$DUP" commit -qm duplicate-packages-key
+output="$(cd "$DUP" && env -u LOCK_RANGES_ROOT bun scripts/kit/check-lock-ranges.ts 2>&1)" && rc=0 || rc=$?
+if [[ "$rc" -eq 1 && "$output" == *'ambiguous bun.lock'* ]]; then
+  echo 'PASS: duplicate packages keys refused'
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: duplicate keys (rc=$rc): $output" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+DUP_MUTANT="$TMP/dup-mutant"
+rm -rf "$DUP_MUTANT"
+cp -a "$DUP" "$DUP_MUTANT"
+node -e '
+const fs = require("node:fs");
+const p = process.argv[1];
+let s = fs.readFileSync(p, "utf8");
+let t = s.replace(/[ \t]*if \(tree\) await assertUnambiguousLock\(lockText\)\n/g, "");
+t = t.replace(/[ \t]*await assertUnambiguousLock\(lockText\)\n/g, "");
+if (t === s || /await assertUnambiguousLock\(/.test(t)) process.exit(1);
+fs.writeFileSync(p, t);
+' "$DUP_MUTANT/scripts/kit/check-lock-ranges.ts"
+output="$(cd "$DUP_MUTANT" && env -u LOCK_RANGES_ROOT bun scripts/kit/check-lock-ranges.ts 2>&1)" && rc=0 || rc=$?
+# Kill = the 'ambiguous' refusal test would fail (message gone), even if rewrite still fails.
+if [[ "$output" != *'ambiguous bun.lock'* ]]; then
+  echo 'PASS: no-strict-key mutant killed'
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: no-strict-key mutant survived (still ambiguous): $output" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+EMPTY_CACHE="$TMP/empty-cache"
+rm -rf "$EMPTY_CACHE"
+cp -a "$NORMALIZATION" "$EMPTY_CACHE"
+empty_cache_dir="$TMP/bun-cache-empty"
+empty_home="$TMP/empty-home"
+rm -rf "$empty_cache_dir" "$empty_home"
+mkdir -p "$empty_cache_dir" "$empty_home"
+output="$(
+  cd "$EMPTY_CACHE" &&
+    env -u LOCK_RANGES_ROOT BUN_INSTALL_CACHE_DIR="$empty_cache_dir" HOME="$empty_home" \
+      bun scripts/kit/check-lock-ranges.ts 2>&1
+)" && rc=0 || rc=$?
+if [[ "$rc" -eq 1 && "$output" == *'warm the Bun cache'* ]]; then
+  echo 'PASS: empty required cache fails closed with warming guidance'
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: empty cache (rc=$rc): $output" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+# Three-app hoisting layout: ordinary install keeps bytes; --lockfile-only would rewrite.
+HOIST="$TMP/hoist-stable"
+HOIST_CACHE="$TMP/hoist-cache"
+rm -rf "$HOIST" "$HOIST_CACHE"
+mkdir -p "$HOIST_CACHE"
+cat >"$TMP/build-hoist.py" <<'HOISTPY'
+#!/usr/bin/env python3
+"""Build a three-app hoisting-stable lock fixture with a loopback registry."""
+from __future__ import annotations
+import datetime as dt, json, os, shutil, subprocess, sys, tarfile, threading
+from base64 import b64encode
+from hashlib import sha512
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from io import BytesIO
+from pathlib import Path
+
+root = Path(sys.argv[1]).resolve()
+cache = Path(sys.argv[2]).resolve()
+scanner = Path(sys.argv[3]).resolve() if len(sys.argv) > 3 else None
+extra_files = {}  # filled by callers via env JSON if needed
+
+if root.exists():
+    shutil.rmtree(root)
+root.mkdir(parents=True)
+cache.mkdir(parents=True, exist_ok=True)
+
+bodies: dict[str, bytes] = {}
+records: dict[tuple[str, str], dict] = {}
+logs: list[str] = []
+port_box = {"port": 0}
+
+
+def make_tgz(name: str, version: str) -> tuple[str, bytes, str]:
+    raw = json.dumps({"name": name, "version": version}).encode()
+    buf = BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+        info = tarfile.TarInfo("package/package.json")
+        info.size = len(raw)
+        tar.addfile(info, BytesIO(raw))
+    blob = buf.getvalue()
+    path = f"{name}/-/{name}-{version}.tgz"
+    integrity = "sha512-" + b64encode(sha512(blob).digest()).decode()
+    return path, blob, integrity
+
+
+for version in ("1.0.0", "1.0.1"):
+    path, blob, integrity = make_tgz("kit-pin", version)
+    bodies[path] = blob
+    records[("kit-pin", version)] = {
+        "name": "kit-pin",
+        "version": version,
+        "dist": {"tarball": "", "integrity": integrity},
+    }
+
+
+class Registry(BaseHTTPRequestHandler):
+    def log_message(self, *args):  # noqa: A003
+        return
+
+    def do_GET(self):  # noqa: N802
+        path = self.path.strip("/")
+        logs.append(path)
+        if path == "kit-pin":
+            versions = ["1.0.0", "1.0.1"]
+            obj = {
+                "name": "kit-pin",
+                "dist-tags": {"latest": "1.0.1"},
+                "versions": {},
+                "time": {
+                    "modified": "2025-01-01T00:00:00.000Z",
+                    "created": "2025-01-01T00:00:00.000Z",
+                },
+            }
+            for v in versions:
+                meta = json.loads(json.dumps(records[("kit-pin", v)]))
+                meta["dist"]["tarball"] = f"http://127.0.0.1:{port_box['port']}/kit-pin/-/kit-pin-{v}.tgz"
+                obj["versions"][v] = meta
+                obj["time"][v] = "2025-01-01T00:00:00.000Z"
+            buf = json.dumps(obj).encode()
+            mime = "application/json"
+        elif path in bodies:
+            buf = bodies[path]
+            mime = "application/octet-stream"
+        else:
+            self.send_error(404)
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", mime)
+        self.send_header("Content-Length", str(len(buf)))
+        self.end_headers()
+        self.wfile.write(buf)
+
+
+srv = ThreadingHTTPServer(("127.0.0.1", 0), Registry)
+port_box["port"] = srv.server_address[1]
+threading.Thread(target=srv.serve_forever, daemon=True).start()
+url = f"http://127.0.0.1:{port_box['port']}/"
+
+bun_version = subprocess.check_output(["bun", "-v"], text=True).strip()
+(root / "package.json").write_text(
+    json.dumps(
+        {
+            "name": "hoist-root",
+            "private": True,
+            "workspaces": ["apps/*"],
+            "trustedDependencies": [],
+            "packageManager": f"bun@{bun_version}",
+        },
+        indent=2,
+    )
+    + "\n"
+)
+(root / "bunfig.toml").write_text(f'[install]\nregistry = "{url}"\nminimumReleaseAge = 259200\n')
+for app, ver in (("a", "1.0.1"), ("b", "1.0.0"), ("c", "1.0.1")):
+    app_dir = root / "apps" / app
+    app_dir.mkdir(parents=True)
+    (app_dir / "package.json").write_text(json.dumps({"name": app, "dependencies": {"kit-pin": ver}}) + "\n")
+if scanner is not None:
+    scripts = root / "scripts" / "kit"
+    scripts.mkdir(parents=True)
+    shutil.copy(scanner, scripts / "check-lock-ranges.ts")
+
+env = {**os.environ, "BUN_INSTALL_CACHE_DIR": str(cache)}
+
+
+def run(*args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["bun", *args],
+        cwd=root,
+        env=env,
+        text=True,
+        capture_output=True,
+        timeout=60,
+    )
+
+
+r = run("install", "--lockfile-only", "--ignore-scripts")
+if r.returncode != 0:
+    sys.stderr.write(r.stdout + r.stderr)
+    raise SystemExit("initial lockfile-only failed")
+
+lock = json.loads(
+    subprocess.check_output(
+        ["bun", "-e", 'console.log(JSON.stringify(Bun.JSONC.parse(await Bun.file("bun.lock").text())))'],
+        cwd=root,
+        text=True,
+    )
+)
+high = next(v for v in lock["packages"].values() if v[0] == "kit-pin@1.0.1")
+low = next(v for v in lock["packages"].values() if v[0] == "kit-pin@1.0.0")
+next_packages = {k: v for k, v in lock["packages"].items() if k != "kit-pin" and not k.endswith("/kit-pin")}
+next_packages["kit-pin"] = low
+next_packages["a/kit-pin"] = high
+next_packages["c/kit-pin"] = high
+lock["packages"] = next_packages
+(root / "bun.lock").write_text(json.dumps(lock, indent=2) + "\n")
+before = (root / "bun.lock").read_bytes()
+
+r = run("install", "--frozen-lockfile", "--minimum-release-age", "0", "--ignore-scripts")
+if r.returncode != 0:
+    sys.stderr.write(r.stdout + r.stderr)
+    raise SystemExit("frozen warmup failed")
+srv.shutdown()
+if (root / "bun.lock").read_bytes() != before:
+    raise SystemExit("frozen rewrote lock")
+
+# Prove ordinary offline keeps bytes and lockfile-only would rewrite.
+r = run("install", "--offline", "--ignore-scripts")
+if r.returncode != 0 or (root / "bun.lock").read_bytes() != before:
+    raise SystemExit("ordinary offline did not keep lock")
+writer = root.parent / (root.name + "-writer")
+if writer.exists():
+    shutil.rmtree(writer)
+shutil.copytree(root, writer, ignore=shutil.ignore_patterns("node_modules", ".pkg"))
+r = subprocess.run(
+    ["bun", "install", "--lockfile-only", "--offline", "--ignore-scripts", "--minimum-release-age", "0"],
+    cwd=writer,
+    env=env,
+    text=True,
+    capture_output=True,
+    timeout=60,
+)
+if r.returncode != 0:
+    sys.stderr.write(r.stdout + r.stderr)
+    raise SystemExit("lockfile-only offline failed")
+if (writer / "bun.lock").read_bytes() == before:
+    raise SystemExit("lockfile-only did not rewrite hoisting layout")
+print("hoist fixture ready")
+print("registry_hits", len(logs))
+
+HOISTPY
+python3 "$TMP/build-hoist.py" "$HOIST" "$HOIST_CACHE" "$SCANNER"
+printf '%s\n' 'node_modules/' '.pkg/' >"$HOIST/.gitignore"
+rm -rf "$HOIST/node_modules" "$HOIST"/apps/*/node_modules "$HOIST/.pkg"
+commit_tree "$HOIST" hoist-stable
+warm_start=$(date +%s%N)
+output="$(
+  cd "$HOIST" &&
+    env -u LOCK_RANGES_ROOT BUN_INSTALL_CACHE_DIR="$HOIST_CACHE" bun scripts/kit/check-lock-ranges.ts 2>&1
+)" && rc=0 || rc=$?
+warm_end=$(date +%s%N)
+warm_ms=$(( (warm_end - warm_start) / 1000000 ))
+if [[ "$rc" -eq 0 && "$output" == *'check-lock-ranges: OK'* ]]; then
+  echo "PASS: hoisting-only layout accepted by ordinary-install oracle (${warm_ms}ms warm)"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: hoist accept (rc=$rc): $output" >&2
+  FAIL=$((FAIL + 1))
+fi
+printf '%s\n' "$warm_ms" >"$TMP/probe-warm-ms.txt"
+
+LOCKFILE_ONLY_MUTANT="$TMP/lockfile-only-mutant"
+rm -rf "$LOCKFILE_ONLY_MUTANT"
+cp -a "$HOIST" "$LOCKFILE_ONLY_MUTANT"
+node -e '
+const fs = require("node:fs");
+const p = process.argv[1];
+let s = fs.readFileSync(p, "utf8");
+const from = "['\''install'\'', '\''--offline'\'', '\''--ignore-scripts'\'']";
+const to = "['\''install'\'', '\''--lockfile-only'\'', '\''--offline'\'', '\''--ignore-scripts'\'', '\''--minimum-release-age'\'', '\''0'\'']";
+const t = s.replace(from, to);
+if (t === s) process.exit(1);
+fs.writeFileSync(p, t);
+' "$LOCKFILE_ONLY_MUTANT/scripts/kit/check-lock-ranges.ts"
+output="$(
+  cd "$LOCKFILE_ONLY_MUTANT" &&
+    env -u LOCK_RANGES_ROOT BUN_INSTALL_CACHE_DIR="$HOIST_CACHE" bun scripts/kit/check-lock-ranges.ts 2>&1
+)" && rc=0 || rc=$?
+if [[ "$rc" -eq 1 && "$output" == *'candidate bun.lock changes on install'* ]]; then
+  echo 'PASS: --lockfile-only comparison mutant killed'
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: lockfile-only mutant (rc=$rc): $output" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+cold_cache="$TMP/hoist-cache-cold"
+cold_home="$TMP/hoist-home-cold"
+rm -rf "$cold_cache" "$cold_home"
+mkdir -p "$cold_cache" "$cold_home"
+cold_start=$(date +%s%N)
+output="$(
+  cd "$HOIST" &&
+    env -u LOCK_RANGES_ROOT BUN_INSTALL_CACHE_DIR="$cold_cache" HOME="$cold_home" \
+      bun scripts/kit/check-lock-ranges.ts 2>&1
+)" && rc=0 || rc=$?
+cold_end=$(date +%s%N)
+cold_ms=$(( (cold_end - cold_start) / 1000000 ))
+printf '%s\n' "$cold_ms" >"$TMP/probe-cold-ms.txt"
+if [[ "$rc" -eq 1 && "$output" == *'warm the Bun cache'* ]]; then
+  echo "PASS: cold empty cache against hoist fixture fails closed (${cold_ms}ms)"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: cold cache timing case (rc=$rc): $output" >&2
   FAIL=$((FAIL + 1))
 fi
 
 echo "== Lock ranges summary: $PASS pass, $FAIL fail =="
+echo "probe warm_ms=$(cat "$TMP/probe-warm-ms.txt") cold_ms=$(cat "$TMP/probe-cold-ms.txt")"
 [[ "$FAIL" -eq 0 ]]

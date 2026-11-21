@@ -7,9 +7,12 @@ import { spawnSync } from 'node:child_process'
  * --config=config/kit/bunfig.gates.toml`, so neither a tree `.env` nor a tree
  * `bunfig.toml` (`preload`, `define`) can set the override. That launch is the
  * guarantee: running this file with a bare `bun` gives no such protection.
- * Normalization checks committed HEAD inputs, or the staged tree during an
- * open merge. Unstaged and untracked files are outside that snapshot.
- * Offline verification may require the local Bun cache.
+ * Stability checks a disposable snapshot of the full tracked candidate tree
+ * (committed HEAD, or the staged tree during an open merge). Unstaged and
+ * untracked files are outside that snapshot. An ordinary offline install with
+ * scripts disabled must leave `bun.lock` unchanged; forced `--lockfile-only`
+ * reserialization is not the oracle. Offline verification may require the
+ * local Bun cache. Ambiguous locks with duplicate decoded keys are refused.
  * A lock without the root workspace `""`, or a scan that checks no range, fails.
  *
  * Scope: every `workspaces` entry in bun.lock, root `""` included. For each of
@@ -45,9 +48,9 @@ import { spawnSync } from 'node:child_process'
  * Bun.semver.satisfies returns true for non-ranges, which would hide the defect.
  * Its repair is a spec rewrite, which `bun update` cannot do.
  */
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { basename, join, resolve } from 'node:path'
+import { join, resolve } from 'node:path'
 
 const SECTIONS = ['dependencies', 'devDependencies', 'optionalDependencies'] as const
 
@@ -345,41 +348,55 @@ function candidateTree(root: string): string {
   return tree.stdout.toString().trim()
 }
 
-function checkNormalization(root: string, tree: string): void {
-  const list = spawnSync('git', ['ls-tree', '-r', '-z', '--name-only', tree], { cwd: root })
-  if (list.status !== 0) fail('cannot list candidate lock inputs')
-  const paths = list.stdout
-    .toString()
-    .split('\0')
-    .filter(
-      (path) =>
-        path === 'bun.lock' ||
-        path === 'bunfig.toml' ||
-        basename(path) === 'package.json' ||
-        path.startsWith('config/kit/patches/'),
-    )
-  if (!(paths.includes('bun.lock') && paths.includes('package.json')))
-    fail('candidate lock inputs are missing')
-  const dir = mkdtempSync(join(tmpdir(), 'lock-normalization-'))
+/** Refuse locks Bun would silently collapse: duplicate decoded object keys. */
+async function assertUnambiguousLock(text: string): Promise<void> {
+  const dir = mkdtempSync(join(tmpdir(), 'lock-dup-'))
   try {
-    const archive = spawnSync('git', ['archive', tree, '--', ...paths], {
+    const entry = join(dir, 'lock.jsonc')
+    writeFileSync(entry, text)
+    const result = await Bun.build({ entrypoints: [entry], write: false })
+    const duplicate = result.logs.some((log) => /duplicate key/i.test(log.message))
+    if (duplicate) throw new Error('ambiguous bun.lock: duplicate decoded keys')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+}
+
+/**
+ * Ordinary offline install in a disposable full-tree snapshot. Scripts off;
+ * honour the snapshot bunfig (no age-0 writer). Never copy the probe output back.
+ */
+async function checkStability(root: string, tree: string): Promise<void> {
+  const dir = mkdtempSync(join(tmpdir(), 'lock-stability-'))
+  try {
+    const archive = spawnSync('git', ['archive', tree], {
       cwd: root,
-      maxBuffer: 64 * 1024 * 1024,
+      maxBuffer: 256 * 1024 * 1024,
     })
-    if (archive.status !== 0) throw new Error('cannot archive candidate lock inputs')
-    const extract = spawnSync('tar', ['-xf', '-', '-C', dir], { input: archive.stdout })
-    if (extract.status !== 0) throw new Error('cannot extract candidate lock inputs')
-    const manifest = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'))
+    if (archive.status !== 0) throw new Error('cannot archive candidate tree')
+    const extract = spawnSync('tar', ['-xf', '-', '-C', dir], {
+      input: archive.stdout,
+      maxBuffer: 256 * 1024 * 1024,
+    })
+    if (extract.status !== 0) throw new Error('cannot extract candidate tree')
+    if (!(existsSync(join(dir, 'bun.lock')) && existsSync(join(dir, 'package.json'))))
+      throw new Error('candidate lock inputs are missing')
+    const manifest = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) as {
+      packageManager?: string
+    }
     if (manifest.packageManager !== `bun@${Bun.version}`)
-      throw new Error('cannot verify lock normalization without the pinned Bun version')
-    const before = readFileSync(join(dir, 'bun.lock'))
-    const install = spawnSync(
-      process.execPath,
-      ['install', '--lockfile-only', '--offline', '--ignore-scripts', '--minimum-release-age', '0'],
-      { cwd: dir },
-    )
+      throw new Error('cannot verify lock stability without the pinned Bun version')
+    const lockText = readFileSync(join(dir, 'bun.lock'), 'utf8')
+    await assertUnambiguousLock(lockText)
+    const before = Buffer.from(lockText)
+    const env = { ...process.env }
+    delete env.LOCK_RANGES_ROOT
+    const install = spawnSync(process.execPath, ['install', '--offline', '--ignore-scripts'], {
+      cwd: dir,
+      env,
+    })
     if (install.status !== 0)
-      throw new Error('cannot verify lock normalization offline; warm the Bun cache and retry')
+      throw new Error('cannot verify lock stability offline; warm the Bun cache and retry')
     if (!before.equals(readFileSync(join(dir, 'bun.lock'))))
       throw new Error('candidate bun.lock changes on install; regenerate and stage or commit it')
   } catch (error) {
@@ -390,7 +407,7 @@ function checkNormalization(root: string, tree: string): void {
   }
 }
 
-function main(): void {
+async function main(): Promise<void> {
   const root = treeRoot()
   const tree = process.env.LOCK_RANGES_ROOT === undefined ? candidateTree(root) : undefined
   const stagedLock =
@@ -398,7 +415,9 @@ function main(): void {
       ? spawnSync('git', ['show', `${tree}:bun.lock`], { cwd: root })
       : undefined
   if (stagedLock && stagedLock.status !== 0) fail('missing staged merge bun.lock')
-  const lock = parseLock(stagedLock ? stagedLock.stdout.toString() : readLock(root))
+  const lockText = stagedLock ? stagedLock.stdout.toString() : readLock(root)
+  if (tree) await assertUnambiguousLock(lockText)
+  const lock = parseLock(lockText)
   const tally: Tally = { checked: 0, skipped: 0, findings: [] }
   const keys = Object.keys(lock.workspaces).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
   for (const key of keys) {
@@ -410,10 +429,10 @@ function main(): void {
     console.error(`check-lock-ranges: FAIL (${tally.findings.length} finding(s))`)
     process.exit(1)
   }
-  if (tree) checkNormalization(root, tree)
+  if (tree) await checkStability(root, tree)
   console.log(
     `check-lock-ranges: OK (${keys.length} workspace(s), ${tally.checked} range(s) checked, ${tally.skipped} skipped)`,
   )
 }
 
-main()
+await main()

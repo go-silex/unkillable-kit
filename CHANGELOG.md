@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Kit upgrade lock stability
+
+- `kit-upgrade` stages the merged `bun.lock` and inheritance marker, frozen-installs, then runs `lock-ranges:check` with no re-add and `LOCK_RANGES_ROOT` cleared. The check's oracle is an ordinary offline install in a disposable full-tree snapshot: a layout that install leaves unchanged is accepted even when `--lockfile-only` would re-serialize it; duplicate decoded keys and rewrite cases still fail.
+
 ### API client body content type
 
 - `apiFetch` / `createApiClient` set `content-type: application/json` only for string bodies with no content type already set. `FormData`, `URLSearchParams`, and typed `Blob` bodies keep the content type `fetch` derives. Binary bodies (`ArrayBuffer`, typed arrays, streams) are now sent without a content type: a caller sending JSON that way must set `content-type` explicitly.

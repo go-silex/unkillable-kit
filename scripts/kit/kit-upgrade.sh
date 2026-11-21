@@ -5,6 +5,7 @@ export GIT_OPTIONAL_LOCKS=0
 trap 'echo "stop: inspect the error and resume manually as documented in Pulling kit upgrades; do not restart an open merge" >&2' ERR
 
 cd "$(git rev-parse --show-toplevel)"
+unset LOCK_RANGES_ROOT
 check=false
 if [[ ${1:-} == --check && $# == 1 ]]; then
   check=true
@@ -57,13 +58,15 @@ fi
 git diff --quiet HEAD -- LICENSE
 printf '{\n  "version": 1,\n  "upstreamCommit": "%s"\n}\n' "$(git rev-parse upstream/main)" > config/product/inheritance.json
 bun_cmd=${KIT_UPGRADE_BUN:-bun}
-"$bun_cmd" install
-git add bun.lock
+git add bun.lock config/product/inheritance.json
+if ! "$bun_cmd" install --frozen-lockfile --minimum-release-age 0; then
+  echo 'stop: merge remains open; resolve lock-ranges findings by owner and resume as documented in Pulling kit upgrades' >&2
+  exit 1
+fi
 if ! "$bun_cmd" run lock-ranges:check; then
   echo 'stop: merge remains open; resolve lock-ranges findings by owner and resume as documented in Pulling kit upgrades' >&2
   exit 1
 fi
-git add bun.lock config/product/inheritance.json
 git commit --no-edit
 if ! git diff --quiet upstream/main -- .github/dependabot.yml; then
   node scripts/kit/configure-product-dependabot.cjs
