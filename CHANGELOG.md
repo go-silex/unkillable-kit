@@ -1,5 +1,7 @@
 # Changelog
 
+New entries go under `Unreleased`. A release moves them under a `<component>/vX.Y.Z` section; tagged sections are not rewritten.
+
 ## Unreleased
 
 ### Kit upgrade lock stability
@@ -18,6 +20,10 @@
 ### Shared CI install recipe
 
 - Root core, grouped coverage and the maintained Product CI template call Kit-owned `scripts/kit/ci-install.sh` for the frozen Bun install with the selected Node's bundled `node-gyp` shim. Existing Products opt in once after upstream merge by matching that Install step (and pinned Node setup if missing), keeping Product-specific checks.
+
+## unkillable-kit/v0.1.0 — 2026-11-21
+
+Tagged at `8481566`. Product adoption steps: [release notes](https://github.com/go-silex/unkillable-kit/releases/tag/unkillable-kit/v0.1.0).
 
 ### Vitest CI workers
 
