@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Kit upgrade check
+
+- `kit-upgrade --check` prints the pending commit count and first-parent merges of the locally cached `upstream/main`, plus a `git show` pointer to that tip's CHANGELOG, without fetching or writing.
+
 ### API client body content type
 
 - `apiFetch` / `createApiClient` set `content-type: application/json` only for string bodies with no content type already set. `FormData`, `URLSearchParams`, and typed `Blob` bodies keep the content type `fetch` derives. Binary bodies (`ArrayBuffer`, typed arrays, streams) are now sent without a content type: a caller sending JSON that way must set `content-type` explicitly.

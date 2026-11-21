@@ -581,8 +581,8 @@ The script runs only in a clean product clone, refuses an in-progress merge, and
 
 For a new token pin, merge conflict, lock-ranges resume, or independent-lineage join, run the lines of `scripts/kit/kit-upgrade.sh` by hand from `git merge --no-ff --no-commit` onward as applicable, including its `LICENSE` lines.
 
-`bun run kit-upgrade -- --check` reports notices and pending work against the locally cached `upstream/main` without fetching or changing anything.
-A clone whose pin predates this script performs its first upgrade with the previous manual block in this section at its pinned commit; do not copy it from a newer version.
+`bun run kit-upgrade -- --check` prints notices and the cached `upstream/main` pending range (commits, Kit merges, CHANGELOG pointer); no fetch or write.
+Pins older than this script first upgrade with this section's manual block at that pin.
 
 A range that sets a new pin of `actions/create-github-app-token` stops before the merge. Establish the effective `CI_APP_ID` mode using [CI App setup](./ci-app-setup.md#trust-and-setup):
 verified absence permits the inactive, separately authorized manual-merge path; a nonempty value requires the installed App's Client ID, valid authorization configuration and a successful mint established through a separately authorized exercise.
