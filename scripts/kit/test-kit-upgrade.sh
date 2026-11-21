@@ -217,7 +217,7 @@ snapshot_git_state "$dir/before-check"
 run_upgrade --check
 grep -q 'upgrade pending' "$dir/out"
 grep -q '^Pending commits: 1$' "$dir/out"
-if grep -q 'CHANGELOG.md additions:' "$dir/out"; then exit 1; fi
+grep -q "^Kit CHANGELOG at the cached tip: git show ${cached}:CHANGELOG.md$" "$dir/out" || grep -q '^Kit CHANGELOG at the cached tip: git show ' "$dir/out"
 [[ $(git -C "$dir/product" rev-parse HEAD) == "$before" ]]
 [[ $(git -C "$dir/product" rev-parse upstream/main) == "$cached" ]]
 assert_git_state_unchanged "$dir/before-check"
@@ -225,8 +225,8 @@ pass '--check uses cached upstream without fetching or writing'
 
 fixture check-report
 git -C "$dir/seed" checkout -qb feature-one
-printf '# Changelog\n\n## Unreleased\n\n- First pending change\n' > "$dir/seed/CHANGELOG.md"
-git -C "$dir/seed" add CHANGELOG.md
+echo one > "$dir/seed/one"
+git -C "$dir/seed" add one
 git -C "$dir/seed" commit -qm feature-one
 git -C "$dir/seed" checkout -q main
 git -C "$dir/seed" merge -q --no-ff -m 'Merge first feature' feature-one
@@ -238,20 +238,16 @@ git -C "$dir/seed" checkout -q main
 git -C "$dir/seed" merge -q --no-ff -m 'Merge second feature' feature-two
 git -C "$dir/seed" push -q "$dir/upstream.git" main
 git -C "$dir/product" fetch -q upstream
+tip=$(git -C "$dir/product" rev-parse upstream/main)
 snapshot_git_state "$dir/before-report"
 run_upgrade --check
 grep -qx 'Pending commits: 4' "$dir/out"
-grep -qx -- '- First pending change' "$dir/out"
 [[ $(grep '^Merge .* feature$' "$dir/out") == $'Merge first feature\nMerge second feature' ]]
+grep -qx "Kit CHANGELOG at the cached tip: git show ${tip}:CHANGELOG.md" "$dir/out"
 assert_git_state_unchanged "$dir/before-report"
-pass '--check reports pending merge subjects and Kit CHANGELOG additions without writes'
+pass '--check reports pending merge subjects without writes'
 
 fixture check-caps
-{
-  for ((i=1; i<=51; i++)); do printf -- '- Cap line %02d\n' "$i"; done
-} > "$dir/seed/CHANGELOG.md"
-git -C "$dir/seed" add CHANGELOG.md
-git -C "$dir/seed" commit -qm changelog-caps
 for ((i=1; i<=51; i++)); do
   git -C "$dir/seed" checkout -qb "cap-$i"
   echo "cap-$i" > "$dir/seed/cap-$i"
@@ -263,13 +259,10 @@ done
 git -C "$dir/seed" push -q "$dir/upstream.git" main
 git -C "$dir/product" fetch -q upstream
 run_upgrade --check
-merges=$(awk '/^First-parent merge subjects/{p=1;next} /^CHANGELOG|^upgrade pending|^shallow/{p=0} p' "$dir/out")
+merges=$(awk '/^First-parent merge subjects/{p=1;next} /^Kit CHANGELOG|^upgrade pending|^shallow|^pending range/{p=0} p' "$dir/out")
 [[ $(printf '%s\n' "$merges" | grep -c '^Merge cap ') == 50 ]]
 [[ $(printf '%s\n' "$merges" | tail -n1) == '… 1 more' ]]
-adds=$(awk '/^CHANGELOG.md additions:/{p=1;next} /^upgrade pending|^shallow/{p=0} p' "$dir/out")
-[[ $(printf '%s\n' "$adds" | grep -c '^- Cap line ') == 50 ]]
-[[ $(printf '%s\n' "$adds" | tail -n1) == '… 1 more' ]]
-pass '--check caps merge subjects and CHANGELOG lines at 50'
+pass '--check caps merge subjects at 50'
 
 fixture check-second-parent
 git -C "$dir/seed" checkout -qb feature
@@ -280,12 +273,8 @@ git -C "$dir/seed" checkout -qb feature-side
 echo side > "$dir/seed/side"
 git -C "$dir/seed" add side
 git -C "$dir/seed" commit -qm side
-printf '%s\n' '- Side-only changelog' > "$dir/seed/CHANGELOG.md"
-git -C "$dir/seed" add CHANGELOG.md
-git -C "$dir/seed" commit -qm 'side changelog'
 git -C "$dir/seed" checkout -q feature
-# ours-merge keeps Side-only out of the first-parent result while retaining the side commit.
-git -C "$dir/seed" merge -q -s ours --no-ff -m 'Merge side into feature' feature-side
+git -C "$dir/seed" merge -q --no-ff -m 'Merge side into feature' feature-side
 git -C "$dir/seed" checkout -q main
 git -C "$dir/seed" merge -q --no-ff -m 'Merge feature' feature
 git -C "$dir/seed" push -q "$dir/upstream.git" main
@@ -293,14 +282,13 @@ git -C "$dir/product" fetch -q upstream
 run_upgrade --check
 grep -qx 'Merge feature' "$dir/out"
 if grep -q 'Merge side into feature' "$dir/out"; then exit 1; fi
-if grep -q 'Side-only changelog' "$dir/out"; then exit 1; fi
-pass '--check lists only first-parent merges and CHANGELOG patches'
+pass '--check lists only first-parent merges'
 
 fixture check-multi-base
 base=$(git -C "$dir/seed" rev-parse HEAD)
 git -C "$dir/seed" checkout -qb tip-a
-printf '# Changelog\n\n## Unreleased\n\n- already inherited A\n' > "$dir/seed/CHANGELOG.md"
-git -C "$dir/seed" add CHANGELOG.md
+echo a > "$dir/seed/a-file"
+git -C "$dir/seed" add a-file
 git -C "$dir/seed" commit -qm tip-a
 git -C "$dir/seed" checkout -q main
 git -C "$dir/seed" merge -q --no-ff -m 'Merge tip A' tip-a
@@ -330,7 +318,6 @@ git -C "$dir/seed" push -q "$dir/upstream.git" main
 git -C "$dir/product" fetch -q upstream
 run_upgrade --check
 if grep -q 'Merge tip A' "$dir/out"; then exit 1; fi
-if grep -q -- '- already inherited A' "$dir/out"; then exit 1; fi
 grep -q '^Pending commits:' "$dir/out"
 pass '--check excludes already-inherited merge-base side history'
 
@@ -371,66 +358,73 @@ grep -q 'shallow clone: pending range not reported' "$dir/out"
 if grep -q '^Pending commits:' "$dir/out"; then exit 1; fi
 pass '--check skips the report on a shallow clone'
 
-fixture check-product-edit
-printf '# Changelog\n\n## Unreleased\n\n- shared line\n- kit only old\n' > "$dir/seed/CHANGELOG.md"
-git -C "$dir/seed" add CHANGELOG.md
-git -C "$dir/seed" commit -qm 'kit changelog base'
+fixture check-unreadable
+advance
 git -C "$dir/seed" push -q "$dir/upstream.git" main
 git -C "$dir/product" fetch -q upstream
-git -C "$dir/product" merge -q --no-edit upstream/main
-printf '{"version":1,"upstreamCommit":"%s"}\n' "$(git -C "$dir/product" rev-parse upstream/main)" > "$dir/product/config/product/inheritance.json"
-printf '# Changelog\n\n## Unreleased\n\n- product rewrite\n- shared line\n- product only\n' > "$dir/product/CHANGELOG.md"
-git -C "$dir/product" add CHANGELOG.md config/product/inheritance.json
-git -C "$dir/product" commit -qm 'product edits changelog'
-printf '# Changelog\n\n## Unreleased\n\n- shared line\n- kit only old\n- shared line\n- kit new line\n' > "$dir/seed/CHANGELOG.md"
-git -C "$dir/seed" add CHANGELOG.md
-git -C "$dir/seed" commit -qm 'kit adds shared and new'
-git -C "$dir/seed" push -q "$dir/upstream.git" main
-git -C "$dir/product" fetch -q upstream
-run_upgrade --check
-adds=$(awk '/^CHANGELOG.md additions:/{p=1;next} /^upgrade pending|^shallow/{p=0} p' "$dir/out")
-[[ $(printf '%s\n' "$adds") == $'- shared line\n- kit new line' ]]
-if grep -q 'product rewrite\|product only\|kit only old' "$dir/out"; then exit 1; fi
-pass '--check reports Kit CHANGELOG additions ignoring Product edits'
+mkdir -p "$dir/bin"
+real_git=$(command -v git)
+cat > "$dir/bin/git" <<EOF
+#!/usr/bin/env bash
+if [[ \$1 == rev-list && \$* == *--count* ]]; then
+  echo 'fatal: revision walk setup failed' >&2
+  exit 128
+fi
+if [[ \$1 == log && \$* == *--first-parent* && \$* == *--merges* ]]; then
+  echo 'fatal: revision walk setup failed' >&2
+  exit 128
+fi
+exec "$real_git" "\$@"
+EOF
+chmod +x "$dir/bin/git"
+PATH="$dir/bin:$PATH" run_upgrade --check
+grep -q 'pending range not readable from local history' "$dir/out"
+grep -q 'upgrade pending' "$dir/out"
+if grep -q '^Pending commits:' "$dir/out"; then exit 1; fi
+if grep -q 'do not restart an open merge' "$dir/out"; then exit 1; fi
+pass '--check reports an unreadable pending range without ERR'
 
-fixture check-dup-bullet
-printf '# Changelog\n\n## Unreleased\n\n- once\n' > "$dir/seed/CHANGELOG.md"
-git -C "$dir/seed" add CHANGELOG.md
-git -C "$dir/seed" commit -qm 'changelog once'
-printf '# Changelog\n\n## Unreleased\n\n- once\n- once\n' > "$dir/seed/CHANGELOG.md"
-git -C "$dir/seed" add CHANGELOG.md
-git -C "$dir/seed" commit -qm 'changelog twice'
-git -C "$dir/seed" push -q "$dir/upstream.git" main
+fixture check-status-fail
+advance
 git -C "$dir/product" fetch -q upstream
-run_upgrade --check
-adds=$(awk '/^CHANGELOG.md additions:/{p=1;next} /^upgrade pending|^shallow/{p=0} p' "$dir/out")
-# first commit adds headers + once; second adds one more once — expect two '- once' from the range patches
-[[ $(printf '%s\n' "$adds" | grep -c '^- once$') == 2 ]]
-pass '--check prints repeated identical Kit bullets twice'
+# A status failure (e.g. a blob a sparse blobless clone cannot read offline) must not pass as clean.
+mkdir -p "$dir/bin"
+real_git=$(command -v git)
+cat > "$dir/bin/git" <<EOF
+#!/usr/bin/env bash
+if [[ \$1 == status ]]; then
+  echo 'fatal: unable to read tree' >&2
+  exit 128
+fi
+exec "$real_git" "\$@"
+EOF
+chmod +x "$dir/bin/git"
+rc=0
+PATH="$dir/bin:$PATH" run_upgrade --check || rc=$?
+[[ $rc == 1 ]]
+grep -q 'cannot read the working tree state' "$dir/out"
+if grep -q 'upgrade pending' "$dir/out"; then exit 1; fi
+pass '--check fails closed when git status cannot read the tree'
 
 fixture check-textconv
-printf '# Changelog\n\n## Unreleased\n\n- textconv line\n' > "$dir/seed/CHANGELOG.md"
-git -C "$dir/seed" add CHANGELOG.md
-git -C "$dir/seed" commit -qm 'changelog for textconv'
+echo textconv-change > "$dir/seed/textconv-change"
+git -C "$dir/seed" add textconv-change
+git -C "$dir/seed" commit -qm 'pending change for textconv'
 git -C "$dir/seed" push -q "$dir/upstream.git" main
 git -C "$dir/product" fetch -q upstream
-mkdir -p "$dir/product/.git"
-printf 'CHANGELOG.md diff=readme\npackage.json diff=manifest\n' > "$dir/product/.git/info/attributes"
-git -C "$dir/product" config diff.readme.textconv cat
-git -C "$dir/product" config diff.readme.cachetextconv true
+mkdir -p "$dir/product/.git/info"
+printf 'package.json diff=manifest\n' > "$dir/product/.git/info/attributes"
 git -C "$dir/product" config diff.manifest.textconv cat
 git -C "$dir/product" config diff.manifest.cachetextconv true
 snapshot_git_state "$dir/before-textconv"
 run_upgrade --check
 if git -C "$dir/product" for-each-ref 'refs/notes/textconv/*' | grep -q .; then exit 1; fi
 assert_git_state_unchanged "$dir/before-textconv"
-grep -qx -- '- textconv line' "$dir/out"
 pass '--check skips textconv and writes no textconv notes'
 
 fixture check-token-tip
 echo 'uses: actions/create-github-app-token@v3' > "$dir/seed/.github/workflows/ci.yml"
-printf '# Changelog\n\n## Unreleased\n\n- with token pin\n' > "$dir/seed/CHANGELOG.md"
-git -C "$dir/seed" add .github/workflows/ci.yml CHANGELOG.md
+git -C "$dir/seed" add .github/workflows/ci.yml
 git -C "$dir/seed" commit -qm 'token pin tip'
 git -C "$dir/seed" push -q "$dir/upstream.git" main
 git -C "$dir/product" fetch -q upstream
@@ -440,68 +434,42 @@ if grep -q '^Pending commits:' "$dir/out"; then exit 1; fi
 pass '--check uses captured tip for token-pin notice'
 
 fixture check-sticky-tip
-printf '# Changelog\n\n## Unreleased\n\n- tip A line\n' > "$dir/seed/CHANGELOG.md"
-git -C "$dir/seed" add CHANGELOG.md
+echo tip-a > "$dir/seed/tip-a"
+git -C "$dir/seed" add tip-a
 git -C "$dir/seed" commit -qm 'tip A'
 git -C "$dir/seed" push -q "$dir/upstream.git" main
 tip_a=$(git -C "$dir/seed" rev-parse HEAD)
-printf '# Changelog\n\n## Unreleased\n\n- tip A line\n- tip B only\n' > "$dir/seed/CHANGELOG.md"
-git -C "$dir/seed" add CHANGELOG.md
-git -C "$dir/seed" commit -qm 'tip B'
+echo 'uses: actions/create-github-app-token@v3' > "$dir/seed/.github/workflows/ci.yml"
+echo tip-b > "$dir/seed/tip-b"
+git -C "$dir/seed" add .github/workflows/ci.yml tip-b
+git -C "$dir/seed" commit -qm 'tip B token'
 git -C "$dir/seed" push -q "$dir/upstream.git" main
 tip_b=$(git -C "$dir/seed" rev-parse HEAD)
 git -C "$dir/product" fetch -q upstream
-# Point the cached tip at A while keeping B reachable for a mid-check re-resolve.
+# Start with the cached tip at A; after tip capture, advance the live tracking ref to B.
 git -C "$dir/product" update-ref refs/remotes/upstream/main "$tip_a"
 mkdir -p "$dir/bin"
 real_git=$(command -v git)
 cat > "$dir/bin/git" <<EOF
 #!/usr/bin/env bash
-if [[ \$1 == rev-parse && \$2 == upstream/main ]]; then
-  if [[ -f \$KIT_UPGRADE_TIP_FLIP ]]; then
-    exec "$real_git" rev-parse "$tip_b"
-  fi
-  printf '%s\\n' "$tip_a" > "\$KIT_UPGRADE_TIP_FLIP"
-  exec "$real_git" rev-parse "$tip_a"
+if [[ -f \$KIT_UPGRADE_TIP_FLIP && ! -f \$KIT_UPGRADE_TIP_FLIPPED ]]; then
+  touch "\$KIT_UPGRADE_TIP_FLIPPED"
+  "$real_git" -C "$dir/product" update-ref refs/remotes/upstream/main "$tip_b"
+fi
+if [[ \$1 == rev-parse && \$2 == upstream/main && ! -f \$KIT_UPGRADE_TIP_FLIP ]]; then
+  touch "\$KIT_UPGRADE_TIP_FLIP"
 fi
 exec "$real_git" "\$@"
 EOF
 chmod +x "$dir/bin/git"
-export KIT_UPGRADE_TIP_FLIP="$dir/tip-flipped"
-rm -f "$KIT_UPGRADE_TIP_FLIP"
+export KIT_UPGRADE_TIP_FLIP="$dir/tip-flip" KIT_UPGRADE_TIP_FLIPPED="$dir/tip-flipped"
+rm -f "$KIT_UPGRADE_TIP_FLIP" "$KIT_UPGRADE_TIP_FLIPPED"
 PATH="$dir/bin:$PATH" run_upgrade --check
 grep -qx 'Pending commits: 1' "$dir/out"
-grep -qx -- '- tip A line' "$dir/out"
-if grep -q 'tip B only' "$dir/out"; then exit 1; fi
+grep -qx "Kit CHANGELOG at the cached tip: git show ${tip_a}:CHANGELOG.md" "$dir/out"
+if grep -q 'establish the effective CI_APP_ID' "$dir/out"; then exit 1; fi
+[[ $(git -C "$dir/product" rev-parse upstream/main) == "$tip_b" ]]
 pass '--check keeps the tip captured before preflight'
-
-fixture check-blobless
-base=$(git -C "$dir/seed" rev-parse HEAD)
-printf '# Changelog\n\n## Unreleased\n\n- Offline blob line\n' > "$dir/seed/CHANGELOG.md"
-git -C "$dir/seed" add CHANGELOG.md
-git -C "$dir/seed" commit -qm offline-changelog
-git -C "$dir/seed" push -q "$dir/upstream.git" main
-git -C "$dir/upstream.git" config uploadpack.allowFilter true
-rm -rf "$dir/product"
-git clone -q --filter=blob:none --no-checkout "file://$dir/upstream.git" "$dir/product"
-git -C "$dir/product" remote rename origin upstream
-git -C "$dir/product" remote add origin product
-git -C "$dir/product" checkout -q "$base"
-mkdir -p "$dir/product/config/product"
-printf '{"version":1,"upstreamCommit":"%s"}\n' "$base" > "$dir/product/config/product/inheritance.json"
-git -C "$dir/product" add config/product/inheritance.json
-git -C "$dir/product" commit -qm product
-packs_before=$(find "$dir/product/.git/objects/pack" -type f | sort)
-snapshot_git_state "$dir/before-blobless"
-git -C "$dir/product" ls-tree --name-only upstream/main -- CHANGELOG.md | grep -qx CHANGELOG.md
-if GIT_NO_LAZY_FETCH=1 git -C "$dir/product" cat-file -e upstream/main:CHANGELOG.md 2>/dev/null; then exit 1; fi
-run_upgrade --check
-grep -q 'CHANGELOG.md history not available offline' "$dir/out"
-if grep -q 'do not restart an open merge' "$dir/out"; then exit 1; fi
-packs_after=$(find "$dir/product/.git/objects/pack" -type f | sort)
-[[ $packs_before == "$packs_after" ]]
-assert_git_state_unchanged "$dir/before-blobless"
-pass '--check stays offline for a blobless CHANGELOG'
 
 fixture check-current
 run_upgrade --check

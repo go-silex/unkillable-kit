@@ -4,7 +4,7 @@
 
 ### Kit upgrade check
 
-- `kit-upgrade --check` prints the pending commit count, first-parent merges and CHANGELOG lines the Kit added in the locally cached `upstream/main` range, without fetching or writing.
+- `kit-upgrade --check` prints the pending commit count and first-parent merges of the locally cached `upstream/main`, plus a `git show` pointer to that tip's CHANGELOG, without fetching or writing.
 
 ### API client body content type
 

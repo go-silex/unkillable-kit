@@ -24,7 +24,11 @@ if $check; then
   export GIT_NO_LAZY_FETCH=1
   tip=$(git rev-parse upstream/main)
 fi
-if [[ -n $(git status --porcelain) ]] || [[ -f $(git rev-parse --git-path MERGE_HEAD) ]]; then
+if ! status=$(git status --porcelain); then
+  echo 'stop: cannot read the working tree state (git status failed)' >&2
+  exit 1
+fi
+if [[ -n $status ]] || [[ -f $(git rev-parse --git-path MERGE_HEAD) ]]; then
   echo 'stop: clean the working tree and finish any in-progress merge first' >&2
   exit 1
 fi
@@ -50,32 +54,19 @@ if $check; then
   if [[ $(git rev-parse --is-shallow-repository) == true ]]; then
     echo 'shallow clone: pending range not reported; fetch full history to see it'
   else
-    count=$(git rev-list --count HEAD.."$tip")
-    printf 'Pending commits: %s\n' "$count"
-    echo 'First-parent merge subjects (oldest first):'
-    git log --first-parent --merges --reverse --format=%s HEAD.."$tip" |
-      awk 'NR <= 50 { print } END { if (NR > 50) printf "… %d more\n", NR - 50 }'
-    _cl_patch=$(mktemp)
-    # Range+pathspec log omits first-parent merge patches; walk those commits explicitly.
-    # An `if` condition keeps a failure (e.g. a blob missing offline) out of errexit and the ERR trap.
-    if ! git rev-list --first-parent HEAD.."$tip" |
-      git log --no-walk --stdin --reverse --diff-merges=first-parent --no-textconv --no-ext-diff -p --format= -- CHANGELOG.md >"$_cl_patch" 2>/dev/null; then
-      echo 'CHANGELOG.md history not available offline'
+    # One block: a failure here must not trip the ERR trap.
+    if count=$(git rev-list --count HEAD.."$tip") &&
+      subjects=$(git log --first-parent --merges --reverse --format=%s HEAD.."$tip"); then
+      printf 'Pending commits: %s\n' "$count"
+      echo 'First-parent merge subjects (oldest first):'
+      if [[ -n $subjects ]]; then
+        printf '%s\n' "$subjects" |
+          awk 'NR <= 50 { print } END { if (NR > 50) printf "… %d more\n", NR - 50 }'
+      fi
+      printf 'Kit CHANGELOG at the cached tip: git show %s:CHANGELOG.md\n' "$tip"
     else
-      awk '
-        /^diff --git / { in_hunk = 0; next }
-        /^@@/ { in_hunk = 1; next }
-        in_hunk && /^\+/ {
-          line = substr($0, 2)
-          sub(/\r$/, "", line)
-          if (line == "") next
-          if (++n == 1) print "CHANGELOG.md additions:"
-          if (n <= 50) print line
-        }
-        END { if (n > 50) printf "… %d more\n", n - 50 }
-      ' "$_cl_patch"
+      echo 'pending range not readable from local history'
     fi
-    rm -f "$_cl_patch"
   fi
   echo 'upgrade pending against the locally cached upstream/main (fetch separately to refresh)'
   exit 0
