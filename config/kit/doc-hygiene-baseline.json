@@ -87,7 +87,7 @@
   "docs/kit/product-consumer-contract.md": {
     "overLimitLines": 125,
     "maxLineBytes": 2129,
-    "fileBytes": 179858
+    "fileBytes": 179780
   },
   "docs/kit/security-dependabot.md": {
     "overLimitLines": 28,
