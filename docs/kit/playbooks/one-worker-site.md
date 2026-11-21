@@ -31,7 +31,7 @@ The handler classifies the path as Static Assets does (decoded once, repeated sl
 
 - What an API path answers is the API's: JSON errors from the Hono App, Better Auth's own responses under its base path. Routing is not authorization: the API keeps its own checks.
 - HTML responses from the binding get `cache-control: no-cache`, `x-content-type-options`, `x-frame-options` and `referrer-policy`. `shellHeaders` adds Product policy, such as a CSP, and wins on conflict.
-- Navigations are fetched without conditional headers: a 304 would carry the binding's cache policy instead of the shell's.
+- Outside `/assets/`, requests are fetched without conditional headers: any of them may be HTML, and a 304 would carry the binding's cache policy instead of the shell's. Built files under the prefix keep their 304s.
 - A miss on a dotted path answers `Vary: Accept`, since `Accept` chose between the shell and the 404.
 - `isApiPath` and `assetPrefix` override the defaults.
 

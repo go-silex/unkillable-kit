@@ -47,6 +47,10 @@ it('routes the production Wrangler recipe through local Static Assets', async ()
     const missing = await worker.fetch('/assets/missing.js', { headers: { accept: 'text/html' } })
     expect(missing.status).toBe(404)
     expect(missing.headers.get('content-type') ?? '').not.toContain('text/html')
+    // Static Assets alone answers under /assets/*: through the Worker this would be a JSON 405.
+    const post = await worker.fetch('/assets/missing.js', { method: 'POST' })
+    expect(post.status).toBe(404)
+    expect(post.headers.get('x-request-id')).toBeNull()
     const api = await worker.fetch('/api/missing', {
       headers: { accept: 'text/html', 'sec-fetch-mode': 'navigate' },
     })

@@ -12,23 +12,27 @@ function setup(
   const api = vi.fn((_request: Request, _env: unknown, _context: unknown) =>
     Response.json({ source: 'api' }, { status: 404 }),
   )
+  const files: Record<string, { type: string; body: string }> = {
+    '/': { type: 'text/html; charset=utf-8', body: '<html>shell</html>' },
+    '/guide.v2': { type: 'text/html', body: '<html>guide</html>' },
+    '/existing.js': { type: 'application/javascript', body: 'javascript' },
+    '/assets/app.js': { type: 'application/javascript', body: 'built' },
+  }
   const binding = {
     async fetch(request: Request) {
       requests.push(request)
-      const path = new URL(request.url).pathname
-      if (request.headers.has('if-none-match') && (path === '/' || path === '/existing.js')) {
+      const file = files[new URL(request.url).pathname]
+      if (!file) {
+        return new Response('missing', { status: 404, headers: { 'content-type': 'text/plain' } })
+      }
+      const headers = { 'content-type': file.type, 'cache-control': 'public', etag: '"v1"' }
+      if (request.headers.has('if-none-match')) {
         return new Response(null, {
           status: 304,
-          headers: { etag: '"v1"', 'cache-control': 'public, max-age=0, must-revalidate' },
+          headers: { ...headers, 'cache-control': 'public, max-age=0, must-revalidate' },
         })
       }
-      if (path === '/')
-        return new Response(request.method === 'HEAD' ? null : '<html>shell</html>', {
-          headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'public' },
-        })
-      if (path === '/existing.js')
-        return new Response('javascript', { headers: { 'content-type': 'application/javascript' } })
-      return new Response('missing', { status: 404, headers: { 'content-type': 'text/plain' } })
+      return new Response(request.method === 'HEAD' ? null : file.body, { headers })
     },
   }
   const fetch = createSiteFetch({
@@ -134,23 +138,29 @@ describe('createSiteFetch', () => {
     expect(requests).toHaveLength(0)
   })
 
-  it('passes a 304 for a built file through unchanged', async () => {
+  it('passes a 304 for a built file under the asset prefix through unchanged', async () => {
     const { call } = setup()
-    const response = await call('/existing.js', { headers: { 'if-none-match': '"v1"' } })
+    const response = await call('/assets/app.js', { headers: { 'if-none-match': '"v1"' } })
     expect(response.status).toBe(304)
     expect(response.headers.get('cache-control')).toBe('public, max-age=0, must-revalidate')
   })
 
-  it('answers a revalidating navigation in full, so the shell keeps its headers', async () => {
-    const { call, requests } = setup({ shellHeaders: { 'cache-control': 'private, no-cache' } })
-    const response = await call('/', {
-      headers: { accept: 'text/html', 'if-none-match': '"v1"', 'if-modified-since': 'x' },
-    })
-    expect(response.status).toBe(200)
-    expect(response.headers.get('cache-control')).toBe('private, no-cache')
-    expect(requests[0]?.headers.has('if-none-match')).toBe(false)
-    expect(requests[0]?.headers.has('if-modified-since')).toBe(false)
-  })
+  it.each([
+    ['/', 'text/html'],
+    ['/guide.v2', '*/*'],
+  ])(
+    'answers a revalidation of HTML at %s in full, so it keeps its headers',
+    async (path, accept) => {
+      const { call, requests } = setup({ shellHeaders: { 'cache-control': 'private, no-cache' } })
+      const response = await call(path, {
+        headers: { accept, 'if-none-match': '"v1"', 'if-modified-since': 'x' },
+      })
+      expect(response.status).toBe(200)
+      expect(response.headers.get('cache-control')).toBe('private, no-cache')
+      expect(requests[0]?.headers.has('if-none-match')).toBe(false)
+      expect(requests[0]?.headers.has('if-modified-since')).toBe(false)
+    },
+  )
 
   it('returns JSON 405 with Allow and a request id for non-API methods', async () => {
     const { call, requests, api } = setup()

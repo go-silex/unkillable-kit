@@ -62,15 +62,16 @@ async function serveAsset(
   const underPrefix = path.startsWith(assetPrefix)
   const extensionless = !path.slice(path.lastIndexOf('/') + 1).includes('.')
   const navigation = !underPrefix && (extensionless || acceptsHtml(request))
-  // A navigation always gets a full response, so a 304 never replaces the shell headers.
-  const assetRequest = navigation ? withoutConditionals(request) : request
+  // Outside built files any response may be HTML: fetch it in full, so a 304 never swaps
+  // the shell headers for the binding's cache policy.
+  const assetRequest = underPrefix ? request : withoutConditionals(request)
   let response = await binding.fetch(assetRequest)
   // On a dotted miss outside the prefix, Accept decides between the 404 and the shell.
   const vary = response.status === 404 && !underPrefix && !extensionless
   if (response.status === 404 && navigation) {
     response = await binding.fetch(new Request(new URL('/', request.url), assetRequest))
   }
-  const html = isHtml(response)
+  const html = response.headers.get('content-type')?.toLowerCase().includes('text/html') ?? false
   if (!(html || vary)) return response
   const headers = new Headers(response.headers)
   if (html) setShellHeaders(headers, shellHeaders)
@@ -94,11 +95,6 @@ function withoutConditionals(request: Request): Request {
   headers.delete('if-none-match')
   headers.delete('if-modified-since')
   return new Request(request, { headers })
-}
-
-function isHtml(response: Response): boolean {
-  if (response.status === 304) return false
-  return response.headers.get('content-type')?.toLowerCase().includes('text/html') ?? false
 }
 
 function setShellHeaders(headers: Headers, shellHeaders: HeadersInit | undefined): void {
