@@ -167,7 +167,7 @@ export function parseJsoncStrict(text: string): unknown {
   return value
 }
 
-export const CANONICAL_LOCK_MSG =
+const CANONICAL_LOCK_MSG =
   'bun.lock is not in the form Bun writes (CR, BOM or comment found); regenerate it'
 
 function scanOutsideStrings(text: string): void {
@@ -198,7 +198,7 @@ function skipJsonString(text: string, start: number): number {
 }
 
 /** Refuse CR, BOM, or any `/` outside a string (comments are not Bun's lock form). */
-export function assertCanonicalLock(text: string): void {
+function assertCanonicalLock(text: string): void {
   if (text.charCodeAt(0) === 0xfeff || text.includes('\r')) throw new Error(CANONICAL_LOCK_MSG)
   scanOutsideStrings(text)
 }
