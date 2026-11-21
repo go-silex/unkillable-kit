@@ -155,7 +155,7 @@ export function createApiClient(opts: ApiClientOptions = {}): { apiFetch: ApiFet
         headers.set(key, value)
       })
     }
-    if (fetchInit.body != null && !headers.has('content-type')) {
+    if (typeof fetchInit.body === 'string' && !headers.has('content-type')) {
       headers.set('content-type', 'application/json')
     }
 

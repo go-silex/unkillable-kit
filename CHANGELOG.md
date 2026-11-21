@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### API client body content type
+
+- `apiFetch` / `createApiClient` set `content-type: application/json` only for string bodies with no content type already set. `FormData`, `URLSearchParams`, and typed `Blob` bodies keep the content type `fetch` derives. Binary bodies (`ArrayBuffer`, typed arrays, streams) are now sent without a content type: a caller sending JSON that way must set `content-type` explicitly.
+
 ### Vitest CI workers
 
 - Kit and newly generated Product Apps use all available Vitest workers in CI, without changing local defaults.
