@@ -1002,6 +1002,27 @@ else
   FAIL=$((FAIL + 1))
 fi
 
+# A short write (file-size limit) fails closed instead of truncating the snapshot
+SHORT="$TMP/short-write"
+mkdir -p "$SHORT/repo" "$SHORT/out"
+git -C "$SHORT/repo" init -q
+printf '{}\n' > "$SHORT/repo/package.json"
+printf '{}\n' > "$SHORT/repo/bun.lock"
+head -c 8193 /dev/zero > "$SHORT/repo/big.bin"
+git -C "$SHORT/repo" add -A && git -C "$SHORT/repo" commit -qm short-write
+SHORT_JS="import {materializeTree} from '$ROOT/scripts/kit/lib/materialize-tree.ts'; await materializeTree(process.cwd(), 'HEAD', '$SHORT/out')"
+short_out="$(cd "$SHORT/repo" && python3 -c 'import os, resource, signal, sys
+signal.signal(signal.SIGXFSZ, signal.SIG_IGN)
+resource.setrlimit(resource.RLIMIT_FSIZE, (8192, 8192))
+os.execvp("bun", ["bun", "--no-env-file", "-e", sys.argv[1]])' "$SHORT_JS" 2>&1)" && short_rc=0 || short_rc=$?
+if [[ "$short_rc" -ne 0 && "$short_out" == *EFBIG* ]]; then
+  echo 'PASS: short write fails closed'
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: short write rc=$short_rc: $short_out" >&2
+  FAIL=$((FAIL + 1))
+fi
+
 echo "== Lock ranges summary: $PASS pass, $FAIL fail =="
 echo "probe warm_ms=$(cat "$TMP/probe-warm-ms.txt") cold_ms=$(cat "$TMP/probe-cold-ms.txt")"
 echo "suite HOME=$HOME cache=$BUN_INSTALL_CACHE_DIR"

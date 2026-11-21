@@ -214,11 +214,11 @@ function createByteReader(stream: Readable): ByteReader {
         const head = chunks[0]
         if (!head) throw new Error('cannot materialize candidate tree: truncated cat-file stream')
         const available = head.length - offset
-        const take = Math.min(available, left)
-        writeSync(fd, head, offset, take)
-        offset += take
-        left -= take
-        buffered -= take
+        const wrote = writeSync(fd, head, offset, Math.min(available, left))
+        if (wrote <= 0) throw new Error('cannot materialize candidate tree: write made no progress')
+        offset += wrote
+        left -= wrote
+        buffered -= wrote
         if (offset === head.length) {
           chunks.shift()
           offset = 0
