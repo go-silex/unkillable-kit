@@ -258,7 +258,7 @@ fi
 assert_exit "kit + product sentinel still rejects acme-api" 1 \
   "EXTRACT_MODE=product EXTRACT_HARNESS_SENTINEL='${SENTINEL}' run_extract_gate '${KIT}'"
 
-# 11) kit fixture + tools/ file → fail-closed (ADR-0011)
+# 11) kit fixture + tools/ file → fail-closed (ADR-0009 D2)
 FIX_TOOLS="$TMP/tools-fail"
 make_repo "${FIX_TOOLS}"
 set_origin "${FIX_TOOLS}" "https://github.com/Roxabi/roxabi-boilerplate-cf.git"

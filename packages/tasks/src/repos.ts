@@ -53,7 +53,7 @@ export async function insertTask(
   return row
 }
 
-/** Fields a patch may never carry: identity and the tenant of record (ADR-0016 D1). */
+/** Fields a patch may never carry: identity and the tenant of record (ADR-0007 D2). */
 const IMMUTABLE_TASK_FIELDS = ['id', 'orgId', 'createdBy', 'createdAt'] as const
 
 export async function updateTask(

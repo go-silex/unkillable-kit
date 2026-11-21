@@ -4,10 +4,9 @@
 #
 # Modes:
 #   kit     — allowlisted kit/mirror origin, no product inheritance marker
-#   product — inheritance marker (or transitional kit-baseline) present
+#   product — inheritance marker present
 #
 # Base (product): config/product/inheritance.json → upstreamCommit
-#   transitional: docs/product/kit-baseline
 #   NEVER upstream/main. NEVER auto-fetch.
 #   The base must be an inherited kit/mirror tip: it may not descend from the commit that introduced the
 #   marker (a product commit), and the history must be complete (shallow clone fails closed).
@@ -147,7 +146,7 @@ function inventoryUnclassified(zones) {
   return bad
 }
 
-/** Tracked workflows must be product-prefixed or listed in protected_files (ADR-0009 D6, ADR-0013). */
+/** Tracked workflows must be product-prefixed or listed in protected_files (ADR-0009 D3, D6). */
 function inventoryUnclassifiedWorkflows(zones) {
   const dir = zones.workflow_dir || '.github/workflows'
   const prefix = zones.workflow_product_prefix || 'product-'
@@ -257,7 +256,7 @@ if (unclassifiedWorkflows.length) {
   )
   for (const f of unclassifiedWorkflows.slice(0, 50)) console.error(`  UNCLASSIFIED WORKFLOW ${f}`)
   if (unclassifiedWorkflows.length > 50) console.error(`  … +${unclassifiedWorkflows.length - 50} more`)
-  die('workflow inventory gate failed (ADR-0009 D6, ADR-0013)')
+  die('workflow inventory gate failed (ADR-0009 D3, D6)')
 }
 
 const exceptionsRel = zones.exceptions_file || 'config/product/zero-edit-exceptions.json'

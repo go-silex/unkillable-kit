@@ -4,75 +4,25 @@
     "maxLineBytes": 521,
     "fileBytes": 9799
   },
-  "docs/kit/architecture/adr/0002-session-hmac-interim-vs-better-auth.md": {
-    "overLimitLines": 1,
-    "maxLineBytes": 559,
-    "fileBytes": 13991
-  },
-  "docs/kit/architecture/adr/0003-multi-tenant-rbac-modules.md": {
-    "overLimitLines": 7,
-    "maxLineBytes": 560,
-    "fileBytes": 25879
-  },
-  "docs/kit/architecture/adr/0005-flows-platform-agentic-workflows.md": {
-    "overLimitLines": 27,
-    "maxLineBytes": 1718,
-    "fileBytes": 41434
-  },
-  "docs/kit/architecture/adr/0007-tasks-comments-kernel.md": {
-    "overLimitLines": 1,
-    "maxLineBytes": 656,
-    "fileBytes": 6090
-  },
-  "docs/kit/architecture/adr/0008-kit-schema-identity-product-compose.md": {
-    "overLimitLines": 2,
-    "maxLineBytes": 558,
-    "fileBytes": 15542
-  },
-  "docs/kit/architecture/adr/0009-kit-namespace-polarity-inheritance-marker.md": {
-    "overLimitLines": 10,
-    "maxLineBytes": 1311,
-    "fileBytes": 20667
-  },
-  "docs/kit/architecture/adr/0012-kernel-persistence-request-context.md": {
-    "overLimitLines": 3,
-    "maxLineBytes": 510,
-    "fileBytes": 10465
-  },
-  "docs/kit/architecture/adr/0013-root-github-workflow-ownership.md": {
-    "overLimitLines": 36,
-    "maxLineBytes": 705,
-    "fileBytes": 26361
-  },
   "docs/kit/architecture/adr/0014-openapi-from-hono-routes.md": {
     "overLimitLines": 2,
     "maxLineBytes": 570,
     "fileBytes": 7523
   },
-  "docs/kit/architecture/adr/0015-mcp-remote-oauth-worker.md": {
-    "overLimitLines": 31,
-    "maxLineBytes": 1243,
-    "fileBytes": 33810
-  },
-  "docs/kit/architecture/adr/0016-tasks-owner-org-tenancy.md": {
-    "overLimitLines": 3,
-    "maxLineBytes": 426,
-    "fileBytes": 4318
-  },
   "docs/kit/architecture/adr/0018-durable-execution-ownership.md": {
     "overLimitLines": 4,
     "maxLineBytes": 617,
-    "fileBytes": 10775
+    "fileBytes": 10743
   },
   "docs/kit/architecture/adr/0019-notifications-rules-inbox-and-delivery.md": {
-    "overLimitLines": 59,
-    "maxLineBytes": 1272,
-    "fileBytes": 72275
+    "overLimitLines": 25,
+    "maxLineBytes": 977,
+    "fileBytes": 28388
   },
   "docs/kit/architecture/adr/0020-notification-delivery-ownership.md": {
-    "overLimitLines": 41,
+    "overLimitLines": 21,
     "maxLineBytes": 735,
-    "fileBytes": 58782
+    "fileBytes": 23826
   },
   "docs/kit/architecture/adr/0021-slack-installations-and-notification-channel.md": {
     "overLimitLines": 38,
@@ -137,7 +87,7 @@
   "docs/kit/product-consumer-contract.md": {
     "overLimitLines": 126,
     "maxLineBytes": 2129,
-    "fileBytes": 180747
+    "fileBytes": 179886
   },
   "docs/kit/security-dependabot.md": {
     "overLimitLines": 28,
@@ -147,7 +97,7 @@
   "docs/kit/standards/stack.md": {
     "overLimitLines": 51,
     "maxLineBytes": 867,
-    "fileBytes": 63861
+    "fileBytes": 63844
   },
   "docs/kit/testing/coverage.md": {
     "overLimitLines": 7,
@@ -157,7 +107,7 @@
   "docs/kit/testing/critical-path.md": {
     "overLimitLines": 92,
     "maxLineBytes": 3787,
-    "fileBytes": 280082
+    "fileBytes": 280080
   },
   "docs/kit/testing/ops-model.md": {
     "overLimitLines": 32,

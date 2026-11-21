@@ -85,11 +85,11 @@ for f in "${required[@]}"; do
   fi
 done
 
-# ADR-0011 D3: tools/ is folded. Empty dir is tolerated; any entry fails.
+# ADR-0009 D2: tools/ is not a polarity root. Empty dir is tolerated; any entry fails.
 # `find` not `ls` — command substitution of ls -A drops a newline-only name.
 if [[ -e tools ]]; then
   if [[ ! -d tools ]]; then
-    echo "extract-dry-run: tools must not exist as a non-directory (ADR-0011)" >&2
+    echo "extract-dry-run: tools must not exist as a non-directory (ADR-0009 D2)" >&2
     exit 1
   fi
   set +e
@@ -97,11 +97,11 @@ if [[ -e tools ]]; then
   find_ec=$?
   set -e
   if [[ "$find_ec" -ne 0 ]]; then
-    echo "extract-dry-run: tools/ scan failed (ADR-0011)" >&2
+    echo "extract-dry-run: tools/ scan failed (ADR-0009 D2)" >&2
     exit 1
   fi
   if [[ -n "$leftover" ]]; then
-    echo "extract-dry-run: tools/ must stay empty (ADR-0011); found ${leftover}" >&2
+    echo "extract-dry-run: tools/ must stay empty (ADR-0009 D2); found ${leftover}" >&2
     exit 1
   fi
 fi

@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Module catalogue reads
+
+- The Example App reads module availability from `platform_modules` only and no longer falls back to the legacy `kit_modules` table. The table, its catalog ids and `@kit/auth/repos/modules` remain; dropping the table will be a separate contract migration (ADR-0003 D7).
+- Seed output marks a module `created` against `platform_modules`, instead of reporting every module as created on every run.
+
+### Starter scope gate
+
+- `extract-dry-run` refuses an `apps/starter-api` manifest whose schema sets are not exactly `core` and `audit` (ADR-0022). The unenforced per-App file and line cap is removed.
+
+### ADR consolidation
+
+- ADR-0011 and ADR-0013 are merged into ADR-0009 (D1–D3), ADR-0016 into ADR-0007 D2, ADR-0024 into the `@kit/auth` README and design note 0019 into the Slack design note; the merged files are removed. Product docs linking them must update those links.
+
 ### One Worker site
 
 - `@kit/core` exports `createSiteFetch`, which serves a SPA and its API from one Worker. API paths always reach the API, never the assets or the shell. The shell is served only for navigations, with its own headers and never as a 304. Missing built files keep a 404, and the handler passes through when no `ASSETS` binding exists. The starter API composes it, and the [playbook](docs/kit/playbooks/one-worker-site.md) carries the tested Wrangler `[assets]` recipe.

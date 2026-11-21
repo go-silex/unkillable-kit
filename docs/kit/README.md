@@ -55,22 +55,18 @@ This index locates the authoritative home for each rule and the operational guid
 - [ADR-0005 — governed flows and durable runs](./architecture/adr/0005-flows-platform-agentic-workflows.md).
 - [ADR-0007 — tasks and comments kernel](./architecture/adr/0007-tasks-comments-kernel.md).
 - [ADR-0008 — kit schema identity](./architecture/adr/0008-kit-schema-identity-product-compose.md).
-- [ADR-0009 — namespace polarity and inheritance](./architecture/adr/0009-kit-namespace-polarity-inheritance-marker.md).
+- [ADR-0009 — kit/product ownership zones and inheritance](./architecture/adr/0009-kit-namespace-polarity-inheritance-marker.md).
 - [ADR-0010 — list-page cursor envelope](./architecture/adr/0010-list-page-cursor-envelope.md).
-- [ADR-0011 — scripts/config polarity](./architecture/adr/0011-tools-fold-scripts-config-polarity.md).
 - [ADR-0012 — kernel persist and request-context](./architecture/adr/0012-kernel-persistence-request-context.md).
-- [ADR-0013 — root and GitHub workflow ownership](./architecture/adr/0013-root-github-workflow-ownership.md).
 - [ADR-0014 — OpenAPI projected from Hono routes](./architecture/adr/0014-openapi-from-hono-routes.md).
 - [ADR-0015 — hosted Streamable HTTP + Worker MCP OAuth](./architecture/adr/0015-mcp-remote-oauth-worker.md).
-- [ADR-0016 — tasks owner-org tenancy (proposed)](./architecture/adr/0016-tasks-owner-org-tenancy.md).
 - [ADR-0018 — one durable owner per durable execution](./architecture/adr/0018-durable-execution-ownership.md).
 - [ADR-0019 — notification rules, Inbox and producer contracts](./architecture/adr/0019-notifications-rules-inbox-and-delivery.md).
 - [ADR-0020 — Workflow-owned Delivery and Queue demo boundary](./architecture/adr/0020-notification-delivery-ownership.md).
 - [ADR-0021 — Slack installations and notification Channel](./architecture/adr/0021-slack-installations-and-notification-channel.md).
 - [ADR-0022 — minimal starter Apps](./architecture/adr/0022-minimal-starter-apps.md).
 - [ADR-0023 — CI coverage partitions for heavy Apps](./architecture/adr/0023-ci-coverage-partitions.md).
-- [ADR-0024 — opt-in OpenID Provider (proposed)](./architecture/adr/0024-oidc-provider.md).
-- Non-normative design notes: [ADR-0019](./architecture/design-notes/0019-notifications.md), [ADR-0021](./architecture/design-notes/0021-slack.md).
+- Non-normative design note: [ADR-0021 Slack](./architecture/design-notes/0021-slack.md).
 
 ## Processes, operations and security
 

@@ -108,7 +108,7 @@ describe('tasks repos org predicates', () => {
   })
 })
 
-describe('tasks repos — assignees (ADR-0016)', () => {
+describe('tasks repos — assignees (ADR-0007 D2)', () => {
   it('rolls back task creation and earlier assignee chunks when a later insert fails', async () => {
     const { db, sqlite } = await seedTwoOrgs()
     sqlite.exec(

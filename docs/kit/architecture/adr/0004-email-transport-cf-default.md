@@ -3,7 +3,11 @@ title: 'ADR-0004 — Email transport: CF Email Sending default (prod), Mailpit/l
 status: accepted
 normative: true
 date: 2026-07-30
+amended: 2026-11-21
 axial: false
+supersedes_notes: >
+  2026-11-21: D2 states that a Worker refuses `smtp`, matching `@kit/email`;
+  D5 now precedes D6. No decision changed.
 related:
   - packages/email
   - GitHub epic CF Email
@@ -36,7 +40,7 @@ Resend remains an **escape hatch** (`EMAIL_TRANSPORT=resend`) if a product canno
 ### D2 — Kit API shape
 
 ```text
-EMAIL_TRANSPORT=log | smtp | cf | resend   # app env
+EMAIL_TRANSPORT=log | cf | resend          # Worker; smtp is Node-only and refused there
 EMAIL_FROM=...
 EMAIL_ALLOW_DOMAINS=a.com,b.com            # recipient allowlist
 EMAIL_FROM_DOMAIN=example.com              # optional From pin (staging default)
@@ -44,7 +48,7 @@ EMAIL_FROM_DOMAIN=example.com              # optional From pin (staging default)
 
 - **`cf`**: `env.EMAIL.send({ to, from, subject, html, text })` — binding name configurable (default `EMAIL`)
 - **`log`**: structured console JSON (edge-safe; **must redact** reset/invite tokens in body)
-- **`smtp`**: Node-only Mailpit path (`@kit/email/server`) — never import from Worker bundle
+- **`smtp`**: Node-only Mailpit path (`@kit/email/server`) — a Worker refuses `EMAIL_TRANSPORT=smtp`; never import it from the Worker bundle
 - **`resend`**: optional HTTP from Worker when product opts in
 
 ### D3 — Domain & deliverability (ops)
@@ -61,6 +65,12 @@ EMAIL_FROM_DOMAIN=example.com              # optional From pin (staging default)
 - Fail closed if `EMAIL_TRANSPORT=cf` and binding missing outside test
 - Token hrefs are scheme/host-allowlisted before render (`assertSafeTokenHref`); HTML-escape is not enough. `allowedOrigins` is required; a request-derived BA `baseURL` is not seeded into the allowlist
 
+### D5 — Axial
+
+- Templates: shared builders in `@kit/email` (locale-aware later); **no product domain copy** in package defaults beyond kit demo strings
+- Apps choose from-address and which flows call the port
+- No empty `@kit/email-cf` package — extend `@kit/email`
+
 ### D6 — Staging recipient allowlist and From-domain pin
 
 Staging sends **real** mail (client + internal QA), but must not spray arbitrary addresses from DB dumps.
@@ -73,12 +83,6 @@ Staging sends **real** mail (client + internal QA), but must not spray arbitrary
 | Subject               | Forced prefix **`[TEST STAGING]`** (idempotent)                      | Unchanged                                                  |
 
 Intent: ops allowlists each client test domain and the team domain, pins the staging From identity, and makes subjects distinguishable from production.
-
-### D5 — Axial
-
-- Templates: shared builders in `@kit/email` (locale-aware later); **no product domain copy** in package defaults beyond kit demo strings
-- Apps choose from-address and which flows call the port
-- No empty `@kit/email-cf` package — extend `@kit/email`
 
 ## Consequences
 

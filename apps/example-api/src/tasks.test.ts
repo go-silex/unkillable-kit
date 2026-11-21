@@ -383,7 +383,7 @@ describe('tasks dogfood API', () => {
     )
     expect(stealLink.status).toBe(404)
 
-    // Assignees: another org can neither read nor rewrite them (ADR-0016).
+    // Assignees: another org can neither read nor rewrite them (ADR-0007 D2).
     const stealAssignees = await app.request(
       `/api/tasks/${task.id}`,
       {
@@ -658,7 +658,7 @@ describe('tasks dogfood API', () => {
     expect(await (await list()).json()).toMatchObject({ comments: [{ id: comment.id }] })
   })
 
-  it('assignees must be members of the task org (ADR-0016 D4)', async () => {
+  it('assignees must be members of the task org (ADR-0007 D2)', async () => {
     const app = createApp()
     const env = createMemoryEnv()
     const staffCookie = await login(app, env, 'staff@kit.local')

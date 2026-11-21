@@ -3,8 +3,12 @@ title: 'ADR-0008 — Kit schema identity is module id + hash, not example-api NN
 status: accepted
 normative: true
 date: 2026-08-19
-amended: 2026-11-14
+amended: 2026-11-21
 axial: false
+supersedes_notes: >
+  2026-11-21: D4 restates the 2026-11-14 `core,audit` fresh default as the
+  current rule and drops its set-to-file table; the catalog is the only list.
+  No decision changed.
 related:
   - docs/kit/architecture/adr/0001-primary-axis-packages-compose-apps.md
   - docs/kit/product-consumer-contract.md
@@ -75,32 +79,25 @@ Manifest JSON keys (sync script): `modules.<id>.kitSha256`, `modules.<id>.produc
 
 ### D4 — Sync is append-only
 
-**Amendment (2026-11-14):** The fresh default is now `core,audit`, recorded in the new manifest. For an existing manifest, omitted `--modules` remains `core` plus recorded sets, including sets derived once from legacy manifests without `sets`; it does not silently add `audit`. Explicit selections are unchanged. The historical default and opt-in descriptions below describe the original decision; this amendment supersedes them for fresh Products. `audit` owns `rate_limit_buckets`, required by a mounted Better Auth throttle.
-
-The catalog defines the `core` set, including `0014_better_auth_1_7_additive` and `0015_api_keys_org_not_null`. Omitted `--modules` selects `core` plus the product manifest `sets` array. Explicit `--modules` and `--adopt` record selected sets; when `sets` is absent it is migrated once from recorded ids and canonical headers. An explicit list omitting a recorded set fails if catalog ids in that set are missing from `modules`, naming those ids. Delete the set from `sets` to opt out. `--adopt` fails closed when an unclaimed file matches an unselected set.
+Omitted `--modules` selects `core,audit` for a new manifest and records them (amendment 2026-11-14). For an existing manifest it selects `core` plus the recorded `sets` and never silently adds `audit`.
+`audit` owns `rate_limit_buckets`, which a mounted Better Auth throttle requires: a `core`-only database returns 500 on every non-exempt Better Auth request.
+Explicit `--modules` and `--adopt` record selected sets; when `sets` is absent it is migrated once from recorded ids and canonical headers.
+An explicit list omitting a recorded set fails if catalog ids in that set are missing from `modules`, naming those ids. Delete the set from `sets` to opt out. `--adopt` fails closed when an unclaimed file matches an unselected set.
 
 ```text
 scripts/kit/kit-schema-sync.sh --app apps/<product>-api [--modules core|all|<sets>]
 ```
 
-| Default | omitted `--modules` = `core` ∪ manifest `sets` (greenfield, no manifest → `core` only) |
-| Opt-in sets | `rbac` · `audit` · `demo` · `flows` · `tasks` · `notifications` — first opt-in is `--modules core,<set>`; the catalog is SSoT for ids/files. `audit` is required wherever the Better Auth throttle runs: `rate_limit_buckets` ships in it, and a `core`-only database returns 500 on every non-exempt Better Auth request |
-| `all` | Every catalogued module at that run, recorded into `sets` — **not** the default; do not use it for sets the product does not mount |
-| Write | Append a **new** local file + manifest row |
-| Never | Rewrite an applied file · reuse a local `NNNN` · edit `d1_migrations` |
-| Hash change | If a **published** module `id` changes bytes → **fail**. Add a **new** `id` (new source file). Do not mutate the old id |
+| Case        | Rule                                                                                                                               |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Default     | omitted `--modules` = `core,audit` for a new manifest; `core` ∪ manifest `sets` otherwise                                          |
+| Opt-in sets | every other catalogued set; first opt-in is `--modules core,<set>`                                                                 |
+| `all`       | Every catalogued module at that run, recorded into `sets` — **not** the default; do not use it for sets the product does not mount |
+| Write       | Append a **new** local file + manifest row                                                                                         |
+| Never       | Rewrite an applied file · reuse a local `NNNN` · edit `d1_migrations`                                                              |
+| Hash change | If a **published** module `id` changes bytes → **fail**. Add a **new** `id` (new source file). Do not mutate the old id            |
 
-Set ↔ current applied files (catalog remains SSoT):
-
-| Set             | example-api today                                                                                                             |
-| --------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `core`          | The ids labelled `core` in the catalog, not a migration number range                                                          |
-| `rbac`          | `0009_organization_roles_grants.sql`                                                                                          |
-| `audit`         | `0010_rate_limit_audit.sql`                                                                                                   |
-| `demo`          | `0011_demo_items.sql`                                                                                                         |
-| `flows`         | `0012_flows_plans_runs.sql`, `0016_flows_run_approvals.sql`, `0017_flow_run_events.sql`                                       |
-| `tasks`         | `0013_tasks_comments.sql`, `0018_tasks_assignees_org.sql`, `0019_tasks_org_fk_contract.sql`, `0020_tasks_stage_org_guard.sql` |
-| `notifications` | `0023_notifications.sql`                                                                                                      |
+The catalog `config/kit/kit-schema-modules.json` maps each set to its ids and applied files; this ADR keeps no copy.
 
 ### D5 — Product SQL numbering
 

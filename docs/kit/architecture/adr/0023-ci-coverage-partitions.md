@@ -7,7 +7,6 @@ axial: false
 related:
   - docs/kit/architecture/adr/0001-primary-axis-packages-compose-apps.md
   - docs/kit/architecture/adr/0009-kit-namespace-polarity-inheritance-marker.md
-  - docs/kit/architecture/adr/0013-root-github-workflow-ownership.md
   - docs/kit/testing/ops-model.md
   - docs/kit/testing/coverage.md
   - docs/kit/testing/critical-path.md
@@ -110,7 +109,7 @@ The `coverage-partitions` job runs a matrix over those descriptors and calls the
 Each call runs its parts as a matrix over `indices`, then its merge, which needs only that call's parts.
 A slow or failing App therefore delays or fails only its own merge; no other App's merge needs its parts.
 Parts and merges live neither in the existing `coverage` matrix nor in the final `ci` job: `needs` waits for every leg of a matrix, so either placement would put the slowest unrelated leg on each declared App's path.
-The callee is a Kit workflow listed in `protected_files`, as [ADR-0013](./0013-root-github-workflow-ownership.md) D1 requires.
+The callee is a Kit workflow listed in `protected_files`, as [ADR-0009](./0009-kit-namespace-polarity-inheritance-marker.md) D3 requires.
 
 ### D8 — Producer result
 
@@ -126,7 +125,7 @@ Parts, merges and the join therefore bind the same runner code.
 
 ### D10 — Ownership and retirement
 
-The `ci.yml` and `coverage-app.yml` workflows, the runner and the coverage script stay Kit-owned under [ADR-0013](./0013-root-github-workflow-ownership.md).
+The `ci.yml` and `coverage-app.yml` workflows, the runner and the coverage script stay Kit-owned under [ADR-0009](./0009-kit-namespace-polarity-inheritance-marker.md) D3.
 A Product declares only in its `config/product/` namespace ([ADR-0009](./0009-kit-namespace-polarity-inheritance-marker.md)) and edits no App configuration or Kit zone; a declared App must already meet the D4 summary precondition.
 The App stays the coverage unit ([ADR-0001](./0001-primary-axis-packages-compose-apps.md)); Packages cannot be declared.
 
