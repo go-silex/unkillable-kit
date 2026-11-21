@@ -179,6 +179,22 @@ else
   exit 1
 fi
 
+echo "== extract-dry-run: starter scope (ADR-0022) =="
+# The starter API is the minimal copy source of create-product.sh: the core and audit schema sets only.
+if [[ -d apps/starter-api ]]; then
+  starter_sets="$(
+    node -e '
+const m = JSON.parse(require("node:fs").readFileSync("apps/starter-api/kit-schema-manifest.json", "utf8"))
+if (!Array.isArray(m.sets)) process.exit(1)
+console.log([...m.sets].sort().join(","))
+' 2>/dev/null
+  )" || starter_sets="(unreadable manifest)"
+  if [[ "$starter_sets" != "audit,core" ]]; then
+    echo "extract-dry-run: apps/starter-api must sync only the core and audit schema sets (ADR-0022); found ${starter_sets}" >&2
+    exit 1
+  fi
+fi
+
 echo "== extract-dry-run: banlist (packages + kit apps only) =="
 # check-banned-strings.sh targets packages + the kit apps of zero-edit-zones.json (lib/kit-apps.sh)
 bash scripts/kit/check-banned-strings.sh
