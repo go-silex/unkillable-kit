@@ -7,14 +7,13 @@ import { spawnSync } from 'node:child_process'
  * --config=config/kit/bunfig.gates.toml`, so neither a tree `.env` nor a tree
  * `bunfig.toml` (`preload`, `define`) can set the override. That launch is the
  * guarantee: running this file with a bare `bun` gives no such protection.
- * Stability materializes the full tracked candidate tree (HEAD, or the staged
- * merge tree) via read-tree/checkout-index so export-ignore/subst cannot alter
- * inputs, then runs an ordinary offline install in a neutral child env against
- * the operator cache from `bun pm cache`. Unstaged/untracked files stay out.
- * Forced `--lockfile-only` is not the oracle. Ambiguous locks with duplicate
- * decoded keys are refused by a strict JSONC reader. Offline verification may
- * require the local Bun cache. A lock without root workspace `""`, or a scan
- * that checks no range, fails.
+ * Stability materializes the tracked candidate tree (HEAD, or the staged merge
+ * tree) with a raw attr-neutral checkout, then an ordinary offline install in a
+ * neutral child env using the same cache as a normal `bun pm cache` (honours
+ * tree `.env`). A write-suppression canary follows. Non-canonical locks (CR,
+ * BOM, comments) fail closed. Forced `--lockfile-only` is not the oracle.
+ * Duplicate decoded keys are refused. Offline verification may need the local
+ * Bun cache. A lock without root workspace `""`, or a blind scan, fails.
  *
  * Scope: every `workspaces` entry in bun.lock, root `""` included. For each of
  * `dependencies`, `devDependencies` and `optionalDependencies`, the resolved
@@ -49,10 +48,10 @@ import { spawnSync } from 'node:child_process'
  * Bun.semver.satisfies returns true for non-ranges, which would hide the defect.
  * Its repair is a spec rewrite, which `bun update` cannot do.
  */
-import { existsSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, isAbsolute, join, resolve, sep } from 'node:path'
-import { parseJsoncStrict } from './lib/jsonc-strict.ts'
+import { join, resolve, sep } from 'node:path'
+import { assertLockShape, parseJsoncStrict } from './lib/jsonc-strict.ts'
 
 const SECTIONS = ['dependencies', 'devDependencies', 'optionalDependencies'] as const
 
@@ -350,21 +349,13 @@ function candidateTree(root: string): string {
   return tree.stdout.toString().trim()
 }
 
-/** Refuse locks with duplicate decoded object keys or unparseable JSONC. */
-function assertUnambiguousLock(text: string): void {
-  parseJsoncStrict(text)
-}
-
 function resolveOperatorCache(root: string): string {
-  const result = spawnSync(process.execPath, ['--no-env-file', 'pm', 'cache'], {
-    cwd: root,
-    encoding: 'utf8',
-  })
-  if (result.status !== 0)
+  // Same resolution as a frozen install: honour tree `.env` (no --no-env-file).
+  const result = spawnSync(process.execPath, ['pm', 'cache'], { cwd: root, encoding: 'utf8' })
+  if (result.status !== 0 || !result.stdout.toString().trim()) {
     throw new Error('cannot resolve Bun package cache; warm the Bun cache and retry')
-  const cache = result.stdout.toString().trim()
-  if (!cache) throw new Error('cannot resolve Bun package cache; warm the Bun cache and retry')
-  return cache
+  }
+  return result.stdout.toString().trim()
 }
 
 function assertNoInfoAttributes(root: string): void {
@@ -374,58 +365,40 @@ function assertNoInfoAttributes(root: string): void {
   })
   if (pathResult.status !== 0) throw new Error('cannot resolve git info/attributes path')
   const attrPath = resolve(root, pathResult.stdout.toString().trim())
-  if (!existsSync(attrPath)) return
-  const body = readFileSync(attrPath, 'utf8').trim()
-  if (body.length > 0) {
+  if (existsSync(attrPath) && readFileSync(attrPath, 'utf8').trim()) {
     throw new Error(
       'candidate snapshot refused: non-empty $GIT_DIR/info/attributes can override filters; clear it before lock-ranges:check',
     )
   }
 }
 
-function assertSnapshotSymlinksSafe(snapshot: string, tree: string, root: string): void {
-  const list = spawnSync('git', ['ls-tree', '-r', tree], { cwd: root, encoding: 'utf8' })
-  if (list.status !== 0) throw new Error('cannot list candidate tree for symlink check')
-  const snapshotRoot = realpathSync(snapshot)
-  for (const line of list.stdout.split('\n')) {
-    if (!line) continue
-    const tab = line.indexOf('\t')
-    if (tab < 0) continue
-    const meta = line.slice(0, tab)
-    const path = line.slice(tab + 1)
-    if (!meta.startsWith('120000 ')) continue
-    const linkPath = join(snapshot, path)
-    let target: string
-    try {
-      target = readlinkSync(linkPath)
-    } catch {
-      throw new Error(`candidate symlink unreadable: ${path}`)
-    }
-    if (isAbsolute(target)) throw new Error(`candidate symlink escapes snapshot: ${path}`)
-    const resolved = resolve(dirname(linkPath), target)
-    if (!(resolved === snapshotRoot || resolved.startsWith(snapshotRoot + sep))) {
-      throw new Error(`candidate symlink escapes snapshot: ${path}`)
-    }
-  }
+function emptyTreeOid(root: string): string {
+  const result = spawnSync('git', ['hash-object', '-t', 'tree', '--stdin'], {
+    cwd: root,
+    input: '',
+    encoding: 'utf8',
+  })
+  const oid = result.stdout.toString().trim()
+  if (result.status !== 0 || !oid) throw new Error('cannot compute empty tree oid')
+  return oid
 }
 
-function assertBunfigAllowsRewrite(snapshot: string): void {
-  const bunfig = join(snapshot, 'bunfig.toml')
-  if (!existsSync(bunfig)) return
-  const text = readFileSync(bunfig, 'utf8')
-  // Match install.frozenLockfile = true (with optional quotes / spacing).
-  if (/(^|\n)\s*frozenLockfile\s*=\s*true\b/i.test(text)) {
+function materializeFailure(detail: string): never {
+  if (/unknown option|attr-source|invalid option/i.test(detail)) {
     throw new Error(
-      'candidate bunfig.toml sets frozenLockfile; the stability probe cannot detect lock rewrites',
+      `cannot materialize candidate tree: git rejects --attr-source (${detail || 'upgrade Git'})`,
     )
   }
+  if (/lazy|partial|promisor|filter/i.test(detail)) {
+    throw new Error(
+      `cannot materialize candidate tree without fetching (partial clone); ${detail || 'set GIT_NO_LAZY_FETCH'}`,
+    )
+  }
+  throw new Error(
+    detail ? `cannot materialize candidate tree: ${detail}` : 'cannot materialize candidate tree',
+  )
 }
 
-/**
- * Materialize the candidate tree without `git archive` export filters
- * (`export-ignore` / `export-subst`). Raw index checkout keeps blob bytes and
- * includes every tracked path. Fail closed on partial-clone fetches.
- */
 function materializeCandidate(
   root: string,
   tree: string,
@@ -433,35 +406,23 @@ function materializeCandidate(
   indexFile: string,
 ): void {
   assertNoInfoAttributes(root)
+  const attr = [`--attr-source=${emptyTreeOid(root)}`, '-c', 'core.attributesFile=/dev/null']
   const env = {
     ...process.env,
     GIT_INDEX_FILE: indexFile,
     GIT_NO_LAZY_FETCH: '1',
+    GIT_ATTR_NOSYSTEM: '1',
   }
-  const read = spawnSync('git', ['read-tree', tree], { cwd: root, env, encoding: 'utf8' })
-  if (read.status !== 0) {
-    const detail = `${read.stderr || read.stdout || ''}`.trim()
-    if (/lazy|partial|promisor|filter/i.test(detail)) {
-      throw new Error(
-        `cannot materialize candidate tree without fetching (partial clone); ${detail || 'set GIT_NO_LAZY_FETCH'}`,
-      )
-    }
-    throw new Error(
-      detail ? `cannot materialize candidate tree: ${detail}` : 'cannot materialize candidate tree',
-    )
-  }
-  // Disable smudge/LFS so payload bytes match the committed blob.
+  const read = spawnSync('git', [...attr, 'read-tree', tree], { cwd: root, env, encoding: 'utf8' })
+  if (read.status !== 0) materializeFailure(`${read.stderr || read.stdout || ''}`.trim())
   const checkout = spawnSync(
     'git',
     [
+      ...attr,
       '-c',
       'core.autocrlf=false',
       '-c',
-      'filter.lfs.smudge=',
-      '-c',
-      'filter.lfs.process=',
-      '-c',
-      'filter.lfs.required=false',
+      'core.symlinks=false',
       'checkout-index',
       '-a',
       '-f',
@@ -469,35 +430,36 @@ function materializeCandidate(
     ],
     { cwd: root, env, encoding: 'utf8' },
   )
-  if (checkout.status !== 0) {
-    const detail = `${checkout.stderr || checkout.stdout || ''}`.trim()
-    throw new Error(
-      detail ? `cannot materialize candidate tree: ${detail}` : 'cannot materialize candidate tree',
-    )
-  }
+  if (checkout.status !== 0)
+    materializeFailure(`${checkout.stderr || checkout.stdout || ''}`.trim())
   if (!(existsSync(join(snapshot, 'bun.lock')) && existsSync(join(snapshot, 'package.json')))) {
     throw new Error('candidate lock inputs are missing')
   }
 }
 
+function runOfflineInstall(snapshot: string, cacheDir: string, home: string) {
+  return spawnSync(
+    process.execPath,
+    ['--no-env-file', 'install', '--offline', '--ignore-scripts', '--cache-dir', cacheDir],
+    {
+      cwd: snapshot,
+      env: {
+        PATH: process.env.PATH ?? '/usr/bin:/bin',
+        TMPDIR: home,
+        HOME: home,
+        XDG_CONFIG_HOME: home,
+      },
+    },
+  )
+}
+
 function probeOfflineInstall(
   snapshot: string,
   cacheDir: string,
-  neutralHome: string,
+  home: string,
   before: Buffer,
 ): void {
-  const childEnv: NodeJS.ProcessEnv = {
-    PATH: process.env.PATH ?? '/usr/bin:/bin',
-    TMPDIR: neutralHome,
-    HOME: neutralHome,
-    XDG_CONFIG_HOME: neutralHome,
-  }
-  const install = spawnSync(
-    process.execPath,
-    ['--no-env-file', 'install', '--offline', '--ignore-scripts', '--cache-dir', cacheDir],
-    { cwd: snapshot, env: childEnv },
-  )
-  if (install.status !== 0) {
+  if (runOfflineInstall(snapshot, cacheDir, home).status !== 0) {
     throw new Error('cannot verify lock stability offline; warm the Bun cache and retry')
   }
   if (!before.equals(readFileSync(join(snapshot, 'bun.lock')))) {
@@ -505,23 +467,42 @@ function probeOfflineInstall(
   }
 }
 
-/**
- * Ordinary offline install in a disposable full-tree snapshot. Scripts off;
- * honour the snapshot bunfig (no age-0 writer). Neutral child env; never copy
- * the probe output back.
- */
+/** Add a root override Bun drops unless the install config suppresses lock writes. */
+function assertLockWritesEnabled(
+  snapshot: string,
+  cacheDir: string,
+  home: string,
+  original: Buffer,
+): void {
+  const lockPath = join(snapshot, 'bun.lock')
+  const parsed = parseJsoncStrict(original.toString('utf8')) as Record<string, unknown>
+  const prior =
+    parsed.overrides && typeof parsed.overrides === 'object' && !Array.isArray(parsed.overrides)
+      ? { ...(parsed.overrides as Record<string, unknown>) }
+      : {}
+  parsed.overrides = { ...prior, __lock_ranges_canary__: '0.0.0' }
+  const perturbed = Buffer.from(`${JSON.stringify(parsed, null, 2)}\n`)
+  writeFileSync(lockPath, perturbed)
+  runOfflineInstall(snapshot, cacheDir, home)
+  if (readFileSync(lockPath).equals(perturbed)) {
+    throw new Error(
+      "the candidate's Bun configuration suppresses lock writes; the stability probe cannot run",
+    )
+  }
+  writeFileSync(lockPath, original)
+}
+
 function checkStability(root: string, tree: string): void {
   const dir = mkdtempSync(join(tmpdir(), 'lock-stability-'))
   const snapshot = join(dir, 'tree')
-  const neutralHome = join(dir, 'home')
+  const home = join(dir, 'home')
   const indexFile = join(dir, 'index')
   try {
-    const mkdir = spawnSync('mkdir', ['-p', snapshot, neutralHome])
-    if (mkdir.status !== 0) throw new Error('cannot prepare stability workspace')
+    if (spawnSync('mkdir', ['-p', snapshot, home]).status !== 0) {
+      throw new Error('cannot prepare stability workspace')
+    }
     const cacheDir = resolveOperatorCache(root)
     materializeCandidate(root, tree, snapshot, indexFile)
-    assertSnapshotSymlinksSafe(snapshot, tree, root)
-    assertBunfigAllowsRewrite(snapshot)
     const manifest = JSON.parse(readFileSync(join(snapshot, 'package.json'), 'utf8')) as {
       packageManager?: string
     }
@@ -529,8 +510,10 @@ function checkStability(root: string, tree: string): void {
       throw new Error('cannot verify lock stability without the pinned Bun version')
     }
     const lockText = readFileSync(join(snapshot, 'bun.lock'), 'utf8')
-    assertUnambiguousLock(lockText)
-    probeOfflineInstall(snapshot, cacheDir, neutralHome, Buffer.from(lockText))
+    assertLockShape(lockText)
+    const before = Buffer.from(lockText)
+    probeOfflineInstall(snapshot, cacheDir, home, before)
+    assertLockWritesEnabled(snapshot, cacheDir, home, before)
   } catch (error) {
     rmSync(dir, { recursive: true, force: true })
     fail(error instanceof Error ? error.message : String(error))
@@ -548,7 +531,7 @@ function main(): void {
       : undefined
   if (stagedLock && stagedLock.status !== 0) fail('missing staged merge bun.lock')
   const lockText = stagedLock ? stagedLock.stdout.toString() : readLock(root)
-  if (tree) assertUnambiguousLock(lockText)
+  if (tree) assertLockShape(lockText)
   const lock = parseLock(lockText)
   const tally: Tally = { checked: 0, skipped: 0, findings: [] }
   const keys = Object.keys(lock.workspaces).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))

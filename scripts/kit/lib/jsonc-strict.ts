@@ -1,6 +1,7 @@
 /**
- * Strict JSONC: objects, arrays, strings, numbers, literals, comments, trailing commas.
- * Per-object uniqueness of decoded keys (JSON string unescaping). Parse errors throw.
+ * Strict JSONC without comments: objects, arrays, strings, numbers, literals,
+ * trailing commas. Per-object uniqueness of decoded keys (JSON string
+ * unescaping). Parse errors throw. Also refuses CR/BOM/comments.
  */
 
 const ESCAPES: Record<string, string> = {
@@ -20,32 +21,12 @@ function fail(c: Cursor, message: string): never {
   throw new Error(`unparseable bun.lock: ${message} at ${c.i}`)
 }
 
-function skipLineComment(c: Cursor): void {
-  c.i += 2
-  while (c.i < c.text.length && c.text[c.i] !== '\n') c.i += 1
-}
-
-function skipBlockComment(c: Cursor): void {
-  c.i += 2
-  while (c.i < c.text.length && !(c.text[c.i] === '*' && c.text[c.i + 1] === '/')) c.i += 1
-  if (c.i >= c.text.length) fail(c, 'unterminated block comment')
-  c.i += 2
-}
-
 function skipWs(c: Cursor): void {
   const { text } = c
   while (c.i < text.length) {
     const ch = text[c.i]!
-    if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+    if (ch === ' ' || ch === '\t' || ch === '\n') {
       c.i += 1
-      continue
-    }
-    if (ch === '/' && text[c.i + 1] === '/') {
-      skipLineComment(c)
-      continue
-    }
-    if (ch === '/' && text[c.i + 1] === '*') {
-      skipBlockComment(c)
       continue
     }
     break
@@ -72,11 +53,12 @@ function readString(c: Cursor): string {
   while (c.i < text.length) {
     const ch = text[c.i++]!
     if (ch === '"') return out
-    if (ch === '\n' || ch === '\r') fail(c, 'newline in string')
+    if (ch === '\n') fail(c, 'newline in string')
     out += ch === '\\' ? readEscape(c) : ch
   }
   fail(c, 'unterminated string')
 }
+
 function readDigits(c: Cursor): void {
   if (!/[0-9]/.test(c.text[c.i] ?? '')) fail(c, 'expected digit')
   while (/[0-9]/.test(c.text[c.i] ?? '')) c.i += 1
@@ -183,4 +165,45 @@ export function parseJsoncStrict(text: string): unknown {
   skipWs(c)
   if (c.i < text.length) fail(c, 'trailing input')
   return value
+}
+
+export const CANONICAL_LOCK_MSG =
+  'bun.lock is not in the form Bun writes (CR, BOM or comment found); regenerate it'
+
+function scanOutsideStrings(text: string): void {
+  let i = 0
+  while (i < text.length) {
+    const ch = text[i]!
+    if (ch === '"') {
+      i = skipJsonString(text, i + 1)
+      continue
+    }
+    if (ch === '/') throw new Error(CANONICAL_LOCK_MSG)
+    i += 1
+  }
+}
+
+function skipJsonString(text: string, start: number): number {
+  let i = start
+  while (i < text.length) {
+    const ch = text[i]!
+    if (ch === '\\') {
+      i += 2
+      continue
+    }
+    if (ch === '"') return i + 1
+    i += 1
+  }
+  throw new Error(CANONICAL_LOCK_MSG)
+}
+
+/** Refuse CR, BOM, or any `/` outside a string (comments are not Bun's lock form). */
+export function assertCanonicalLock(text: string): void {
+  if (text.charCodeAt(0) === 0xfeff || text.includes('\r')) throw new Error(CANONICAL_LOCK_MSG)
+  scanOutsideStrings(text)
+}
+
+export function assertLockShape(text: string): void {
+  assertCanonicalLock(text)
+  parseJsoncStrict(text)
 }
