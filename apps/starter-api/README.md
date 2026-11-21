@@ -6,6 +6,8 @@ Minimal Hono Worker: Better Auth password sessions, Organization-scoped members 
 
 Copy `.dev.vars.example` to `.dev.vars` and set a local secret. Public signup is enabled only by that local file; it is off by default. Run `bun run --filter @kit/starter-api db:migrate`, then `bun run --filter @kit/starter-api dev` (port 8787). Run `bun run --filter @kit/starter-api test` for SQLite-backed HTTP tests. Remote deployment requires a real D1 database, strong secret, production URL and explicit trusted CORS origins. This starter has no email transport, so password recovery is not configured.
 
+For a same-origin SPA and API on one Worker, see the [one Worker playbook](../../docs/kit/playbooks/one-worker-site.md). Vite proxy development remains available; static assets are optional when running the API alone.
+
 `GET /api/me` returns the current profile and memberships; `GET /api/orgs/:orgId/members` requires a session or organization-bound key and current membership. Better Auth's Organization routes are disabled: provision Organizations and memberships through your Product's authorized administration flow.
 
 API keys require the `read` scope for both endpoints; scopes are independent grants. All other routes deny API keys unless their exact method and path are declared in `src/platform/key-scopes.ts`. Sessions keep their existing access rules. The scopes migration preserves legacy keys with `read,write,admin`; newly created keys must receive explicit scopes.

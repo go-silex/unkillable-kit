@@ -83,7 +83,7 @@ Better Auth sessions are **host-only cookies** (`HttpOnly` · `Secure` on stagin
 
 Kit showcase `[env.production]` does **not** yet set `workers_dev = false` (dogfood leftover). Products must set the flags; do not copy that omission.
 
-SPA `VITE_API_URL` is baked at **build** time. Staging web build **requires** `VITE_API_URL` = that env’s `BETTER_AUTH_URL`. Defaulting to the prod API (kit `web-build.sh` does this for showcase) on a staging host + `credentials: include` writes **production** if CORS is opened.
+SPA `VITE_API_URL` is baked at **build** time. Separate staging SPA **requires** `VITE_API_URL` = that env’s `BETTER_AUTH_URL`. Defaulting to the prod API (kit `web-build.sh` does this for showcase) on a staging host + `credentials: include` writes **production** if CORS is opened.
 
 ---
 
@@ -190,10 +190,10 @@ bunx wrangler secret put BETTER_AUTH_SECRET --env staging
 Zero-edit: **do not** patch `apps/example-*/wrangler.toml` or `scripts/kit/cf-builds/*`.
 
 1. New `apps/<product>-api/wrangler.toml` with **both** envs (ids from step 2).
-2. `wrangler d1 create <product>-api-staging` · `wrangler r2 bucket create <product>-api-staging` (and a second pair for production).
+2. `wrangler d1 create <product>-api-staging` · `wrangler r2 bucket create <product>-api-staging` (+ production pair).
 3. Custom domains on the product zone. Same registrable name for API + SPA **per plane**.
-4. **Two** API Worker projects + **two** SPA projects (or Worker-assets), Builds table in §4. **Never** `KIT_SHOWCASE_DEPLOY=1`.
-5. Staging SPA build: `VITE_API_URL` required, equal to staging `BETTER_AUTH_URL`.
+4. **Two** API Workers + **two** SPA projects (or one [Worker site](./playbooks/one-worker-site.md)), Builds table in §4. **Never** `KIT_SHOWCASE_DEPLOY=1`.
+5. Separate staging SPA: `VITE_API_URL` = its `BETTER_AUTH_URL`.
 6. Seed staging with a staging recipe — not a production dump.
 7. Account / zone: `config/kit/deploy.cf.local.toml` (gitignored).
 
