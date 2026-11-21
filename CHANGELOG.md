@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Kit upgrade lock stability
+
+- `kit-upgrade` no longer rewrites `bun.lock`: it stages the merged lock and marker, frozen-installs, runs `lock-ranges:check`, then commits with no re-add. The check accepts a lock an ordinary offline install leaves unchanged, even if `--lockfile-only` would re-serialize it.
+- The probe runs on the raw tracked tree with a neutral environment; a canary detects configs that suppress lock writes. Duplicate keys, CR, BOM or comments in `bun.lock` fail.
+
 ### Kit upgrade check
 
 - `kit-upgrade --check` prints the pending commit count and first-parent merges of the locally cached `upstream/main`, plus a `git show` pointer to that tip's CHANGELOG, without fetching or writing.

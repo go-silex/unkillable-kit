@@ -40,6 +40,11 @@ write_lock() {
 
 TMP="$(mktemp -d -t lock-ranges.XXXXXX)"
 trap 'rm -rf "$TMP"' EXIT
+# Hermetic: empty HOME/cache for the whole suite. Stability cases warm SUITE_CACHE later.
+SUITE_HOME="$TMP/suite-home"
+SUITE_CACHE="$TMP/suite-cache"
+mkdir -p "$SUITE_HOME" "$SUITE_CACHE"
+export HOME="$SUITE_HOME" XDG_CONFIG_HOME="$SUITE_HOME" BUN_INSTALL_CACHE_DIR="$SUITE_CACHE"
 
 echo "== Lock ranges self-test =="
 
@@ -390,12 +395,14 @@ assert_case "a scan that checks no range fails" 1 "$BLIND" "no range checked —
 # the tree's own lock drifts. One tree per channel, so a failure names the channel left open.
 decoy_tree() {
   local tree="$1"
-  mkdir -p "$tree/scripts/kit" "$tree/config/kit" "$tree/decoy"
+  mkdir -p "$tree/scripts/kit/lib" "$tree/config/kit" "$tree/decoy"
   git -C "$tree" init -q
   cp "$SCANNER" "$tree/scripts/kit/"
+  cp "$ROOT/scripts/kit/lib/jsonc-strict.ts" "$tree/scripts/kit/lib/"
+  cp "$ROOT/scripts/kit/lib/materialize-tree.ts" "$tree/scripts/kit/lib/"
   cp "$ROOT/config/kit/bunfig.gates.toml" "$tree/config/kit/"
   cp "$CLEAN/bun.lock" "$tree/decoy/bun.lock"
-  node -e '
+  bun -e '
     const fs = require("node:fs")
     const launch = JSON.parse(fs.readFileSync(process.argv[1], "utf8")).scripts["lock-ranges:check"]
     fs.writeFileSync(process.argv[2], JSON.stringify({ scripts: { "lock-ranges:check": launch } }))
@@ -407,6 +414,8 @@ decoy_tree() {
   "packages": { "left-pad": ["left-pad@2.0.0", "", {}, "sha512-fixture"] },
 }
 EOF
+  git -C "$tree" add .
+  git -C "$tree" -c user.email=fixture@example.invalid -c user.name=Fixture commit -qm decoy
 }
 
 assert_not_repointed() {
@@ -433,34 +442,644 @@ printf 'preload = ["./preload.ts"]\n' >"$BUNFIG/bunfig.toml"
 printf 'process.env.LOCK_RANGES_ROOT = "decoy"\n' >"$BUNFIG/preload.ts"
 assert_not_repointed "a tree bunfig.toml preload" "$BUNFIG"
 
-NORMALIZATION="$TMP/normalization"
-mkdir -p "$NORMALIZATION"
-git -C "$ROOT" archive HEAD | tar -x -C "$NORMALIZATION"
-cp "$SCANNER" "$NORMALIZATION/scripts/kit/check-lock-ranges.ts"
-git -C "$NORMALIZATION" init -q
-git -C "$NORMALIZATION" add .
 export GIT_AUTHOR_NAME=Fixture GIT_AUTHOR_EMAIL=fixture@example.invalid
 export GIT_COMMITTER_NAME=Fixture GIT_COMMITTER_EMAIL=fixture@example.invalid
-git -C "$NORMALIZATION" commit -qm fixture
-output="$(cd "$NORMALIZATION" && env -u LOCK_RANGES_ROOT bun scripts/kit/check-lock-ranges.ts 2>&1)" && rc=0 || rc=$?
-if [[ "$rc" -eq 0 ]]; then
-  echo 'PASS: committed normalized lock'
+
+commit_tree() {
+  local tree="$1" msg="$2"
+  git -C "$tree" init -q
+  git -C "$tree" add .
+  git -C "$tree" commit -qm "$msg"
+}
+
+copy_scanner() {
+  local tree="$1"
+  mkdir -p "$tree/scripts/kit/lib"
+  cp "$SCANNER" "$tree/scripts/kit/check-lock-ranges.ts"
+  cp "$ROOT/scripts/kit/lib/jsonc-strict.ts" "$tree/scripts/kit/lib/jsonc-strict.ts"
+  cp "$ROOT/scripts/kit/lib/materialize-tree.ts" "$tree/scripts/kit/lib/materialize-tree.ts"
+}
+
+run_check() {
+  local tree="$1"
+  shift
+  (cd "$tree" && env -u LOCK_RANGES_ROOT "$@" bun scripts/kit/check-lock-ranges.ts)
+}
+
+HOIST="$TMP/hoist-stable"
+python3 "$ROOT/scripts/kit/lib/build-hoist-fixture.py" "$HOIST" "$SUITE_CACHE" "$SCANNER"
+printf '%s\n' 'node_modules/' '.pkg/' '.hermetic-home/' >"$HOIST/.gitignore"
+rm -rf "$HOIST/node_modules" "$HOIST"/apps/*/node_modules "$HOIST/.pkg" "$HOIST/.hermetic-home"
+copy_scanner "$HOIST"
+commit_tree "$HOIST" hoist-stable
+
+warm_start=$(date +%s%N)
+output="$(run_check "$HOIST" 2>&1)" && rc=0 || rc=$?
+warm_end=$(date +%s%N)
+warm_ms=$(( (warm_end - warm_start) / 1000000 ))
+if [[ "$rc" -eq 0 && "$output" == *'check-lock-ranges: OK'* ]]; then
+  echo "PASS: hoisting-only layout accepted (${warm_ms}ms warm)"
   PASS=$((PASS + 1))
 else
-  echo "FAIL: committed normalized lock: $output" >&2
+  echo "FAIL: hoist accept (rc=$rc): $output" >&2
   FAIL=$((FAIL + 1))
 fi
-node -e 'const fs = require("node:fs"); const p = process.argv[1]; const s = fs.readFileSync(p, "utf8"); const t = s.replace(/  "trustedDependencies": \[\],\n/, ""); if (s === t) process.exit(1); fs.writeFileSync(p, t)' "$NORMALIZATION/bun.lock"
-git -C "$NORMALIZATION" add bun.lock
-git -C "$NORMALIZATION" commit -qm mutant
-output="$(cd "$NORMALIZATION" && env -u LOCK_RANGES_ROOT bun scripts/kit/check-lock-ranges.ts 2>&1)" && rc=0 || rc=$?
+printf '%s\n' "$warm_ms" >"$TMP/probe-warm-ms.txt"
+
+# go-silex/unkillable-kit#42: missing trustedDependencies on the loopback fixture
+TRUST="$TMP/trust-rewrite"
+rm -rf "$TRUST"
+cp -a "$HOIST" "$TRUST"
+bun -e 'const fs=require("fs"); const p=process.argv[1]; const s=fs.readFileSync(p,"utf8"); const t=s.replace(/  "trustedDependencies": \[\],\n/,""); if(t===s) process.exit(1); fs.writeFileSync(p,t)' "$TRUST/bun.lock"
+git -C "$TRUST" add bun.lock && git -C "$TRUST" commit -qm trust-mutant
+output="$(run_check "$TRUST" 2>&1)" && rc=0 || rc=$?
 if [[ "$rc" -eq 1 && "$output" == *'candidate bun.lock changes on install'* ]]; then
-  echo 'PASS: committed lock normalization drift detected'
+  echo 'PASS: missing trustedDependencies fails on rewrite'
   PASS=$((PASS + 1))
 else
-  echo "FAIL: committed lock normalization drift (rc=$rc): $output" >&2
+  echo "FAIL: missing trustedDependencies (rc=$rc): $output" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+# go-silex/unkillable-kit#42: removed tracked workspace manifest
+MISSING_WS="$TMP/missing-workspace"
+rm -rf "$MISSING_WS"
+cp -a "$HOIST" "$MISSING_WS"
+rm -f "$MISSING_WS/apps/a/package.json"
+git -C "$MISSING_WS" add -A && git -C "$MISSING_WS" commit -qm missing-a
+output="$(run_check "$MISSING_WS" 2>&1)" && rc=0 || rc=$?
+if [[ "$rc" -eq 1 && "$output" == *'candidate bun.lock changes on install'* ]]; then
+  echo 'PASS: removed tracked workspace manifest fails on rewrite'
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: removed workspace manifest (rc=$rc): $output" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+PROBE_MUTANT="$TMP/probe-mutant"
+rm -rf "$PROBE_MUTANT"
+cp -a "$TRUST" "$PROBE_MUTANT"
+bun -e '
+const fs=require("fs"); const p=process.argv[1]; let s=fs.readFileSync(p,"utf8");
+const t=s.replace("checkStability(root, tree)","/* stability probe deleted */");
+if(t===s) process.exit(1); fs.writeFileSync(p,t);
+' "$PROBE_MUTANT/scripts/kit/check-lock-ranges.ts"
+output="$(run_check "$PROBE_MUTANT" 2>&1)" && rc=0 || rc=$?
+if [[ "$rc" -eq 0 ]]; then
+  echo 'PASS: deleting stability probe mutant killed'
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: probe-deleted mutant still failed (rc=$rc): $output" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+for mode in literal escaped nested; do
+  DUP="$TMP/dup-$mode"
+  rm -rf "$DUP"
+  cp -a "$HOIST" "$DUP"
+  node "$ROOT/scripts/kit/lib/inject-lock-duplicate.mjs" "$DUP/bun.lock" "$mode"
+  git -C "$DUP" add bun.lock && git -C "$DUP" commit -qm "dup-$mode"
+  # Verdict must not depend on TMPDIR: escaped case under node_modules/.cache/tmp
+  if [[ "$mode" == escaped ]]; then
+    bad_tmp="$DUP/node_modules/.cache/tmp"
+    mkdir -p "$bad_tmp"
+    output="$(cd "$DUP" && env -u LOCK_RANGES_ROOT TMPDIR="$bad_tmp" bun scripts/kit/check-lock-ranges.ts 2>&1)" && rc=0 || rc=$?
+  else
+    output="$(run_check "$DUP" 2>&1)" && rc=0 || rc=$?
+  fi
+  if [[ "$rc" -eq 1 && "$output" == *'ambiguous bun.lock'* ]]; then
+    echo "PASS: duplicate keys refused ($mode)"
+    PASS=$((PASS + 1))
+  else
+    echo "FAIL: duplicate keys $mode (rc=$rc): $output" >&2
+    FAIL=$((FAIL + 1))
+  fi
+done
+
+# Malformed JSONC fails closed
+BAD="$TMP/bad-jsonc"
+rm -rf "$BAD"
+cp -a "$HOIST" "$BAD"
+printf '{ "lockfileVersion": 1, "workspaces": { "", },\n' >"$BAD/bun.lock"
+git -C "$BAD" add bun.lock && git -C "$BAD" commit -qm bad
+output="$(run_check "$BAD" 2>&1)" && rc=0 || rc=$?
+if [[ "$rc" -eq 1 && "$output" == *'unparseable bun.lock'* ]]; then
+  echo 'PASS: malformed JSONC fails closed'
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: malformed JSONC (rc=$rc): $output" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+DUP_MUTANT="$TMP/dup-mutant"
+rm -rf "$DUP_MUTANT"
+cp -a "$TMP/dup-literal" "$DUP_MUTANT"
+bun -e '
+const fs=require("fs"); const p=process.argv[1]; let s=fs.readFileSync(p,"utf8");
+let t=s.replace(/assertLockShape\([^\n]+\)\n/g, "");
+if(t===s||/assertLockShape\(/.test(t)) process.exit(1);
+fs.writeFileSync(p,t);
+' "$DUP_MUTANT/scripts/kit/check-lock-ranges.ts"
+output="$(run_check "$DUP_MUTANT" 2>&1)" && rc=0 || rc=$?
+if [[ "$output" != *'ambiguous bun.lock'* ]]; then
+  echo 'PASS: no-strict-key mutant killed'
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: no-strict-key mutant survived: $output" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+# Empty required cache fail-closed
+EMPTY_CACHE="$TMP/empty-cache-tree"
+rm -rf "$EMPTY_CACHE" "$TMP/empty-cache-dir"
+cp -a "$HOIST" "$EMPTY_CACHE"
+mkdir -p "$TMP/empty-cache-dir"
+output="$(cd "$EMPTY_CACHE" && env -u LOCK_RANGES_ROOT BUN_INSTALL_CACHE_DIR="$TMP/empty-cache-dir" bun scripts/kit/check-lock-ranges.ts 2>&1)" && rc=0 || rc=$?
+if [[ "$rc" -eq 1 && "$output" == *'warm the Bun cache'* ]]; then
+  echo 'PASS: empty required cache fails closed with warming guidance'
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: empty cache (rc=$rc): $output" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+# HOME/.bunfig.toml frozenLockfile must not hide go-silex/unkillable-kit#42
+FROZEN_HOME="$TMP/frozen-home"
+rm -rf "$FROZEN_HOME"
+mkdir -p "$FROZEN_HOME"
+printf '%s\n' '[install]' 'frozenLockfile = true' >"$FROZEN_HOME/.bunfig.toml"
+output="$(cd "$TRUST" && env -u LOCK_RANGES_ROOT HOME="$FROZEN_HOME" XDG_CONFIG_HOME="$FROZEN_HOME" BUN_INSTALL_CACHE_DIR="$SUITE_CACHE" bun scripts/kit/check-lock-ranges.ts 2>&1)" && rc=0 || rc=$?
+if [[ "$rc" -eq 1 && "$output" == *'candidate bun.lock changes on install'* ]]; then
+  echo 'PASS: HOME frozenLockfile cannot hide trustedDependencies rewrite'
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: HOME frozenLockfile bypass (rc=$rc): $output" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+# Canonical lock refusals on the *committed blob* (not working copy): CR, BOM, comment, crdup
+for kind in cr bom comment crdup; do
+  CANON="$TMP/canon-$kind"
+  rm -rf "$CANON"
+  cp -a "$HOIST" "$CANON"
+  case "$kind" in
+    cr) python3 -c 'from pathlib import Path; p=Path("'"$CANON"'/bun.lock"); p.write_bytes(p.read_bytes().replace(b"\n", b"\r\n"))' ;;
+    bom) python3 -c 'from pathlib import Path; p=Path("'"$CANON"'/bun.lock"); p.write_bytes(b"\xef\xbb\xbf"+p.read_bytes())' ;;
+    comment) python3 -c 'from pathlib import Path; p=Path("'"$CANON"'/bun.lock"); t=p.read_text(); p.write_text(t.replace("{", "{\n  // comment", 1))' ;;
+    crdup) python3 -c 'from pathlib import Path; p=Path("'"$CANON"'/bun.lock"); t=p.read_text();
+needle='"'"'"packages":'"'"'
+i=t.find(needle)
+assert i>0
+inj="// hide\r  \"packages\": {},\n  "
+p.write_text(t[:i]+inj+t[i:])' ;;
+  esac
+  git -C "$CANON" add bun.lock && git -C "$CANON" commit -qm "canon-$kind"
+  output="$(run_check "$CANON" 2>&1)" && rc=0 || rc=$?
+  if [[ "$rc" -eq 1 && "$output" == *'not in the form Bun writes'* ]]; then
+    echo "PASS: non-canonical lock refused ($kind)"
+    PASS=$((PASS + 1))
+  else
+    echo "FAIL: canonical $kind (rc=$rc): $output" >&2
+    FAIL=$((FAIL + 1))
+  fi
+done
+
+# CRLF working copy of an LF-committed lock must pass (shape reads the blob)
+CRLF_WC="$TMP/crlf-working"
+rm -rf "$CRLF_WC"
+cp -a "$HOIST" "$CRLF_WC"
+git -C "$CRLF_WC" config core.autocrlf true
+# Refresh working tree conversion
+rm -f "$CRLF_WC/bun.lock"
+git -C "$CRLF_WC" checkout -- bun.lock
+if ! git -C "$CRLF_WC" ls-files --eol bun.lock | grep -q 'i/lf.*w/crlf\|i/lf.*w/mixed\|i/lf'; then
+  # Force CRLF in working copy without committing
+  python3 -c 'from pathlib import Path; p=Path("'"$CRLF_WC"'/bun.lock"); b=p.read_bytes(); p.write_bytes(b.replace(b"\n", b"\r\n") if b"\r\n" not in b else b)'
+fi
+# Ensure HEAD blob is still LF
+blob=$(git -C "$CRLF_WC" cat-file blob HEAD:bun.lock | python3 -c 'import sys; d=sys.stdin.buffer.read(); sys.exit(0 if b"\r" not in d else 1)') || { echo 'FAIL: setup LF blob'; FAIL=$((FAIL+1)); }
+output="$(run_check "$CRLF_WC" 2>&1)" && rc=0 || rc=$?
+if [[ "$rc" -eq 0 ]]; then
+  echo 'PASS: CRLF working copy of LF-committed lock accepted'
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: CRLF working copy (rc=$rc): $output" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+# Committed CR lock still fails (already covered by canon-cr); keep explicit name
+echo 'PASS: committed CR lock covered by non-canonical (cr)'
+PASS=$((PASS + 1))
+
+# Write-suppression canary: each suppressing bunfig must fail; root-level frozen must pass
+base_bunfig="$(cat "$HOIST/bunfig.toml")"
+reg=$(printf '%s' "$base_bunfig" | sed -n 's/.*registry = "\([^"]*\)".*/\1/p' | head -1)
+write_suppress_fig() {
+  local dest="$1" kind="$2"
+  case "$kind" in
+    frozen) printf '%s\nfrozenLockfile = true\n' "$base_bunfig" >"$dest" ;;
+    quoted) printf '%s' "$base_bunfig" | sed 's/\[install\]/[install]\n"frozenLockfile" = true/' >"$dest" ;;
+    dotted) printf 'install.registry = "%s"\ninstall.minimumReleaseAge = 259200\ninstall.frozenLockfile = true\n' "$reg" >"$dest" ;;
+    inline) printf 'install = { frozenLockfile = true, registry = "%s", minimumReleaseAge = 259200 }\n' "$reg" >"$dest" ;;
+    dry) printf '%s\ndryRun = true\n' "$base_bunfig" >"$dest" ;;
+    savefalse) printf '[install.lockfile]\nsave = false\n%s' "$base_bunfig" >"$dest" ;;
+    *) return 1 ;;
+  esac
+}
+for kind in frozen quoted dotted inline dry savefalse; do
+  SUP="$TMP/suppress-$kind"
+  rm -rf "$SUP"
+  cp -a "$HOIST" "$SUP"
+  write_suppress_fig "$SUP/bunfig.toml" "$kind"
+  git -C "$SUP" add bunfig.toml && git -C "$SUP" commit -qm "suppress-$kind"
+  canary_start=$(date +%s%N)
+  output="$(run_check "$SUP" 2>&1)" && rc=0 || rc=$?
+  canary_end=$(date +%s%N)
+  canary_ms=$(( (canary_end - canary_start) / 1000000 ))
+  if [[ "$rc" -eq 1 && "$output" == *'suppresses lock writes'* ]]; then
+    echo "PASS: write-suppression detected ($kind) (${canary_ms}ms)"
+    PASS=$((PASS + 1))
+  else
+    echo "FAIL: suppress $kind (rc=$rc): $output" >&2
+    FAIL=$((FAIL + 1))
+  fi
+done
+printf '%s\n' "$canary_ms" >"$TMP/canary-ms.txt"
+
+# Manifest-less cache (CI shape after frozen install: tarballs, no *.npm manifests)
+MANIFESTLESS_CACHE="$TMP/manifestless-cache"
+rm -rf "$MANIFESTLESS_CACHE"
+cp -a "$SUITE_CACHE" "$MANIFESTLESS_CACHE"
+find "$MANIFESTLESS_CACHE" -name '*.npm' -delete
+if [[ "$(find "$MANIFESTLESS_CACHE" -name '*.npm' | wc -l)" -ne 0 ]]; then
+  echo 'FAIL: could not strip *.npm from manifest-less cache' >&2
+  FAIL=$((FAIL + 1))
+fi
+ML="$TMP/manifestless-hoist"
+rm -rf "$ML"
+cp -a "$HOIST" "$ML"
+output="$(cd "$ML" && env -u LOCK_RANGES_ROOT BUN_INSTALL_CACHE_DIR="$MANIFESTLESS_CACHE" bun scripts/kit/check-lock-ranges.ts 2>&1)" && rc=0 || rc=$?
+if [[ "$rc" -eq 0 && "$output" == *'check-lock-ranges: OK'* ]]; then
+  echo 'PASS: full check with manifest-less cache'
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: manifest-less check (rc=$rc): $output" >&2
+  FAIL=$((FAIL + 1))
+fi
+for kind in frozen quoted dotted inline dry savefalse; do
+  SUP_ML="$TMP/suppress-ml-$kind"
+  rm -rf "$SUP_ML"
+  cp -a "$HOIST" "$SUP_ML"
+  write_suppress_fig "$SUP_ML/bunfig.toml" "$kind"
+  git -C "$SUP_ML" add bunfig.toml && git -C "$SUP_ML" commit -qm "suppress-ml-$kind"
+  output="$(cd "$SUP_ML" && env -u LOCK_RANGES_ROOT BUN_INSTALL_CACHE_DIR="$MANIFESTLESS_CACHE" bun scripts/kit/check-lock-ranges.ts 2>&1)" && rc=0 || rc=$?
+  if [[ "$rc" -eq 1 && "$output" == *'suppresses lock writes'* ]]; then
+    echo "PASS: write-suppression still detected under manifest-less cache ($kind)"
+    PASS=$((PASS + 1))
+  else
+    echo "FAIL: suppress-ml $kind (rc=$rc): $output" >&2
+    FAIL=$((FAIL + 1))
+  fi
+done
+# Overrides canary needs manifests; must fail closed on a manifest-less cache.
+OV_MUTANT="$TMP/overrides-canary-mutant"
+rm -rf "$OV_MUTANT"
+cp -a "$HOIST" "$OV_MUTANT"
+bun -e '
+const fs=require("fs"); const p=process.argv[1]; let s=fs.readFileSync(p,"utf8");
+const from=`parsed.trustedDependencies = [CANARY_SENTINEL]`;
+const to=`const prior = parsed.overrides && typeof parsed.overrides === "object" && !Array.isArray(parsed.overrides) ? { ...(parsed.overrides as Record<string, unknown>) } : {};\n  parsed.overrides = { ...prior, [CANARY_SENTINEL]: "0.0.0" }`;
+const t=s.replace(from,to); if(t===s) process.exit(1); fs.writeFileSync(p,t);
+' "$OV_MUTANT/scripts/kit/check-lock-ranges.ts"
+output="$(cd "$OV_MUTANT" && env -u LOCK_RANGES_ROOT BUN_INSTALL_CACHE_DIR="$MANIFESTLESS_CACHE" bun scripts/kit/check-lock-ranges.ts 2>&1)" && rc=0 || rc=$?
+if [[ "$rc" -eq 1 && "$output" == *'suppresses lock writes'* ]]; then
+  echo 'PASS: overrides canary mutant killed by manifest-less cache'
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: overrides canary mutant (rc=$rc): $output" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+ROOT_FROZEN="$TMP/root-frozen"
+rm -rf "$ROOT_FROZEN"
+cp -a "$HOIST" "$ROOT_FROZEN"
+printf 'frozenLockfile = true\n%s' "$base_bunfig" >"$ROOT_FROZEN/bunfig.toml"
+git -C "$ROOT_FROZEN" add bunfig.toml && git -C "$ROOT_FROZEN" commit -qm root-frozen
+output="$(run_check "$ROOT_FROZEN" 2>&1)" && rc=0 || rc=$?
+if [[ "$rc" -eq 0 ]]; then
+  echo 'PASS: root-level frozenLockfile ignored (not refused)'
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: root frozenLockfile (rc=$rc): $output" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+# export-ignore on a new workspace absent from the lock must fail
+EXPORT_IGNORE="$TMP/export-ignore"
+rm -rf "$EXPORT_IGNORE"
+cp -a "$HOIST" "$EXPORT_IGNORE"
+mkdir -p "$EXPORT_IGNORE/apps/d"
+printf '%s\n' '{"name":"d","dependencies":{"kit-pin":"1.0.1"}}' >"$EXPORT_IGNORE/apps/d/package.json"
+printf '%s\n' 'apps/d/ export-ignore' >"$EXPORT_IGNORE/.gitattributes"
+git -C "$EXPORT_IGNORE" add -A && git -C "$EXPORT_IGNORE" commit -qm export-ignore
+output="$(run_check "$EXPORT_IGNORE" 2>&1)" && rc=0 || rc=$?
+if [[ "$rc" -eq 1 && "$output" == *'candidate bun.lock changes on install'* ]]; then
+  echo 'PASS: export-ignore workspace still present in probe and fails'
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: export-ignore (rc=$rc): $output" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+# Raw blob materialize: eol=crlf, ident, custom smudge — snapshot bytes equal blobs
+ATTRS="$TMP/raw-attrs"
+rm -rf "$ATTRS"
+cp -a "$HOIST" "$ATTRS"
+printf '%s\n' 'bun.lock text eol=crlf' 'apps/a/package.json ident' 'secret.txt filter=kitcanary' >"$ATTRS/.gitattributes"
+printf 'plain\n' >"$ATTRS/secret.txt"
+# Put $Id$ into apps/a/package.json for ident
+bun -e 'const fs=require("fs"); const p=process.argv[1]; const pkg=JSON.parse(fs.readFileSync(p,"utf8")); pkg.description="$Id$"; fs.writeFileSync(p, JSON.stringify(pkg,null,2)+"\n");' "$ATTRS/apps/a/package.json"
+git -C "$ATTRS" add -A && git -C "$ATTRS" commit -qm attrs
+git -C "$ATTRS" config filter.kitcanary.smudge 'sed s/plain/SMUDGED/'
+git -C "$ATTRS" config filter.kitcanary.clean cat
+blob_lock=$(git -C "$ATTRS" rev-parse HEAD:bun.lock)
+blob_pkg=$(git -C "$ATTRS" rev-parse HEAD:apps/a/package.json)
+blob_secret=$(git -C "$ATTRS" rev-parse HEAD:secret.txt)
+mat=$(mktemp -d)
+snap="$mat/tree"
+mkdir -p "$snap"
+# Use the production materializer
+ROOT_FOR_MAT="$ROOT" SNAP="$snap" TREE_REPO="$ATTRS" bun -e '
+const { materializeTree } = await import(process.env.ROOT_FOR_MAT + "/scripts/kit/lib/materialize-tree.ts")
+await materializeTree(process.env.TREE_REPO, "HEAD", process.env.SNAP)
+'
+ok=1
+cmp -s <(git -C "$ATTRS" cat-file blob "$blob_lock") "$snap/bun.lock" || ok=0
+cmp -s <(git -C "$ATTRS" cat-file blob "$blob_pkg") "$snap/apps/a/package.json" || ok=0
+cmp -s <(git -C "$ATTRS" cat-file blob "$blob_secret") "$snap/secret.txt" || ok=0
+if [[ "$ok" -eq 1 ]]; then
+  echo 'PASS: raw checkout keeps blob bytes (eol=crlf, ident, smudge)'
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: raw checkout converted bytes" >&2
+  FAIL=$((FAIL + 1))
+fi
+rm -rf "$mat"
+output="$(run_check "$ATTRS" 2>&1)" && rc=0 || rc=$?
+if [[ "$rc" -eq 0 ]]; then
+  echo 'PASS: eol=crlf/ident tree still install-stable'
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: attrs stability (rc=$rc): $output" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+# Pivot symlink chain: relative escape is dangling in the disposable snapshot (ENOENT allowed),
+# so the probe fails on install rewrite; verdict must not depend on the external file.
+SYMLINK="$TMP/symlink-chain"
+rm -rf "$SYMLINK"
+cp -a "$HOIST" "$SYMLINK"
+rm -f "$SYMLINK/apps/b/package.json"
+ln -s 'pivot/../../b.json' "$SYMLINK/apps/b/package.json"
+ln -s '../..' "$SYMLINK/apps/b/pivot"
+printf '%s\n' '{"name":"b","dependencies":{"kit-pin":"9.9.9"}}' >"$TMP/b.json"
+git -C "$SYMLINK" add -A && git -C "$SYMLINK" commit -qm symlink-chain
+output1="$(run_check "$SYMLINK" 2>&1)" && rc1=0 || rc1=$?
+printf '%s\n' '{"name":"b","dependencies":{"kit-pin":"1.0.0"}}' >"$TMP/b.json"
+output2="$(run_check "$SYMLINK" 2>&1)" && rc2=0 || rc2=$?
+if [[ "$rc1" -eq 1 && "$rc2" -eq 1 && "$rc1" -eq "$rc2" ]]; then
+  echo "PASS: symlink pivot chain fails independently of external file (rc=$rc1)"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: symlink pivot (rc1=$rc1 rc2=$rc2)"$'\n'"$output1"$'\n'"---"$'\n'"$output2" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+# Absolute outside symlink: realpath succeeds outside the snapshot → refuse
+ABS_OUT="$TMP/abs-outside"
+rm -rf "$ABS_OUT"
+cp -a "$HOIST" "$ABS_OUT"
+outside="$TMP/outside-manifest"
+mkdir -p "$outside"
+printf '%s\n' '{"name":"a","dependencies":{"kit-pin":"1.0.1"}}' >"$outside/package.json"
+rm -f "$ABS_OUT/apps/a/package.json"
+ln -s "$outside/package.json" "$ABS_OUT/apps/a/package.json"
+git -C "$ABS_OUT" add -A && git -C "$ABS_OUT" commit -qm abs-outside
+output="$(run_check "$ABS_OUT" 2>&1)" && rc=0 || rc=$?
+# Flip external; still refuse
+printf '%s\n' '{"name":"a","dependencies":{"kit-pin":"9.9.9"}}' >"$outside/package.json"
+output2="$(run_check "$ABS_OUT" 2>&1)" && rc2=0 || rc2=$?
+if [[ "$rc" -eq 1 && "$rc2" -eq 1 && "$output" == *'symlink escapes snapshot'* && "$output2" == *'symlink escapes snapshot'* ]]; then
+  echo 'PASS: absolute outside symlink refused'
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: absolute outside symlink (rc=$rc rc2=$rc2): $output" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+# In-tree shared-manifest symlink is supported
+ORDINARY="$TMP/ordinary-symlink"
+rm -rf "$ORDINARY"
+cp -a "$HOIST" "$ORDINARY"
+mkdir -p "$ORDINARY/config/product/workspace-manifests"
+mv "$ORDINARY/apps/b/package.json" "$ORDINARY/config/product/workspace-manifests/b.json"
+ln -s '../../config/product/workspace-manifests/b.json' "$ORDINARY/apps/b/package.json"
+git -C "$ORDINARY" add -A && git -C "$ORDINARY" commit -qm ordinary-symlink
+output="$(run_check "$ORDINARY" 2>&1)" && rc=0 || rc=$?
+if [[ "$rc" -eq 0 ]]; then
+  echo 'PASS: in-tree shared-manifest symlink accepted'
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: ordinary symlink (rc=$rc): $output" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+# .env selects populated cache while default cache empty — check must pass
+DOTENV_CACHE="$TMP/dotenv-cache-select"
+rm -rf "$DOTENV_CACHE" "$TMP/populated-cache" "$TMP/empty-default-cache"
+cp -a "$HOIST" "$DOTENV_CACHE"
+# Warm a private cache by copying suite cache
+cp -a "$SUITE_CACHE" "$TMP/populated-cache"
+mkdir -p "$TMP/empty-default-cache" "$DOTENV_CACHE/.hermetic-home"
+# Point .env at populated cache; leave BUN_INSTALL_CACHE_DIR unset so default would be empty home cache
+printf 'BUN_INSTALL_CACHE_DIR=%s\n' "$TMP/populated-cache" >"$DOTENV_CACHE/.env"
+git -C "$DOTENV_CACHE" add .env && git -C "$DOTENV_CACHE" commit -qm dotenv-cache
+# Run with empty default: unset BUN_INSTALL_CACHE_DIR, HOME with empty .bun
+empty_home="$TMP/empty-default-home"
+rm -rf "$empty_home"
+mkdir -p "$empty_home"
+output="$(cd "$DOTENV_CACHE" && env -u LOCK_RANGES_ROOT -u BUN_INSTALL_CACHE_DIR HOME="$empty_home" XDG_CONFIG_HOME="$empty_home" bun scripts/kit/check-lock-ranges.ts 2>&1)" && rc=0 || rc=$?
+if [[ "$rc" -eq 0 ]]; then
+  echo 'PASS: .env-selected cache used when default cache is empty'
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: .env cache select (rc=$rc): $output" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+# Large tracked file streams (no in-memory buffer limit)
+LARGE="$TMP/large-file"
+rm -rf "$LARGE"
+cp -a "$HOIST" "$LARGE"
+dd if=/dev/zero of="$LARGE/big.bin" bs=1M count=4 status=none
+git -C "$LARGE" add big.bin && git -C "$LARGE" commit -qm large
+output="$(run_check "$LARGE" 2>&1)" && rc=0 || rc=$?
+if [[ "$rc" -eq 0 ]]; then
+  echo 'PASS: large tracked file streams through materialize'
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: large file (rc=$rc): $output" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+# lockfile-only mutant
+LOCKFILE_ONLY_MUTANT="$TMP/lockfile-only-mutant"
+rm -rf "$LOCKFILE_ONLY_MUTANT"
+cp -a "$HOIST" "$LOCKFILE_ONLY_MUTANT"
+bun -e '
+const fs=require("fs"); const p=process.argv[1]; let s=fs.readFileSync(p,"utf8");
+const from="['\''--no-env-file'\'', '\''install'\'', '\''--offline'\'', '\''--ignore-scripts'\'', '\''--cache-dir'\'', cacheDir]";
+const to="['\''--no-env-file'\'', '\''install'\'', '\''--lockfile-only'\'', '\''--offline'\'', '\''--ignore-scripts'\'', '\''--cache-dir'\'', cacheDir]";
+const t=s.replace(from,to); if(t===s) process.exit(1); fs.writeFileSync(p,t);
+' "$LOCKFILE_ONLY_MUTANT/scripts/kit/check-lock-ranges.ts"
+output="$(run_check "$LOCKFILE_ONLY_MUTANT" 2>&1)" && rc=0 || rc=$?
+if [[ "$rc" -eq 1 && "$output" == *'candidate bun.lock changes on install'* ]]; then
+  echo 'PASS: --lockfile-only comparison mutant killed'
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: lockfile-only mutant (rc=$rc): $output" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+cold_cache="$TMP/hoist-cache-cold"
+rm -rf "$cold_cache"
+mkdir -p "$cold_cache"
+cold_start=$(date +%s%N)
+output="$(cd "$HOIST" && env -u LOCK_RANGES_ROOT BUN_INSTALL_CACHE_DIR="$cold_cache" bun scripts/kit/check-lock-ranges.ts 2>&1)" && rc=0 || rc=$?
+cold_end=$(date +%s%N)
+cold_ms=$(( (cold_end - cold_start) / 1000000 ))
+printf '%s\n' "$cold_ms" >"$TMP/probe-cold-ms.txt"
+if [[ "$rc" -eq 1 && "$output" == *'warm the Bun cache'* ]]; then
+  echo "PASS: cold empty cache fails closed (${cold_ms}ms)"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: cold cache (rc=$rc): $output" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+# Staged unstable lock vs stable HEAD during an open merge must fail.
+STAGED="$TMP/staged-vs-head"
+rm -rf "$STAGED"
+cp -a "$HOIST" "$STAGED"
+# Create a second commit that restores a stable lock, then stage an unstable index during merge-ish write-tree
+bun -e 'const fs=require("fs"); const p=process.argv[1]; const s=fs.readFileSync(p,"utf8"); const t=s.replace(/  "trustedDependencies": \[\],\n/,""); if(t===s) process.exit(1); fs.writeFileSync(p,t)' "$STAGED/bun.lock"
+git -C "$STAGED" add bun.lock && git -C "$STAGED" commit -qm unstable-head
+# Now HEAD is unstable. Make a stable staged tree by restoring trustedDependencies in the index only.
+cp "$HOIST/bun.lock" "$STAGED/bun.lock"
+git -C "$STAGED" add bun.lock
+# Simulate open merge: write MERGE_HEAD and keep staged stable? Assignment wants staged unstable, HEAD stable.
+git -C "$STAGED" reset --hard HEAD~1 >/dev/null
+# HEAD is stable (hoist). Stage unstable lock while MERGE_HEAD present.
+bun -e 'const fs=require("fs"); const p=process.argv[1]; const s=fs.readFileSync(p,"utf8"); const t=s.replace(/  "trustedDependencies": \[\],\n/,""); if(t===s) process.exit(1); fs.writeFileSync(p,t)' "$STAGED/bun.lock"
+git -C "$STAGED" add bun.lock
+git -C "$STAGED" rev-parse HEAD >"$STAGED/.git/MERGE_HEAD"
+output="$(run_check "$STAGED" 2>&1)" && rc=0 || rc=$?
+if [[ "$rc" -eq 1 && "$output" == *'candidate bun.lock changes on install'* ]]; then
+  echo 'PASS: unstable staged lock fails despite stable HEAD'
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: staged-vs-head (rc=$rc): $output" >&2
+  FAIL=$((FAIL + 1))
+fi
+# Mutant: always HEAD instead of staged tree → killed (would pass)
+HEAD_MUTANT="$TMP/head-mutant"
+rm -rf "$HEAD_MUTANT"
+cp -a "$STAGED" "$HEAD_MUTANT"
+bun -e '
+const fs=require("fs"); const p=process.argv[1]; let s=fs.readFileSync(p,"utf8");
+const from="if (!existsSync(resolve(root, merge.stdout.toString().trim()))) return '\''HEAD'\''\n  const tree = spawnSync('\''git'\'', ['\''write-tree'\''], { cwd: root, env })";
+const to="if (!existsSync(resolve(root, merge.stdout.toString().trim()))) return '\''HEAD'\''\n  return '\''HEAD'\''\n  const tree = spawnSync('\''git'\'', ['\''write-tree'\''], { cwd: root, env })";
+const t=s.replace(from,to);
+if(t===s) process.exit(1); fs.writeFileSync(p,t);
+' "$HEAD_MUTANT/scripts/kit/check-lock-ranges.ts"
+output="$(run_check "$HEAD_MUTANT" 2>&1)" && rc=0 || rc=$?
+if [[ "$rc" -eq 0 ]]; then
+  echo 'PASS: always-HEAD mutant killed'
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: always-HEAD mutant still failed (rc=$rc): $output" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+
+# Bounded-memory materialize + full-buffer mutant
+MEM_OUT="$(bun "$ROOT/scripts/kit/lib/materialize-memory-selftest.ts" 64 2>&1)" && mem_rc=0 || mem_rc=$?
+if [[ "$mem_rc" -eq 0 && "$MEM_OUT" == *'PASS: materialize memory bound'* ]]; then
+  echo "PASS: materialize 64 MiB stays memory-bounded"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: materialize memory bound: $MEM_OUT" >&2
+  FAIL=$((FAIL + 1))
+fi
+MEM_MUT="$TMP/mem-mutant"
+rm -rf "$MEM_MUT"
+mkdir -p "$MEM_MUT/scripts/kit/lib"
+cp "$ROOT/scripts/kit/lib/materialize-tree.ts" "$MEM_MUT/scripts/kit/lib/"
+cp "$ROOT/scripts/kit/lib/materialize-memory-selftest.ts" "$MEM_MUT/scripts/kit/lib/"
+bun "$ROOT/scripts/kit/lib/patch-materialize-fullbuf-mutant.ts" "$MEM_MUT/scripts/kit/lib/materialize-tree.ts"
+output="$(cd "$MEM_MUT/scripts/kit/lib" && bun ./materialize-memory-selftest.ts 64 2>&1)" && rc=0 || rc=$?
+if [[ "$rc" -ne 0 && "$output" == *'RSS growth'* ]]; then
+  echo 'PASS: full-buffer writeExact mutant killed by memory test'
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: full-buffer mutant survived (rc=$rc): $output" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+# Partial clone fail-closed without fetching
+PARTIAL_OUT="$(bun "$ROOT/scripts/kit/lib/materialize-partial-clone-selftest.ts" "$ROOT" "$SCANNER" 2>&1)" && partial_rc=0 || partial_rc=$?
+if [[ "$partial_rc" -eq 0 && "$PARTIAL_OUT" == *'PASS: partial clone'* ]]; then
+  echo "$PARTIAL_OUT" | tail -1
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: partial clone: $PARTIAL_OUT" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+# Raw path bytes stay distinct
+RAW_OUT="$(bun "$ROOT/scripts/kit/lib/materialize-raw-paths-selftest.ts" "$HOIST" 2>&1)" && raw_rc=0 || raw_rc=$?
+if [[ "$raw_rc" -eq 0 && "$RAW_OUT" == *'PASS:'* ]]; then
+  echo "$RAW_OUT" | tail -1
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: raw paths: $RAW_OUT" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+# A short write (file-size limit) fails closed instead of truncating the snapshot
+SHORT="$TMP/short-write"
+mkdir -p "$SHORT/repo" "$SHORT/out"
+git -C "$SHORT/repo" init -q
+printf '{}\n' > "$SHORT/repo/package.json"
+printf '{}\n' > "$SHORT/repo/bun.lock"
+head -c 8193 /dev/zero > "$SHORT/repo/big.bin"
+git -C "$SHORT/repo" add -A && git -C "$SHORT/repo" commit -qm short-write
+SHORT_JS="import {materializeTree} from '$ROOT/scripts/kit/lib/materialize-tree.ts'; await materializeTree(process.cwd(), 'HEAD', '$SHORT/out')"
+# The file-size limit covers the git children too: keep them from writing trace files.
+short_out="$(cd "$SHORT/repo" && GIT_CONFIG_NOSYSTEM=1 python3 -c 'import os, resource, signal, sys
+for k in [k for k in os.environ if k.startswith("GIT_TRACE")]: del os.environ[k]
+signal.signal(signal.SIGXFSZ, signal.SIG_IGN)
+resource.setrlimit(resource.RLIMIT_FSIZE, (8192, 8192))
+os.execvp("bun", ["bun", "--no-env-file", "-e", sys.argv[1]])' "$SHORT_JS" 2>&1)" && short_rc=0 || short_rc=$?
+if [[ "$short_rc" -ne 0 && "$short_out" == *EFBIG* ]]; then
+  echo 'PASS: short write fails closed'
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: short write rc=$short_rc: $short_out" >&2
   FAIL=$((FAIL + 1))
 fi
 
 echo "== Lock ranges summary: $PASS pass, $FAIL fail =="
+echo "probe warm_ms=$(cat "$TMP/probe-warm-ms.txt") cold_ms=$(cat "$TMP/probe-cold-ms.txt")"
+echo "suite HOME=$HOME cache=$BUN_INSTALL_CACHE_DIR"
 [[ "$FAIL" -eq 0 ]]

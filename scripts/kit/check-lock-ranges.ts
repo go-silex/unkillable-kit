@@ -7,10 +7,14 @@ import { spawnSync } from 'node:child_process'
  * --config=config/kit/bunfig.gates.toml`, so neither a tree `.env` nor a tree
  * `bunfig.toml` (`preload`, `define`) can set the override. That launch is the
  * guarantee: running this file with a bare `bun` gives no such protection.
- * Normalization checks committed HEAD inputs, or the staged tree during an
- * open merge. Unstaged and untracked files are outside that snapshot.
- * Offline verification may require the local Bun cache.
- * A lock without the root workspace `""`, or a scan that checks no range, fails.
+ * Stability materializes the tracked candidate tree (HEAD, or the staged merge
+ * tree) as raw blobs via `ls-tree` + `cat-file --batch` (no checkout filters),
+ * then an ordinary offline install in a neutral child env using the same cache
+ * as `bun pm cache` (honours tree `.env`). A write-suppression canary follows.
+ * Shape checks (CR/BOM/comments, duplicate keys) read the candidate blob, not
+ * the working copy. Tracked symlinks must resolve inside the snapshot. Forced
+ * `--lockfile-only` is not the oracle. Offline verification may need the local
+ * Bun cache. A lock without root workspace `""`, or a blind scan, fails.
  *
  * Scope: every `workspaces` entry in bun.lock, root `""` included. For each of
  * `dependencies`, `devDependencies` and `optionalDependencies`, the resolved
@@ -45,9 +49,11 @@ import { spawnSync } from 'node:child_process'
  * Bun.semver.satisfies returns true for non-ranges, which would hide the defect.
  * Its repair is a spec rewrite, which `bun update` cannot do.
  */
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { basename, join, resolve } from 'node:path'
+import { join, resolve } from 'node:path'
+import { assertLockShape, parseJsoncStrict } from './lib/jsonc-strict.ts'
+import { gitNoLazyEnv, materializeTree } from './lib/materialize-tree.ts'
 
 const SECTIONS = ['dependencies', 'devDependencies', 'optionalDependencies'] as const
 
@@ -337,51 +343,124 @@ function treeRoot(): string {
 }
 
 function candidateTree(root: string): string {
-  const merge = spawnSync('git', ['rev-parse', '--git-path', 'MERGE_HEAD'], { cwd: root })
+  const env = gitNoLazyEnv()
+  const merge = spawnSync('git', ['rev-parse', '--git-path', 'MERGE_HEAD'], { cwd: root, env })
   if (merge.status !== 0) fail('cannot determine merge state')
   if (!existsSync(resolve(root, merge.stdout.toString().trim()))) return 'HEAD'
-  const tree = spawnSync('git', ['write-tree'], { cwd: root })
+  const tree = spawnSync('git', ['write-tree'], { cwd: root, env })
   if (tree.status !== 0) fail('cannot verify staged merge tree; resolve conflicts first')
   return tree.stdout.toString().trim()
 }
 
-function checkNormalization(root: string, tree: string): void {
-  const list = spawnSync('git', ['ls-tree', '-r', '-z', '--name-only', tree], { cwd: root })
-  if (list.status !== 0) fail('cannot list candidate lock inputs')
-  const paths = list.stdout
-    .toString()
-    .split('\0')
-    .filter(
-      (path) =>
-        path === 'bun.lock' ||
-        path === 'bunfig.toml' ||
-        basename(path) === 'package.json' ||
-        path.startsWith('config/kit/patches/'),
+function resolveOperatorCache(root: string): string {
+  // Same resolution as a frozen install: honour tree `.env` (no --no-env-file).
+  const result = spawnSync(process.execPath, ['pm', 'cache'], { cwd: root, encoding: 'utf8' })
+  if (result.status !== 0 || !result.stdout.toString().trim()) {
+    throw new Error('cannot resolve Bun package cache; warm the Bun cache and retry')
+  }
+  return result.stdout.toString().trim()
+}
+
+function readCandidateLockBlob(root: string, tree: string): string {
+  const result = spawnSync('git', ['cat-file', 'blob', `${tree}:bun.lock`], {
+    cwd: root,
+    env: gitNoLazyEnv(),
+    maxBuffer: 64 * 1024 * 1024,
+  })
+  if (result.status !== 0) {
+    const detail = `${result.stderr || result.stdout || ''}`.toString().trim()
+    if (/lazy|partial|promisor|filter|not a valid object/i.test(detail)) {
+      fail(
+        detail
+          ? `cannot read candidate bun.lock without fetching (partial clone); ${detail}`
+          : 'cannot read candidate bun.lock without fetching (partial clone)',
+      )
+    }
+    fail('missing candidate bun.lock')
+  }
+  return Buffer.from(result.stdout).toString('utf8')
+}
+
+function runOfflineInstall(snapshot: string, cacheDir: string, home: string) {
+  return spawnSync(
+    process.execPath,
+    ['--no-env-file', 'install', '--offline', '--ignore-scripts', '--cache-dir', cacheDir],
+    {
+      cwd: snapshot,
+      env: {
+        PATH: process.env.PATH ?? '/usr/bin:/bin',
+        TMPDIR: home,
+        HOME: home,
+        XDG_CONFIG_HOME: home,
+      },
+    },
+  )
+}
+
+function probeOfflineInstall(
+  snapshot: string,
+  cacheDir: string,
+  home: string,
+  before: Buffer,
+): void {
+  if (runOfflineInstall(snapshot, cacheDir, home).status !== 0) {
+    throw new Error('cannot verify lock stability offline; warm the Bun cache and retry')
+  }
+  if (!before.equals(readFileSync(join(snapshot, 'bun.lock')))) {
+    throw new Error('candidate bun.lock changes on install; regenerate and stage or commit it')
+  }
+}
+
+const CANARY_SENTINEL = '__lock_ranges_canary__'
+
+/**
+ * Write-suppression canary: a bogus `trustedDependencies` entry. Bun rewrites
+ * that list from package.json without resolving the name, so a cache that only
+ * holds frozen-install tarballs (no `*.npm` manifests) still repairs it.
+ */
+function assertLockWritesEnabled(
+  snapshot: string,
+  cacheDir: string,
+  home: string,
+  original: Buffer,
+): void {
+  const lockPath = join(snapshot, 'bun.lock')
+  const parsed = parseJsoncStrict(original.toString('utf8')) as Record<string, unknown>
+  parsed.trustedDependencies = [CANARY_SENTINEL]
+  const perturbed = Buffer.from(`${JSON.stringify(parsed, null, 2)}\n`)
+  writeFileSync(lockPath, perturbed)
+  const child = runOfflineInstall(snapshot, cacheDir, home)
+  const after = readFileSync(lockPath)
+  if (child.status !== 0 || after.equals(perturbed) || after.includes(CANARY_SENTINEL)) {
+    throw new Error(
+      "the candidate's Bun configuration suppresses lock writes; the stability probe cannot run",
     )
-  if (!(paths.includes('bun.lock') && paths.includes('package.json')))
-    fail('candidate lock inputs are missing')
-  const dir = mkdtempSync(join(tmpdir(), 'lock-normalization-'))
+  }
+  writeFileSync(lockPath, original)
+}
+
+async function checkStability(root: string, tree: string): Promise<void> {
+  const dir = mkdtempSync(join(tmpdir(), 'lock-stability-'))
+  const snapshot = join(dir, 'tree')
+  const home = join(dir, 'home')
   try {
-    const archive = spawnSync('git', ['archive', tree, '--', ...paths], {
-      cwd: root,
-      maxBuffer: 64 * 1024 * 1024,
-    })
-    if (archive.status !== 0) throw new Error('cannot archive candidate lock inputs')
-    const extract = spawnSync('tar', ['-xf', '-', '-C', dir], { input: archive.stdout })
-    if (extract.status !== 0) throw new Error('cannot extract candidate lock inputs')
-    const manifest = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'))
-    if (manifest.packageManager !== `bun@${Bun.version}`)
-      throw new Error('cannot verify lock normalization without the pinned Bun version')
-    const before = readFileSync(join(dir, 'bun.lock'))
-    const install = spawnSync(
-      process.execPath,
-      ['install', '--lockfile-only', '--offline', '--ignore-scripts', '--minimum-release-age', '0'],
-      { cwd: dir },
-    )
-    if (install.status !== 0)
-      throw new Error('cannot verify lock normalization offline; warm the Bun cache and retry')
-    if (!before.equals(readFileSync(join(dir, 'bun.lock'))))
-      throw new Error('candidate bun.lock changes on install; regenerate and stage or commit it')
+    if (spawnSync('mkdir', ['-p', snapshot, home]).status !== 0) {
+      throw new Error('cannot prepare stability workspace')
+    }
+    const cacheDir = resolveOperatorCache(root)
+    await materializeTree(root, tree, snapshot)
+    const manifest = JSON.parse(readFileSync(join(snapshot, 'package.json'), 'utf8')) as {
+      packageManager?: string
+    }
+    if (manifest.packageManager !== `bun@${Bun.version}`) {
+      throw new Error('cannot verify lock stability without the pinned Bun version')
+    }
+    // Shape already checked on the candidate blob in main; re-check snapshot bytes.
+    const lockText = readFileSync(join(snapshot, 'bun.lock'), 'utf8')
+    assertLockShape(lockText)
+    const before = Buffer.from(lockText)
+    probeOfflineInstall(snapshot, cacheDir, home, before)
+    assertLockWritesEnabled(snapshot, cacheDir, home, before)
   } catch (error) {
     rmSync(dir, { recursive: true, force: true })
     fail(error instanceof Error ? error.message : String(error))
@@ -390,15 +469,14 @@ function checkNormalization(root: string, tree: string): void {
   }
 }
 
-function main(): void {
+async function main(): Promise<void> {
   const root = treeRoot()
   const tree = process.env.LOCK_RANGES_ROOT === undefined ? candidateTree(root) : undefined
-  const stagedLock =
-    tree && tree !== 'HEAD'
-      ? spawnSync('git', ['show', `${tree}:bun.lock`], { cwd: root })
-      : undefined
-  if (stagedLock && stagedLock.status !== 0) fail('missing staged merge bun.lock')
-  const lock = parseLock(stagedLock ? stagedLock.stdout.toString() : readLock(root))
+  // Range scan: staged blob during merge; working lock outside a merge (unchanged).
+  const lockText = tree && tree !== 'HEAD' ? readCandidateLockBlob(root, tree) : readLock(root)
+  // Shape checks always use the raw candidate blob when stability applies.
+  if (tree) assertLockShape(readCandidateLockBlob(root, tree))
+  const lock = parseLock(lockText)
   const tally: Tally = { checked: 0, skipped: 0, findings: [] }
   const keys = Object.keys(lock.workspaces).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
   for (const key of keys) {
@@ -410,10 +488,10 @@ function main(): void {
     console.error(`check-lock-ranges: FAIL (${tally.findings.length} finding(s))`)
     process.exit(1)
   }
-  if (tree) checkNormalization(root, tree)
+  if (tree) await checkStability(root, tree)
   console.log(
     `check-lock-ranges: OK (${keys.length} workspace(s), ${tally.checked} range(s) checked, ${tally.skipped} skipped)`,
   )
 }
 
-main()
+await main()

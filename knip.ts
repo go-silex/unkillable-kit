@@ -25,6 +25,11 @@ const config: KnipConfig = {
         'scripts/kit/resolve-tree-identity.mjs',
         'scripts/kit/lib/merge-gate.cjs',
         'scripts/kit/lib/head-authorization.cjs',
+        'scripts/kit/lib/inject-lock-duplicate.mjs',
+        'scripts/kit/lib/materialize-memory-selftest.ts',
+        'scripts/kit/lib/materialize-partial-clone-selftest.ts',
+        'scripts/kit/lib/materialize-raw-paths-selftest.ts',
+        'scripts/kit/lib/patch-materialize-fullbuf-mutant.ts',
       ],
       // @commitlint/cli is invoked by path from scripts/kit/lefthook-commit-msg.sh;
       // Knip's Lefthook plugin reads only lefthook.yml `run` strings, not that script.

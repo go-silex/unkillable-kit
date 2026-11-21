@@ -6,12 +6,25 @@ source "${ROOT}/scripts/kit/lib/hermetic-git.sh"
 unset GITHUB_REPOSITORY
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
+SUITE_HOME="$tmp/suite-home"
+SUITE_CACHE="$tmp/suite-cache"
+mkdir -p "$SUITE_HOME" "$SUITE_CACHE"
+export HOME="$SUITE_HOME" XDG_CONFIG_HOME="$SUITE_HOME" BUN_INSTALL_CACHE_DIR="$SUITE_CACHE"
 cat > "$tmp/bun" <<'BUN'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$KIT_UPGRADE_TEST_LOG"
+if [[ ${FAIL_FROZEN:-} == 1 && ${1:-} == install && ${2:-} == --frozen-lockfile ]]; then exit 1; fi
 if [[ ${FAIL_LOCK:-} == 1 && ${1:-} == run && ${2:-} == lock-ranges:check ]]; then exit 1; fi
+if [[ ${REAL_LOCK:-} == 1 && ${1:-} == install && ${2:-} == --frozen-lockfile ]]; then
+  exec bun "$@"
+fi
 if [[ ${REAL_LOCK:-} == 1 && ${1:-} == run && ${2:-} == lock-ranges:check ]]; then
-  exec bun --no-env-file --config=config/kit/bunfig.gates.toml run scripts/kit/check-lock-ranges.ts
+  bun --no-env-file --config=config/kit/bunfig.gates.toml run scripts/kit/check-lock-ranges.ts
+  rc=$?
+  if [[ $rc -eq 0 && ${DIRTY_AFTER_CHECK:-} == 1 ]]; then
+    printf '\n' >> bun.lock
+  fi
+  exit "$rc"
 fi
 BUN
 chmod +x "$tmp/bun"
@@ -101,9 +114,9 @@ fixture clean
 advance
 run_upgrade
 [[ $(git -C "$dir/product" rev-list --parents -n 1 HEAD | wc -w) == 3 ]]
-[[ $(git -C "$dir/product" show HEAD:config/product/inheritance.json | node -e 'let s="";process.stdin.on("data",x=>s+=x).on("end",()=>console.log(JSON.parse(s).upstreamCommit))') == $(git -C "$dir/seed" rev-parse HEAD) ]]
+[[ $(git -C "$dir/product" show HEAD:config/product/inheritance.json | bun -e 'let s="";process.stdin.on("data",x=>s+=x).on("end",()=>console.log(JSON.parse(s).upstreamCommit))') == $(git -C "$dir/seed" rev-parse HEAD) ]]
 [[ -z $(git -C "$dir/product" status --porcelain) ]]
-[[ $(cat "$KIT_UPGRADE_TEST_LOG") == $'install\nrun lock-ranges:check\nrun zero-edit' ]]
+[[ $(cat "$KIT_UPGRADE_TEST_LOG") == $'install --frozen-lockfile --minimum-release-age 0\nrun lock-ranges:check\nrun zero-edit' ]]
 pass 'clean upgrade rewrites marker and commits'
 fixture license
 before_license=$(git -C "$dir/product" show HEAD:LICENSE)
@@ -159,13 +172,34 @@ if FAIL_LOCK=1 run_upgrade; then exit 1; fi
 grep -q 'merge remains open' "$dir/out"
 pass 'lock-ranges failure leaves merge open without commit'
 
-normalization_fixture() {
-  dir="$tmp/$1"
+
+# Product fixture rooted on the loopback hoist lock (hermetic cache).
+hoist_product_fixture() {
+  local name=$1
+  dir="$tmp/$name"
   export KIT_UPGRADE_TEST_LOG="$dir/bun.log"
-  mkdir -p "$dir/seed"
-  git -C "$ROOT" archive HEAD | tar -x -C "$dir/seed"
-  cp "$ROOT/scripts/kit/kit-upgrade.sh" "$ROOT/scripts/kit/check-lock-ranges.ts" "$dir/seed/scripts/kit/"
-  node -e 'const fs=require("fs"), p=process.argv[1], s=fs.readFileSync(p,"utf8"); const t=s.replace(/  "trustedDependencies": \[\],\n/,""); if(t===s) process.exit(1); fs.writeFileSync(p,t)' "$dir/seed/bun.lock"
+  mkdir -p "$dir"
+  python3 "$ROOT/scripts/kit/lib/build-hoist-fixture.py" "$dir/seed" "$SUITE_CACHE" "$ROOT/scripts/kit/check-lock-ranges.ts"
+  printf '%s\n' 'node_modules/' '.pkg/' '.hermetic-home/' >"$dir/seed/.gitignore"
+  rm -rf "$dir/seed/node_modules" "$dir/seed"/apps/*/node_modules "$dir/seed/.pkg" "$dir/seed/.hermetic-home"
+  mkdir -p "$dir/seed/scripts/kit/lib" "$dir/seed/config/kit" "$dir/seed/config/product"
+  cp "$ROOT/scripts/kit/kit-upgrade.sh" "$ROOT/scripts/kit/resolve-tree-identity.mjs" "$dir/seed/scripts/kit/"
+  cp "$ROOT/scripts/kit/check-lock-ranges.ts" "$dir/seed/scripts/kit/"
+  cp "$ROOT/scripts/kit/lib/jsonc-strict.ts" "$dir/seed/scripts/kit/lib/"
+  cp "$ROOT/scripts/kit/lib/materialize-tree.ts" "$dir/seed/scripts/kit/lib/"
+  : >"$dir/seed/config/kit/bunfig.gates.toml"
+  printf '%s\n' '{"version":1,"kit_origin_allowlist":["kit"]}' >"$dir/seed/config/kit/zero-edit-zones.json"
+  bun -e '
+const fs=require("fs");
+const p=process.argv[1];
+const pkg=JSON.parse(fs.readFileSync(p,"utf8"));
+pkg.scripts={
+  ...(pkg.scripts||{}),
+  "lock-ranges:check":"bun --no-env-file --config=config/kit/bunfig.gates.toml run scripts/kit/check-lock-ranges.ts",
+  "zero-edit":"bun -e \"process.exit(0)\"",
+};
+fs.writeFileSync(p, JSON.stringify(pkg,null,2)+"\n");
+' "$dir/seed/package.json"
   git -C "$dir/seed" init -q -b main
   git -C "$dir/seed" add .
   git -C "$dir/seed" commit -qm initial
@@ -178,34 +212,84 @@ normalization_fixture() {
   git -C "$dir/product" add config/product/inheritance.json
   git -C "$dir/product" commit -qm product
 }
-normalization_fixture normalized-merge
-cp "$ROOT/bun.lock" "$dir/seed/bun.lock"
-advance
+
+advance_seed() {
+  echo "change-$RANDOM" > "$dir/seed/change"
+  git -C "$dir/seed" add change
+  git -C "$dir/seed" commit -qm update
+  git -C "$dir/seed" push -q "$dir/upstream.git" main
+}
+
+hoist_product_fixture stable-merge
+advance_seed
 REAL_LOCK=1 run_upgrade
 [[ ! -f "$dir/product/.git/MERGE_HEAD" ]]
-git -C "$dir/product" show HEAD:bun.lock | cmp - "$ROOT/bun.lock"
-pass 'upgrade validates normalized staged lock despite stale pre-merge HEAD'
+pass 'upgrade commits install-stable staged lock'
 
-normalization_fixture invalid-merge
-advance
+hoist_product_fixture frozen-fail
+advance_seed
+before=$(git -C "$dir/product" rev-parse HEAD)
+if FAIL_FROZEN=1 REAL_LOCK=1 run_upgrade; then exit 1; fi
+[[ $(git -C "$dir/product" rev-parse HEAD) == "$before" && -f "$dir/product/.git/MERGE_HEAD" ]]
+grep -q 'frozen install of the merged lock failed' "$dir/out"
+pass 'frozen install failure leaves merge open with its own stop'
+
+hoist_product_fixture check-fail
+advance_seed
+before=$(git -C "$dir/product" rev-parse HEAD)
+if FAIL_LOCK=1 REAL_LOCK=1 run_upgrade; then exit 1; fi
+[[ $(git -C "$dir/product" rev-parse HEAD) == "$before" && -f "$dir/product/.git/MERGE_HEAD" ]]
+grep -q 'merge remains open' "$dir/out"
+pass 'lock-ranges check failure leaves merge open'
+
+hoist_product_fixture dirty-after-check
+advance_seed
+DIRTY_AFTER_CHECK=1 REAL_LOCK=1 run_upgrade
+[[ ! -f "$dir/product/.git/MERGE_HEAD" ]]
+[[ -n $(git -C "$dir/product" status --porcelain -- bun.lock) ]]
+pass 'working bun.lock dirty after staging is not committed'
+
+hoist_product_fixture decoy-env
+advance_seed
+mkdir -p "$dir/decoy"
+printf '%s\n' '{"lockfileVersion":1,"workspaces":{"":{"name":"decoy","dependencies":{"left-pad":"^1.0.0"}}},"packages":{"left-pad":["left-pad@2.0.0","",{},"sha512-x"]}}' >"$dir/decoy/bun.lock"
+LOCK_RANGES_ROOT="$dir/decoy" REAL_LOCK=1 run_upgrade
+[[ ! -f "$dir/product/.git/MERGE_HEAD" ]]
+if grep -q 'left-pad' "$dir/out"; then
+  echo 'FAIL: decoy LOCK_RANGES_ROOT was consulted' >&2
+  exit 1
+fi
+pass 'inherited LOCK_RANGES_ROOT decoy is ignored'
+
+hoist_product_fixture out-of-range
+# Force an out-of-range resolution: pin kit-pin workspace range to 9.0.0 while lock keeps 1.0.x
+bun -e '
+const fs=require("fs");
+const lockPath=process.argv[1], pkgPath=process.argv[2];
+const lock=JSON.parse(fs.readFileSync(lockPath,"utf8"));
+lock.workspaces["apps/a"].dependencies["kit-pin"]="9.0.0";
+fs.writeFileSync(lockPath, JSON.stringify(lock,null,2)+"\n");
+const pkg=JSON.parse(fs.readFileSync(pkgPath,"utf8"));
+fs.writeFileSync(pkgPath, JSON.stringify(pkg,null,2)+"\n");
+' "$dir/seed/bun.lock" "$dir/seed/apps/a/package.json"
+# Also update the workspace package.json that the lock mirrors for honesty of the tree
+printf '%s\n' '{"name":"a","dependencies":{"kit-pin":"9.0.0"}}' >"$dir/seed/apps/a/package.json"
+git -C "$dir/seed" add -A && git -C "$dir/seed" commit -qm out-of-range
+git -C "$dir/seed" push -q "$dir/upstream.git" main
 before=$(git -C "$dir/product" rev-parse HEAD)
 if REAL_LOCK=1 run_upgrade; then exit 1; fi
 [[ $(git -C "$dir/product" rev-parse HEAD) == "$before" && -f "$dir/product/.git/MERGE_HEAD" ]]
-grep -q 'bun.lock changes on install' "$dir/out"
-pass 'upgrade rejects invalid staged normalization and leaves merge open'
+grep -q 'does not satisfy the range\|kit-pin' "$dir/out"
+pass 'out-of-range staged resolution leaves merge open'
 
-normalization_fixture index-isolation
-cp "$ROOT/bun.lock" "$dir/seed/bun.lock"
-advance
-git -C "$dir/product" fetch -q upstream
-git -C "$dir/product" merge -q --no-ff --no-commit upstream/main
-git -C "$dir/product" show HEAD:bun.lock > "$dir/product/bun.lock"
-(cd "$dir/product" && bun --no-env-file --config=config/kit/bunfig.gates.toml run scripts/kit/check-lock-ranges.ts) >"$dir/out" 2>&1
-git -C "$dir/product" add bun.lock
-cp "$ROOT/bun.lock" "$dir/product/bun.lock"
-if (cd "$dir/product" && bun --no-env-file --config=config/kit/bunfig.gates.toml run scripts/kit/check-lock-ranges.ts) >"$dir/out" 2>&1; then exit 1; fi
-grep -q 'bun.lock changes on install' "$dir/out"
-pass 'merge gate uses staged lock, not conflicting unstaged bytes'
+hoist_product_fixture hoist-upgrade
+advance_seed
+REAL_LOCK=1 run_upgrade
+[[ ! -f "$dir/product/.git/MERGE_HEAD" ]]
+[[ $(git -C "$dir/product" rev-list --parents -n 1 HEAD | wc -w) == 3 ]]
+(cd "$dir/product" && bun --no-env-file --config=config/kit/bunfig.gates.toml run scripts/kit/check-lock-ranges.ts) >/dev/null
+pass 'hoisting-only layout commits through kit-upgrade'
+
 fixture check
 advance
 git -C "$dir/product" fetch -q upstream
