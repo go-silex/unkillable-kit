@@ -20,32 +20,67 @@ if [[ $(node scripts/kit/resolve-tree-identity.mjs) != 'mode=product '* ]]; then
   echo 'stop: kit-upgrade requires a product clone' >&2
   exit 1
 fi
+if $check; then
+  export GIT_NO_LAZY_FETCH=1
+  tip=$(git rev-parse upstream/main)
+fi
 if [[ -n $(git status --porcelain) ]] || [[ -f $(git rev-parse --git-path MERGE_HEAD) ]]; then
   echo 'stop: clean the working tree and finish any in-progress merge first' >&2
   exit 1
 fi
 if ! $check; then
   git fetch upstream
+  tip=$(git rev-parse upstream/main)
 fi
-package_diff=$(git diff -U0 HEAD upstream/main -- package.json)
+package_diff=$(git diff --no-textconv --no-ext-diff -U0 HEAD "$tip" -- package.json)
 # Read the whole pipe: grep -q can cause SIGPIPE, while large here-strings can fail on a full TMPDIR.
 if printf '%s\n' "$package_diff" | grep '^+.*"packageManager"' >/dev/null; then
   echo "packageManager moves: set BUN_VERSION on each Workers Builds / Pages project just before this reaches its deploy/<branch> source branch (row 'Kit bumps packageManager')" >&2
 fi
-workflow_diff=$(git diff -U0 HEAD upstream/main -- .github/workflows)
+workflow_diff=$(git diff --no-textconv --no-ext-diff -U0 HEAD "$tip" -- .github/workflows)
 if printf '%s\n' "$workflow_diff" | grep '^+.*create-github-app-token@' >/dev/null; then
   echo "stop: this range bumps actions/create-github-app-token; establish the effective CI_APP_ID mode first (row 'Kit bumps actions/create-github-app-token')" >&2
   exit 1
 fi
-if git merge-base --is-ancestor upstream/main HEAD; then
+if git merge-base --is-ancestor "$tip" HEAD; then
   echo 'already up to date with upstream/main'
   exit 0
 fi
 if $check; then
+  if [[ $(git rev-parse --is-shallow-repository) == true ]]; then
+    echo 'shallow clone: pending range not reported; fetch full history to see it'
+  else
+    count=$(git rev-list --count HEAD.."$tip")
+    printf 'Pending commits: %s\n' "$count"
+    echo 'First-parent merge subjects (oldest first):'
+    git log --first-parent --merges --reverse --format=%s HEAD.."$tip" |
+      awk 'NR <= 50 { print } END { if (NR > 50) printf "… %d more\n", NR - 50 }'
+    _cl_patch=$(mktemp)
+    # Range+pathspec log omits first-parent merge patches; walk those commits explicitly.
+    # An `if` condition keeps a failure (e.g. a blob missing offline) out of errexit and the ERR trap.
+    if ! git rev-list --first-parent HEAD.."$tip" |
+      git log --no-walk --stdin --reverse --diff-merges=first-parent --no-textconv --no-ext-diff -p --format= -- CHANGELOG.md >"$_cl_patch" 2>/dev/null; then
+      echo 'CHANGELOG.md history not available offline'
+    else
+      awk '
+        /^diff --git / { in_hunk = 0; next }
+        /^@@/ { in_hunk = 1; next }
+        in_hunk && /^\+/ {
+          line = substr($0, 2)
+          sub(/\r$/, "", line)
+          if (line == "") next
+          if (++n == 1) print "CHANGELOG.md additions:"
+          if (n <= 50) print line
+        }
+        END { if (n > 50) printf "… %d more\n", n - 50 }
+      ' "$_cl_patch"
+    fi
+    rm -f "$_cl_patch"
+  fi
   echo 'upgrade pending against the locally cached upstream/main (fetch separately to refresh)'
   exit 0
 fi
-if ! git merge --no-ff --no-commit upstream/main; then
+if ! git merge --no-ff --no-commit "$tip"; then
   echo 'stop: resolve the merge conflict, refresh the inheritance marker to the merged tip, then continue manually as documented in Pulling kit upgrades' >&2
   exit 1
 fi
@@ -54,8 +89,8 @@ if git cat-file -e HEAD:LICENSE 2>/dev/null; then
 else
   git rm -q -f --ignore-unmatch -- LICENSE
 fi
-git diff --quiet HEAD -- LICENSE
-printf '{\n  "version": 1,\n  "upstreamCommit": "%s"\n}\n' "$(git rev-parse upstream/main)" > config/product/inheritance.json
+git diff --no-textconv --no-ext-diff --quiet HEAD -- LICENSE
+printf '{\n  "version": 1,\n  "upstreamCommit": "%s"\n}\n' "$tip" > config/product/inheritance.json
 bun_cmd=${KIT_UPGRADE_BUN:-bun}
 "$bun_cmd" install
 git add bun.lock
@@ -65,7 +100,7 @@ if ! "$bun_cmd" run lock-ranges:check; then
 fi
 git add bun.lock config/product/inheritance.json
 git commit --no-edit
-if ! git diff --quiet upstream/main -- .github/dependabot.yml; then
+if ! git diff --no-textconv --no-ext-diff --quiet "$tip" -- .github/dependabot.yml; then
   node scripts/kit/configure-product-dependabot.cjs
   git add .github/dependabot.yml
   if ! git diff --cached --quiet -- .github/dependabot.yml; then

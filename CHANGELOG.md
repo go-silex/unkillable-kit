@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Kit upgrade check
+
+- `kit-upgrade --check` prints the pending commit count, first-parent merges and CHANGELOG lines the Kit added in the locally cached `upstream/main` range, without fetching or writing.
+
 ### Vitest CI workers
 
 - Kit and newly generated Product Apps use all available Vitest workers in CI, without changing local defaults.
