@@ -16,14 +16,18 @@ function setup(
     async fetch(request: Request) {
       requests.push(request)
       const path = new URL(request.url).pathname
+      if (request.headers.has('if-none-match') && (path === '/' || path === '/existing.js')) {
+        return new Response(null, {
+          status: 304,
+          headers: { etag: '"v1"', 'cache-control': 'public, max-age=0, must-revalidate' },
+        })
+      }
       if (path === '/')
         return new Response(request.method === 'HEAD' ? null : '<html>shell</html>', {
           headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'public' },
         })
       if (path === '/existing.js')
         return new Response('javascript', { headers: { 'content-type': 'application/javascript' } })
-      if (path === '/unchanged')
-        return new Response(null, { status: 304, headers: { etag: '"v1"' } })
       return new Response('missing', { status: 404, headers: { 'content-type': 'text/plain' } })
     },
   }
@@ -41,9 +45,9 @@ function setup(
 }
 
 describe('createSiteFetch', () => {
-  it('serves the shell for a deep link with browser headers and strips queries from both requests', async () => {
+  it('serves the shell for a deep link with browser headers', async () => {
     const { call, requests } = setup()
-    const response = await call('/dashboard/profile?token=secret', {
+    const response = await call('/dashboard/profile?tab=keys', {
       headers: { accept: 'text/html' },
     })
     expect(response.status).toBe(200)
@@ -54,20 +58,20 @@ describe('createSiteFetch', () => {
     expect(response.headers.get('x-frame-options')).toBe('DENY')
     expect(response.headers.get('referrer-policy')).toBe('strict-origin-when-cross-origin')
     expect(requests.map((request) => request.url)).toEqual([
-      'https://site.example/dashboard/profile',
+      'https://site.example/dashboard/profile?tab=keys',
       'https://site.example/',
     ])
   })
 
-  it('returns existing assets unchanged, without forwarding the query', async () => {
-    const { call, requests } = setup()
-    const response = await call('/existing.js?token=secret')
+  it('returns existing assets unchanged', async () => {
+    const { call } = setup()
+    const response = await call('/existing.js')
     expect(await response.text()).toBe('javascript')
     expect(response.headers.get('content-type')).toBe('application/javascript')
-    expect(requests.map((request) => request.url)).toEqual(['https://site.example/existing.js'])
+    expect(response.headers.get('vary')).toBeNull()
   })
 
-  it.each(['/assets/missing.js', '/assets/missing', '/missing.js'])(
+  it.each(['/assets/missing.js', '/assets/missing', '/missing.js', '//assets/missing'])(
     'keeps missing file %s as a non-HTML 404',
     async (path) => {
       const { call, requests } = setup()
@@ -78,18 +82,30 @@ describe('createSiteFetch', () => {
     },
   )
 
-  it('never falls back under the asset prefix even for HTML navigation', async () => {
-    const { call, requests } = setup()
-    const response = await call('/assets/missing.js', { headers: { accept: 'text/html' } })
-    expect(response.status).toBe(404)
-    expect(requests).toHaveLength(1)
-  })
+  it.each(['/assets/missing.js', '//assets/missing.js'])(
+    'never falls back under the asset prefix for HTML navigation to %s',
+    async (path) => {
+      const { call, requests } = setup()
+      const response = await call(path, { headers: { accept: 'text/html' } })
+      expect(response.status).toBe(404)
+      expect(requests).toHaveLength(1)
+    },
+  )
 
-  it('allows a dotted navigation when HTML is accepted', async () => {
+  it('lets Accept choose between the shell and the 404 on a dotted miss, and says so', async () => {
     const { call } = setup()
-    expect(await (await call('/a.b', { headers: { accept: 'text/html' } })).text()).toBe(
-      '<html>shell</html>',
-    )
+    const page = await call('/users/jane.doe', {
+      headers: { accept: 'text/html,application/xhtml+xml,*/*;q=0.8' },
+    })
+    expect(await page.text()).toBe('<html>shell</html>')
+    expect(page.headers.get('vary')).toBe('Accept')
+    const data = await call('/users/jane.doe', { headers: { accept: 'application/json' } })
+    expect(data.status).toBe(404)
+    expect(data.headers.get('vary')).toBe('Accept')
+    const refused = await call('/users/jane.doe', {
+      headers: { accept: 'application/json, text/html;q=0' },
+    })
+    expect(refused.status).toBe(404)
   })
 
   it('preserves HEAD on asset and shell requests', async () => {
@@ -100,37 +116,51 @@ describe('createSiteFetch', () => {
     expect(requests.map((request) => request.method)).toEqual(['HEAD', 'HEAD'])
   })
 
-  it.each(['/api', '/api/unknown', '/API/unknown', '/%61pi/unknown', '/health', '/%E0%A4%A'])(
-    'routes %s to API even for navigation',
-    async (path) => {
-      const { call, api, requests } = setup()
-      const response = await call(path, {
-        headers: { accept: 'text/html', 'sec-fetch-mode': 'navigate' },
-      })
-      expect(await response.json()).toEqual({ source: 'api' })
-      expect(api).toHaveBeenCalledOnce()
-      expect(requests).toHaveLength(0)
-    },
-  )
-
-  it('passes a 304 response through unchanged', async () => {
-    const { call, requests } = setup()
-    const response = await call('/unchanged')
-    expect(response.status).toBe(304)
-    expect(response.headers.get('etag')).toBe('"v1"')
-    expect(response.headers.get('cache-control')).toBeNull()
-    expect(requests).toHaveLength(1)
+  it.each([
+    '/api',
+    '/api/unknown',
+    '/API/unknown',
+    '/%61pi/unknown',
+    '//api/unknown',
+    '/health',
+    '/%E0%A4%A',
+  ])('routes %s to API even for navigation', async (path) => {
+    const { call, api, requests } = setup()
+    const response = await call(path, {
+      headers: { accept: 'text/html', 'sec-fetch-mode': 'navigate' },
+    })
+    expect(await response.json()).toEqual({ source: 'api' })
+    expect(api).toHaveBeenCalledOnce()
+    expect(requests).toHaveLength(0)
   })
 
-  it('returns JSON 405 with Allow for non-API methods', async () => {
+  it('passes a 304 for a built file through unchanged', async () => {
+    const { call } = setup()
+    const response = await call('/existing.js', { headers: { 'if-none-match': '"v1"' } })
+    expect(response.status).toBe(304)
+    expect(response.headers.get('cache-control')).toBe('public, max-age=0, must-revalidate')
+  })
+
+  it('answers a revalidating navigation in full, so the shell keeps its headers', async () => {
+    const { call, requests } = setup({ shellHeaders: { 'cache-control': 'private, no-cache' } })
+    const response = await call('/', {
+      headers: { accept: 'text/html', 'if-none-match': '"v1"', 'if-modified-since': 'x' },
+    })
+    expect(response.status).toBe(200)
+    expect(response.headers.get('cache-control')).toBe('private, no-cache')
+    expect(requests[0]?.headers.has('if-none-match')).toBe(false)
+    expect(requests[0]?.headers.has('if-modified-since')).toBe(false)
+  })
+
+  it('returns JSON 405 with Allow and a request id for non-API methods', async () => {
     const { call, requests, api } = setup()
     const response = await call('/dashboard', { method: 'POST' })
     expect(response.status).toBe(405)
     expect(response.headers.get('allow')).toBe('GET, HEAD')
     expect(response.headers.get('content-type')).toContain('application/json')
-    expect(await response.json()).toMatchObject({
-      error: { code: 'VALIDATION_ERROR', message: 'Method not allowed' },
-    })
+    const body = (await response.json()) as { error: { code: string }; requestId: string }
+    expect(body.error.code).toBe('VALIDATION_ERROR')
+    expect(response.headers.get('x-request-id')).toBe(body.requestId)
     expect(requests).toHaveLength(0)
     expect(api).not.toHaveBeenCalled()
   })

@@ -14,7 +14,7 @@ it('routes the production Wrangler recipe through local Static Assets', async ()
     experimental: { disableExperimentalWarning: true, disableDevRegistry: true, watch: false },
   })
   try {
-    const page = await worker.fetch('/dashboard?token=secret', { headers: { accept: 'text/html' } })
+    const page = await worker.fetch('/dashboard?tab=keys', { headers: { accept: 'text/html' } })
     expect(page.status).toBe(200)
     expect(page.headers.get('cache-control')).toBe('no-cache')
     expect(await page.text()).toContain('starter site fixture')
@@ -23,6 +23,19 @@ it('routes the production Wrangler recipe through local Static Assets', async ()
     expect(root.status).toBe(200)
     expect(root.headers.get('cache-control')).toBe('no-cache')
     expect(root.headers.get('x-frame-options')).toBe('DENY')
+    // A revalidating navigation still gets the full shell with its headers, never a 304.
+    const etag = root.headers.get('etag')
+    expect(etag).toBeTruthy()
+    const revalidated = await worker.fetch('/', {
+      headers: { accept: 'text/html', 'if-none-match': etag ?? '' },
+    })
+    expect(revalidated.status).toBe(200)
+    expect(revalidated.headers.get('cache-control')).toBe('no-cache')
+    // Static Assets canonical redirects keep the browser's query.
+    const canonical = await worker.fetch('/index.html?lang=fr', { redirect: 'manual' })
+    expect(canonical.status).toBeGreaterThanOrEqual(300)
+    expect(canonical.status).toBeLessThan(400)
+    expect(new URL(canonical.headers.get('location') ?? '', 'http://x').search).toBe('?lang=fr')
     const robots = await worker.fetch('/robots.txt')
     expect(robots.status).toBe(200)
     expect(robots.headers.get('content-type')).toContain('text/plain')

@@ -47,7 +47,7 @@ function fixture(withAssets: boolean) {
 
 it('composes the real API with the site and preserves same-origin sessions', async () => {
   const { request, assetUrls } = fixture(true)
-  const page = await request('/dashboard?token=secret', { headers: { accept: 'text/html' } })
+  const page = await request('/dashboard', { headers: { accept: 'text/html' } })
   expect(page.status).toBe(200)
   expect(page.headers.get('content-type')).toContain('text/html')
   expect(page.headers.get('cache-control')).toBe('no-cache')

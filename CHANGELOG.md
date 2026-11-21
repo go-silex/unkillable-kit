@@ -4,7 +4,7 @@
 
 ### One Worker site
 
-- `@kit/core` exports `createSiteFetch`, which serves a SPA and its API from one Worker. It routes API paths to the API, never as HTML, and fetches built files without the page query. It serves the shell only for navigations, keeps a 404 for missing built files, and passes through when no `ASSETS` binding exists. The starter API composes it, and the [playbook](docs/kit/playbooks/one-worker-site.md) carries the tested Wrangler `[assets]` recipe.
+- `@kit/core` exports `createSiteFetch`, which serves a SPA and its API from one Worker. API paths always reach the API, never the assets or the shell. The shell is served only for navigations, with its own headers and never as a 304. Missing built files keep a 404, and the handler passes through when no `ASSETS` binding exists. The starter API composes it, and the [playbook](docs/kit/playbooks/one-worker-site.md) carries the tested Wrangler `[assets]` recipe.
 
 ### Kit schema check
 

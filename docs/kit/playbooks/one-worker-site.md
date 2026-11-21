@@ -17,19 +17,23 @@ export default {
 }
 ```
 
-The handler decides each request in this order:
+The handler classifies the path as Static Assets does (decoded once, repeated slashes collapsed), then decides in this order:
 
-| Request                                                                      | Answer                                                                           |
-| ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| No `ASSETS` binding                                                          | The API, for every path: API-only Workers and local `wrangler dev` are unchanged |
-| `/api`, `/api/*`, `/health` (decoded once, any case), or an undecodable path | The API, never HTML, whatever the `Accept` or `Sec-Fetch-Mode` headers           |
-| Another method than `GET`/`HEAD`                                             | JSON 405 with `Allow: GET, HEAD`                                                 |
-| A file of the build                                                          | The file, fetched without the page's query string                                |
-| A miss under `/assets/`                                                      | The 404, never the shell                                                         |
-| Another miss: no extension in the last segment, or `Accept: text/html`       | The shell (`/`)                                                                  |
-| Any other miss                                                               | The 404                                                                          |
+| Request                                                                    | Answer                                                                                    |
+| -------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| No `ASSETS` binding                                                        | The API, for every path: API-only Workers and local `wrangler dev` are unchanged          |
+| `/api`, `/api/*`, `/health` (any case), or an undecodable path             | The API, never the assets or the shell, whatever the `Accept` or `Sec-Fetch-Mode` headers |
+| Another method than `GET`/`HEAD`                                           | JSON 405 with `Allow: GET, HEAD` and `x-request-id`                                       |
+| A file of the build                                                        | The file                                                                                  |
+| A miss under `/assets/`                                                    | The 404, never the shell                                                                  |
+| Another miss: no extension in the last segment, or HTML accepted (`q` > 0) | The shell (`/`)                                                                           |
+| Any other miss                                                             | The 404                                                                                   |
 
-HTML responses from the binding get `cache-control: no-cache`, `x-content-type-options`, `x-frame-options` and `referrer-policy`. `shellHeaders` adds Product policy, such as a CSP, and wins on conflict. `isApiPath` and `assetPrefix` override the defaults. Routing is not authorization: the API keeps its own checks and its JSON errors.
+- What an API path answers is the API's: JSON errors from the Hono App, Better Auth's own responses under its base path. Routing is not authorization: the API keeps its own checks.
+- HTML responses from the binding get `cache-control: no-cache`, `x-content-type-options`, `x-frame-options` and `referrer-policy`. `shellHeaders` adds Product policy, such as a CSP, and wins on conflict.
+- Navigations are fetched without conditional headers: a 304 would carry the binding's cache policy instead of the shell's.
+- A miss on a dotted path answers `Vary: Accept`, since `Accept` chose between the shell and the 404.
+- `isApiPath` and `assetPrefix` override the defaults.
 
 ## Wrangler recipe
 
@@ -43,9 +47,9 @@ not_found_handling = "none"
 run_worker_first = ["/*", "!/assets/*"]
 ```
 
-- `not_found_handling = "none"`: a miss runs the Worker, which tells a missing file from a navigation. With `"single-page-application"`, a missing built file returns `index.html` with status 200, and without `run_worker_first` browser navigations skip the Worker, `/api/*` and OAuth paths included.
+- `not_found_handling = "none"`: outside `/assets/*`, a miss runs the Worker, which tells a missing file from a navigation. With `"single-page-application"`, a missing built file returns `index.html` with status 200, and without `run_worker_first` browser navigations skip the Worker, `/api/*` and OAuth paths included.
 - `run_worker_first` runs the Worker before matching files too: without it, `/` (served from `index.html`) and other root files bypass the handler, so they miss its headers and `shellHeaders` such as a CSP.
-- `!/assets/*` serves Vite's content-hashed files without a Worker invocation; a missing one is a null-body 404. Keep that prefix for built files only.
+- `!/assets/*` is a cost choice: Vite's content-hashed files skip the Worker invocation, and a request under it, missing file or other method, is answered by Static Assets alone. Keep that prefix for built files only.
 
 `apps/starter-api/src/site-recipe.test.ts` runs this block through Wrangler's local Static Assets routing with the real starter Worker.
 
