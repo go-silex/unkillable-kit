@@ -153,7 +153,7 @@ async function main() {
     console.log('')
     console.log(`Seed notes defined: ${SEED_NOTES.length}`)
     console.log('')
-    console.log('Modules (kit_modules):')
+    console.log('Modules (platform_modules):')
     for (const mod of result.modules) {
       const flag = mod.created ? '+ created' : '= exists'
       console.log(`  ${flag}  ${mod.id}  enabled=${mod.enabled}  configured=${mod.configured}`)

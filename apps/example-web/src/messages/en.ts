@@ -249,7 +249,7 @@ export const en: Messages = {
   envBannerStaging: 'Staging environment — not for production data',
   envBannerAdmin: 'Seeded admin account',
   modulesTitle: 'Modules',
-  modulesDesc: 'Toggle optional features (D1 kit_modules)',
+  modulesDesc: 'Toggle optional features (D1 platform_modules)',
   moduleOn: 'On',
   moduleOff: 'Off',
   moduleNotConfigured: 'Not configured',

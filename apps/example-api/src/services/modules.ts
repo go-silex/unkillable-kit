@@ -1,4 +1,3 @@
-import * as modulesRepo from '@kit/auth/repos/modules'
 import * as platformModulesRepo from '@kit/auth/repos/platform-modules'
 import { AppError } from '@kit/core'
 import type { DrizzleD1Database } from 'drizzle-orm/d1'
@@ -21,21 +20,12 @@ export async function ensureKitModules(db: Db): Promise<void> {
   await platformModulesService.ensurePlatformModules(db)
 }
 
-/** Prefer platform catalogue; fall back to kit_modules for pre-migration DBs. */
+/** platform_modules is the only catalogue (ADR-0003 D7); a missing row is unavailable. */
 async function readModuleRow(db: Db, id: KitModuleId) {
   const platform = await platformModulesRepo.getPlatformModule(db, id)
-  if (platform) {
-    return {
-      enabled: Boolean(platform.available),
-      configJson: platform.configJson,
-      source: 'platform' as const,
-    }
-  }
-  const kit = await modulesRepo.getKitModule(db, id)
   return {
-    enabled: Boolean(kit?.enabled),
-    configJson: kit?.configJson ?? null,
-    source: 'kit' as const,
+    enabled: Boolean(platform?.available),
+    configJson: platform?.configJson ?? null,
   }
 }
 
