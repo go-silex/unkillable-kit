@@ -278,7 +278,11 @@ assert_exit_match "starter without manifest fails" 1 'found \(unreadable manifes
   "run_extract_gate '${FIX_STARTER}'"
 echo '{"version":1,"sets":["core","audit","flows"],"modules":{}}' \
   >"${FIX_STARTER}/apps/starter-api/kit-schema-manifest.json"
-assert_exit_match "starter with an opt-in set fails" 1 'found audit,core,flows' \
+assert_exit_match "starter with an opt-in set fails" 1 'found \["core","audit","flows"\]' \
+  "run_extract_gate '${FIX_STARTER}'"
+echo '{"version":1,"sets":["audit,core"],"modules":{}}' \
+  >"${FIX_STARTER}/apps/starter-api/kit-schema-manifest.json"
+assert_exit_match "starter with one joined set id fails" 1 'found \["audit,core"\]' \
   "run_extract_gate '${FIX_STARTER}'"
 echo '{"version":1,"sets":["core","audit"],"modules":{}}' \
   >"${FIX_STARTER}/apps/starter-api/kit-schema-manifest.json"

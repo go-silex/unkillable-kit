@@ -184,12 +184,12 @@ echo "== extract-dry-run: starter scope (ADR-0022) =="
 if [[ -d apps/starter-api ]]; then
   starter_sets="$(
     node -e '
-const m = JSON.parse(require("node:fs").readFileSync("apps/starter-api/kit-schema-manifest.json", "utf8"))
-if (!Array.isArray(m.sets)) process.exit(1)
-console.log([...m.sets].sort().join(","))
+const s = JSON.parse(require("node:fs").readFileSync("apps/starter-api/kit-schema-manifest.json", "utf8")).sets
+const ok = Array.isArray(s) && s.length === 2 && s.includes("core") && s.includes("audit")
+console.log(ok ? "ok" : JSON.stringify(s ?? null))
 ' 2>/dev/null
   )" || starter_sets="(unreadable manifest)"
-  if [[ "$starter_sets" != "audit,core" ]]; then
+  if [[ "$starter_sets" != "ok" ]]; then
     echo "extract-dry-run: apps/starter-api must sync only the core and audit schema sets (ADR-0022); found ${starter_sets}" >&2
     exit 1
   fi
