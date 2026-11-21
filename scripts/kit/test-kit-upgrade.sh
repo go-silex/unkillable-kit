@@ -332,10 +332,44 @@ packs_before=$(find "$dir/product/.git/objects/pack" -type f | sort)
 rc=0
 run_upgrade --check || rc=$?
 [[ $rc == 1 ]]
-grep -q 'objects the preflight needs are not available locally' "$dir/out"
+grep -q 'cannot compare package.json with the cached upstream/main' "$dir/out"
 if grep -q 'do not restart an open merge' "$dir/out"; then exit 1; fi
 [[ $packs_before == "$(find "$dir/product/.git/objects/pack" -type f | sort)" ]]
 pass '--check stops clearly when the cached tip tree is not local'
+
+fixture check-notice-before-stop
+printf '{"packageManager":"bun@2.0"}\n' > "$dir/seed/package.json"
+git -C "$dir/seed" add package.json
+git -C "$dir/seed" commit -qm 'bun bump'
+git -C "$dir/seed" push -q "$dir/upstream.git" main
+git -C "$dir/product" fetch -q upstream
+mkdir -p "$dir/bin"
+real_git=$(command -v git)
+cat > "$dir/bin/git" <<EOF
+#!/usr/bin/env bash
+if [[ \$1 == diff && \$* == *.github/workflows* ]]; then
+  echo 'fatal: unable to read workflow blob' >&2
+  exit 128
+fi
+exec "$real_git" "\$@"
+EOF
+chmod +x "$dir/bin/git"
+rc=0
+PATH="$dir/bin:$PATH" run_upgrade --check || rc=$?
+[[ $rc == 1 ]]
+grep -q '^packageManager moves:' "$dir/out"
+grep -q 'cannot compare .github/workflows with the cached upstream/main' "$dir/out"
+if grep -q 'do not restart an open merge' "$dir/out"; then exit 1; fi
+pass '--check prints the packageManager notice before a workflow preflight stop'
+
+fixture check-ref-not-commit
+blob=$(echo not-a-commit | git -C "$dir/product" hash-object -w --stdin)
+git -C "$dir/product" update-ref refs/remotes/upstream/main "$blob"
+rc=0
+run_upgrade --check || rc=$?
+[[ $rc == 1 ]]
+grep -q 'refs/remotes/upstream/main does not point to a commit' "$dir/out"
+pass '--check names a tracking ref that does not point to a commit'
 
 fixture check-caps
 for ((i=1; i<=51; i++)); do

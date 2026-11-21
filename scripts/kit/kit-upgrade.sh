@@ -22,9 +22,12 @@ if [[ $(node scripts/kit/resolve-tree-identity.mjs) != 'mode=product '* ]]; then
 fi
 # Exact ref only: rev-parse also tries refs/heads/<name>, so a local branch could stand in for the Kit tip.
 resolve_tip() {
-  if ! ref=$(git show-ref --verify --hash refs/remotes/upstream/main 2>/dev/null) ||
-    ! tip=$(git rev-parse --verify --quiet "$ref^{commit}"); then
+  if ! ref=$(git show-ref --verify --hash refs/remotes/upstream/main 2>/dev/null); then
     echo 'stop: refs/remotes/upstream/main is missing; add the upstream remote and fetch it' >&2
+    exit 1
+  fi
+  if ! tip=$(git rev-parse --verify --quiet "$ref^{commit}"); then
+    echo 'stop: refs/remotes/upstream/main does not point to a commit' >&2
     exit 1
   fi
 }
@@ -44,16 +47,18 @@ if ! $check; then
   git fetch upstream
   resolve_tip
 fi
-# An `if` keeps unavailable tip objects (e.g. a tree a partial clone lacks offline) out of the ERR trap.
-if ! package_diff=$(git diff --no-textconv --no-ext-diff -U0 HEAD "$tip" -- package.json) ||
-  ! workflow_diff=$(git diff --no-textconv --no-ext-diff -U0 HEAD "$tip" -- .github/workflows); then
-  echo 'stop: the cached upstream/main objects the preflight needs are not available locally; fetch upstream, then re-run' >&2
+# Each diff in an `if`: a failure (e.g. a tip object a partial clone lacks offline) stops
+# with git's own error instead of the ERR trap, after any earlier notice is printed.
+preflight_stop() {
+  echo "stop: cannot compare $1 with the cached upstream/main (git diff failed; see the error above)" >&2
   exit 1
-fi
+}
+package_diff=$(git diff --no-textconv --no-ext-diff -U0 HEAD "$tip" -- package.json) || preflight_stop package.json
 # Read the whole pipe: grep -q can cause SIGPIPE, while large here-strings can fail on a full TMPDIR.
 if printf '%s\n' "$package_diff" | grep '^+.*"packageManager"' >/dev/null; then
   echo "packageManager moves: set BUN_VERSION on each Workers Builds / Pages project just before this reaches its deploy/<branch> source branch (row 'Kit bumps packageManager')" >&2
 fi
+workflow_diff=$(git diff --no-textconv --no-ext-diff -U0 HEAD "$tip" -- .github/workflows) || preflight_stop .github/workflows
 if printf '%s\n' "$workflow_diff" | grep '^+.*create-github-app-token@' >/dev/null; then
   echo "stop: this range bumps actions/create-github-app-token; establish the effective CI_APP_ID mode first (row 'Kit bumps actions/create-github-app-token')" >&2
   exit 1
