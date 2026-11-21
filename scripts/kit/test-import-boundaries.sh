@@ -232,6 +232,23 @@ echo "apps/acme-api/src/bad.ts  # temporary dual-boot" \
   >"${PAPPLY}/config/product/import-boundary-exemptions.txt"
 assert_case "9b product-api R5 after product exemption → 0" 0 "${PAPPLY}"
 
+# --- product register: duplicate of a kit entry refused ---
+PDUPK="${TMP}/pdupk"
+seed_workspace "${PDUPK}"
+mkdir -p "${PDUPK}/config/product"
+echo "apps/acme-api/src/bad.ts  # kit-owned plant" >"${PDUPK}/config/kit/import-boundary-exemptions.txt"
+echo "apps/acme-api/src/bad.ts  # product copy" \
+  >"${PDUPK}/config/product/import-boundary-exemptions.txt"
+assert_case "9c product duplicate of kit entry → 2" 2 "${PDUPK}" "bad.ts — duplicate vs kit"
+
+# --- product register: repeated entry refused ---
+PDUP="${TMP}/pdup"
+seed_workspace "${PDUP}"
+mkdir -p "${PDUP}/config/product"
+printf '%s\n' "apps/acme-api/src/bad.ts  # first" "apps/acme-api/src/bad.ts  # second" \
+  >"${PDUP}/config/product/import-boundary-exemptions.txt"
+assert_case "9d product repeated entry → 2" 2 "${PDUP}" "bad.ts — duplicate$"
+
 # --- product file absent is OK ---
 PABS="${TMP}/pabs"
 seed_workspace "${PABS}"

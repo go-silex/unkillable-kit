@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # CP-EXTRACT — self-test for extract identity (ADR-0009 D5), residency, kit app allowlist,
-# tools/ absence, branded-slot drop, and CP-BAN frame compounds.
+# tools/ absence, starter schema scope, branded-slot drop, and CP-BAN frame compounds.
 set -euo pipefail
 # shellcheck source=lib/hermetic-git.sh
 source "$(cd "$(dirname "$0")" && pwd -P)/lib/hermetic-git.sh"
@@ -258,7 +258,7 @@ fi
 assert_exit "kit + product sentinel still rejects acme-api" 1 \
   "EXTRACT_MODE=product EXTRACT_HARNESS_SENTINEL='${SENTINEL}' run_extract_gate '${KIT}'"
 
-# 11) kit fixture + tools/ file → fail-closed (ADR-0011)
+# 11) kit fixture + tools/ file → fail-closed (ADR-0009 D2)
 FIX_TOOLS="$TMP/tools-fail"
 make_repo "${FIX_TOOLS}"
 set_origin "${FIX_TOOLS}" "https://github.com/Roxabi/roxabi-boilerplate-cf.git"
@@ -267,6 +267,27 @@ mkdir -p "${FIX_TOOLS}/tools"
 echo '#!/bin/sh' >"${FIX_TOOLS}/tools/checker.sh"
 assert_exit_match "tools/ resurrection fails" 1 'tools/ must stay empty' \
   "run_extract_gate '${FIX_TOOLS}'"
+
+# 11b) starter API with an opt-in schema set or no readable manifest → fail-closed (ADR-0022)
+FIX_STARTER="$TMP/starter-scope-fail"
+make_repo "${FIX_STARTER}"
+set_origin "${FIX_STARTER}" "https://github.com/Roxabi/roxabi-boilerplate-cf.git"
+seed_extract_gate_stubs "${FIX_STARTER}"
+mkdir -p "${FIX_STARTER}/apps/starter-api"
+assert_exit_match "starter without manifest fails" 1 'found \(unreadable manifest\)' \
+  "run_extract_gate '${FIX_STARTER}'"
+echo '{"version":1,"sets":["core","audit","flows"],"modules":{}}' \
+  >"${FIX_STARTER}/apps/starter-api/kit-schema-manifest.json"
+assert_exit_match "starter with an opt-in set fails" 1 'found \["core","audit","flows"\]' \
+  "run_extract_gate '${FIX_STARTER}'"
+echo '{"version":1,"sets":["audit,core"],"modules":{}}' \
+  >"${FIX_STARTER}/apps/starter-api/kit-schema-manifest.json"
+assert_exit_match "starter with one joined set id fails" 1 'found \["audit,core"\]' \
+  "run_extract_gate '${FIX_STARTER}'"
+echo '{"version":1,"sets":["core","audit"],"modules":{}}' \
+  >"${FIX_STARTER}/apps/starter-api/kit-schema-manifest.json"
+assert_output "starter with core and audit passes the scope check" 'extract-dry-run: banlist' \
+  "out=\$(run_extract_gate '${FIX_STARTER}' 2>&1 || true); ! echo \"\$out\" | grep -q 'must sync only' && echo \"\$out\" | grep -E '== extract-dry-run: banlist'"
 
 # 12) reserved example-web-branded is denied on kit and product trees
 FIX_BRANDED="$TMP/branded-fail"

@@ -545,7 +545,7 @@ export const fr: Messages = {
   envBannerStaging: 'Environnement staging — ne pas utiliser pour de vraies données',
   envBannerAdmin: 'Compte admin seed',
   modulesTitle: 'Modules',
-  modulesDesc: 'Activation des fonctionnalités optionnelles (D1 kit_modules)',
+  modulesDesc: 'Activation des fonctionnalités optionnelles (D1 platform_modules)',
   moduleOn: 'Activé',
   moduleOff: 'Désactivé',
   moduleNotConfigured: 'Non configuré',

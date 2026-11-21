@@ -48,6 +48,10 @@ must sync and apply the account-state schema migration before deploying.
 
 ## OpenID provider (opt-in)
 
+First-party web Apps on different origins use it for single sign-on. It is an
+authorization server separate from the hosted MCP shell, which does not become a
+general identity provider; an OIDC identity grants no MCP authority.
+
 The pinned Better Auth 1.7.27 uses `redirect: 'manual'` for back-channel
 logout delivery on Workers. Delivery remains best effort; see the limitations
 below.

@@ -3,8 +3,13 @@ title: 'ADR-0012 — Kernel persistence + request-context stratum'
 status: accepted
 normative: true
 date: 2026-08-24
-amended: 2026-11-14
+amended: 2026-11-21
 axial: false
+supersedes_notes: >
+  2026-11-21: the package migration sketches this ADR compared against are gone
+  (`packages/*/migrations` hold a README only); D1, Option B and the anti-pattern
+  now describe them as history. D6 defers the default selection to ADR-0008 D4.
+  No decision changed.
 related:
   - docs/kit/architecture/adr/0001-primary-axis-packages-compose-apps.md
   - docs/kit/architecture/adr/0003-multi-tenant-rbac-modules.md
@@ -22,13 +27,14 @@ summary: 'Applied SQL + `@kit/auth/hono` are the persist/request-context kernel'
 
 **Authority:** accepted 2026-08-24 by operator delegation on the Roxabi/roxabi-boilerplate-cf#137 goal session. Binding.
 
-**Implemented:** [Roxabi/roxabi-boilerplate-cf#142](https://github.com/Roxabi/roxabi-boilerplate-cf/issues/142) schema/repos/hono, [Roxabi/roxabi-boilerplate-cf#143](https://github.com/Roxabi/roxabi-boilerplate-cf/issues/143) `@kit/flows/run`, [Roxabi/roxabi-boilerplate-cf#144](https://github.com/Roxabi/roxabi-boilerplate-cf/issues/144) compose proof. Parent [Roxabi/roxabi-boilerplate-cf#137](https://github.com/Roxabi/roxabi-boilerplate-cf/issues/137) closed. This ADR is the decision, not the move.
+**Implemented:** [Roxabi/roxabi-boilerplate-cf#142](https://github.com/Roxabi/roxabi-boilerplate-cf/issues/142) schema/repos/hono, [Roxabi/roxabi-boilerplate-cf#143](https://github.com/Roxabi/roxabi-boilerplate-cf/issues/143) `@kit/flows/run`, [Roxabi/roxabi-boilerplate-cf#144](https://github.com/Roxabi/roxabi-boilerplate-cf/issues/144) compose proof.
+Parent [Roxabi/roxabi-boilerplate-cf#137](https://github.com/Roxabi/roxabi-boilerplate-cf/issues/137) closed. This ADR is the decision, not the move.
 
-This decision covers capability-owned persistence, request context and the FlowRun driver. The catalog identifies kit SQL by module ID and hash; the example API journal supplies its applied bytes. Package migration sketches are not an apply source.
+This decision covers capability-owned persistence, request context and the FlowRun driver. The catalog identifies kit SQL by module ID and hash; the example API journal supplies its applied bytes. `packages/*/migrations` are never an apply source.
 
 ## Problem
 
-Keeping generic tables, org middleware and the FlowRun driver inside the dogfood app forces products to copy runtime code. Promoting drifted package migration sketches would instead weaken the applied tenancy model.
+Keeping generic tables, org middleware and the FlowRun driver inside the dogfood app forces products to copy runtime code. Promoting the drifted package migration sketches that existed then would instead have weakened the applied tenancy model.
 
 ## Options considered
 
@@ -37,10 +43,10 @@ Keeping generic tables, org middleware and the FlowRun driver inside the dogfood
 - **Pros:** zero file move; D3 as written stays true
 - **Cons:** S1 remains fatal; second compose still copies runtime; D6 polarity (import factory) does not extend to schema/repos/hono
 
-### Option B — Promote drifted `packages/*/migrations` sketches as the new apply path
+### Option B — Promote the drifted `packages/*/migrations` sketches as the new apply path
 
-- **Pros:** files already sit under packages
-- **Cons:** **S5 violation.** Applied `0012_flows_plans_runs.sql` has composite FK `(plan_id, org_id)` + integer ms. `packages/flows/migrations/0001_flows_plans_runs.sql` has single-column `plan_id` + text timestamps. Sketch promote would drop org-scoped FK.
+- **Pros:** files already sat under packages
+- **Cons:** **S5 violation.** Applied `0012_flows_plans_runs.sql` has composite FK `(plan_id, org_id)` + integer ms. The former sketch `packages/flows/migrations/0001_flows_plans_runs.sql` had single-column `plan_id` + text timestamps; promoting it would have dropped the org-scoped FK.
 
 ### Option C — Catalog applied kit-generic bytes and expand existing schema/hono surfaces (chosen)
 
@@ -51,16 +57,17 @@ Keeping generic tables, org middleware and the FlowRun driver inside the dogfood
 
 ### D1 — Applied bytes and catalog identity (S5)
 
-The catalog `config/kit/kit-schema-modules.json` is the source of module IDs, source paths and SHA-256 pins. Its current kit SQL source is the applied `apps/example-api/migrations/*` journal, which Wrangler also uses. `kit-schema-sync` verifies those catalogued bytes and appends them to each product's own journal; local journal filenames are not kit identity. Do not rewrite applied files or reuse a published module ID for changed bytes.
+The catalog `config/kit/kit-schema-modules.json` is the source of module IDs, source paths and SHA-256 pins. Its current kit SQL source is the applied `apps/example-api/migrations/*` journal, which Wrangler also uses.
+`kit-schema-sync` verifies those catalogued bytes and appends them to each product's own journal; local journal filenames are not kit identity. Do not rewrite applied files or reuse a published module ID for changed bytes.
 
-`packages/*/migrations` are sketches, not the product apply path or a hash source. Never apply a sketch that lost composite `(plan_id, org_id)`. Retargeting Wrangler requires a separate accepted decision.
+`packages/*/migrations` hold a README only; the sketches were removed. They are not the product apply path or a hash source. Never add or apply package SQL that loses composite `(plan_id, org_id)`. Retargeting Wrangler requires a separate accepted decision.
 
-Evidence that forbids Option B:
+Evidence that forbade Option B:
 
-|             | Applied `0012_flows_plans_runs.sql` | Sketch `packages/flows/migrations/0001` |
-| ----------- | ----------------------------------- | --------------------------------------- |
-| Plan/run FK | Composite `(plan_id, org_id)`       | Single-column `plan_id`                 |
-| Timestamps  | Integer ms                          | Text                                    |
+|             | Applied `0012_flows_plans_runs.sql` | Former sketch `packages/flows/migrations/0001` (removed) |
+| ----------- | ----------------------------------- | -------------------------------------------------------- |
+| Plan/run FK | Composite `(plan_id, org_id)`       | Single-column `plan_id`                                  |
+| Timestamps  | Integer ms                          | Text                                                     |
 
 `kit-schema-sync` hashes **promoted applied bytes**, never sketches.
 
@@ -81,7 +88,8 @@ Product compose: `{ ...kitSchema, ...productTables }`. `demo_*` stays in `apps/e
 
 `@kit/db` = handle + types + `D1_IN_ARRAY_CHUNK` / `mapInChunks` (and `createDb` if that is the existing factory). Not a table home. Not a disclaimer that « schemas live in apps ».
 
-`@kit/db` also owns D1 driver-error classification, but no tables. `isUniqueConstraintError` is the one procedure: `(extended: SQLITE_CONSTRAINT_UNIQUE|PRIMARYKEY)` on a `D1_ERROR:` message when that suffix is present, otherwise the engine prefix `UNIQUE constraint failed:` at the start of a cause message. A PRIMARY KEY duplicate is a unique conflict. Bound params and `.code` are not an identity. Exported test helpers `toWorkerdD1Error` and `callSqlite` are the only rethrow shape for in-memory D1 doubles.
+`@kit/db` also owns D1 driver-error classification, but no tables. `isUniqueConstraintError` is the one procedure: `(extended: SQLITE_CONSTRAINT_UNIQUE|PRIMARYKEY)` on a `D1_ERROR:` message when that suffix is present, otherwise the engine prefix `UNIQUE constraint failed:` at the start of a cause message.
+A PRIMARY KEY duplicate is a unique conflict. Bound params and `.code` are not an identity. Exported test helpers `toWorkerdD1Error` and `callSqlite` are the only rethrow shape for in-memory D1 doubles.
 
 ### D4 — Request context is `@kit/auth/hono`
 
@@ -95,9 +103,8 @@ No Worker middleware on the SPA graph. App keeps a thin Env / wrangler apply pat
 
 ### D6 — Catalog is SSoT for `core`
 
-**Amendment (2026-11-14):** Fresh Products now default to `core,audit`; existing manifests retain their recorded selections. See [ADR-0008 D4](./0008-kit-schema-identity-product-compose.md#d4--sync-is-append-only) for the current rule.
-
-`--modules core` is **whatever catalog `set: core` lists**. Omitted `--modules` selects `core` plus the product manifest's recorded sets; an explicit omission of a recorded set with unapplied IDs fails closed. Published module IDs and hashes, not dogfood journal numbers, define identity.
+`--modules core` is **whatever catalog `set: core` lists**. The default selection when `--modules` is omitted is [ADR-0008 D4](./0008-kit-schema-identity-product-compose.md#d4--sync-is-append-only).
+An explicit omission of a recorded set with unapplied IDs fails closed. Published module IDs and hashes, not dogfood journal numbers, define identity.
 
 ### D7 — New catalog ids stay out of this promote
 
@@ -123,16 +130,16 @@ INV-03 (`demo_*` org-scope) and INV-04 (`api_keys.organization_id NOT NULL`) are
 
 ## Anti-patterns
 
-| Anti                                                                                   | Why                                                                    |
-| -------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| Promote `packages/flows/migrations/0001` (or any sketch that lost `(plan_id, org_id)`) | **S5** — weaker tenancy than applied                                   |
-| Put kit-generic tables in `@kit/db`                                                    | Handle-only; D2                                                        |
-| New `@kit/orgs` / `@kit/tenancy` without file-length force + ADR                       | D11 — expand `@kit/auth/schema`                                        |
-| Worker org middleware imported from SPA / `@kit/auth/react` graph                      | D4 polarity                                                            |
-| Bind infer or leave incubating while claiming D6 met                                   | Roxabi/roxabi-boilerplate-cf#141 out; ADR-0005 D6                      |
-| Fold INV-03 / INV-04 into the mechanical promote                                       | D7 — new catalog ids                                                   |
-| Kitchen-sink PR (Roxabi/roxabi-boilerplate-cf#142+143+144)                             | One concern per `/ship`                                                |
-| Treat this ADR as the move                                                             | Decision only; Roxabi/roxabi-boilerplate-cf#142/143/144 implemented it |
+| Anti                                                               | Why                                                                    |
+| ------------------------------------------------------------------ | ---------------------------------------------------------------------- |
+| Add or promote package migration SQL that lost `(plan_id, org_id)` | **S5** — weaker tenancy than applied                                   |
+| Put kit-generic tables in `@kit/db`                                | Handle-only; D2                                                        |
+| New `@kit/orgs` / `@kit/tenancy` without file-length force + ADR   | D11 — expand `@kit/auth/schema`                                        |
+| Worker org middleware imported from SPA / `@kit/auth/react` graph  | D4 polarity                                                            |
+| Bind infer or leave incubating while claiming D6 met               | Roxabi/roxabi-boilerplate-cf#141 out; ADR-0005 D6                      |
+| Fold INV-03 / INV-04 into the mechanical promote                   | D7 — new catalog ids                                                   |
+| Kitchen-sink PR (Roxabi/roxabi-boilerplate-cf#142+143+144)         | One concern per `/ship`                                                |
+| Treat this ADR as the move                                         | Decision only; Roxabi/roxabi-boilerplate-cf#142/143/144 implemented it |
 
 ## Non-goals
 

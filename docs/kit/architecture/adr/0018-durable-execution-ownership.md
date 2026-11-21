@@ -3,7 +3,7 @@ title: 'ADR-0018 — One durable owner per durable execution'
 status: accepted
 normative: true
 date: 2026-10-18
-amended: 2026-10-19
+amended: 2026-11-21
 axial: false
 related:
   - AGENTS.md
@@ -14,6 +14,9 @@ related:
   - docs/kit/product-consumer-contract.md
   - 'Roxabi/roxabi-boilerplate-cf#412'
 summary: 'One durable owner per durable execution'
+supersedes_notes: >
+  2026-11-21: Context dates the pre-amendment Forbidden line; D5 lists the
+  Delivery owner from ADR-0020. No decision changed.
 ---
 
 # ADR-0018 — One durable owner per durable execution
@@ -22,13 +25,15 @@ Every durable execution has exactly one durable owner. This decision covers Kit 
 
 ## Context
 
-The principle is in the title of [ADR-0005 D2](./0005-flows-platform-agentic-workflows.md#d2--runtime--cloudflare-workflows-do-not-reimplement-durable-engine): « do not reimplement durable engine ». D2's Forbidden line scopes it: « custom DO workflow engine when Workflows suffice ». The constitution kept the tool name and dropped the qualifier.
+The principle is in the title of [ADR-0005 D2](./0005-flows-platform-agentic-workflows.md#d2--runtime--cloudflare-workflows-do-not-reimplement-durable-engine): « do not reimplement durable engine ». D2's Forbidden line then scoped it: « custom DO workflow engine when Workflows suffice ».
+The constitution kept the tool name and dropped the qualifier. Since Roxabi/roxabi-boilerplate-cf#412 that line forbade such engines even when Workflows did not suffice.
 
-Read literally, invariant 6 binds every durable execution of every Product to Cloudflare Workflows. A Kit consumer that runs its conversations on a general-purpose durable conversation runtime built on Durable Objects respects the principle, since it writes no persistence or recovery of its own, and breaks the letter. A Product cannot amend the constitution it inherits ([`product-consumer-contract.md`](../../product-consumer-contract.md)). The letter then leaves two exits: drive each conversation turn through a Workflow on top of the conversation runtime, which gives one execution two owners, or amend the Kit.
+Literally, invariant 6 then bound every Product execution to Cloudflare Workflows, even one a supplied conversation runtime already owned.
+A Product cannot amend the inherited constitution, and a Workflow on top would have given one execution two owners.
 
 What the Kit composes today:
 
-- **Governed plan runs:** Cloudflare Workflows is the only implemented owner. `@kit/flows` drives a plan through step ports and writes its receipts inside the Workflow's steps; Cloudflare Workflows persists and resumes the run through a Workflow entrypoint ([`workflow.ts`](../../../../apps/example-api/src/flows-run/workflow.ts)).
+- **Governed plan runs:** Cloudflare Workflows, the only implemented owner; `@kit/flows` writes its receipts inside the Workflow's steps ([`workflow.ts`](../../../../apps/example-api/src/flows-run/workflow.ts)).
 - **Job messages:** Cloudflare Queues and Cron ([`stack.md`](../../standards/stack.md), row _Jobs_).
 
 ## Decision
@@ -76,17 +81,17 @@ Kit or Product code may define steps, conditions and retry policy on top of the 
 
 ### D5 — Kit-composed owners and the Product ADR trigger
 
-| Execution         | Owner the Kit composes                                                                               | Decided in                                                                                                             |
-| ----------------- | ---------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| Governed plan run | Cloudflare Workflows, the only implemented adapter                                                   | [ADR-0005](./0005-flows-platform-agentic-workflows.md) D2 and its Roxabi/roxabi-boilerplate-cf#412 amendment           |
-| Job message       | Cloudflare Queues; Cron only triggers, and a Product's consumer sets retries and a dead-letter queue | [`stack.md`](../../standards/stack.md), row _Jobs_, for Queues and Cron; D2 for the trigger and dead-letter conditions |
+| Execution             | Owner the Kit composes                                                                               | Decided in                                                                                                             |
+| --------------------- | ---------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Governed plan run     | Cloudflare Workflows, the only implemented adapter                                                   | [ADR-0005](./0005-flows-platform-agentic-workflows.md) D2 and its Roxabi/roxabi-boilerplate-cf#412 amendment           |
+| Job message           | Cloudflare Queues; Cron only triggers, and a Product's consumer sets retries and a dead-letter queue | [`stack.md`](../../standards/stack.md), row _Jobs_, for Queues and Cron; D2 for the trigger and dead-letter conditions |
+| Notification Delivery | Cloudflare Workflows, one Workflow per Delivery with a stable instance ID                            | [ADR-0020](./0020-notification-delivery-ownership.md)                                                                  |
 
-Another owner for governed plan runs requires a new Kit ADR. In an accepted ADR under `docs/product/`, a Product records every other pairing of a durable execution type with an owner that this table does not list; that ADR maps each of the Product's durable execution types to its owner.
+Another owner for governed plan runs requires a new Kit ADR. A Product records every other unlisted execution-type/owner pairing in an accepted ADR under `docs/product/`; that ADR maps each of its durable execution types to its owner.
 
 ## Non-claims
 
 - Choosing a durable owner proves nothing about authentication, Organization isolation, authority ceiling, budget, effect safety or execution history.
-- No Kit gate checks this rule or a Product ADR written under D5.
 - A Product's choice of owner is neither durable workflow proof nor a second consumer for the Agents layer gate ([platform direction](../platform-direction.md#capability-sequence)).
 - Invariant 7 is unchanged.
 
@@ -95,16 +100,12 @@ Another owner for governed plan runs requires a new Kit ADR. In an accepted ADR 
 ### Positive
 
 - The constitution states the principle, and a Product inherits it without a waiver.
-- Governed plan runs keep their implemented owner; `@kit/flows` writes its receipts inside the Workflow's steps (D2), so no Kit code changes.
+- Governed plan runs keep their implemented owner, so no Kit code changes.
 
 ### Negative
 
-- The rule is enforced at review time only. Hand-built durability or a double owner is caught by the independent-agent review D2 names, not by a gate.
+- The rule is enforced only by the independent-agent review D2 names, not by a gate.
 - Every runtime a Product adds brings its own limits, failure modes and operations, which that Product owns.
-
-### Neutral
-
-- Governed plan runs retain Cloudflare Workflows as their implemented adapter. The same execution may not have a second owner or hand-built recovery.
 
 ## Alternatives rejected
 

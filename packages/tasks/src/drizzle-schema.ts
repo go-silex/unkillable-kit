@@ -1,5 +1,5 @@
 /**
- * ADR-0007 task board Drizzle tables; tenancy shape per ADR-0016.
+ * ADR-0007 task board Drizzle tables; tenancy shape in its D2.
  * Applied SQL SSoT: apps/example-api/migrations/* (dogfood tranche), 0013 + 0018.
  */
 import { integer, primaryKey, sqliteTable, text, unique } from 'drizzle-orm/sqlite-core'
@@ -39,12 +39,12 @@ export const kitTasks = sqliteTable(
     createdAt: integer('created_at', { mode: 'number' }).notNull(),
     updatedAt: integer('updated_at', { mode: 'number' }).notNull(),
   },
-  // Target of the composite tenancy FKs (ADR-0016 D2): children bind to (id, org_id).
+  // Target of the composite tenancy FKs (ADR-0007 D2): children bind to (id, org_id).
   (t) => [unique('kit_tasks_id_org_uidx').on(t.id, t.orgId)],
 )
 
 /**
- * ADR-0016 D1: `org_id` is the task's owner Organization. Migration 0019 enforces NOT NULL
+ * ADR-0007 D2: `org_id` is the task's owner Organization. Migration 0019 enforces NOT NULL
  * and composite ownership foreign keys; repository reads and writes remain owner-scoped.
  */
 export const kitTaskAssignees = sqliteTable(

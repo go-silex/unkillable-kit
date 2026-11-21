@@ -5,7 +5,7 @@ import Database from 'better-sqlite3'
 import { describe, expect, it } from 'vitest'
 
 /**
- * ADR-0016 migrations on a database that already holds data:
+ * Task tenancy migrations (ADR-0007 D2) on a database that already holds data:
  * 0018 (expand, in the journal) backfills kit_task_assignees.org_id from the owning task;
  * 0019 (contract, in the journal) purges rows that
  * break the tenancy rule, then enforces NOT NULL + composite FKs.

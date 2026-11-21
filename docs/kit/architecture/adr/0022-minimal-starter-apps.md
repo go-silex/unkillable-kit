@@ -3,7 +3,12 @@ title: 'ADR-0022 — Minimal starter Apps'
 status: accepted
 normative: true
 date: 2026-11-14
+amended: 2026-11-21
 axial: false
+supersedes_notes: >
+  2026-11-21: decision 6 drops the unenforced 60-file / 4,000-line cap; `extract-dry-run`
+  now checks that the starter API keeps only the `core` and `audit` schema sets.
+  Decision 4 names `create-product.sh`, which already copies the starters.
 related:
   - AGENTS.md
   - GLOSSARY.md
@@ -25,13 +30,13 @@ Independent Product deployments need a small, type-checked starting point organi
 1. The Kit owns `apps/starter-api`, a Hono Worker, and `apps/starter-web`, a Vite and TanStack Router App. They provide authentication, Organization tenancy and audit, without opt-in capabilities.
 2. API business modules live under `src/modules/<module>/` and own their routes, service, repository access and tests; cross-cutting wiring lives under `src/platform/`. Exactly one neutral sample module uses only the `core` and `audit` schema sets. It introduces no Product domain.
 3. `example-*` remains the composition proof for opt-in capabilities, not the minimal starting point.
-4. These Apps are the copy source for a future `create-product` generator. They do not depend on `example-*`; a declared rename map covers their package names, Worker names and titles.
+4. These Apps are the copy source of `scripts/kit/create-product.sh`. They do not depend on `example-*`; the script's rename map covers their package names, Worker names and titles.
 5. Shared authentication requirements, Organization context resolution and auth route mounting belong to their owning `@kit/*` package. Both API Apps consume that policy; the existing example HTTP behavior remains unchanged.
-6. Both starters participate in the root gate with their own coverage floors. Each App is capped at 60 owned files and 4,000 lines, including tests and configuration, excluding generated files and dependencies. Raising either cap requires an amended decision; the starter must not become a second example.
+6. Both starters participate in the root gate with their own coverage floors. `extract-dry-run` refuses a starter API manifest whose schema sets are not exactly `core` and `audit`. Adding an opt-in capability to a starter requires an amended decision; the starter must not become a second example.
 
 ## Consequences
 
-The starter is maintained and tested as a real workspace rather than as an unvalidated template. Its minimal scope and size cap make optional integrations and Product-specific behavior explicit follow-on work. The generator and deployment are outside this decision's implementation.
+The starter is maintained and tested as a real workspace rather than as an unvalidated template. Its minimal scope makes optional integrations and Product-specific behavior explicit follow-on work. Deployment is outside this decision's implementation.
 
 ## Alternatives rejected
 

@@ -17,7 +17,7 @@
 #   - protected-path dual-edit fails
 #   - mirror stays kit mode (allowlisted origin, no product marker)
 #   - kit fixture seeds from exact source HEAD (branch or detached — CI-safe)
-#   - unlisted product-*.yml workflow passes; unlisted non-prefix workflow fails (ADR-0013)
+#   - unlisted product-*.yml workflow passes; unlisted non-prefix workflow fails (ADR-0009 D3)
 #   - tool-mandated docs/agents/issue-tracker.md passes the inventory; sibling / same-basename /
 #     protected-only docs paths fail; product tracks it and cannot edit it (Roxabi/roxabi-boilerplate-cf#259)
 #   - product edit of .dev/stack.yml passes with no exception; package.json stays forbidden (Roxabi/roxabi-boilerplate-cf#260)
@@ -86,7 +86,7 @@ run_zero_edit_capture() {
   fi
 }
 
-# ADR-0013: workflow inventory — product- prefix OK unlisted; other unlisted FAIL.
+# ADR-0009 D3: workflow inventory — product- prefix OK unlisted; other unlisted FAIL.
 # Uses a working-tree copy of checker+zones so uncommitted kit HEAD still exercises the gate.
 run_workflow_inventory_cases() {
   local tree="$1"
@@ -156,7 +156,7 @@ run_workflow_inventory_cases() {
     echo "$fail_out" >&2
     exit 1
   fi
-  if [[ "$fail_out" != *"workflow inventory gate failed (ADR-0009 D6, ADR-0013)"* ]]; then
+  if [[ "$fail_out" != *"workflow inventory gate failed (ADR-0009 D3, D6)"* ]]; then
     echo "FAIL: expected workflow inventory die message" >&2
     echo "$fail_out" >&2
     exit 1

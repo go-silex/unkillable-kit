@@ -2,12 +2,14 @@
 title: 'ADR-0007 — Tasks + comments as kit capability (incubating)'
 status: accepted
 normative: true
-amended: 2026-10-03
+amended: 2026-11-21
 axial: false
 supersedes_notes: >
   2026-09-13: D1 « no D1/Drizzle in packages » superseded by ADR-0012 D2/D3 —
   each capability owns its Drizzle tables behind a `./schema` export and apps
   compose them. « No Worker bindings » is unchanged; applied SQL stays app-side.
+  2026-11-21: the observed task tenancy notes of proposed ADR-0016 (file removed)
+  moved into D2 as current implementation; no decision changed.
 related:
   - docs/kit/architecture/adr/0001-primary-axis-packages-compose-apps.md
   - docs/kit/architecture/adr/0003-multi-tenant-rbac-modules.md
@@ -49,7 +51,13 @@ Each capability owns its Drizzle tables and repositories, exported through `./sc
 - **No recurrence** in V0
 - **Project / phase / poles / GitHub** = product-only
 
-**Current implementation, not a new architectural decision:** the example API validates assignees against the task organization's membership. The task repositories scope operations to the owner organization; catalogued migrations `0018` and `0019` add assignee organization ownership and composite task/organization foreign keys for assignees and links. Migration `0020` adds stage-organization guards. Applied migration history is deployment-specific; the files' presence does not establish that any particular database has applied them. Contract migration `0019` deletes mismatched rows, so operators must inspect its preflight counts before applying it.
+**Current implementation, not a new architectural decision.** Task-family `org_id` is the owning Organization (tenant of record), not an acting or reading Organization; the API resolves scope through membership.
+App-only checks cannot protect direct repository callers. The task repositories therefore require the owner `orgId` for existing rows and refuse identity or ownership fields in updates.
+Catalogued migrations add the database side: `0018` assignee organization ownership, `0019` composite task/organization foreign keys for assignees and links, `0020` stage-organization guards.
+The example API validates assignees against the owning organization's membership; removing a member does not erase old assignee rows.
+Never rebuild the `kit_tasks` parent: on D1, dropping a parent fires `ON DELETE CASCADE` on product-owned children unknown to the kit. Future rebuilds keep the `0020` guards, which do not validate pre-existing rows.
+Applied migration history is deployment-specific; the files' presence does not establish that any database applied them. Contract migration `0019` deletes mismatched rows and recovery is D1 Time Travel.
+Deploy order, preflight counts and per-database purge approval follow the `tasks` row of the [product consumer contract](../../product-consumer-contract.md).
 
 ### D3 — AudiencePort
 

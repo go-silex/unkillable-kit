@@ -7,7 +7,7 @@
  *   with `better-auth/crypto` `hashPassword` (scrypt).
  */
 
-import * as modulesRepo from '@kit/auth/repos/modules'
+import * as platformModulesRepo from '@kit/auth/repos/platform-modules'
 import * as platformRolesRepo from '@kit/auth/repos/platform-roles'
 import { baAccount, baUser } from '@kit/auth/schema'
 import { hashPassword as baHashPassword } from 'better-auth/crypto'
@@ -196,7 +196,9 @@ export async function seedDemoDatabase(
   }
   const notes = withNotes ? await seedDemoNotesRows(db, now) : []
   const items = await seedDemoItemRows(db, now)
-  const beforeIds = new Set((await modulesRepo.listKitModules(db)).map((r) => r.id))
+  const beforeIds = new Set(
+    (await platformModulesRepo.listPlatformModules(db)).map((r) => r.moduleId),
+  )
   await modulesService.ensureKitModules(db)
   // ADR-0003 dual-level catalogue (migrated from kit_modules via SQL + ensure)
   await platformModulesService.ensurePlatformModules(db)

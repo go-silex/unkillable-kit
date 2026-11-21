@@ -67,10 +67,15 @@ restore "$adr"
 sedi 's/^axial: false/axial: true/' "$second"
 expect_failure second-axial
 restore "$second"
-proposed="$tmp/docs/kit/architecture/adr/0016-tasks-owner-org-tenancy.md"
+proposed="$tmp/docs/kit/architecture/adr/9998-proposed-fixture.md"
+printf '%s\n' '---' "title: 'ADR-9998 — Proposed fixture'" 'status: proposed' 'normative: false' \
+  'axial: false' "summary: 'Proposed fixture'" '---' >"$proposed"
+run --write
+grep -F 'Proposed fixture (proposed)' "$tmp/docs/kit/architecture/index.md" >/dev/null
+run
 sedi 's/^status: proposed/status: rejected/' "$proposed"
 expect_failure changed-status
 run --write
-grep -F 'Tasks owner-org tenancy (rejected)' "$tmp/docs/kit/architecture/index.md" >/dev/null
+grep -F 'Proposed fixture (rejected)' "$tmp/docs/kit/architecture/index.md" >/dev/null
 run
 echo 'ADR frontmatter mutations passed'

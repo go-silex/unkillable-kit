@@ -6,7 +6,7 @@ import type { schema } from '../db/schema'
 
 type Db = DrizzleD1Database<typeof schema>
 
-/** ADR-0016 D4: an assignee is a member of the task's owner org. */
+/** ADR-0007 D2: an assignee is a member of the task's owner org. */
 export async function assertAssigneesAreMembers(db: Db, orgId: string, assigneeIds: string[]) {
   const wanted = [...new Set(assigneeIds)]
   if (wanted.length === 0) return

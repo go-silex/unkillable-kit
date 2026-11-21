@@ -85,11 +85,11 @@ for f in "${required[@]}"; do
   fi
 done
 
-# ADR-0011 D3: tools/ is folded. Empty dir is tolerated; any entry fails.
+# ADR-0009 D2: tools/ is not a polarity root. Empty dir is tolerated; any entry fails.
 # `find` not `ls` — command substitution of ls -A drops a newline-only name.
 if [[ -e tools ]]; then
   if [[ ! -d tools ]]; then
-    echo "extract-dry-run: tools must not exist as a non-directory (ADR-0011)" >&2
+    echo "extract-dry-run: tools must not exist as a non-directory (ADR-0009 D2)" >&2
     exit 1
   fi
   set +e
@@ -97,11 +97,11 @@ if [[ -e tools ]]; then
   find_ec=$?
   set -e
   if [[ "$find_ec" -ne 0 ]]; then
-    echo "extract-dry-run: tools/ scan failed (ADR-0011)" >&2
+    echo "extract-dry-run: tools/ scan failed (ADR-0009 D2)" >&2
     exit 1
   fi
   if [[ -n "$leftover" ]]; then
-    echo "extract-dry-run: tools/ must stay empty (ADR-0011); found ${leftover}" >&2
+    echo "extract-dry-run: tools/ must stay empty (ADR-0009 D2); found ${leftover}" >&2
     exit 1
   fi
 fi
@@ -177,6 +177,22 @@ elif [[ "$MODE" == "product" ]]; then
 else
   echo "extract-dry-run: unresolved tree mode '${MODE}'" >&2
   exit 1
+fi
+
+echo "== extract-dry-run: starter scope (ADR-0022) =="
+# The starter API is the minimal copy source of create-product.sh: the core and audit schema sets only.
+if [[ -d apps/starter-api ]]; then
+  starter_sets="$(
+    node -e '
+const s = JSON.parse(require("node:fs").readFileSync("apps/starter-api/kit-schema-manifest.json", "utf8")).sets
+const ok = Array.isArray(s) && s.length === 2 && s.includes("core") && s.includes("audit")
+console.log(ok ? "ok" : JSON.stringify(s ?? null))
+' 2>/dev/null
+  )" || starter_sets="(unreadable manifest)"
+  if [[ "$starter_sets" != "ok" ]]; then
+    echo "extract-dry-run: apps/starter-api must sync only the core and audit schema sets (ADR-0022); found ${starter_sets}" >&2
+    exit 1
+  fi
 fi
 
 echo "== extract-dry-run: banlist (packages + kit apps only) =="

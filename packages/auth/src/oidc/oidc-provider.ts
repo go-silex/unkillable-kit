@@ -138,6 +138,7 @@ export function createOidcProvider(options: OidcProviderOptions): OidcProviderCo
             ],
           },
         },
+        // OpenID Connect Core §15.1 requires RS256 support; the JWT plugin defaults to EdDSA.
         jwt({ jwks: { keyPairConfig: { alg: 'RS256' } }, disableSettingJwtHeader: true }),
         withOidcMetadataPolicy(
           oauthProvider({
