@@ -269,6 +269,74 @@ grep -q 'upgrade pending' "$dir/out"
 if grep -q '^Kit CHANGELOG at the cached tip' "$dir/out"; then exit 1; fi
 pass '--check omits the CHANGELOG pointer when the tip has no CHANGELOG'
 
+fixture check-changelog-not-file
+git -C "$dir/seed" rm -q CHANGELOG.md
+mkdir "$dir/seed/CHANGELOG.md"
+echo entry > "$dir/seed/CHANGELOG.md/2026.md"
+git -C "$dir/seed" add CHANGELOG.md
+git -C "$dir/seed" commit -qm 'changelog directory'
+git -C "$dir/seed" push -q "$dir/upstream.git" main
+git -C "$dir/product" fetch -q upstream
+run_upgrade --check
+grep -q 'upgrade pending' "$dir/out"
+if grep -q '^Kit CHANGELOG at the cached tip' "$dir/out"; then exit 1; fi
+git -C "$dir/seed" rm -rq CHANGELOG.md
+ln -s docs/news.md "$dir/seed/CHANGELOG.md"
+git -C "$dir/seed" add CHANGELOG.md
+git -C "$dir/seed" commit -qm 'changelog symlink'
+git -C "$dir/seed" push -q "$dir/upstream.git" main
+git -C "$dir/product" fetch -q upstream
+run_upgrade --check
+grep -q 'upgrade pending' "$dir/out"
+if grep -q '^Kit CHANGELOG at the cached tip' "$dir/out"; then exit 1; fi
+pass '--check omits the CHANGELOG pointer when the tip entry is not a regular file'
+
+fixture ref-decoy
+advance
+git -C "$dir/product" fetch -q upstream
+# Fetch maps elsewhere and the canonical tracking ref is gone; a local branch named like it must not be used.
+git -C "$dir/product" config remote.upstream.fetch '+refs/heads/main:refs/remotes/upstream/vendor/main'
+git -C "$dir/product" update-ref -d refs/remotes/upstream/main
+decoy=$(git -C "$dir/product" commit-tree 'HEAD^{tree}' -p HEAD -m 'unpublished local commit')
+git -C "$dir/product" update-ref refs/heads/refs/remotes/upstream/main "$decoy"
+before=$(git -C "$dir/product" rev-parse HEAD)
+rc=0
+run_upgrade --check || rc=$?
+[[ $rc == 1 ]]
+grep -q 'refs/remotes/upstream/main is missing' "$dir/out"
+rc=0
+run_upgrade || rc=$?
+[[ $rc == 1 ]]
+grep -q 'refs/remotes/upstream/main is missing' "$dir/out"
+[[ $(git -C "$dir/product" rev-parse HEAD) == "$before" ]]
+[[ ! -f $dir/product/.git/MERGE_HEAD ]]
+pass 'a local branch named like the tracking ref is never merged or pinned'
+
+fixture check-missing-tree
+advance
+git -C "$dir/upstream.git" config uploadpack.allowFilter true
+base=$(git -C "$dir/seed" rev-parse HEAD^)
+# Clone onto the base branch: checking out from the tip would read (and fetch) the tip tree.
+git -C "$dir/seed" push -q "$dir/upstream.git" "$base:refs/heads/base"
+rm -rf "$dir/product"
+git clone -q --filter=tree:0 --branch base "file://$dir/upstream.git" "$dir/product"
+git -C "$dir/product" remote rename origin upstream
+git -C "$dir/product" remote add origin product
+mkdir -p "$dir/product/config/product"
+printf '{"version":1,"upstreamCommit":"%s"}\n' "$base" > "$dir/product/config/product/inheritance.json"
+git -C "$dir/product" add config/product/inheritance.json
+git -C "$dir/product" commit -qm product
+# The tip commit is local but its root tree is not; --check must not fetch it.
+if GIT_NO_LAZY_FETCH=1 git -C "$dir/product" cat-file -e "$(git -C "$dir/seed" rev-parse 'HEAD^{tree}')" 2>/dev/null; then exit 1; fi
+packs_before=$(find "$dir/product/.git/objects/pack" -type f | sort)
+rc=0
+run_upgrade --check || rc=$?
+[[ $rc == 1 ]]
+grep -q 'objects the preflight needs are not available locally' "$dir/out"
+if grep -q 'do not restart an open merge' "$dir/out"; then exit 1; fi
+[[ $packs_before == "$(find "$dir/product/.git/objects/pack" -type f | sort)" ]]
+pass '--check stops clearly when the cached tip tree is not local'
+
 fixture check-caps
 for ((i=1; i<=51; i++)); do
   git -C "$dir/seed" checkout -qb "cap-$i"
@@ -480,7 +548,7 @@ if [[ -f \$KIT_UPGRADE_TIP_FLIP && ! -f \$KIT_UPGRADE_TIP_FLIPPED ]]; then
   touch "\$KIT_UPGRADE_TIP_FLIPPED"
   "$real_git" -C "$dir/product" update-ref refs/remotes/upstream/main "$tip_b"
 fi
-if [[ \$1 == rev-parse && \$* == *upstream/main* && ! -f \$KIT_UPGRADE_TIP_FLIP ]]; then
+if [[ \$* == *upstream/main* && ! -f \$KIT_UPGRADE_TIP_FLIP ]]; then
   touch "\$KIT_UPGRADE_TIP_FLIP"
 fi
 exec "$real_git" "\$@"

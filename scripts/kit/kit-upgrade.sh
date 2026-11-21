@@ -20,9 +20,10 @@ if [[ $(node scripts/kit/resolve-tree-identity.mjs) != 'mode=product '* ]]; then
   echo 'stop: kit-upgrade requires a product clone' >&2
   exit 1
 fi
-# The full ref name: a local branch named upstream/main must not shadow the cached Kit tip.
+# Exact ref only: rev-parse also tries refs/heads/<name>, so a local branch could stand in for the Kit tip.
 resolve_tip() {
-  if ! tip=$(git rev-parse --verify --quiet 'refs/remotes/upstream/main^{commit}'); then
+  if ! ref=$(git show-ref --verify --hash refs/remotes/upstream/main 2>/dev/null) ||
+    ! tip=$(git rev-parse --verify --quiet "$ref^{commit}"); then
     echo 'stop: refs/remotes/upstream/main is missing; add the upstream remote and fetch it' >&2
     exit 1
   fi
@@ -43,12 +44,16 @@ if ! $check; then
   git fetch upstream
   resolve_tip
 fi
-package_diff=$(git diff --no-textconv --no-ext-diff -U0 HEAD "$tip" -- package.json)
+# An `if` keeps unavailable tip objects (e.g. a tree a partial clone lacks offline) out of the ERR trap.
+if ! package_diff=$(git diff --no-textconv --no-ext-diff -U0 HEAD "$tip" -- package.json) ||
+  ! workflow_diff=$(git diff --no-textconv --no-ext-diff -U0 HEAD "$tip" -- .github/workflows); then
+  echo 'stop: the cached upstream/main objects the preflight needs are not available locally; fetch upstream, then re-run' >&2
+  exit 1
+fi
 # Read the whole pipe: grep -q can cause SIGPIPE, while large here-strings can fail on a full TMPDIR.
 if printf '%s\n' "$package_diff" | grep '^+.*"packageManager"' >/dev/null; then
   echo "packageManager moves: set BUN_VERSION on each Workers Builds / Pages project just before this reaches its deploy/<branch> source branch (row 'Kit bumps packageManager')" >&2
 fi
-workflow_diff=$(git diff --no-textconv --no-ext-diff -U0 HEAD "$tip" -- .github/workflows)
 if printf '%s\n' "$workflow_diff" | grep '^+.*create-github-app-token@' >/dev/null; then
   echo "stop: this range bumps actions/create-github-app-token; establish the effective CI_APP_ID mode first (row 'Kit bumps actions/create-github-app-token')" >&2
   exit 1
@@ -74,7 +79,9 @@ if $check; then
       echo 'pending range not readable from local history'
     fi
   fi
-  if [[ $(git ls-tree --name-only "$tip" -- CHANGELOG.md 2>/dev/null) == CHANGELOG.md ]]; then
+  # A regular file only: a directory or symlink named CHANGELOG.md would make the pointer misleading.
+  changelog_entry=$'^100(644|755) blob [0-9a-f]+\tCHANGELOG\\.md$'
+  if [[ $(git ls-tree "$tip" -- CHANGELOG.md 2>/dev/null) =~ $changelog_entry ]]; then
     printf 'Kit CHANGELOG at the cached tip: git show %s:CHANGELOG.md\n' "$tip"
   fi
   echo 'upgrade pending against the locally cached upstream/main (fetch separately to refresh)'
