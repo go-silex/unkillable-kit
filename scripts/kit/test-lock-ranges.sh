@@ -706,6 +706,60 @@ for kind in frozen quoted dotted inline dry savefalse; do
 done
 printf '%s\n' "$canary_ms" >"$TMP/canary-ms.txt"
 
+# Manifest-less cache (CI shape after frozen install: tarballs, no *.npm manifests)
+MANIFESTLESS_CACHE="$TMP/manifestless-cache"
+rm -rf "$MANIFESTLESS_CACHE"
+cp -a "$SUITE_CACHE" "$MANIFESTLESS_CACHE"
+find "$MANIFESTLESS_CACHE" -name '*.npm' -delete
+if [[ "$(find "$MANIFESTLESS_CACHE" -name '*.npm' | wc -l)" -ne 0 ]]; then
+  echo 'FAIL: could not strip *.npm from manifest-less cache' >&2
+  FAIL=$((FAIL + 1))
+fi
+ML="$TMP/manifestless-hoist"
+rm -rf "$ML"
+cp -a "$HOIST" "$ML"
+output="$(cd "$ML" && env -u LOCK_RANGES_ROOT BUN_INSTALL_CACHE_DIR="$MANIFESTLESS_CACHE" bun scripts/kit/check-lock-ranges.ts 2>&1)" && rc=0 || rc=$?
+if [[ "$rc" -eq 0 && "$output" == *'check-lock-ranges: OK'* ]]; then
+  echo 'PASS: full check with manifest-less cache'
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: manifest-less check (rc=$rc): $output" >&2
+  FAIL=$((FAIL + 1))
+fi
+for kind in frozen quoted dotted inline dry savefalse; do
+  SUP_ML="$TMP/suppress-ml-$kind"
+  rm -rf "$SUP_ML"
+  cp -a "$HOIST" "$SUP_ML"
+  write_suppress_fig "$SUP_ML/bunfig.toml" "$kind"
+  git -C "$SUP_ML" add bunfig.toml && git -C "$SUP_ML" commit -qm "suppress-ml-$kind"
+  output="$(cd "$SUP_ML" && env -u LOCK_RANGES_ROOT BUN_INSTALL_CACHE_DIR="$MANIFESTLESS_CACHE" bun scripts/kit/check-lock-ranges.ts 2>&1)" && rc=0 || rc=$?
+  if [[ "$rc" -eq 1 && "$output" == *'suppresses lock writes'* ]]; then
+    echo "PASS: write-suppression still detected under manifest-less cache ($kind)"
+    PASS=$((PASS + 1))
+  else
+    echo "FAIL: suppress-ml $kind (rc=$rc): $output" >&2
+    FAIL=$((FAIL + 1))
+  fi
+done
+# Overrides canary needs manifests; must fail closed on a manifest-less cache.
+OV_MUTANT="$TMP/overrides-canary-mutant"
+rm -rf "$OV_MUTANT"
+cp -a "$HOIST" "$OV_MUTANT"
+bun -e '
+const fs=require("fs"); const p=process.argv[1]; let s=fs.readFileSync(p,"utf8");
+const from=`parsed.trustedDependencies = [CANARY_SENTINEL]`;
+const to=`const prior = parsed.overrides && typeof parsed.overrides === "object" && !Array.isArray(parsed.overrides) ? { ...(parsed.overrides as Record<string, unknown>) } : {};\n  parsed.overrides = { ...prior, [CANARY_SENTINEL]: "0.0.0" }`;
+const t=s.replace(from,to); if(t===s) process.exit(1); fs.writeFileSync(p,t);
+' "$OV_MUTANT/scripts/kit/check-lock-ranges.ts"
+output="$(cd "$OV_MUTANT" && env -u LOCK_RANGES_ROOT BUN_INSTALL_CACHE_DIR="$MANIFESTLESS_CACHE" bun scripts/kit/check-lock-ranges.ts 2>&1)" && rc=0 || rc=$?
+if [[ "$rc" -eq 1 && "$output" == *'suppresses lock writes'* ]]; then
+  echo 'PASS: overrides canary mutant killed by manifest-less cache'
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: overrides canary mutant (rc=$rc): $output" >&2
+  FAIL=$((FAIL + 1))
+fi
+
 ROOT_FROZEN="$TMP/root-frozen"
 rm -rf "$ROOT_FROZEN"
 cp -a "$HOIST" "$ROOT_FROZEN"

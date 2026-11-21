@@ -413,7 +413,11 @@ function probeOfflineInstall(
 
 const CANARY_SENTINEL = '__lock_ranges_canary__'
 
-/** Add a root override Bun drops unless the install config suppresses lock writes. */
+/**
+ * Write-suppression canary: a bogus `trustedDependencies` entry. Bun rewrites
+ * that list from package.json without resolving the name, so a cache that only
+ * holds frozen-install tarballs (no `*.npm` manifests) still repairs it.
+ */
 function assertLockWritesEnabled(
   snapshot: string,
   cacheDir: string,
@@ -422,11 +426,7 @@ function assertLockWritesEnabled(
 ): void {
   const lockPath = join(snapshot, 'bun.lock')
   const parsed = parseJsoncStrict(original.toString('utf8')) as Record<string, unknown>
-  const prior =
-    parsed.overrides && typeof parsed.overrides === 'object' && !Array.isArray(parsed.overrides)
-      ? { ...(parsed.overrides as Record<string, unknown>) }
-      : {}
-  parsed.overrides = { ...prior, [CANARY_SENTINEL]: '0.0.0' }
+  parsed.trustedDependencies = [CANARY_SENTINEL]
   const perturbed = Buffer.from(`${JSON.stringify(parsed, null, 2)}\n`)
   writeFileSync(lockPath, perturbed)
   const child = runOfflineInstall(snapshot, cacheDir, home)

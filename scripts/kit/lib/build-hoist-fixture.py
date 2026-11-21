@@ -37,14 +37,15 @@ def make_tgz(name: str, version: str) -> tuple[str, bytes, str]:
     return path, blob, integrity
 
 
-for version in ("1.0.0", "1.0.1"):
-    path, blob, integrity = make_tgz("kit-pin", version)
-    bodies[path] = blob
-    records[("kit-pin", version)] = {
-        "name": "kit-pin",
-        "version": version,
-        "dist": {"tarball": "", "integrity": integrity},
-    }
+for name, versions in (("kit-pin", ("1.0.0", "1.0.1")), ("kit-meta", ("1.0.0",))):
+    for version in versions:
+        path, blob, integrity = make_tgz(name, version)
+        bodies[path] = blob
+        records[(name, version)] = {
+            "name": name,
+            "version": version,
+            "dist": {"tarball": "", "integrity": integrity},
+        }
 
 
 class Registry(BaseHTTPRequestHandler):
@@ -54,11 +55,11 @@ class Registry(BaseHTTPRequestHandler):
     def do_GET(self):  # noqa: N802
         path = self.path.strip("/")
         logs.append(path)
-        if path == "kit-pin":
-            versions = ["1.0.0", "1.0.1"]
+        if path in ("kit-pin", "kit-meta"):
+            versions = ["1.0.0", "1.0.1"] if path == "kit-pin" else ["1.0.0"]
             obj = {
-                "name": "kit-pin",
-                "dist-tags": {"latest": "1.0.1"},
+                "name": path,
+                "dist-tags": {"latest": versions[-1]},
                 "versions": {},
                 "time": {
                     "modified": "2025-01-01T00:00:00.000Z",
@@ -66,8 +67,8 @@ class Registry(BaseHTTPRequestHandler):
                 },
             }
             for v in versions:
-                meta = json.loads(json.dumps(records[("kit-pin", v)]))
-                meta["dist"]["tarball"] = f"http://127.0.0.1:{port_box['port']}/kit-pin/-/kit-pin-{v}.tgz"
+                meta = json.loads(json.dumps(records[(path, v)]))
+                meta["dist"]["tarball"] = f"http://127.0.0.1:{port_box['port']}/{path}/-/{path}-{v}.tgz"
                 obj["versions"][v] = meta
                 obj["time"][v] = "2025-01-01T00:00:00.000Z"
             buf = json.dumps(obj).encode()
@@ -99,6 +100,10 @@ bun_version = subprocess.check_output(["bun", "-v"], text=True).strip()
             "workspaces": ["apps/*"],
             "trustedDependencies": [],
             "packageManager": f"bun@{bun_version}",
+            # Existing override: trustedDependencies canary needs no manifests;
+            # an overrides canary re-resolves and fails on a manifest-less cache.
+            "dependencies": {"kit-meta": "1.0.0"},
+            "overrides": {"kit-meta": "1.0.0"},
         },
         indent=2,
     )
