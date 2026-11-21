@@ -31,6 +31,16 @@ milliseconds rounded to three decimals, `status` is `passed` or `failed`, and `e
 child exit code (or 1 if unavailable). A failure is recorded before fail-fast stops execution;
 read-only plan modes emit no task timings.
 
+Workspace Vitest configs use the shared `ciMaxWorkers` setting: CI uses all available CPUs;
+outside CI, Vitest keeps its defaults. Coverage parts and their merge use the same App config.
+Root lint checks the dedicated Vitest config or the Vite fallback without loading it. It
+reports a missing config in a Vitest workspace, a missing shared setting or `fileParallelism: false`
+(which forces one worker). Kit findings fail lint; Product findings warn without failing it.
+
+For an App copied from an older starter, import `ciMaxWorkers` from
+`../../packages/config/vitest-workers.mts` and set `test.maxWorkers` to it in the App's config.
+Keep any Product-specific worker limit if its suite needs it; the warning is advisory.
+
 ---
 
 | What it answers                                        | Section                                                          |

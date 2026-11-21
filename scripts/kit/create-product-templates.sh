@@ -75,11 +75,13 @@ EOF
   cat > "$app/vitest.config.ts" <<EOF
 import { defineConfig } from 'vitest/config'
 import { makeCoverage } from '../../packages/config/vitest-coverage.mts'
+import { ciMaxWorkers } from '../../packages/config/vitest-workers.mts'
 
 export default defineConfig({
   test: {
+    maxWorkers: ciMaxWorkers,
     environment: 'node',
-       include: ['src/**/*.test.ts'],
+    include: ['src/**/*.test.ts'],
     coverage: makeCoverage('$name-mcp', {
       statements: 50,
       lines: 50,

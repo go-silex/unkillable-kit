@@ -49,7 +49,9 @@ The measured path includes every producer's queue, checkout, install, controls, 
 
 Record runner, cache state and exit status; distinguish cold task/transform caches from warm runs. A cached download is not a cached task result. Local measurements do not prove GitHub performance; real successful CI is required separately in Kit and Product.
 
-The measured multi-file Auth, Flows, UI, Example API and Example Web suites use all available CPUs only when `CI` is non-empty. Otherwise Vitest run/watch defaults remain unchanged. Local Root runs each ordered recipe sequentially, fail-fast. `COVERAGE_CHANGED_BASE` is local and cannot execute Root.
+See the [shared Vitest worker policy](../testing.md) for CI defaults and Product adoption.
+Local Root runs each ordered recipe sequentially, fail-fast. `COVERAGE_CHANGED_BASE` is local
+and cannot execute Root.
 
 The Coverage plan checks inheritance and zero-edit with Node and full Git history before Bun setup, installation or matrix expansion. All other producers depend on it; final `ci` runs after plan failure and requires its success and all required receipts. Missing, skipped or failed prerequisites never pass; valid tooling selection may skip tooling steps. Product CI and Secret scan remain independent and blocking.
 
