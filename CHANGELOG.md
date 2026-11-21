@@ -11,7 +11,7 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ### OIDC logout planning
 
-- Back-channel logout planning reads distinct session and client pairs, and only the refresh tokens it revokes, so its cost no longer grows with repeated token exchanges. The notified relying parties, the 25-session cap and the best-effort behaviour are unchanged.
+- On the D1 adapter, back-channel logout planning loads distinct session and client pairs for notification and only non-revoked refresh tokens for revocation, instead of every token row. The notified relying parties, the 25-session cap and the best-effort behaviour are unchanged.
 
 ### Kit upgrade check
 
