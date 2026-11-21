@@ -13,7 +13,7 @@
 
 ### ADR consolidation
 
-- ADR-0011 and ADR-0013 are merged into ADR-0009 (D1–D3), ADR-0016 into ADR-0007 D2, ADR-0024 into the `@kit/auth` README and design note 0019 into the Slack design note; the merged files are removed. Product docs linking them must update those links.
+- ADR-0011 and ADR-0013 are merged into ADR-0009 (D1–D3), ADR-0016 into ADR-0007 D2 and ADR-0024 into the `@kit/auth` README; the merged files are removed. Design note 0019 is removed because ADR-0021 and its design note already carry its routes, DTO and import rule. Product docs linking these files must update those links.
 
 ### One Worker site
 
