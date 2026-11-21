@@ -33,8 +33,9 @@ read-only plan modes emit no task timings.
 
 Workspace Vitest configs use the shared `ciMaxWorkers` setting: CI uses all available CPUs;
 outside CI, Vitest keeps its defaults. Coverage parts and their merge use the same App config.
-Root lint checks dedicated Vitest configs and, for Vitest workspaces without one, the Vite
-fallback. It errors for Kit-owned configs and warns for Product-owned configs, without loading them.
+Root lint checks the dedicated Vitest config or the Vite fallback without loading it. It
+reports a missing config in a Vitest workspace, a missing shared setting or `fileParallelism: false`
+(which forces one worker). Kit findings fail lint; Product findings warn without failing it.
 
 For an App copied from an older starter, import `ciMaxWorkers` from
 `../../packages/config/vitest-workers.mts` and set `test.maxWorkers` to it in the App's config.

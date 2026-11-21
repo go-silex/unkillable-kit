@@ -56,31 +56,59 @@ function configObject(program: Program): Node | undefined {
   }
 }
 
+function report(workspace: string, detail: string, config?: string): void {
+  const path = config ? join(workspace, config) : workspace
+  const ownedByKit = zones.protected_prefixes.some((prefix) => `${workspace}/`.startsWith(prefix))
+  console.error(`vitest-workers: ${ownedByKit ? 'error' : 'warning'}: ${path}: ${detail}`)
+  if (ownedByKit) process.exitCode = 1
+}
+
 // Check the canonical config shape without executing Kit or Product code.
-function usesSharedDefault(path: string): boolean {
+function inspect(path: string): { shared: boolean; fileParallelismDisabled: boolean } {
   const { program, errors } = parseSync(path, readFileSync(path, 'utf8'))
   if (errors.length) throw new Error(errors[0]?.message)
-  const workers = option(option(configObject(program), 'test'), 'maxWorkers')
-  if (workers?.type !== 'Identifier' || workers.name !== 'ciMaxWorkers') return false
-  return importsName(
-    program,
-    'ciMaxWorkers',
-    (from) => from.startsWith('.') && resolve(dirname(path), from) === shared,
-  )
+  const test = option(configObject(program), 'test')
+  const workers = option(test, 'maxWorkers')
+  const parallelism = option(test, 'fileParallelism')
+  const sharedOk =
+    workers?.type === 'Identifier' &&
+    workers.name === 'ciMaxWorkers' &&
+    importsName(
+      program,
+      'ciMaxWorkers',
+      (from) => from.startsWith('.') && resolve(dirname(path), from) === shared,
+    )
+  return {
+    shared: sharedOk,
+    fileParallelismDisabled: parallelism?.type === 'Literal' && parallelism.value === false,
+  }
 }
 
 function check(workspace: string, config: string): void {
   const path = join(workspace, config)
-  let detail =
-    'import ciMaxWorkers from packages/config/vitest-workers.mts and set test.maxWorkers to it'
   try {
-    if (usesSharedDefault(join(root, path))) return
+    const { shared: sharedOk, fileParallelismDisabled } = inspect(join(root, path))
+    if (!sharedOk) {
+      report(
+        workspace,
+        'import ciMaxWorkers from packages/config/vitest-workers.mts and set test.maxWorkers to it',
+        config,
+      )
+    }
+    if (fileParallelismDisabled) {
+      report(
+        workspace,
+        'test.fileParallelism: false forces one worker after maxWorkers resolution',
+        config,
+      )
+    }
   } catch (error) {
-    detail = `cannot read or parse config: ${error instanceof Error ? error.message : String(error)}`
+    report(
+      workspace,
+      `cannot read or parse config: ${error instanceof Error ? error.message : String(error)}`,
+      config,
+    )
   }
-  const ownedByKit = zones.protected_prefixes.some((prefix) => path.startsWith(prefix))
-  console.error(`vitest-workers: ${ownedByKit ? 'error' : 'warning'}: ${path}: ${detail}`)
-  if (ownedByKit) process.exitCode = 1
 }
 
 function usesVitest(manifest: string): boolean {
@@ -100,8 +128,13 @@ for (const pattern of workspaces) {
     const workspace = dirname(manifest)
     const cwd = join(root, workspace)
     const dedicated = [...configs.scanSync({ cwd })]
+    const vitest = usesVitest(manifest)
     const candidates =
-      dedicated.length > 0 || !usesVitest(manifest) ? dedicated : fallbackConfigs.scanSync({ cwd })
+      dedicated.length > 0 || !vitest ? dedicated : [...fallbackConfigs.scanSync({ cwd })]
+    if (vitest && candidates.length === 0) {
+      report(workspace, 'no Vitest or Vite config; Vitest defaults to one worker on 2-CPU runners')
+      continue
+    }
     for (const config of candidates) check(workspace, config)
   }
 }
