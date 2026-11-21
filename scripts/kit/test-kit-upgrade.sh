@@ -29,6 +29,7 @@ fixture() {
   printf '{"version":1,"kit_origin_allowlist":["kit"]}\n' > "$dir/seed/config/kit/zero-edit-zones.json"
   printf '{"packageManager":"bun@1.0"}\n' > "$dir/seed/package.json"
   echo lock > "$dir/seed/bun.lock"
+  echo '# Changelog' > "$dir/seed/CHANGELOG.md"
   echo upstream-license > "$dir/seed/LICENSE"
   git -C "$dir/seed" init -q -b main
   git -C "$dir/seed" add .
@@ -217,7 +218,7 @@ snapshot_git_state "$dir/before-check"
 run_upgrade --check
 grep -q 'upgrade pending' "$dir/out"
 grep -q '^Pending commits: 1$' "$dir/out"
-grep -q "^Kit CHANGELOG at the cached tip: git show ${cached}:CHANGELOG.md$" "$dir/out" || grep -q '^Kit CHANGELOG at the cached tip: git show ' "$dir/out"
+grep -qx "Kit CHANGELOG at the cached tip: git show ${cached}:CHANGELOG.md" "$dir/out"
 [[ $(git -C "$dir/product" rev-parse HEAD) == "$before" ]]
 [[ $(git -C "$dir/product" rev-parse upstream/main) == "$cached" ]]
 assert_git_state_unchanged "$dir/before-check"
@@ -246,6 +247,27 @@ grep -qx 'Pending commits: 4' "$dir/out"
 grep -qx "Kit CHANGELOG at the cached tip: git show ${tip}:CHANGELOG.md" "$dir/out"
 assert_git_state_unchanged "$dir/before-report"
 pass '--check reports pending merge subjects without writes'
+
+fixture check-ref-shadow
+advance
+git -C "$dir/product" fetch -q upstream
+tip=$(git -C "$dir/product" rev-parse refs/remotes/upstream/main)
+# A local branch with the same short name must not stand in for the cached Kit tip.
+git -C "$dir/product" branch upstream/main HEAD
+run_upgrade --check
+grep -qx 'Pending commits: 1' "$dir/out"
+grep -qx "Kit CHANGELOG at the cached tip: git show ${tip}:CHANGELOG.md" "$dir/out"
+pass '--check reads the remote-tracking ref, not a local branch of the same name'
+
+fixture check-changelog-removed
+git -C "$dir/seed" rm -q CHANGELOG.md
+git -C "$dir/seed" commit -qm 'remove changelog'
+git -C "$dir/seed" push -q "$dir/upstream.git" main
+git -C "$dir/product" fetch -q upstream
+run_upgrade --check
+grep -q 'upgrade pending' "$dir/out"
+if grep -q '^Kit CHANGELOG at the cached tip' "$dir/out"; then exit 1; fi
+pass '--check omits the CHANGELOG pointer when the tip has no CHANGELOG'
 
 fixture check-caps
 for ((i=1; i<=51; i++)); do
@@ -381,6 +403,7 @@ PATH="$dir/bin:$PATH" run_upgrade --check
 grep -q 'pending range not readable from local history' "$dir/out"
 grep -q 'upgrade pending' "$dir/out"
 if grep -q '^Pending commits:' "$dir/out"; then exit 1; fi
+grep -q '^Kit CHANGELOG at the cached tip: git show ' "$dir/out"
 if grep -q 'do not restart an open merge' "$dir/out"; then exit 1; fi
 pass '--check reports an unreadable pending range without ERR'
 
@@ -407,8 +430,9 @@ if grep -q 'upgrade pending' "$dir/out"; then exit 1; fi
 pass '--check fails closed when git status cannot read the tree'
 
 fixture check-textconv
-echo textconv-change > "$dir/seed/textconv-change"
-git -C "$dir/seed" add textconv-change
+# The pending range changes package.json, so the preflight diff reads it through the textconv driver.
+printf '{"packageManager":"bun@1.0","name":"kit"}\n' > "$dir/seed/package.json"
+git -C "$dir/seed" add package.json
 git -C "$dir/seed" commit -qm 'pending change for textconv'
 git -C "$dir/seed" push -q "$dir/upstream.git" main
 git -C "$dir/product" fetch -q upstream
@@ -456,7 +480,7 @@ if [[ -f \$KIT_UPGRADE_TIP_FLIP && ! -f \$KIT_UPGRADE_TIP_FLIPPED ]]; then
   touch "\$KIT_UPGRADE_TIP_FLIPPED"
   "$real_git" -C "$dir/product" update-ref refs/remotes/upstream/main "$tip_b"
 fi
-if [[ \$1 == rev-parse && \$2 == upstream/main && ! -f \$KIT_UPGRADE_TIP_FLIP ]]; then
+if [[ \$1 == rev-parse && \$* == *upstream/main* && ! -f \$KIT_UPGRADE_TIP_FLIP ]]; then
   touch "\$KIT_UPGRADE_TIP_FLIP"
 fi
 exec "$real_git" "\$@"

@@ -20,9 +20,16 @@ if [[ $(node scripts/kit/resolve-tree-identity.mjs) != 'mode=product '* ]]; then
   echo 'stop: kit-upgrade requires a product clone' >&2
   exit 1
 fi
+# The full ref name: a local branch named upstream/main must not shadow the cached Kit tip.
+resolve_tip() {
+  if ! tip=$(git rev-parse --verify --quiet 'refs/remotes/upstream/main^{commit}'); then
+    echo 'stop: refs/remotes/upstream/main is missing; add the upstream remote and fetch it' >&2
+    exit 1
+  fi
+}
 if $check; then
   export GIT_NO_LAZY_FETCH=1
-  tip=$(git rev-parse upstream/main)
+  resolve_tip
 fi
 if ! status=$(git status --porcelain); then
   echo 'stop: cannot read the working tree state (git status failed)' >&2
@@ -34,7 +41,7 @@ if [[ -n $status ]] || [[ -f $(git rev-parse --git-path MERGE_HEAD) ]]; then
 fi
 if ! $check; then
   git fetch upstream
-  tip=$(git rev-parse upstream/main)
+  resolve_tip
 fi
 package_diff=$(git diff --no-textconv --no-ext-diff -U0 HEAD "$tip" -- package.json)
 # Read the whole pipe: grep -q can cause SIGPIPE, while large here-strings can fail on a full TMPDIR.
@@ -63,10 +70,12 @@ if $check; then
         printf '%s\n' "$subjects" |
           awk 'NR <= 50 { print } END { if (NR > 50) printf "… %d more\n", NR - 50 }'
       fi
-      printf 'Kit CHANGELOG at the cached tip: git show %s:CHANGELOG.md\n' "$tip"
     else
       echo 'pending range not readable from local history'
     fi
+  fi
+  if [[ $(git ls-tree --name-only "$tip" -- CHANGELOG.md 2>/dev/null) == CHANGELOG.md ]]; then
+    printf 'Kit CHANGELOG at the cached tip: git show %s:CHANGELOG.md\n' "$tip"
   fi
   echo 'upgrade pending against the locally cached upstream/main (fetch separately to refresh)'
   exit 0
