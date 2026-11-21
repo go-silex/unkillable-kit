@@ -45,7 +45,6 @@ function logoutAdapter(
   async function snapshotSessions<T>(query: FindQuery): Promise<T[]> {
     let selected: { id: string }[] = []
     try {
-      if (!d1) throw new Error('missing OIDC logout D1 binding')
       const sessions = await adapter.findMany<{ id: string }>({
         ...query,
         sortBy: { field: 'createdAt', direction: 'desc' },
@@ -55,10 +54,19 @@ function logoutAdapter(
       selected = sessions.slice(0, MAX_NOTIFIED_SESSIONS)
       if (selected.length) {
         const sessionIds = selected.map((s) => s.id)
-        ;[access, refresh] = await Promise.all([
-          loadDistinctSessionClients(d1, sessionIds),
-          loadRevocableRefreshTokens(d1, sessionIds),
-        ])
+        if (d1) {
+          ;[access, refresh] = await Promise.all([
+            loadDistinctSessionClients(d1, sessionIds),
+            loadRevocableRefreshTokens(d1, sessionIds),
+          ])
+        } else {
+          log.warn('OIDC logout planning uses unbounded adapter fallback')
+          const where = [{ field: 'sessionId', operator: 'in' as const, value: sessionIds }]
+          ;[access, refresh] = await Promise.all([
+            adapter.findMany<LogoutRow>({ model: 'oauthAccessToken', where, limit: 2147483647 }),
+            adapter.findMany<LogoutRow>({ model: 'oauthRefreshToken', where, limit: 2147483647 }),
+          ])
+        }
         const ids = [...new Set([...access, ...refresh].map((token) => token.clientId))]
         for (let i = 0; i < ids.length; i += D1_IN_ARRAY_CHUNK) {
           clients.push(
@@ -163,7 +171,7 @@ export function createOidcLogoutPlugin() {
           const current = storage.getStore()
           const adapter = await getCurrentAdapter(ctx.context.adapter)
           const merged = { ...ctx.context.adapter, ...adapter }
-          const d1 = logoutD1(merged) ?? logoutD1(adapter) ?? logoutD1(ctx.context.adapter)
+          const d1 = logoutD1(adapter)
           let truncated = false
           let coverageUnknown = false
           const bounded = logoutAdapter(

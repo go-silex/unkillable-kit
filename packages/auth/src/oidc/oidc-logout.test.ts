@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
+import { runWithAdapter, runWithTransaction } from '@better-auth/core/context'
 import { createSqliteD1 } from '@kit/db/testing'
+import type { DBAdapter } from 'better-auth'
 import Database from 'better-sqlite3'
 import { decodeJwt } from 'jose'
 import { expect, it, onTestFinished, vi } from 'vitest'
@@ -541,4 +543,84 @@ it('reports unknown coverage when refresh planning fails', async () => {
   await Promise.all(pending)
   expect(injected).toBe(true)
   expect(delivery).not.toHaveBeenCalled()
+})
+
+it('never forwards notification-only IDs after a queued hook', async () => {
+  const accessUpdates: string[] = []
+  const { auth, pending, delivery, addSession, addClient, addRefresh } = setup({
+    beforeQuery(sql) {
+      if (/^\s*update\s+["`]?oauth_access_token\b/i.test(sql)) accessUpdates.push(sql)
+    },
+  })
+  addSession('session')
+  addClient('refresh-only')
+  addRefresh('historical', 'session', 'refresh-only', { scopes: ['offline_access'] })
+  // The public KitBetterAuth type omits Better Auth's in-process context.
+  const contextAuth = auth as unknown as { $context: Promise<{ adapter: DBAdapter }> }
+  const { adapter } = await contextAuth.$context
+  const writes = vi.spyOn(adapter, 'updateMany')
+  await runWithTransaction(adapter, () => endOidcUserSessions(auth, USER_ID))
+  await Promise.all(pending)
+  expect(notifiedClients(delivery)).toEqual(['refresh-only'])
+  expect(accessUpdates).toEqual([])
+  expect(writes.mock.calls.map(([query]) => query.model)).not.toContain('oauthAccessToken')
+})
+
+it('matches adapter scope decoding for legacy refresh rows', async () => {
+  const { sqlite, auth, pending, delivery, addSession, addClient, addRefresh } = setup()
+  addSession('session')
+  addClient('client')
+  addRefresh('quoted', 'session', 'client', { scopes: ['openid', 'legacy"offline_access'] })
+  addRefresh('legacy', 'session', 'client')
+  addRefresh('offline', 'session', 'client', { scopes: ['offline_access'] })
+  sqlite
+    .prepare('UPDATE oauth_refresh_token SET scopes = ? WHERE id = ?')
+    .run('openid offline_access', 'legacy')
+  await endOidcUserSessions(auth, USER_ID)
+  await Promise.all(pending)
+  expect(notifiedClients(delivery)).toEqual(['client'])
+  expect(
+    sqlite
+      .prepare('SELECT id, revoked IS NOT NULL AS revoked FROM oauth_refresh_token ORDER BY id')
+      .all(),
+  ).toEqual([
+    { id: 'legacy', revoked: 1 },
+    { id: 'offline', revoked: 0 },
+    { id: 'quoted', revoked: 1 },
+  ])
+})
+
+it('preserves logout with a forwarding adapter without a D1 handle', async () => {
+  const { sqlite, auth, pending, delivery, addSession, addClient, addRefresh } = setup()
+  addSession('session')
+  addClient('client')
+  addRefresh('refresh', 'session', 'client')
+  const contextAuth = auth as unknown as { $context: Promise<{ adapter: DBAdapter }> }
+  const ctx = await contextAuth.$context
+  const { __kitOidcLogoutD1: _binding, ...wrapper } = ctx.adapter as DBAdapter & {
+    __kitOidcLogoutD1?: unknown
+  }
+  ctx.adapter = wrapper
+  expect(await runWithAdapter(wrapper, () => endOidcUserSessions(auth, USER_ID))).toEqual({
+    success: true,
+    truncated: false,
+  })
+  await Promise.all(pending)
+  expect(notifiedClients(delivery)).toEqual(['client'])
+  expect(
+    sqlite.prepare('SELECT revoked IS NOT NULL AS revoked FROM oauth_refresh_token').get(),
+  ).toEqual({
+    revoked: 1,
+  })
+})
+
+it('bounds returned refresh rows when most tokens are revoked', async () => {
+  const { auth, pending, addSession, addClient, addRefresh, now, tokenPlanRows } = setup()
+  addSession('session')
+  addClient('client')
+  for (let i = 0; i < 600; i++) addRefresh(`old-${i}`, 'session', 'client', { revoked: now })
+  addRefresh('live', 'session', 'client')
+  await endOidcUserSessions(auth, USER_ID)
+  await Promise.all(pending)
+  expect(tokenPlanRows()).toBeLessThan(10)
 })
