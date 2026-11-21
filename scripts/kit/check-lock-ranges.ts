@@ -53,7 +53,7 @@ import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileS
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { assertLockShape, parseJsoncStrict } from './lib/jsonc-strict.ts'
-import { materializeTree } from './lib/materialize-tree.ts'
+import { gitNoLazyEnv, materializeTree } from './lib/materialize-tree.ts'
 
 const SECTIONS = ['dependencies', 'devDependencies', 'optionalDependencies'] as const
 
@@ -343,10 +343,11 @@ function treeRoot(): string {
 }
 
 function candidateTree(root: string): string {
-  const merge = spawnSync('git', ['rev-parse', '--git-path', 'MERGE_HEAD'], { cwd: root })
+  const env = gitNoLazyEnv()
+  const merge = spawnSync('git', ['rev-parse', '--git-path', 'MERGE_HEAD'], { cwd: root, env })
   if (merge.status !== 0) fail('cannot determine merge state')
   if (!existsSync(resolve(root, merge.stdout.toString().trim()))) return 'HEAD'
-  const tree = spawnSync('git', ['write-tree'], { cwd: root })
+  const tree = spawnSync('git', ['write-tree'], { cwd: root, env })
   if (tree.status !== 0) fail('cannot verify staged merge tree; resolve conflicts first')
   return tree.stdout.toString().trim()
 }
@@ -363,9 +364,20 @@ function resolveOperatorCache(root: string): string {
 function readCandidateLockBlob(root: string, tree: string): string {
   const result = spawnSync('git', ['cat-file', 'blob', `${tree}:bun.lock`], {
     cwd: root,
+    env: gitNoLazyEnv(),
     maxBuffer: 64 * 1024 * 1024,
   })
-  if (result.status !== 0) fail('missing candidate bun.lock')
+  if (result.status !== 0) {
+    const detail = `${result.stderr || result.stdout || ''}`.toString().trim()
+    if (/lazy|partial|promisor|filter|not a valid object/i.test(detail)) {
+      fail(
+        detail
+          ? `cannot read candidate bun.lock without fetching (partial clone); ${detail}`
+          : 'cannot read candidate bun.lock without fetching (partial clone)',
+      )
+    }
+    fail('missing candidate bun.lock')
+  }
   return Buffer.from(result.stdout).toString('utf8')
 }
 

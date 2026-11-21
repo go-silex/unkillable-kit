@@ -114,7 +114,7 @@ fixture clean
 advance
 run_upgrade
 [[ $(git -C "$dir/product" rev-list --parents -n 1 HEAD | wc -w) == 3 ]]
-[[ $(git -C "$dir/product" show HEAD:config/product/inheritance.json | node -e 'let s="";process.stdin.on("data",x=>s+=x).on("end",()=>console.log(JSON.parse(s).upstreamCommit))') == $(git -C "$dir/seed" rev-parse HEAD) ]]
+[[ $(git -C "$dir/product" show HEAD:config/product/inheritance.json | bun -e 'let s="";process.stdin.on("data",x=>s+=x).on("end",()=>console.log(JSON.parse(s).upstreamCommit))') == $(git -C "$dir/seed" rev-parse HEAD) ]]
 [[ -z $(git -C "$dir/product" status --porcelain) ]]
 [[ $(cat "$KIT_UPGRADE_TEST_LOG") == $'install --frozen-lockfile --minimum-release-age 0\nrun lock-ranges:check\nrun zero-edit' ]]
 pass 'clean upgrade rewrites marker and commits'
@@ -189,14 +189,14 @@ hoist_product_fixture() {
   cp "$ROOT/scripts/kit/lib/materialize-tree.ts" "$dir/seed/scripts/kit/lib/"
   : >"$dir/seed/config/kit/bunfig.gates.toml"
   printf '%s\n' '{"version":1,"kit_origin_allowlist":["kit"]}' >"$dir/seed/config/kit/zero-edit-zones.json"
-  node -e '
+  bun -e '
 const fs=require("fs");
 const p=process.argv[1];
 const pkg=JSON.parse(fs.readFileSync(p,"utf8"));
 pkg.scripts={
   ...(pkg.scripts||{}),
   "lock-ranges:check":"bun --no-env-file --config=config/kit/bunfig.gates.toml run scripts/kit/check-lock-ranges.ts",
-  "zero-edit":"node -e \"process.exit(0)\"",
+  "zero-edit":"bun -e \"process.exit(0)\"",
 };
 fs.writeFileSync(p, JSON.stringify(pkg,null,2)+"\n");
 ' "$dir/seed/package.json"
@@ -263,7 +263,7 @@ pass 'inherited LOCK_RANGES_ROOT decoy is ignored'
 
 hoist_product_fixture out-of-range
 # Force an out-of-range resolution: pin kit-pin workspace range to 9.0.0 while lock keeps 1.0.x
-node -e '
+bun -e '
 const fs=require("fs");
 const lockPath=process.argv[1], pkgPath=process.argv[2];
 const lock=JSON.parse(fs.readFileSync(lockPath,"utf8"));

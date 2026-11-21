@@ -402,7 +402,7 @@ decoy_tree() {
   cp "$ROOT/scripts/kit/lib/materialize-tree.ts" "$tree/scripts/kit/lib/"
   cp "$ROOT/config/kit/bunfig.gates.toml" "$tree/config/kit/"
   cp "$CLEAN/bun.lock" "$tree/decoy/bun.lock"
-  node -e '
+  bun -e '
     const fs = require("node:fs")
     const launch = JSON.parse(fs.readFileSync(process.argv[1], "utf8")).scripts["lock-ranges:check"]
     fs.writeFileSync(process.argv[2], JSON.stringify({ scripts: { "lock-ranges:check": launch } }))
@@ -490,7 +490,7 @@ printf '%s\n' "$warm_ms" >"$TMP/probe-warm-ms.txt"
 TRUST="$TMP/trust-rewrite"
 rm -rf "$TRUST"
 cp -a "$HOIST" "$TRUST"
-node -e 'const fs=require("fs"); const p=process.argv[1]; const s=fs.readFileSync(p,"utf8"); const t=s.replace(/  "trustedDependencies": \[\],\n/,""); if(t===s) process.exit(1); fs.writeFileSync(p,t)' "$TRUST/bun.lock"
+bun -e 'const fs=require("fs"); const p=process.argv[1]; const s=fs.readFileSync(p,"utf8"); const t=s.replace(/  "trustedDependencies": \[\],\n/,""); if(t===s) process.exit(1); fs.writeFileSync(p,t)' "$TRUST/bun.lock"
 git -C "$TRUST" add bun.lock && git -C "$TRUST" commit -qm trust-mutant
 output="$(run_check "$TRUST" 2>&1)" && rc=0 || rc=$?
 if [[ "$rc" -eq 1 && "$output" == *'candidate bun.lock changes on install'* ]]; then
@@ -519,7 +519,7 @@ fi
 PROBE_MUTANT="$TMP/probe-mutant"
 rm -rf "$PROBE_MUTANT"
 cp -a "$TRUST" "$PROBE_MUTANT"
-node -e '
+bun -e '
 const fs=require("fs"); const p=process.argv[1]; let s=fs.readFileSync(p,"utf8");
 const t=s.replace("checkStability(root, tree)","/* stability probe deleted */");
 if(t===s) process.exit(1); fs.writeFileSync(p,t);
@@ -574,7 +574,7 @@ fi
 DUP_MUTANT="$TMP/dup-mutant"
 rm -rf "$DUP_MUTANT"
 cp -a "$TMP/dup-literal" "$DUP_MUTANT"
-node -e '
+bun -e '
 const fs=require("fs"); const p=process.argv[1]; let s=fs.readFileSync(p,"utf8");
 let t=s.replace(/assertLockShape\([^\n]+\)\n/g, "");
 if(t===s||/assertLockShape\(/.test(t)) process.exit(1);
@@ -744,7 +744,7 @@ cp -a "$HOIST" "$ATTRS"
 printf '%s\n' 'bun.lock text eol=crlf' 'apps/a/package.json ident' 'secret.txt filter=kitcanary' >"$ATTRS/.gitattributes"
 printf 'plain\n' >"$ATTRS/secret.txt"
 # Put $Id$ into apps/a/package.json for ident
-node -e 'const fs=require("fs"); const p=process.argv[1]; const pkg=JSON.parse(fs.readFileSync(p,"utf8")); pkg.description="$Id$"; fs.writeFileSync(p, JSON.stringify(pkg,null,2)+"\n");' "$ATTRS/apps/a/package.json"
+bun -e 'const fs=require("fs"); const p=process.argv[1]; const pkg=JSON.parse(fs.readFileSync(p,"utf8")); pkg.description="$Id$"; fs.writeFileSync(p, JSON.stringify(pkg,null,2)+"\n");' "$ATTRS/apps/a/package.json"
 git -C "$ATTRS" add -A && git -C "$ATTRS" commit -qm attrs
 git -C "$ATTRS" config filter.kitcanary.smudge 'sed s/plain/SMUDGED/'
 git -C "$ATTRS" config filter.kitcanary.clean cat
@@ -882,7 +882,7 @@ fi
 LOCKFILE_ONLY_MUTANT="$TMP/lockfile-only-mutant"
 rm -rf "$LOCKFILE_ONLY_MUTANT"
 cp -a "$HOIST" "$LOCKFILE_ONLY_MUTANT"
-node -e '
+bun -e '
 const fs=require("fs"); const p=process.argv[1]; let s=fs.readFileSync(p,"utf8");
 const from="['\''--no-env-file'\'', '\''install'\'', '\''--offline'\'', '\''--ignore-scripts'\'', '\''--cache-dir'\'', cacheDir]";
 const to="['\''--no-env-file'\'', '\''install'\'', '\''--lockfile-only'\'', '\''--offline'\'', '\''--ignore-scripts'\'', '\''--cache-dir'\'', cacheDir]";
@@ -918,7 +918,7 @@ STAGED="$TMP/staged-vs-head"
 rm -rf "$STAGED"
 cp -a "$HOIST" "$STAGED"
 # Create a second commit that restores a stable lock, then stage an unstable index during merge-ish write-tree
-node -e 'const fs=require("fs"); const p=process.argv[1]; const s=fs.readFileSync(p,"utf8"); const t=s.replace(/  "trustedDependencies": \[\],\n/,""); if(t===s) process.exit(1); fs.writeFileSync(p,t)' "$STAGED/bun.lock"
+bun -e 'const fs=require("fs"); const p=process.argv[1]; const s=fs.readFileSync(p,"utf8"); const t=s.replace(/  "trustedDependencies": \[\],\n/,""); if(t===s) process.exit(1); fs.writeFileSync(p,t)' "$STAGED/bun.lock"
 git -C "$STAGED" add bun.lock && git -C "$STAGED" commit -qm unstable-head
 # Now HEAD is unstable. Make a stable staged tree by restoring trustedDependencies in the index only.
 cp "$HOIST/bun.lock" "$STAGED/bun.lock"
@@ -926,7 +926,7 @@ git -C "$STAGED" add bun.lock
 # Simulate open merge: write MERGE_HEAD and keep staged stable? Assignment wants staged unstable, HEAD stable.
 git -C "$STAGED" reset --hard HEAD~1 >/dev/null
 # HEAD is stable (hoist). Stage unstable lock while MERGE_HEAD present.
-node -e 'const fs=require("fs"); const p=process.argv[1]; const s=fs.readFileSync(p,"utf8"); const t=s.replace(/  "trustedDependencies": \[\],\n/,""); if(t===s) process.exit(1); fs.writeFileSync(p,t)' "$STAGED/bun.lock"
+bun -e 'const fs=require("fs"); const p=process.argv[1]; const s=fs.readFileSync(p,"utf8"); const t=s.replace(/  "trustedDependencies": \[\],\n/,""); if(t===s) process.exit(1); fs.writeFileSync(p,t)' "$STAGED/bun.lock"
 git -C "$STAGED" add bun.lock
 git -C "$STAGED" rev-parse HEAD >"$STAGED/.git/MERGE_HEAD"
 output="$(run_check "$STAGED" 2>&1)" && rc=0 || rc=$?
@@ -941,10 +941,10 @@ fi
 HEAD_MUTANT="$TMP/head-mutant"
 rm -rf "$HEAD_MUTANT"
 cp -a "$STAGED" "$HEAD_MUTANT"
-node -e '
+bun -e '
 const fs=require("fs"); const p=process.argv[1]; let s=fs.readFileSync(p,"utf8");
-const from="if (!existsSync(resolve(root, merge.stdout.toString().trim()))) return '\''HEAD'\''\n  const tree = spawnSync('\''git'\'', ['\''write-tree'\''], { cwd: root })";
-const to="if (!existsSync(resolve(root, merge.stdout.toString().trim()))) return '\''HEAD'\''\n  return '\''HEAD'\''\n  const tree = spawnSync('\''git'\'', ['\''write-tree'\''], { cwd: root })";
+const from="if (!existsSync(resolve(root, merge.stdout.toString().trim()))) return '\''HEAD'\''\n  const tree = spawnSync('\''git'\'', ['\''write-tree'\''], { cwd: root, env })";
+const to="if (!existsSync(resolve(root, merge.stdout.toString().trim()))) return '\''HEAD'\''\n  return '\''HEAD'\''\n  const tree = spawnSync('\''git'\'', ['\''write-tree'\''], { cwd: root, env })";
 const t=s.replace(from,to);
 if(t===s) process.exit(1); fs.writeFileSync(p,t);
 ' "$HEAD_MUTANT/scripts/kit/check-lock-ranges.ts"
@@ -954,6 +954,51 @@ if [[ "$rc" -eq 0 ]]; then
   PASS=$((PASS + 1))
 else
   echo "FAIL: always-HEAD mutant still failed (rc=$rc): $output" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+
+# Bounded-memory materialize + full-buffer mutant
+MEM_OUT="$(bun "$ROOT/scripts/kit/lib/materialize-memory-selftest.ts" 64 2>&1)" && mem_rc=0 || mem_rc=$?
+if [[ "$mem_rc" -eq 0 && "$MEM_OUT" == *'PASS: materialize memory bound'* ]]; then
+  echo "PASS: materialize 64 MiB stays memory-bounded"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: materialize memory bound: $MEM_OUT" >&2
+  FAIL=$((FAIL + 1))
+fi
+MEM_MUT="$TMP/mem-mutant"
+rm -rf "$MEM_MUT"
+mkdir -p "$MEM_MUT/scripts/kit/lib"
+cp "$ROOT/scripts/kit/lib/materialize-tree.ts" "$MEM_MUT/scripts/kit/lib/"
+cp "$ROOT/scripts/kit/lib/materialize-memory-selftest.ts" "$MEM_MUT/scripts/kit/lib/"
+bun "$ROOT/scripts/kit/lib/patch-materialize-fullbuf-mutant.ts" "$MEM_MUT/scripts/kit/lib/materialize-tree.ts"
+output="$(cd "$MEM_MUT/scripts/kit/lib" && bun ./materialize-memory-selftest.ts 64 2>&1)" && rc=0 || rc=$?
+if [[ "$rc" -ne 0 && "$output" == *'RSS growth'* ]]; then
+  echo 'PASS: full-buffer writeExact mutant killed by memory test'
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: full-buffer mutant survived (rc=$rc): $output" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+# Partial clone fail-closed without fetching
+PARTIAL_OUT="$(bun "$ROOT/scripts/kit/lib/materialize-partial-clone-selftest.ts" "$ROOT" "$SCANNER" 2>&1)" && partial_rc=0 || partial_rc=$?
+if [[ "$partial_rc" -eq 0 && "$PARTIAL_OUT" == *'PASS: partial clone'* ]]; then
+  echo "$PARTIAL_OUT" | tail -1
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: partial clone: $PARTIAL_OUT" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+# Raw path bytes stay distinct
+RAW_OUT="$(bun "$ROOT/scripts/kit/lib/materialize-raw-paths-selftest.ts" "$HOIST" 2>&1)" && raw_rc=0 || raw_rc=$?
+if [[ "$raw_rc" -eq 0 && "$RAW_OUT" == *'PASS:'* ]]; then
+  echo "$RAW_OUT" | tail -1
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: raw paths: $RAW_OUT" >&2
   FAIL=$((FAIL + 1))
 fi
 
