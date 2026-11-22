@@ -142,6 +142,6 @@ After `CI` and `Secret scan` pass on the same push to `main`, **Release preparat
 
 Review the version and Product actions in the PR. UI-only title and body edits are overwritten while the branch is bot-only. Push a commit to keep a correction; a maintainer commit stops automated refreshes, so bring that branch up to date yourself if needed. Rephrase issue-closing references in CHANGELOG notes before preparation.
 
-Keep CHANGELOG release headings at column 0 and use `- **Product action:**` at the start of a list item. Preparation stops if Markdown structure disagrees with the source lines, and waits if any Kit release section is still untagged.
+`doc:check` enforces the Kit CHANGELOG format: `# Changelog`, blank lines, column-zero `##` or `###` headings, `- ` items with adjacent two-space plain continuations, and plain paragraphs separated from lists by a blank line; no fenced code, HTML blocks or comments, quotes, tables, or other block syntax. Start Product action items with `- **Product action:** `. Preparation waits if any Kit release section is still untagged.
 
 Publication stays manual. After merging, delete `release/<component>`; cleanup is required after a squash or rebase of a maintainer-edited proposal. Wait for both push checks on the merge commit. Create the annotated tag on that commit, then publish the GitHub Release from the new section with Product actions first. Never move an existing tag.

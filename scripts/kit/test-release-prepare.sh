@@ -87,7 +87,7 @@ fixture() {
   git -C "$repo" init -q -b main
   printf 'release:\n  component: kit\n' > "$repo/.dev/stack.yml"
   # Keep a no-final-newline, CRLF release section to catch normalization.
-  printf '## kit/v0.1.0 — 2026-01-01\r\n\r\n- Previously released\r\n\r\nOld tail\t' > "$STATE/old"
+  printf '## kit/v0.1.0 — 2026-01-01\r\n\r\n- Previously released\r\n\r\nOld tail  ' > "$STATE/old"
   printf '# Changelog\r\n\r\n## Unreleased\r\n\r\n' > "$repo/CHANGELOG.md"
   cat "$STATE/old" >> "$repo/CHANGELOG.md"
   git -C "$repo" add .
@@ -158,11 +158,16 @@ assert_closing_notes_rejected() {
   expect_log 'rephrase CHANGELOG.md line'
   assert_no_proposal
 }
-assert_markdown_disagreement() {
-  if apply; then fail 'expected Markdown disagreement to stop preparation'; return 1; fi
-  expect_log "CHANGELOG.md line $1"
-  expect_log 'Markdown'
+assert_grammar_rejected() {
+  if apply; then fail 'expected invalid CHANGELOG grammar to stop preparation'; return 1; fi
+  expect_log "CHANGELOG.md line $1:"
+  expect_log "$2"
   assert_no_proposal
+}
+assert_full_action() {
+  jq -e '.body | split("### Product actions\n\n")[1] | split("\n\n## kit/")[0] |
+    contains("- Set the header.\r\n  Restart the client.\r\n  Verify the response.")' "$STATE/pull" >/dev/null ||
+    fail 'expected the Product action summary to include every continuation'
 }
 
 
@@ -225,7 +230,7 @@ apply
 pass 'minor bump, untrusted notes as data, one-commit branch, idempotent refresh and metadata-only repair'
 
 for closing in 'Closes fixture/kit#7' 'FiXeD: https://github.com/fixture/kit/issues/7' \
-    'resolve: https://github.com/fixture/kit/pull/7' $'Resolves\r\n#7'; do
+    'resolve: https://github.com/fixture/kit/pull/7' $'Resolves\r\n  fixture/kit#7'; do
   fixture "closing-${closing%%[ :]*}"
   entries "- $closing"
   assert_closing_notes_rejected
@@ -234,51 +239,73 @@ pass 'issue-closing keywords in generated notes stop before writing'
 
 fixture neutral-reference
 : > "$STATE/old"
-entries '- Refs fixture/kit#7' '<!--'
+entries '- Refs fixture/kit#7'
 apply
 jq -e '.body | index("Proposed tag:") < index("### Manual publication") and
   index("Publish the GitHub Release") < index("### Product actions") and
-  index("### Product actions") < index("- Refs fixture/kit#7") and
-  index("- Refs fixture/kit#7") < index("<!--")' "$STATE/pull" >/dev/null
+  index("### Product actions") < index("- Refs fixture/kit#7")' "$STATE/pull" >/dev/null
 pass 'neutral references stay verbatim; metadata and checklist precede generated Markdown'
 
-fixture fenced-heading
-entries '  ~~~~markdown' '### Example heading' '## Example section' '  ~~~' '```' \
-  '  ~~~~~' '- **Product action:** Update the client.'
-apply
-assert_preserved v0.2.0
-jq -e '.body | contains("## Example section") and contains("- Update the client.")' "$STATE/pull" >/dev/null
-pass 'fenced headings do not end Unreleased or drop later migration notes'
+for invalid in fence tilde-fence nested-fence html-comment html-block quote table table-delimiter nested-heading nested-item \
+    lazy reference setext thematic tabs code indented-blank star plus ordered heading disconnected; do
+  fixture "grammar-$invalid"
+  line=7
+  case $invalid in
+    fence) rule=fences; entries '```md' ;;
+    tilde-fence) rule=fences; entries '  ~~~md' ;;
+    nested-fence) rule=fences; entries '- ```md' ;;
+    html-comment) rule='HTML comments'; entries 'Text <!-- comment -->' ;;
+    html-block) rule='HTML, blockquotes and tables'; entries '<details>' ;;
+    quote) rule='HTML, blockquotes and tables'; entries '> quote' ;;
+    table) rule='HTML, blockquotes and tables'; entries '| table |' ;;
+    table-delimiter) rule='table delimiter'; line=8; entries 'Left | Right' '--- | --- |' ;;
+    nested-heading) rule='block marker'; line=8; entries '- Item' '  ## Nested' ;;
+    nested-item) rule='block marker'; line=8; entries '- Item' '  - Nested' ;;
+    lazy) rule='plain paragraph'; line=8; entries '- Item' 'Lazy continuation' ;;
+    reference) rule='link reference'; entries '[label]: /url' ;;
+    setext) rule='setext'; line=8; entries 'Text' '====' ;;
+    thematic) rule='thematic breaks'; entries '- - -' ;;
+    tabs) rule=tabs; entries $'- Tab\there' ;;
+    code) rule=indentation; entries '    code' ;;
+    indented-blank) rule=indentation; entries '    ' ;;
+    star) rule='list items'; entries '* Item' ;;
+    plus) rule='list items'; entries '+ Item' ;;
+    ordered) rule='list items'; entries '1) Item' ;;
+    heading) rule='heading'; entries '#### Heading' ;;
+    disconnected) rule='continuation'; line=9; entries '- Item' '' '  Disconnected' ;;
+  esac
+  assert_grammar_rejected "$line" "$rule"
+  if invoke --check-changelog; then fail "doc gate accepted $invalid"; fi
+  expect_log "CHANGELOG.md line $line:"
+  pass "invalid $invalid fails preparation and the doc gate"
+done
 
-fixture fenced-marker
-entries '   ````md' '   ```' '- **Product action:** Example only.' '   `````' \
+fixture same-text-heading-substitution
+entries '- First pending note' '<!--' '## kit/v0.1.0 — 2026-01-01' '-->' \
+  '- Second pending note' '- A nested fence' '  ~~~'
+assert_grammar_rejected 8 'HTML comments'
+pass 'same-text heading substitution fails before writing'
+
+fixture same-count-marker-substitution
+entries '<!--' '- **Product action:** Draft instruction.' '-->' \
+  '- **Product action:**' '  Carry out the real migration.'
+assert_grammar_rejected 7 'HTML comments'
+pass 'same-count marker substitution fails before writing'
+
+fixture invalid-tagged-section
+printf '\r\n\r\n> Forbidden in a tagged section' >> "$STATE/old"
+entries '- Valid unreleased change'
+assert_grammar_rejected 15 'HTML, blockquotes and tables'
+pass 'the grammar also checks tagged sections'
+
+fixture multiline-action
+entries '- **Product action:** Set the header.' '  Restart the client.' '  Verify the response.' \
   '- Description with **Product action:** in the middle.'
-assert_dry_run_patch
-expect_log 'None.'
-pass 'markers inside fences or in the middle of a list item do not bump'
-
-fixture nested-heading
-entries '- List item' '' '  ## Nested heading' '' '- **Product action:** Still required.'
+invoke --check-changelog
 apply
 assert_preserved v0.2.0
-pass 'a heading nested in a list item is not a release boundary'
-
-fixture comment-heading
-entries '<!--' '## Comment heading' '-->' '- **Product action:** Still required.'
-assert_markdown_disagreement 8
-pass 'an apparent heading inside an HTML comment cannot silently truncate notes'
-
-fixture list-fence
-entries '- ```md' '  ## Example heading' '  - **Product action:** Example only.'
-assert_markdown_disagreement 9
-pass 'a marker in a list-contained fence cannot silently change the bump'
-
-fixture list-fence-boundary
-entries '- ```md' '  ## Example heading' '  Example text.'
-apply
-assert_preserved v0.1.1
-jq -e '.body | contains("## Example heading") and (contains("Previously released") | not)' "$STATE/pull" >/dev/null
-pass 'a fence that ends with its list item leaves tagged notes outside the proposal'
+assert_full_action
+pass 'the complete multiline Product action appears in the PR summary'
 
 fixture pending-publication
 printf '\r\n## kit/v0.1.1 — 2026-01-02\r\n\r\n- Merged, not tagged\r\n' > "$STATE/pending"
@@ -457,7 +484,15 @@ entries '- Closes fixture/kit#7'
 mutant allow-closing-notes 'if (closingReference)' 'if (false && closingReference)'
 killed allow-closing-notes 'expected issue-closing notes to be rejected' assert_closing_notes_rejected
 
-fixture mutant-trust-line-scan
-entries '<!--' '## Comment heading' '-->' '- **Product action:** Still required.'
-mutant trust-line-scan 'const parsed = markdownStructure(text)' 'const parsed = { headings: headings.map(({ name }) => name), actionCount: 0 }'
-killed trust-line-scan 'expected Markdown disagreement to stop preparation' assert_markdown_disagreement 8
+fixture mutant-skip-grammar
+entries '<!--' '## kit/v0.1.0 — 2026-01-01' '-->' '- Omitted pending note'
+mutant skip-grammar 'const kind = lineKind(content, previous, number)' \
+  'const kind = content.startsWith("#") ? "heading" : "plain"'
+killed skip-grammar 'expected invalid CHANGELOG grammar to stop preparation' assert_grammar_rejected 7 'HTML comments'
+
+fixture mutant-first-line-only
+entries '- **Product action:** Set the header.' '  Restart the client.' '  Verify the response.'
+mutant first-line-only 'text.slice(action.start, action.end)' \
+  'text.slice(action.start, action.end).split(/\r?\n/)[0]'
+apply
+killed first-line-only 'expected the Product action summary to include every continuation' assert_full_action

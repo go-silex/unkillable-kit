@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { appendFileSync, mkdtempSync, rmSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -11,12 +11,16 @@ const requiredWorkflows = ['.github/workflows/ci.yml', '.github/workflows/secret
 // Cover the repository's close-linked-issues workflow as well as GitHub's URL references.
 const issueClosing =
   /(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?\s+(?:(?:[\w.-]+\/[\w.-]+)?#\d+|https?:\/\/[^\s/]+\/[\w.-]+\/[\w.-]+\/(?:issues|pulls?)\/\d+)/i
-const productAction = 'Product action:'
+const actionPrefix = '- **Product action:** '
 const semver = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 
 type Version = readonly [bigint, bigint, bigint]
 type Base = { tag: string; sha: string; version: Version }
-type ReleaseHeading = { name: string; start: number; end: number; eol: string; number: number }
+type ReleaseHeading = { name: string; start: number; end: number; eol: string }
+type LineKind = 'blank' | 'heading' | 'item' | 'continuation' | 'plain'
+const bareBlock = /^(?:#{1,}|[-*+](?: |$)|\d+[.)](?: |$)|[<>|])/
+const referenceDefinition = /^\[(?:\\.|[^\]\\])+\]:/
+const fence = /^(?:`{3,}|~{3,})/
 type ReleaseSection = {
   prefix: string
   body: string
@@ -66,126 +70,101 @@ function git(args: string[], input?: string, extra?: NodeJS.ProcessEnv): string 
   return command('git', args, input, { GIT_NO_LAZY_FETCH: '1', ...extra })
 }
 
-// Renderer output is an event stream. NULs from document text cannot forge events.
-function markdownStructure(text: string) {
-  const headingTexts: string[] = []
-  const literal = (value: string) => value.replaceAll('\0', '\uFFFD')
-  const inline = (value: string) => `\0i${value}`
-  const rendered = Bun.markdown.render(text, {
-    text: literal,
-    codespan: (value) => inline(literal(value)),
-    link: inline,
-    image: inline,
-    emphasis: inline,
-    strikethrough: inline,
-    strong: (value) => (value === productAction ? '\0a' : inline(value)),
-    paragraph: (value) => `\0p${value}\0b`,
-    code: () => '\0b',
-    html: () => '\0b',
-    heading: (value, { level }) => {
-      if (level !== 2) return '\0b'
-      headingTexts.push(value.replaceAll('\0i', '').replaceAll('\0a', productAction))
-      return `\0h${headingTexts.length - 1}\0b`
-    },
-    blockquote: (value) => `\0q${value}\0e`,
-    listItem: (value) => `\0l${value}\0e`,
-  })
-  const headings: string[] = []
-  let depth = 0
-  let unreleased = false
-  let actionCount = 0
-  for (const [, headingId, event, action] of rendered.matchAll(
-    /\0(?:h(\d+)|([lqe])((?:\0p)?\0a)?)/g,
-  )) {
-    if (event === 'e') depth--
-    else if (event === 'l' || event === 'q') {
-      depth++
-      if (event === 'l' && unreleased && action) actionCount++
-    } else if (depth === 0) {
-      const heading = headingTexts[Number(headingId)]!
-      headings.push(heading)
-      unreleased = heading === 'Unreleased'
-    }
-  }
-  return { headings, actionCount }
+function grammarError(line: number, rule: string): never {
+  throw new Error(`CHANGELOG.md line ${line}: ${rule}`)
 }
 
-function* outsideFences(text: string) {
-  let fence: string | undefined
-  let number = 0
-  for (const line of text.matchAll(/([^\r\n]*)(\r\n|\r|\n|$)/g)) {
-    number++
-    const [, content = '', eol = ''] = line
-    const [, delimiter = '', tail = ''] = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(content) ?? []
-    if (
-      fence &&
-      delimiter[0] === fence[0] &&
-      delimiter.length >= fence.length &&
-      /^[ \t]*$/.test(tail)
-    ) {
-      fence = undefined
-      continue
-    }
-    if (fence) continue
-    if (delimiter && (delimiter[0] === '~' || !tail.includes('`'))) {
-      fence = delimiter
-      continue
-    }
-    yield { content, eol, number, start: line.index, end: line.index + line[0].length }
-  }
+function rejectBlock(content: string, number: number): void {
+  if (fence.test(content)) grammarError(number, 'code fences are not allowed')
+  if (/^[<>|]/.test(content)) grammarError(number, 'HTML, blockquotes and tables are not allowed')
+  if (/^(?=.*\|):?-+:?(?: *\| *:?-+:?)*(?: *\|)? *$/.test(content))
+    grammarError(number, 'table delimiter lines are not allowed')
+  if (referenceDefinition.test(content))
+    grammarError(number, 'link reference definitions are not allowed')
+  if (/^[-*_= ]+$/.test(content))
+    grammarError(number, 'thematic breaks and setext underlines are not allowed')
 }
 
-function markdownDisagreement(line: number, kind: string): never {
-  throw new Error(`CHANGELOG.md line ${line}: Markdown and source scan disagree on ${kind}`)
+function continuation(content: string, previous: LineKind, number: number): LineKind {
+  if (!/^ {2}\S/.test(content)) grammarError(number, 'indentation must be exactly two spaces')
+  if (/^ {2}(?:[-*+#<>|]|\d+[.)])/.test(content))
+    grammarError(number, 'a continuation cannot start with a block marker')
+  if (previous !== 'item' && previous !== 'continuation')
+    grammarError(number, 'a continuation must immediately follow its list item or continuation')
+  return 'continuation'
 }
 
-function scanActionLines(body: string) {
-  const lines = []
-  for (const line of outsideFences(body)) {
-    const entry = /^ {0,3}(?:[-+*]|\d{1,9}[.)])[ \t]+\*\*Product action:\*\*[ \t]+(.+)$/.exec(
-      line.content,
-    )
-    if (entry) lines.push({ text: `- ${entry[1]}`, number: line.number })
+function validateItem(item: string, number: number): void {
+  if (!/^\S/.test(item)) grammarError(number, 'list items must start with one space after -')
+  rejectBlock(item, number)
+  if (bareBlock.test(item))
+    grammarError(number, 'a list item cannot start with a nested block marker')
+}
+
+function lineKind(content: string, previous: LineKind, number: number): LineKind {
+  if (number === 1) {
+    if (content !== '# Changelog') grammarError(number, 'the first line must be # Changelog')
+    return 'heading'
   }
-  return lines
+  if (content.includes('\t')) grammarError(number, 'tabs are not allowed')
+  if (content.includes('<!--')) grammarError(number, 'HTML comments are not allowed')
+  if (/^ {0,3}$/.test(content)) return 'blank'
+  const trimmed = content.trimStart()
+  rejectBlock(trimmed, number)
+  if (content !== trimmed) return continuation(content, previous, number)
+  if (/^#{2,3} \S/.test(content)) return 'heading'
+  if (content.startsWith('#'))
+    grammarError(number, 'only ## and ### headings are allowed after line 1')
+  if (content.startsWith('- ')) {
+    validateItem(content.slice(2), number)
+    return 'item'
+  }
+  if (bareBlock.test(content)) grammarError(number, 'list items must start with - at column 0')
+  if (previous === 'item' || previous === 'continuation')
+    grammarError(number, 'a plain paragraph cannot immediately follow a list item or continuation')
+  return 'plain'
 }
 
 function releaseSection(text: string): ReleaseSection {
   const headings: ReleaseHeading[] = []
-  for (const line of outsideFences(text)) {
-    if (line.content.startsWith('## ')) {
-      const name = line.content
+  const actions: { start: number; end: number }[] = []
+  let action: (typeof actions)[number] | undefined
+  let previous: LineKind = 'blank'
+  let number = 0
+  for (const line of text.matchAll(/([^\r\n]*)(\r\n|\r|\n|$)/g)) {
+    const [, content = '', eol = ''] = line
+    number++
+    const kind = lineKind(content, previous, number)
+    const end = line.index + content.length
+    if (kind === 'heading' && content.startsWith('## ')) {
+      const name = content
         .slice(3)
-        .replace(/(?:^|[ \t]+)#+[ \t]*$/, '')
+        .replace(/(?:^| +)#+ *$/, '')
         .trim()
-      headings.push({ ...line, name })
+      headings.push({ name, start: line.index, end: end + eol.length, eol })
     }
-  }
-  const parsed = markdownStructure(text)
-  for (let i = 0; i < Math.max(headings.length, parsed.headings.length); i++) {
-    if (headings[i]?.name !== parsed.headings[i]) {
-      const line = headings[i]?.number ?? (headings.at(-1)?.number ?? 0) + 1
-      markdownDisagreement(line, 'release headings')
+    if (kind !== 'continuation') action = undefined
+    if (kind === 'item' && content.startsWith(actionPrefix)) {
+      action = { start: line.index, end }
+      actions.push(action)
     }
+    if (action) action.end = end
+    previous = kind
   }
   const index = headings.findIndex(({ name }) => name === 'Unreleased')
-  if (index < 0) throw new Error('CHANGELOG.md has no ## Unreleased section')
+  if (index < 0) throw new Error('CHANGELOG.md line 1: missing ## Unreleased section')
   const unreleased = headings[index]!
   const start = unreleased.end
   const end = headings[index + 1]?.start ?? text.length
-  const body = text.slice(start, end)
-  const actionLines = scanActionLines(body)
-  if (actionLines.length !== parsed.actionCount) {
-    const line = actionLines[parsed.actionCount]?.number ?? actionLines[0]?.number ?? 1
-    markdownDisagreement(unreleased.number + line, 'Product action markers')
-  }
   return {
     prefix: text.slice(0, start),
-    body,
+    body: text.slice(start, end),
     rest: text.slice(end),
     eol: unreleased.eol || '\n',
     headings,
-    actions: actionLines.map((line) => line.text),
+    actions: actions
+      .filter((action) => action.start >= start && action.start < end)
+      .map((action) => `- ${text.slice(action.start, action.end).slice(actionPrefix.length)}`),
   }
 }
 
@@ -280,9 +259,8 @@ function firstUnpublished(
   }
 }
 
-function proposalAt(sha: string): Proposal | 'unpublished' | null {
+function proposalAt(sha: string, section: ReleaseSection): Proposal | 'unpublished' | null {
   const component = componentAt(sha)
-  const section = releaseSection(git(['show', '--no-textconv', `${sha}:${changelog}`]))
   const tags = new Set(
     git(['for-each-ref', '--format=%(refname:lstrip=2)', `refs/tags/${component}/v*`]).split('\n'),
   )
@@ -559,7 +537,8 @@ function reconcile(github: GitHub, proposal: Proposal, apply: boolean): string |
 
 function readArgs() {
   const [mode, flag, rev, ...extra] = process.argv.slice(2)
-  const usage = 'usage: release-prepare.ts (--dry-run|--plan|--apply) [--sha <commit>]'
+  const usage =
+    'usage: release-prepare.ts (--check-changelog | (--dry-run|--plan|--apply) [--sha <commit>])'
   if (mode !== '--dry-run' && mode !== '--plan' && mode !== '--apply') throw new Error(usage)
   if (flag !== undefined && (flag !== '--sha' || !rev || extra.length)) throw new Error(usage)
   const sha = git([
@@ -572,8 +551,8 @@ function readArgs() {
   return { mode, sha }
 }
 
-function dryRun(sha: string): void {
-  const proposal = proposalAt(sha)
+function dryRun(sha: string, section: ReleaseSection): void {
+  const proposal = proposalAt(sha, section)
   const eligibility = 'eligibility: not checked (dry-run)'
   if (proposal === 'unpublished') {
     output(eligibility)
@@ -583,14 +562,30 @@ function dryRun(sha: string): void {
   output(`${eligibility}\n\n${detail}`)
 }
 
+function checkChangelog(): void {
+  if (existsSync('config/product/inheritance.json')) return
+  const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(
+    readFileSync(changelog),
+  )
+  releaseSection(text)
+  output('release-prepare: CHANGELOG grammar OK')
+}
+
+function isChangelogCheck(): boolean {
+  if (process.argv[2] !== '--check-changelog') return false
+  if (process.argv.length !== 3) throw new Error('usage: release-prepare.ts --check-changelog')
+  return true
+}
+
 function main(): void {
   const { mode, sha } = readArgs()
   if (git(['ls-tree', sha, '--', 'config/product/inheritance.json']).trim()) {
     output('release-prepare: Product tree; skipped')
     return
   }
+  const section = releaseSection(git(['show', '--no-textconv', `${sha}:${changelog}`]))
   if (mode === '--dry-run') {
-    dryRun(sha)
+    dryRun(sha, section)
     return
   }
   const repo = process.env.GITHUB_REPOSITORY ?? ''
@@ -607,7 +602,7 @@ function main(): void {
     output('release-prepare: CI and Secret scan are not both green for this main push; skipped')
     return
   }
-  const proposal = proposalAt(sha)
+  const proposal = proposalAt(sha, section)
   if (proposal === 'unpublished') return
   const action = proposal && reconcile(github, proposal, mode === '--apply')
   if (action && mode === '--plan' && process.env.GITHUB_OUTPUT)
@@ -618,7 +613,8 @@ function main(): void {
 }
 
 try {
-  main()
+  if (isChangelogCheck()) checkChangelog()
+  else main()
 } catch (error) {
   output(`release-prepare: ${error instanceof Error ? error.message : String(error)}`)
   process.exitCode = 1
