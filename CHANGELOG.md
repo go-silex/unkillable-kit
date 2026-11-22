@@ -4,6 +4,8 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ## Unreleased
 
+## unkillable-kit/v0.2.3 — 2026-11-22
+
 ### Product release preparation
 
 - Products can opt in to [release preparation](docs/kit/product-consumer-contract.md#product-release-preparation-opt-in) using their own changelog and push gates, without changing the inherited Kit workflow or changelog.
