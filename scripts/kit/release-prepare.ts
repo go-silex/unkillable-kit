@@ -8,10 +8,21 @@ const marker = '<!-- kit-release-proposal -->'
 const changelog = 'CHANGELOG.md'
 const shaPattern = /^[a-f0-9]{40}$/
 const requiredWorkflows = ['.github/workflows/ci.yml', '.github/workflows/secret-scan.yml']
+// Cover the repository's close-linked-issues workflow as well as GitHub's URL references.
+const issueClosing =
+  /(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?\s+(?:(?:[\w.-]+\/[\w.-]+)?#\d+|https?:\/\/[^\s/]+\/[\w.-]+\/[\w.-]+\/(?:issues|pulls?)\/\d+)/i
 
 type Version = readonly [bigint, bigint, bigint]
 type Base = { tag: string; sha: string; version: Version }
-type Proposal = { branch: string; sha: string; title: string; body: string; text: string }
+type Proposal = {
+  branch: string
+  sha: string
+  tag: string
+  alreadyInChangelog: boolean
+  title: string
+  body: string
+  text: string
+}
 
 function output(text: string): void {
   // Keep multiline dry-run Markdown readable without handing runner commands to Actions.
@@ -45,17 +56,51 @@ function git(args: string[], input?: string, extra?: NodeJS.ProcessEnv): string 
   return command('git', args, input, { GIT_NO_LAZY_FETCH: '1', ...extra })
 }
 
+function* outsideFences(text: string) {
+  let fence: string | undefined
+  for (const line of text.matchAll(/([^\r\n]*)(\r\n|\r|\n|$)/g)) {
+    const [, content = '', eol = ''] = line
+    const [, delimiter = '', tail = ''] = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(content) ?? []
+    if (
+      fence &&
+      delimiter[0] === fence[0] &&
+      delimiter.length >= fence.length &&
+      /^[ \t]*$/.test(tail)
+    ) {
+      fence = undefined
+      continue
+    }
+    if (fence) continue
+    if (delimiter && (delimiter[0] === '~' || !tail.includes('`'))) {
+      fence = delimiter
+      continue
+    }
+    yield { content, eol, start: line.index, end: line.index + line[0].length }
+  }
+}
+
 function releaseSection(text: string) {
-  const unreleased = /^## Unreleased[ \t]*(\r?\n|$)/m.exec(text)
-  if (!unreleased) throw new Error('CHANGELOG.md has no ## Unreleased section')
-  const start = unreleased.index + unreleased[0].length
-  const next = /^##[ \t]+/m.exec(text.slice(start))
-  const end = next ? start + next.index : text.length
+  const headings = []
+  for (const line of outsideFences(text)) {
+    const heading = /^ {0,3}##(?:[ \t]+(.*)|$)/.exec(line.content)
+    if (heading) {
+      headings.push({
+        ...line,
+        name: (heading[1] ?? '').replace(/(?:^|[ \t]+)#+[ \t]*$/, '').trim(),
+      })
+    }
+  }
+  const index = headings.findIndex(({ name }) => name === 'Unreleased')
+  if (index < 0) throw new Error('CHANGELOG.md has no ## Unreleased section')
+  const unreleased = headings[index]!
+  const start = unreleased.end
+  const end = headings[index + 1]?.start ?? text.length
   return {
     prefix: text.slice(0, start),
     body: text.slice(start, end),
     rest: text.slice(end),
-    eol: unreleased[1] || '\n',
+    eol: unreleased.eol || '\n',
+    headings,
   }
 }
 
@@ -70,9 +115,19 @@ function propose(
 ): Proposal | null {
   const section = releaseSection(text)
   if (!section.body.trim()) return null
-  const actions = [...section.body.matchAll(/^- \*\*Product action:\*\*[ \t]+(.+)$/gm)].map(
-    (entry) => `- ${entry[1]}`,
-  )
+  const closingReference = issueClosing.exec(section.body)
+  if (closingReference) {
+    const before = section.prefix + section.body.slice(0, closingReference.index)
+    const line = before.split(/\r\n|\r|\n/).length
+    throw new Error(`rephrase CHANGELOG.md line ${line}: release notes must not close issues`)
+  }
+  const actions: string[] = []
+  for (const { content } of outsideFences(section.body)) {
+    const entry = /^ {0,3}(?:[-+*]|\d{1,9}[.)])[ \t]+\*\*Product action:\*\*[ \t]+(.+)$/.exec(
+      content,
+    )
+    if (entry) actions.push(`- ${entry[1]}`)
+  }
   const [major, minor, patch] = base.version
   const nextVersion =
     actions.length > 0 ? `${major}.${minor + 1n}.0` : `${major}.${minor}.${patch + 1n}`
@@ -80,15 +135,17 @@ function propose(
   const header = `## ${tag} — ${date}`
   const body = [
     `Proposed tag: \`${tag}\`  \nBase tag: \`${base.tag}\` (\`${base.sha}\`)  \nSource SHA: \`${sha}\`  \nCommits in range: ${count}`,
-    `### Product actions\n\n${actions.join('\n') || 'None.'}`,
-    `${header}\n${section.body}`,
     '### Manual publication\n\n- [ ] Merge this pull request after review.\n- [ ] Wait for successful CI and Secret scan push runs on the merge commit.\n' +
       `- [ ] Create the annotated tag \`${tag}\` on that merge commit. Never move an existing tag.\n` +
       '- [ ] Publish the GitHub Release from the new CHANGELOG section, with Product actions first.',
+    `### Product actions\n\n${actions.join('\n') || 'None.'}`,
+    `${header}\n${section.body}`,
   ].join('\n\n')
   return {
     branch: `release/${component}`,
     sha,
+    tag,
+    alreadyInChangelog: section.headings.some(({ name }) => name.split(/[ \t]/, 1)[0] === tag),
     title: `chore(release): ${tag}`,
     body,
     text: `${section.prefix}${section.eol}${header}${section.eol}${section.body}${section.rest}`,
@@ -132,11 +189,11 @@ function baseAt(sha: string, component: string): Base {
   return { ...best, sha: git(['rev-parse', `refs/tags/${best.tag}^{commit}`]).trim() }
 }
 
-function proposalAt(sha: string): Proposal | null {
+function proposalAt(sha: string): Proposal | 'unpublished' | null {
   const component = componentAt(sha)
   const base = baseAt(sha, component)
   const count = git(['rev-list', '--count', `${base.sha}..${sha}`]).trim()
-  return propose(
+  const proposal = propose(
     component,
     sha,
     base,
@@ -144,6 +201,18 @@ function proposalAt(sha: string): Proposal | null {
     git(['show', '--no-textconv', `${sha}:${changelog}`]),
     new Date().toISOString().slice(0, 10),
   )
+  if (!proposal) return null
+  const ref = `refs/tags/${proposal.tag}`
+  if (git(['for-each-ref', '--format=%(refname)', ref]).split('\n').includes(ref))
+    throw new Error(`tag ${proposal.tag} already exists; will not prepare or move it`)
+  if (proposal.alreadyInChangelog) {
+    // The tag is formed only from the validated component and numeric version.
+    console.log(
+      `::warning::${proposal.tag} already has a CHANGELOG section; publish its tag first.`,
+    )
+    return 'unpublished'
+  }
+  return proposal
 }
 
 type Pull = {
@@ -412,6 +481,17 @@ function readArgs() {
   return { mode, sha }
 }
 
+function dryRun(sha: string): void {
+  const proposal = proposalAt(sha)
+  const eligibility = 'eligibility: not checked (dry-run)'
+  if (proposal === 'unpublished') {
+    output(eligibility)
+    return
+  }
+  const detail = proposal ? `${proposal.title}\n\n${proposal.body}` : 'No unreleased changes.'
+  output(`${eligibility}\n\n${detail}`)
+}
+
 function main(): void {
   const { mode, sha } = readArgs()
   if (git(['ls-tree', sha, '--', 'config/product/inheritance.json']).trim()) {
@@ -419,10 +499,7 @@ function main(): void {
     return
   }
   if (mode === '--dry-run') {
-    const proposal = proposalAt(sha)
-    output(
-      `eligibility: not checked (dry-run)\n\n${proposal ? `${proposal.title}\n\n${proposal.body}` : 'No unreleased changes.'}`,
-    )
+    dryRun(sha)
     return
   }
   const repo = process.env.GITHUB_REPOSITORY ?? ''
@@ -440,6 +517,7 @@ function main(): void {
     return
   }
   const proposal = proposalAt(sha)
+  if (proposal === 'unpublished') return
   const action = proposal && reconcile(github, proposal, mode === '--apply')
   if (action && mode === '--plan' && process.env.GITHUB_OUTPUT)
     appendFileSync(process.env.GITHUB_OUTPUT, 'write=true\n')

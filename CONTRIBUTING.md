@@ -138,8 +138,8 @@ Read [AGENTS.md](AGENTS.md) before changing Kit-owned paths. The development and
 
 ## Preparing a Kit release
 
-After `CI` and `Secret scan` pass on the same push to `main`, **Release preparation** opens or refreshes `release/unkillable-kit` with the dated CHANGELOG section. The workflow uses the [CI App](docs/kit/ci-app-setup.md) and can be dispatched on `main` to reconcile manually.
+After `CI` and `Secret scan` pass on the same push to `main`, **Release preparation** opens or refreshes `release/unkillable-kit` with the dated CHANGELOG section. The workflow uses the [CI App](docs/kit/ci-app-setup.md). Reconciliation is eventual: `main` can advance after the tip check, and a stale manual dispatch can displace a pending run. Dispatch on `main` without `sha` to reconcile the latest tip.
 
-Review the version and Product actions in the PR. A maintainer commit stops automated refreshes; bring that branch up to date yourself if needed.
+Review the version and Product actions in the PR. UI-only title and body edits are overwritten while the branch is bot-only. Push a commit to keep a correction; a maintainer commit stops automated refreshes, so bring that branch up to date yourself if needed. Rephrase issue-closing references in CHANGELOG notes before preparation.
 
-Publication stays manual. After merging, wait for both push checks on the merge commit. Create the annotated tag on that commit, then publish the GitHub Release from the new section with Product actions first. Never move an existing tag.
+Publication stays manual. After merging, delete `release/<component>`; cleanup is required after a squash or rebase of a maintainer-edited proposal. Wait for both push checks on the merge commit. Create the annotated tag on that commit, then publish the GitHub Release from the new section with Product actions first. Never move an existing tag.

@@ -719,7 +719,7 @@ run_upgrade
 test -e "$dir/product/.github/workflows/new.yml"
 pass 'adding a workflow with the existing pin allows --check and the upgrade'
 
-for change in replaced added mixed malformed; do
+for change in replaced added mixed malformed tag-comment malformed-comment mixed-case; do
   token_pin_fixture "check-token-pin-$change"
   case $change in
     replaced) file=original; pin=$new_pin ;;
@@ -727,13 +727,33 @@ for change in replaced added mixed malformed; do
     mixed)
       printf 'uses: actions/create-github-app-token@%s\n' "$old_pin" > "$dir/seed/.github/workflows/new.yml"
       file=other; pin=$new_pin ;;
-    malformed) file=new; pin="${old_pin}0" ;;
+    malformed|malformed-comment) file=new; pin="${old_pin}0" ;;
+    tag-comment) file=new; pin=v3 ;;
+    mixed-case) file=new; pin="${old_pin^^}" ;;
   esac
-  printf 'uses: actions/create-github-app-token@%s\n' "$pin" > "$dir/seed/.github/workflows/$file.yml"
+  printf 'uses: actions/create-github-app-token@%s%s\n' "$pin" \
+    "$([[ $change == *-comment ]] && printf ' # previous: actions/create-github-app-token@%s' "$old_pin")" \
+    > "$dir/seed/.github/workflows/$file.yml"
   commit_token_pins
   assert_token_pin_stops
   pass "$change token pin stops a Product upgrade"
 done
+
+token_pin_fixture check-token-pin-comment-only
+printf '  # uses: actions/create-github-app-token@v3\n' > "$dir/seed/.github/workflows/comments.yml"
+commit_token_pins
+run_upgrade --check
+grep -qx 'Pending commits: 1' "$dir/out"
+pass 'a comment-only occurrence is not a token pin'
+
+token_pin_fixture check-token-pin-head-comment
+printf 'uses: actions/example@v1 # uses: actions/create-github-app-token@%s\n' "$new_pin" > "$dir/seed/.github/workflows/comment.yml"
+commit_token_pins
+git -C "$dir/product" merge -q --no-ff -m 'inherit a comment, not a token pin' upstream/main
+printf '%s\n' "- uses: 'actions/create-github-app-token@$new_pin' # new pin" > "$dir/seed/.github/workflows/new.yml"
+commit_token_pins
+assert_token_pin_stops
+pass 'only a real uses ref at HEAD can authorize pin reuse'
 
 token_pin_fixture check-token-pin-read-failure
 printf 'uses: actions/create-github-app-token@%s\n' "$old_pin" > "$dir/seed/.github/workflows/new.yml"

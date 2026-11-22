@@ -149,6 +149,16 @@ assert_maintainer_preserved() {
   local sha=$1
   [[ $(head) == "$sha" ]] || fail 'expected maintainer head to stay unchanged'
 }
+assert_no_proposal() {
+  [[ ! -s $STATE/writes && ! -e $STATE/pull ]] || fail 'expected no GitHub writes'
+  if head 2>/dev/null; then fail 'expected no proposal branch'; fi
+}
+assert_closing_notes_rejected() {
+  if apply; then fail 'expected issue-closing notes to be rejected'; return 1; fi
+  expect_log 'rephrase CHANGELOG.md line'
+  assert_no_proposal
+}
+
 
 fixture patch
 entries '- Standard change'
@@ -207,6 +217,66 @@ apply
 [[ $(head) == "$refreshed" && $(jq -r .title "$STATE/pull") == 'chore(release): kit/v0.2.0' ]]
 [[ $(cat "$STATE/writes") == $'POST pulls\nPATCH pulls/7\nPATCH pulls/7' ]]
 pass 'minor bump, untrusted notes as data, one-commit branch, idempotent refresh and metadata-only repair'
+
+for closing in 'Closes fixture/kit#7' 'FiXeD: https://github.com/fixture/kit/issues/7' \
+    'resolve: https://github.com/fixture/kit/pull/7' $'Resolves\r\n#7'; do
+  fixture "closing-${closing%%[ :]*}"
+  entries "- $closing"
+  assert_closing_notes_rejected
+done
+pass 'issue-closing keywords in generated notes stop before writing'
+
+fixture neutral-reference
+entries '- Refs fixture/kit#7' '<!--'
+apply
+jq -e '.body | index("Proposed tag:") < index("### Manual publication") and
+  index("Publish the GitHub Release") < index("### Product actions") and
+  index("### Product actions") < index("- Refs fixture/kit#7") and
+  index("- Refs fixture/kit#7") < index("<!--")' "$STATE/pull" >/dev/null
+pass 'neutral references stay verbatim; metadata and checklist precede generated Markdown'
+
+fixture fenced-heading
+entries '  ~~~~markdown' '### Example heading' '## Example section' '  ~~~' '```' \
+  '  ~~~~~' '- **Product action:** Update the client.'
+apply
+assert_preserved v0.2.0
+jq -e '.body | contains("## Example section") and contains("- Update the client.")' "$STATE/pull" >/dev/null
+pass 'fenced headings do not end Unreleased or drop later migration notes'
+
+fixture fenced-marker
+entries '   ````md' '   ```' '- **Product action:** Example only.' '   `````' \
+  '- Description with **Product action:** in the middle.'
+assert_dry_run_patch
+expect_log 'None.'
+pass 'markers inside fences or in the middle of a list item do not bump'
+
+fixture pending-publication
+printf '\r\n## kit/v0.1.1 — 2026-01-02\r\n\r\n- Merged, not tagged\r\n' > "$STATE/pending"
+cat "$STATE/old" >> "$STATE/pending"
+mv "$STATE/pending" "$STATE/old"
+entries '- Next patch'
+apply
+expect_log '::warning::'
+expect_log 'kit/v0.1.1'
+expect_log 'publish its tag first'
+assert_no_proposal
+pass 'an already merged release section waits for manual tagging'
+
+fixture colliding-tag
+entries '- Next patch'
+git -C "$repo" switch -qc unrelated "$base"
+git -C "$repo" commit -qm 'off main' --allow-empty
+git -C "$repo" tag kit/v0.1.1
+git -C "$repo" switch -q main
+local_tags > "$STATE/local.before"
+remote_tags > "$STATE/remote.before"
+if apply; then fail 'expected a tag collision to fail'; fi
+expect_log 'tag kit/v0.1.1 already exists'
+assert_no_proposal
+cmp -s "$STATE/local.before" <(local_tags)
+cmp -s "$STATE/remote.before" <(remote_tags)
+pass 'an existing tag off the source history blocks the proposal without moving tags'
+
 
 fixture empty
 source_commit 'no unreleased notes'
@@ -351,3 +421,13 @@ git -C "$repo" switch -q main
 source_commit 'advance main past the edited proposal'
 apply
 killed ignore-maintainer 'expected maintainer head to stay unchanged' assert_maintainer_preserved "$human"
+
+fixture mutant-allow-closing-notes
+entries '- Closes fixture/kit#7'
+mutant allow-closing-notes 'if (closingReference)' 'if (false && closingReference)'
+killed allow-closing-notes 'expected issue-closing notes to be rejected' assert_closing_notes_rejected
+
+fixture mutant-ignore-fences
+entries '```md' '- **Product action:** Example only.' '```' '- Actual patch'
+mutant ignore-fences 'if (fence) continue' 'if (false && fence) continue'
+killed ignore-fences 'missing output: chore(release): kit/v0.1.1' assert_dry_run_patch

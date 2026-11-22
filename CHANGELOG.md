@@ -6,6 +6,7 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ### Kit release preparation
 
+- **Product action:** Before upgrading, set `.dev/stack.yml` `release.component` to your own component if it is `roxabi-boilerplate-cf` or `unkillable-kit`. The Product stack contract rejects both Kit values.
 - After green CI and Secret scan on `main`, the Kit opens or refreshes one release-preparation PR. Maintainers review the proposal and publish the tag and GitHub Release manually.
 - Kit upgrades continue to stop on a new `actions/create-github-app-token` pin; adding a workflow that reuses an exact pin already in use is not a bump.
 
