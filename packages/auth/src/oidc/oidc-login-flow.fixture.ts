@@ -292,5 +292,4 @@ export {
   setup,
   start,
   startGoogleLogin,
-  VERIFIER,
 }
