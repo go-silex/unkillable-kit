@@ -8,23 +8,25 @@ const ORIGIN = 'https://auth.example.test'
 export default {
   async fetch(
     request: Request,
-    env: { DB: KitD1Database },
+    env: { DB: KitD1Database; DB_SECONDARY: KitD1Database; OIDC_ENABLED: boolean },
     ctx: { waitUntil(promise: Promise<unknown>): void },
   ) {
     const pending: Promise<unknown>[] = []
     const auth = createBetterAuth({
-      database: env.DB,
+      database: request.headers.get('x-test-database') === 'secondary' ? env.DB_SECONDARY : env.DB,
       secret: 'test-better-auth-secret-xxxxxxxx32c!!',
       baseURL: ORIGIN,
       trustedOrigins: [ORIGIN],
       allowPublicSignup: true,
-      oidcProvider: createOidcProvider({
-        loginPage: '/login',
-        waitUntil: (promise) => {
-          pending.push(promise)
-          ctx.waitUntil(promise)
-        },
-      }),
+      oidcProvider: env.OIDC_ENABLED
+        ? createOidcProvider({
+            loginPage: '/login',
+            waitUntil: (promise) => {
+              pending.push(promise)
+              ctx.waitUntil(promise)
+            },
+          })
+        : undefined,
     })
     const path = new URL(request.url).pathname
     if (path === '/__test/register') {

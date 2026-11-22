@@ -4,6 +4,20 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ## Unreleased
 
+### OpenID provider
+
+- Enforce `prompt=login` and `max_age` at authorization code issuance using
+  password sign-in evidence (go-silex/unkillable-kit#121).
+- **Product action:** The OIDC provider requires `better-auth`,
+  `@better-auth/core`, and `@better-auth/oauth-provider` at exactly `1.7.27`,
+  enforced at startup when OIDC is enabled. Sync and
+  apply the new `oidc_provider` migration to the D1 binding with the canonical
+  `session` table before deploying. Keep authorization and continuation traffic
+  on one Kit version during cutover. Restart all pending pre-upgrade
+  authorizations from the relying party, even without freshness constraints.
+  When the App receives `OIDC_RESTART_REQUIRED`, start a new authorization rather
+  than retrying with the same signed query.
+
 ## unkillable-kit/v0.3.0 — 2026-11-22
 
 ### OIDC logout

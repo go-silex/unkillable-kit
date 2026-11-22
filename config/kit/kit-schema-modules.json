@@ -151,6 +151,12 @@
       "file": "0027_better_auth_oidc_provider.sql",
       "set": "oidc_provider",
       "kitSha256": "c2faba31520094e0ca6f851fbd7b0108a797001389ca3ae73f49121799976a60"
+    },
+    {
+      "id": "better_auth_oidc_fresh_login",
+      "file": "0028_better_auth_oidc_fresh_login.sql",
+      "set": "oidc_provider",
+      "kitSha256": "f1264c7f7172dd7f0829b409621e32300594ff856938266c5b3c6e900f510e38"
     }
   ]
 }

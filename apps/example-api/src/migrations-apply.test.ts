@@ -9,6 +9,7 @@ const migDir = join(__dirname, '../migrations')
 const files = readdirSync(migDir)
   .filter((file) => file.endsWith('.sql'))
   .sort()
+const oidcFreshLoginMigration = '0028_better_auth_oidc_fresh_login.sql'
 
 function applyThrough(sqlite: Database.Database, last: string): void {
   for (const name of files) {
@@ -49,6 +50,7 @@ describe('D1 migrations', () => {
     expect(files).toContain('0002_api_keys_prefix.sql')
     expect(files).toContain('0014_better_auth_1_7_additive.sql')
     expect(files).toContain('0015_api_keys_org_not_null.sql')
+    expect(files).toContain(oidcFreshLoginMigration)
     applyThrough(sqlite, files.at(-1)!)
     const cols = sqlite.prepare(`PRAGMA table_info(api_keys)`).all() as {
       name: string
@@ -85,7 +87,48 @@ describe('D1 migrations', () => {
     expect(accountIndexes).toContainEqual(
       expect.objectContaining({ name: 'account_issuer_accountId_uidx', unique: 1 }),
     )
+    expect(
+      sqlite
+        .prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`)
+        .pluck()
+        .get('oidc_session_authentication'),
+    ).toBe('oidc_session_authentication')
     sqlite.close()
+  })
+
+  it('adds OIDC password evidence without backfilling existing sessions and cascades deletion', () => {
+    const sqlite = new Database(':memory:')
+    try {
+      sqlite.pragma('foreign_keys = ON')
+      applyThrough(sqlite, '0027_better_auth_oidc_provider.sql')
+      insertLegacyAccount(sqlite)
+      sqlite
+        .prepare(
+          `INSERT INTO session (id, expires_at, token, created_at, updated_at, user_id)
+           VALUES ('session_1', 2000, 'token_1', 1000, 1000, 'user_1')`,
+        )
+        .run()
+
+      applyMigration(sqlite, oidcFreshLoginMigration)
+      expect(sqlite.prepare('SELECT id FROM session').pluck().all()).toEqual(['session_1'])
+      expect(sqlite.prepare('SELECT * FROM oidc_session_authentication').all()).toEqual([])
+
+      const insert = sqlite.prepare(
+        `INSERT INTO oidc_session_authentication (session_id, method, authenticated_at)
+         VALUES (?, ?, ?)`,
+      )
+      expect(() => insert.run('session_1', 'magic-link', 1000)).toThrow(/CHECK constraint failed/)
+      expect(() => insert.run('session_1', 'password', 0)).toThrow(/CHECK constraint failed/)
+      expect(() => insert.run('session_1', 'password', 1000.5)).toThrow(/CHECK constraint failed/)
+      expect(() => insert.run('missing', 'password', 1000)).toThrow(/FOREIGN KEY constraint failed/)
+      expect(insert.run('session_1', 'password', 1000).changes).toBe(1)
+      expect(() => insert.run('session_1', 'password', 1000)).toThrow(/UNIQUE constraint failed/)
+
+      sqlite.prepare('DELETE FROM session WHERE id = ?').run('session_1')
+      expect(sqlite.prepare('SELECT * FROM oidc_session_authentication').all()).toEqual([])
+    } finally {
+      sqlite.close()
+    }
   })
 
   it('adds credential identity without replacing account and remains compatible with 1.6 inserts', () => {

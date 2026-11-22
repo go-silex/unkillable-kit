@@ -6,8 +6,8 @@ import { throttleBetterAuthRequest } from '../repos/ba-throttle'
 import type { KitRepoDb } from '../repos/db-type'
 import { clientIp } from '../repos/rate-limit'
 import { scrubBetterAuthServerError } from './ba-server-error'
-import { normalizePasswordSignInResponse } from './sign-in-anti-enum'
-import { normalizeEmailSignUpResponse } from './sign-up-anti-enum'
+import { isPasswordSignInPath, normalizePasswordSignInResponse } from './sign-in-anti-enum'
+import { isEmailSignUpPath, normalizeEmailSignUpResponse } from './sign-up-anti-enum'
 
 export type BetterAuthHandlerEnv = {
   Variables: {
@@ -43,6 +43,34 @@ export function createBetterAuthHandler(): Handler<BetterAuthHandlerEnv> {
     const raw = await auth.handler(c.req.raw)
     const requestId = c.get('requestId') || 'req_unknown'
     const res = scrubBetterAuthServerError(raw, requestId)
+    if (
+      res.status === 409 &&
+      c.req.raw.method === 'POST' &&
+      (isPasswordSignInPath(new URL(c.req.raw.url).pathname) ||
+        isEmailSignUpPath(new URL(c.req.raw.url).pathname))
+    ) {
+      // Preflight can request restart before account handling. If a capsule
+      // expires later, a successful credential check may already have written
+      // a session; never pass its cookie through with the restart signal.
+      const body: unknown = await res
+        .clone()
+        .json()
+        .catch(() => null)
+      if (
+        body &&
+        typeof body === 'object' &&
+        'code' in body &&
+        body.code === 'OIDC_RESTART_REQUIRED'
+      ) {
+        return Response.json(
+          {
+            error: { code: body.code, message: 'Restart authorization from the client.' },
+            requestId,
+          },
+          { status: 409, headers: { 'cache-control': 'no-store', 'x-request-id': requestId } },
+        )
+      }
+    }
     const signIn = normalizePasswordSignInResponse(c.req.raw, res, requestId)
     return normalizeEmailSignUpResponse(c.req.raw, signIn, requestId)
   }

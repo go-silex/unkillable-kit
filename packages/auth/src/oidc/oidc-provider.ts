@@ -1,10 +1,12 @@
-import { defineRequestState } from '@better-auth/core/context'
+import { defineRequestState, getBetterAuthVersion } from '@better-auth/core/context'
 import { oauthProvider } from '@better-auth/oauth-provider'
+import type { BetterAuthPlugin } from 'better-auth'
 import { APIError, createAuthMiddleware } from 'better-auth/api'
 import { jwt } from 'better-auth/plugins'
 import type { KitBetterAuth } from '../better-auth-factory'
 import type { OidcProviderConfig } from './oidc-config'
 import { oidcFreshLoginGuard } from './oidc-fresh-login-guard'
+import { createOidcFreshLoginPolicy } from './oidc-fresh-login-policy'
 import { createOidcLogoutPlugin } from './oidc-logout'
 import { rejectOidcSignupPrompt, withOidcPromptPolicy } from './oidc-prompt-create'
 
@@ -39,7 +41,8 @@ function hasSafeOidcResponseQuery(uri: string) {
 export function createOidcProvider(options: OidcProviderOptions): OidcProviderConfig {
   return {
     waitUntil: options.waitUntil,
-    plugins: (isActive) => {
+    compose: (isActive, database) => {
+      const freshness = createOidcFreshLoginPolicy(database, options.loginPage)
       const userInfoScopes = defineRequestState<string[] | undefined>(() => undefined)
       const assertActive = async (userId: string) => {
         let active = false
@@ -66,7 +69,7 @@ export function createOidcProvider(options: OidcProviderOptions): OidcProviderCo
           ...(scopes.includes('profile') ? { name: user.name } : {}),
         }
       }
-      return [
+      const plugins: BetterAuthPlugin[] = [
         {
           id: 'kit-oidc-policy',
           hooks: {
@@ -120,6 +123,7 @@ export function createOidcProvider(options: OidcProviderOptions): OidcProviderCo
           },
         },
         oidcFreshLoginGuard,
+        freshness.preflight,
         // OpenID Connect Core §15.1 requires RS256 support; the JWT plugin defaults to EdDSA.
         jwt({ jwks: { keyPairConfig: { alg: 'RS256' } }, disableSettingJwtHeader: true }),
         withOidcPromptPolicy(
@@ -190,9 +194,31 @@ export function createOidcProvider(options: OidcProviderOptions): OidcProviderCo
               return userClaims(user, scopes)
             },
           }),
+          freshness.capture,
         ),
+        freshness.enforcement,
+        {
+          id: 'kit-oidc-version',
+          init: (ctx) => {
+            const pinned = '1.7.27'
+            // Better Auth 1.7.27 depends on better-call exactly 1.4.6.
+            // better-call exposes no runtime version; dependency overrides must preserve that pin.
+            if (
+              ctx.version !== pinned ||
+              getBetterAuthVersion() !== pinned ||
+              ctx.options.plugins?.find((plugin) => plugin.id === 'jwt')?.version !== pinned ||
+              ctx.options.plugins?.find((plugin) => plugin.id === 'oauth-provider')?.version !==
+                pinned
+            ) {
+              throw new Error(
+                'The Kit OIDC provider requires Better Auth, core and oauth-provider 1.7.27',
+              )
+            }
+          },
+        },
         createOidcLogoutPlugin(),
       ]
+      return { plugins, protectResponse: freshness.protectResponse }
     },
   }
 }
