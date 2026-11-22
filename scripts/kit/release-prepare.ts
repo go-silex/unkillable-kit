@@ -14,10 +14,13 @@ const issueClosing =
 const actionMarker = '- **Product action:**'
 const actionPrefix = `${actionMarker} `
 const semver = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
+const releaseHeading = /^([0-9]+\.[0-9]+\.[0-9]+) — [0-9]{4}-[0-9]{2}-[0-9]{2}(?![\s\S])/
+const characterReference = /&(?:#[xX][0-9a-fA-F]+|#[0-9]+|[a-zA-Z][a-zA-Z0-9]*);/
 
 type Version = readonly [bigint, bigint, bigint]
 type Base = { tag: string; sha: string; version: Version }
-type ReleaseHeading = { name: string; start: number; end: number; eol: string }
+type Heading = { start: number; end: number; eol: string }
+type ReleaseHeading = Heading & { tag: string; version: Version }
 type LineKind = 'blank' | 'heading' | 'item' | 'continuation' | 'plain'
 const bareBlock = /^(?:#{1,}|[-*+](?: |$)|\d+[.)](?: |$)|[<>|])/
 const fence = /^(?:`{3,}|~{3,})/
@@ -114,6 +117,16 @@ function isProductAction(content: string, number: number): boolean {
   return false
 }
 
+function parseVersion(text: string): Version | undefined {
+  const parsed = semver.exec(text)
+  return parsed ? [BigInt(parsed[1]!), BigInt(parsed[2]!), BigInt(parsed[3]!)] : undefined
+}
+
+function compareVersions(a: Version, b: Version): number {
+  const difference = a.findIndex((value, index) => value !== b[index])
+  return difference < 0 ? 0 : a[difference]! > b[difference]! ? 1 : -1
+}
+
 function lineKind(content: string, previous: LineKind, number: number): LineKind {
   if (number === 1) {
     if (content !== '# Changelog') grammarError(number, 'the first line must be # Changelog')
@@ -121,6 +134,8 @@ function lineKind(content: string, previous: LineKind, number: number): LineKind
   }
   if (content.includes('\t')) grammarError(number, 'tabs are not allowed')
   if (content.includes('<!--')) grammarError(number, 'HTML comments are not allowed')
+  if (characterReference.test(content))
+    grammarError(number, 'HTML character references are not allowed')
   if (/^ {0,3}$/.test(content)) return 'blank'
   const trimmed = content.trimStart()
   rejectBlock(trimmed, number)
@@ -138,19 +153,47 @@ function lineKind(content: string, previous: LineKind, number: number): LineKind
   return 'plain'
 }
 
-function uniqueHeading(content: string, number: number, headingNames: Set<string>): string {
-  const name = content
-    .slice(3)
-    .replace(/(?:^| +)#+ *$/, '')
-    .trim()
-  if (headingNames.has(name)) grammarError(number, 'duplicate ## heading')
-  headingNames.add(name)
-  return name
+function parseReleaseHeading(
+  content: string,
+  component: string,
+  previous: ReleaseHeading | undefined,
+  number: number,
+): Pick<ReleaseHeading, 'tag' | 'version'> {
+  const prefix = `## ${component}/v`
+  const label = content.startsWith(prefix)
+    ? releaseHeading.exec(content.slice(prefix.length))?.[1]
+    : undefined
+  const version = label && parseVersion(label)
+  if (!version)
+    grammarError(number, `expected canonical ## ${component}/vMAJOR.MINOR.PATCH — YYYY-MM-DD`)
+  if (previous) {
+    const order = compareVersions(previous.version, version)
+    if (order === 0) grammarError(number, 'duplicate release version')
+    if (order < 0) grammarError(number, 'release versions must be strictly descending')
+  }
+  return { tag: `${component}/v${label}`, version }
 }
 
-function releaseSection(text: string): ReleaseSection {
+function parseSectionHeading(
+  content: string,
+  heading: Heading,
+  unreleased: Heading | undefined,
+  releases: ReleaseHeading[],
+  component: string,
+  number: number,
+): Heading {
+  if (content === '## Unreleased') {
+    if (unreleased) grammarError(number, 'duplicate ## Unreleased heading')
+    return heading
+  }
+  if (!unreleased) grammarError(number, 'the first ## heading must be exactly ## Unreleased')
+  releases.push({ ...heading, ...parseReleaseHeading(content, component, releases.at(-1), number) })
+  return unreleased
+}
+
+function releaseSection(text: string, component: string): ReleaseSection {
+  let unreleased: Heading | undefined
   const headings: ReleaseHeading[] = []
-  const headingNames = new Set<string>()
   const actions: { start: number; end: number }[] = []
   let action: (typeof actions)[number] | undefined
   let previous: LineKind = 'blank'
@@ -161,8 +204,14 @@ function releaseSection(text: string): ReleaseSection {
     const kind = lineKind(content, previous, number)
     const end = line.index + content.length
     if (kind === 'heading' && content.startsWith('## ')) {
-      const name = uniqueHeading(content, number, headingNames)
-      headings.push({ name, start: line.index, end: end + eol.length, eol })
+      unreleased = parseSectionHeading(
+        content,
+        { start: line.index, end: end + eol.length, eol },
+        unreleased,
+        headings,
+        component,
+        number,
+      )
     }
     if (kind !== 'continuation') action = undefined
     if (kind === 'item' && isProductAction(content, number)) {
@@ -172,11 +221,9 @@ function releaseSection(text: string): ReleaseSection {
     if (action) action.end = end
     previous = kind
   }
-  const index = headings.findIndex(({ name }) => name === 'Unreleased')
-  if (index < 0) throw new Error('CHANGELOG.md line 1: missing ## Unreleased section')
-  const unreleased = headings[index]!
+  if (!unreleased) grammarError(1, 'missing ## Unreleased section')
   const start = unreleased.end
-  const end = headings[index + 1]?.start ?? text.length
+  const end = headings[0]?.start ?? text.length
   return {
     prefix: text.slice(0, start),
     body: text.slice(start, end),
@@ -207,9 +254,15 @@ function propose(
   }
   const { actions } = section
   const [major, minor, patch] = base.version
-  const nextVersion =
-    actions.length > 0 ? `${major}.${minor + 1n}.0` : `${major}.${minor}.${patch + 1n}`
-  const tag = `${component}/v${nextVersion}`
+  const nextVersion: Version =
+    actions.length > 0 ? [major, minor + 1n, 0n] : [major, minor, patch + 1n]
+  const tag = `${component}/v${nextVersion.join('.')}`
+  const latest = section.headings[0]
+  if (latest && compareVersions(nextVersion, latest.version) <= 0) {
+    throw new Error(
+      `proposed tag ${tag} must be newer than the latest CHANGELOG release ${latest.tag}`,
+    )
+  }
   const header = `## ${tag} — ${date}`
   const body = [
     `Proposed tag: \`${tag}\`  \nBase tag: \`${base.tag}\` (\`${base.sha}\`)  \nSource SHA: \`${sha}\`  \nCommits in range: ${count}`,
@@ -229,8 +282,8 @@ function propose(
   }
 }
 
-function componentAt(sha: string): string {
-  const config = Bun.YAML.parse(git(['show', '--no-textconv', `${sha}:.dev/stack.yml`])) as {
+function releaseComponent(text: string): string {
+  const config = Bun.YAML.parse(text) as {
     release?: { component?: unknown }
   } | null
   const value = config?.release?.component
@@ -250,42 +303,22 @@ function baseAt(sha: string, component: string): Base {
   ]).split('\n')
   let best: { tag: string; version: Version } | undefined
   for (const tag of tags) {
-    const parsed = semver.exec(tag.slice(prefix.length))
-    if (!parsed) continue
-    const version: Version = [BigInt(parsed[1]!), BigInt(parsed[2]!), BigInt(parsed[3]!)]
-    const firstDifference = best?.version.findIndex((value, index) => value !== version[index])
-    if (
-      !best ||
-      (firstDifference !== undefined &&
-        firstDifference >= 0 &&
-        version[firstDifference]! > best.version[firstDifference]!)
-    )
-      best = { tag, version }
+    const version = parseVersion(tag.slice(prefix.length))
+    if (version && (!best || compareVersions(version, best.version) > 0)) best = { tag, version }
   }
   if (!best) throw new Error(`no ${prefix}X.Y.Z tag is an ancestor of the source SHA`)
   return { ...best, sha: git(['rev-parse', `refs/tags/${best.tag}^{commit}`]).trim() }
 }
 
-function firstUnpublished(
-  headings: ReleaseHeading[],
+function proposalAt(
+  sha: string,
+  section: ReleaseSection,
   component: string,
-  tags: Set<string>,
-): string | undefined {
-  const prefix = `${component}/v`
-  for (const { name } of headings) {
-    const [tag = ''] = name.split(/[ \t]/, 1)
-    if (tag.startsWith(prefix) && semver.test(tag.slice(prefix.length)) && !tags.has(tag)) {
-      return tag
-    }
-  }
-}
-
-function proposalAt(sha: string, section: ReleaseSection): Proposal | 'unpublished' | null {
-  const component = componentAt(sha)
+): Proposal | 'unpublished' | null {
   const tags = new Set(
     git(['for-each-ref', '--format=%(refname:lstrip=2)', `refs/tags/${component}/v*`]).split('\n'),
   )
-  const unpublished = firstUnpublished(section.headings, component, tags)
+  const unpublished = section.headings.find(({ tag }) => !tags.has(tag))?.tag
   if (unpublished) {
     console.log(`::warning::${unpublished} already has a CHANGELOG section; publish its tag first.`)
     return 'unpublished'
@@ -572,8 +605,8 @@ function readArgs() {
   return { mode, sha }
 }
 
-function dryRun(sha: string, section: ReleaseSection): void {
-  const proposal = proposalAt(sha, section)
+function dryRun(sha: string, section: ReleaseSection, component: string): void {
+  const proposal = proposalAt(sha, section, component)
   const eligibility = 'eligibility: not checked (dry-run)'
   if (proposal === 'unpublished') {
     output(eligibility)
@@ -588,7 +621,7 @@ function checkChangelog(): void {
   const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(
     readFileSync(changelog),
   )
-  releaseSection(text)
+  releaseSection(text, releaseComponent(readFileSync('.dev/stack.yml', 'utf8')))
   output('release-prepare: CHANGELOG grammar OK')
 }
 
@@ -604,9 +637,10 @@ function main(): void {
     output('release-prepare: Product tree; skipped')
     return
   }
-  const section = releaseSection(git(['show', '--no-textconv', `${sha}:${changelog}`]))
+  const component = releaseComponent(git(['show', '--no-textconv', `${sha}:.dev/stack.yml`]))
+  const section = releaseSection(git(['show', '--no-textconv', `${sha}:${changelog}`]), component)
   if (mode === '--dry-run') {
-    dryRun(sha, section)
+    dryRun(sha, section, component)
     return
   }
   const repo = process.env.GITHUB_REPOSITORY ?? ''
@@ -623,7 +657,7 @@ function main(): void {
     output('release-prepare: CI and Secret scan are not both green for this main push; skipped')
     return
   }
-  const proposal = proposalAt(sha, section)
+  const proposal = proposalAt(sha, section, component)
   if (proposal === 'unpublished') return
   const action = proposal && reconcile(github, proposal, mode === '--apply')
   if (action && mode === '--plan' && process.env.GITHUB_OUTPUT)

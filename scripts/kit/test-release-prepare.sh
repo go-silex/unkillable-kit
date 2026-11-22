@@ -249,7 +249,9 @@ pass 'neutral references stay verbatim; metadata and checklist precede generated
 
 for invalid in fence tilde-fence nested-fence html-comment html-block quote table table-delimiter nested-heading nested-item \
     lazy reference multiline-reference continuation-reference setext thematic pipe-free-table tabs code indented-blank \
-    star plus ordered heading disconnected empty-action action-spaces near-miss lower-case italic-action duplicate-unreleased duplicate-release; do
+    star plus ordered heading disconnected empty-action action-spaces near-miss lower-case italic-action \
+    duplicate-unreleased duplicate-release inline-release nbsp-release formatted-unreleased wrong-component \
+    trailing-release ascii-date semver-order unreleased-first html-decimal html-hex html-named; do
   fixture "grammar-$invalid"
   line=7
   case $invalid in
@@ -283,8 +285,24 @@ for invalid in fence tilde-fence nested-fence html-comment html-block quote tabl
     near-miss) rule='Product action marker'; entries '- **Product action**: Migrate the client.' ;;
     lower-case) rule='Product action marker'; entries '- **product action:** Migrate the client.' ;;
     italic-action) rule='Product action marker'; entries '- *Product action:* Migrate the client.' ;;
-    duplicate-unreleased) rule='duplicate ## heading'; line=8; entries '- First change' '## Unreleased' '- **Product action:** Another change.' ;;
-    duplicate-release) rule='duplicate ## heading'; line=10; entries '## kit/v0.1.0 — 2026-01-01' '- Duplicate section' ;;
+    duplicate-unreleased) rule='duplicate ## Unreleased'; line=8; entries '- First change' '## Unreleased' '- **Product action:** Another change.' ;;
+    duplicate-release) rule='duplicate release version'; line=10; entries '## kit/v0.1.0 — 2026-01-02' '- Duplicate section' ;;
+    inline-release) rule='expected canonical'; line=8; entries '- First change' '## `kit/v0.1.1` — 2026-01-02' ;;
+    nbsp-release) rule='expected canonical'; entries $'## kit/v0.1.1\u00a0—\u00a02026-01-02' ;;
+    formatted-unreleased) rule='expected canonical'; line=8; entries '- First change' '## **Unreleased**' '- **Product action:** Another change.' ;;
+    wrong-component) rule='expected canonical'; entries '## other-kit/v0.1.1 — 2026-01-02' ;;
+    trailing-release) rule='expected canonical'; entries '## kit/v0.1.1 — 2026-01-02 ' ;;
+    ascii-date) rule='expected canonical'; entries '## kit/v0.1.1 — ２０２６-01-02' ;;
+    semver-order) rule='strictly descending'; line=8; entries '## kit/v0.2.0 — 2026-01-02' '## kit/v0.10.0 — 2026-01-03' ;;
+    unreleased-first)
+      rule='first ## heading'; line=3; entries '- First change'
+      { printf '# Changelog\r\n\r\n## kit/v0.2.0 — 2026-01-02\r\n'; tail -n +3 "$repo/CHANGELOG.md"; } > "$STATE/out-of-order"
+      mv "$STATE/out-of-order" "$repo/CHANGELOG.md"
+      source_commit 'put a release before Unreleased'
+      ;;
+    html-decimal) rule='HTML character references'; entries '- **Product&#32;action:** Migrate.' ;;
+    html-hex) rule='HTML character references'; entries '- Item' '  More&nbsp information&#x20;here.'; line=8 ;;
+    html-named) rule='HTML character references'; entries '### Named &nbsp; text' ;;
   esac
   assert_grammar_rejected "$line" "$rule"
   if invoke --check-changelog; then fail "doc gate accepted $invalid"; fi
@@ -356,6 +374,21 @@ assert_no_proposal
 cmp -s "$STATE/local.before" <(local_tags)
 cmp -s "$STATE/remote.before" <(remote_tags)
 pass 'an existing tag off the source history blocks the proposal without moving tags'
+
+fixture older-than-latest-heading
+printf '## kit/v0.10.0 — 2026-01-02\r\n\r\n- Newer release\r\n\r\n' > "$STATE/releases"
+cat "$STATE/old" >> "$STATE/releases"
+mv "$STATE/releases" "$STATE/old"
+entries '- New change with a bare &'
+git -C "$repo" switch -qc unrelated "$base"
+git -C "$repo" commit -qm 'off main' --allow-empty
+git -C "$repo" tag kit/v0.10.0
+git -C "$repo" switch -q main
+invoke --check-changelog
+if apply; then fail 'expected a proposal older than the latest section to fail'; fi
+expect_log 'must be newer than the latest CHANGELOG release kit/v0.10.0'
+assert_no_proposal
+pass 'a tag off main cannot make the proposed CHANGELOG go out of version order'
 
 
 fixture empty
@@ -508,7 +541,7 @@ mutant allow-closing-notes 'if (closingReference)' 'if (false && closingReferenc
 killed allow-closing-notes 'expected issue-closing notes to be rejected' assert_closing_notes_rejected
 
 fixture mutant-skip-grammar
-entries '<!--' '## Hidden heading' '-->' '- Omitted pending note'
+entries '<!--' '- Omitted pending note'
 mutant skip-grammar 'const kind = lineKind(content, previous, number)' \
   'const kind = content.startsWith("#") ? "heading" : "plain"'
 killed skip-grammar 'expected invalid CHANGELOG grammar to stop preparation' assert_grammar_rejected 7 'HTML comments'
@@ -532,7 +565,14 @@ killed strip-marker 'expected byte-identical Product action bullets in the summa
 
 fixture mutant-duplicate-unreleased
 entries '- First change' '## Unreleased' '- **Product action:** Another change.'
-mutant duplicate-unreleased 'if (headingNames.has(name))' \
-  'if (name !== "Unreleased" && headingNames.has(name))'
+mutant duplicate-unreleased "if (unreleased) grammarError(number, 'duplicate ## Unreleased heading')" \
+  "if (unreleased) return unreleased"
 killed duplicate-unreleased 'expected invalid CHANGELOG grammar to stop preparation' \
-  assert_grammar_rejected 8 'duplicate ## heading'
+  assert_grammar_rejected 8 'duplicate ## Unreleased'
+
+fixture mutant-noncanonical-release
+entries '- First change' '## `kit/v0.1.1` — 2026-01-02'
+mutant noncanonical-release 'const prefix = `## ${component}/v`' \
+  'content = content.replaceAll(String.fromCharCode(96), ""); const prefix = `## ${component}/v`'
+killed noncanonical-release 'expected invalid CHANGELOG grammar to stop preparation' \
+  assert_grammar_rejected 8 'expected canonical'
