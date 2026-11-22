@@ -38,13 +38,13 @@ export default {
     }
     if (path === '/__test/logout') {
       const { userId } = (await request.json()) as { userId: string }
-      await endOidcUserSessions(auth, userId)
+      const result = await endOidcUserSessions(auth, userId)
       ctx.waitUntil(
         Promise.allSettled(pending).then(() =>
           fetch('https://client.example.test/__test/background-complete', { method: 'POST' }),
         ),
       )
-      return Response.json({ success: true, backgroundTasks: pending.length })
+      return Response.json({ ...result, backgroundTasks: pending.length })
     }
     return auth.handler(request)
   },

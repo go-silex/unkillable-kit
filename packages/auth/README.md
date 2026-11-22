@@ -133,7 +133,17 @@ If logout planning or the session snapshot fails, the result reports
 `success: true` and `coverage: 'unknown'`; do not interpret that as complete
 notification coverage. Its `truncated` value is a boolean when coverage is
 known, and `null` whenever planning fails.
-Use it before `disableAccount` or any other direct session deletion: once
+Unsupported refresh scopes skip only the affected session and report unknown coverage.
+On D1, planning deduplicates session/client pairs but still copies live refresh
+rows one for one so the provider can revoke eligible tokens by ID after deletion.
+Refresh revocation runs in batches. If a batch fails, the provider logs the
+failure and still attempts notification. Other batches are attempted, but some
+tokens may remain unrevoked; the result does not report revocation write success.
+The Kit's D1 factory registers its own adapters, so deferred effects run on the
+database that planned the logout. There is no public way to register a custom
+transaction adapter, so when logout runs inside one, the session is deleted but
+deferred revocation and notification are skipped, logged, and reported as unknown coverage.
+Call `endOidcUserSessions` before `disableAccount` or any other direct session deletion: once
 sessions are deleted directly, the provider cannot run those hooks for them.
 Better Auth's native bulk session revocation paths are not a substitute.
 

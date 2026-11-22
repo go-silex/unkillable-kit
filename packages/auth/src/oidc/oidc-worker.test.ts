@@ -14,7 +14,7 @@ const LOGOUT_URI = 'https://client.example.test/backchannel-logout'
 const VERIFIER = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~'
 const root = dirname(fileURLToPath(import.meta.url))
 
-it('delivers a signed back-channel logout using the Workers execution context', async () => {
+it('delivers signed back-channel logout and revokes legacy BLOB-scoped refresh tokens on Workers', async () => {
   const bundle = await build({
     entryPoints: [fileURLToPath(new URL('./oidc-worker.fixture.ts', import.meta.url))],
     bundle: true,
@@ -159,14 +159,31 @@ it('delivers a signed back-channel logout using the Workers execution context', 
       .first<{ disabled: number | null; backchannel_logout_uri: string | null }>()
     expect(storedClient).toMatchObject({ backchannel_logout_uri: LOGOUT_URI })
     expect(storedClient?.disabled ?? 0).toBe(0)
+    // D1 returns a BLOB as bytes. String coercion of this one-byte value parses as a JSON number.
+    await db
+      .prepare(
+        `INSERT INTO oauth_refresh_token
+           (id, token, client_id, session_id, user_id, expires_at, created_at, scopes)
+         SELECT 'legacy-refresh', 'legacy-refresh-value', client_id, session_id, user_id,
+                expires_at, created_at, X'31'
+         FROM oauth_access_token WHERE user_id = ?`,
+      )
+      .bind(user.id)
+      .run()
     const logout = await miniflare.dispatchFetch(`${ORIGIN}/__test/logout`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ userId: user.id }),
     })
-    expect(await logout.json()).toMatchObject({ success: true, backgroundTasks: 1 })
+    expect(await logout.json()).toEqual({ success: true, truncated: false, backgroundTasks: 1 })
     expect(logout.status).toBe(200)
     await deliveryReceived
+    const refresh = await db
+      .prepare(
+        "SELECT typeof(scopes) AS storage, revoked FROM oauth_refresh_token WHERE id = 'legacy-refresh'",
+      )
+      .first<{ storage: string; revoked: number | null }>()
+    expect(refresh).toMatchObject({ storage: 'blob', revoked: expect.any(Number) })
     expect(deliveries).toHaveLength(1)
     expect(deliveries[0]).toMatchObject({ url: LOGOUT_URI, method: 'POST' })
     const logoutToken = new URLSearchParams(deliveries[0].body).get('logout_token')

@@ -25,6 +25,77 @@ type LogoutResult =
 
 type LogoutClient = { clientId: string }
 
+async function updateLogoutTokens(
+  adapter: Pick<DBAdapter, 'updateMany'>,
+  query: Parameters<DBAdapter['updateMany']>[0],
+) {
+  // The access-token rows were removed by the session FK cascade.
+  if (query.model === 'oauthAccessToken') return 0
+  if (query.model !== 'oauthRefreshToken') return adapter.updateMany(query)
+  const index = query.where.findIndex((condition) => condition.operator === 'in')
+  const condition = query.where[index]
+  if (!(condition && Array.isArray(condition.value))) return adapter.updateMany(query)
+  let count = 0
+  let failures: unknown[] | undefined
+  for (let i = 0; i < condition.value.length; i += D1_IN_ARRAY_CHUNK) {
+    const where = [...query.where]
+    where[index] = {
+      ...condition,
+      value: condition.value.slice(i, i + D1_IN_ARRAY_CHUNK) as string[] | number[],
+    }
+    try {
+      count += await adapter.updateMany({ ...query, where })
+    } catch (error) {
+      failures ??= []
+      failures.push(error)
+    }
+  }
+  // The provider logs a failed revocation and still attempts delivery.
+  if (failures) throw new AggregateError(failures, 'OIDC refresh revocation chunks failed')
+  return count
+}
+
+function bindDeferredLogoutHooks(
+  pending: Array<() => Promise<void>>,
+  queued: Array<() => Promise<void>>,
+  live: DBAdapter | undefined,
+) {
+  if (!pending.length) return true
+  if (!live) {
+    log.error('OIDC deferred logout skipped: transaction adapter binding is unverified')
+    return false
+  }
+  const postCommit: DBAdapter = {
+    ...live,
+    updateMany: (query) => updateLogoutTokens(live, query),
+  }
+  for (const hook of pending) {
+    queued.push(async () => {
+      await runWithAdapter(postCommit, hook)
+    })
+  }
+  return true
+}
+
+function sessionsWithUnsupportedScopes(refresh: LogoutRow[]) {
+  let failedSessions: Set<string> | undefined
+  for (const { revoked, scopes, sessionId } of refresh) {
+    // Match the types that support the provider's scope membership check.
+    if (
+      !revoked &&
+      scopes !== null &&
+      scopes !== undefined &&
+      typeof scopes !== 'string' &&
+      !Array.isArray(scopes) &&
+      !(scopes instanceof Uint8Array)
+    ) {
+      failedSessions ??= new Set()
+      failedSessions.add(sessionId)
+    }
+  }
+  return failedSessions
+}
+
 // Better Auth snapshots entities for its delete hooks before issuing deleteMany.
 // Bound that snapshot, but leave the actual userId deletion untouched so the
 // database cascades every session-bound access token in the same statement.
@@ -66,6 +137,13 @@ function logoutAdapter(
             adapter.findMany<LogoutRow>({ model: 'oauthAccessToken', where, limit: 2147483647 }),
             adapter.findMany<LogoutRow>({ model: 'oauthRefreshToken', where, limit: 2147483647 }),
           ])
+        }
+        const failedSessions = sessionsWithUnsupportedScopes(refresh)
+        if (failedSessions) {
+          onPlanningFailure()
+          log.error('OIDC logout notification planning skipped sessions with unsupported scopes')
+          access = access.filter(({ sessionId }) => !failedSessions.has(sessionId))
+          refresh = refresh.filter(({ sessionId }) => !failedSessions.has(sessionId))
         }
         const ids = [...new Set([...access, ...refresh].map((token) => token.clientId))]
         for (let i = 0; i < ids.length; i += D1_IN_ARRAY_CHUNK) {
@@ -135,24 +213,7 @@ function logoutAdapter(
       jwks = Promise.resolve([key])
       return key as R
     },
-    async updateMany(query) {
-      if (query.model === 'oauthAccessToken') return 0
-      // The access-token rows were removed by the session FK cascade.
-      // Chunk any remaining provider writes (e.g. historical refresh tokens).
-      const index = query.where.findIndex((condition) => condition.operator === 'in')
-      const condition = query.where[index]
-      if (!(condition && Array.isArray(condition.value))) return adapter.updateMany(query)
-      let count = 0
-      for (let i = 0; i < condition.value.length; i += D1_IN_ARRAY_CHUNK) {
-        const where = [...query.where]
-        where[index] = {
-          ...condition,
-          value: condition.value.slice(i, i + D1_IN_ARRAY_CHUNK) as string[] | number[],
-        }
-        count += await adapter.updateMany({ ...query, where })
-      }
-      return count
-    },
+    updateMany: (query) => updateLogoutTokens(adapter, query),
   }
 }
 
@@ -170,23 +231,33 @@ export function createOidcLogoutPlugin() {
           const storage = await getCurrentDBAdapterAsyncLocalStorage()
           const current = storage.getStore()
           const adapter = await getCurrentAdapter(ctx.context.adapter)
-          const merged = { ...ctx.context.adapter, ...adapter }
-          const d1 = logoutD1(adapter)
+          const binding = logoutD1(adapter)
           let truncated = false
           let coverageUnknown = false
           const bounded = logoutAdapter(
-            merged,
+            binding?.adapter ?? { ...ctx.context.adapter, ...adapter },
             () => {
               truncated = true
             },
             () => {
               coverageUnknown = true
             },
-            d1,
+            binding?.d1,
           )
           const removeSessions = () =>
             ctx.context.internalAdapter.deleteUserSessions(ctx.body.userId)
-          if (current) {
+          if (current?.isTransactionActive) {
+            const pendingHooks: typeof current.pendingHooks = []
+            try {
+              await storage.run({ ...current, adapter: bounded, pendingHooks }, removeSessions)
+            } finally {
+              // Only the exact planning adapter's registration proves a live binding.
+              // Neither the endpoint adapter nor the restored outer scope proves it.
+              if (!bindDeferredLogoutHooks(pendingHooks, current.pendingHooks, binding?.adapter)) {
+                coverageUnknown = true
+              }
+            }
+          } else if (current) {
             await storage.run({ ...current, adapter: bounded }, removeSessions)
           } else {
             await runWithAdapter(bounded, removeSessions)

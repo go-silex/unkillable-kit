@@ -566,6 +566,206 @@ it('never forwards notification-only IDs after a queued hook', async () => {
   expect(writes.mock.calls.map(([query]) => query.model)).not.toContain('oauthAccessToken')
 })
 
+it('revokes more than 100 refresh tokens when the D1 transaction queue drains', async () => {
+  const { sqlite, auth, pending, delivery, addSession, addClient, addRefresh } = setup()
+  addSession('session')
+  addClient('client')
+  for (let i = 0; i < 101; i++) addRefresh(`refresh-${i}`, 'session', 'client')
+  const contextAuth = auth as unknown as { $context: Promise<{ adapter: DBAdapter }> }
+  const { adapter } = await contextAuth.$context
+  const unrevoked = () =>
+    sqlite.prepare('SELECT count(*) AS count FROM oauth_refresh_token WHERE revoked IS NULL').get()
+  await runWithTransaction(adapter, async () => {
+    expect(await endOidcUserSessions(auth, USER_ID)).toEqual({ success: true, truncated: false })
+    expect(unrevoked()).toEqual({ count: 101 })
+  })
+  await Promise.all(pending)
+  expect(unrevoked()).toEqual({ count: 0 })
+  expect(notifiedClients(delivery)).toEqual(['client'])
+})
+
+it.each([false, true])(
+  'reports unknown coverage but preserves valid sibling sessions (forwarding=%s)',
+  async (forwarding) => {
+    const { sqlite, auth, pending, delivery, addSession, addClient, addRefresh } = setup()
+    addSession('malformed-session')
+    addSession('valid-session')
+    addClient('malformed-client')
+    addClient('valid-client')
+    addRefresh('malformed', 'malformed-session', 'malformed-client')
+    addRefresh('valid', 'valid-session', 'valid-client')
+    sqlite.prepare("UPDATE oauth_refresh_token SET scopes = '42' WHERE id = 'malformed'").run()
+    const contextAuth = auth as unknown as { $context: Promise<{ adapter: DBAdapter }> }
+    const { adapter } = await contextAuth.$context
+    const logout = () => endOidcUserSessions(auth, USER_ID)
+    expect(await (forwarding ? runWithAdapter({ ...adapter }, logout) : logout())).toEqual({
+      success: true,
+      truncated: null,
+      coverage: 'unknown',
+    })
+    await Promise.all(pending)
+    expect(notifiedClients(delivery)).toEqual(['valid-client'])
+    expect(sqlite.prepare('SELECT count(*) AS count FROM session').get()).toEqual({ count: 0 })
+    expect(
+      sqlite
+        .prepare('SELECT id, revoked IS NOT NULL AS revoked FROM oauth_refresh_token ORDER BY id')
+        .all(),
+    ).toEqual([
+      { id: 'malformed', revoked: 0 },
+      { id: 'valid', revoked: 1 },
+    ])
+  },
+)
+
+function withSqliteTransaction(sqlite: Database.Database, adapter: DBAdapter): DBAdapter {
+  const transaction: DBAdapter['transaction'] = async (run) => {
+    sqlite.exec('BEGIN')
+    const assertActive = () => {
+      if (!sqlite.inTransaction) throw new Error('Transaction adapter expired')
+    }
+    const scoped: DBAdapter = {
+      ...adapter,
+      async findMany<T>(query: Parameters<DBAdapter['findMany']>[0]) {
+        assertActive()
+        return adapter.findMany<T>(query)
+      },
+      create(query) {
+        assertActive()
+        return adapter.create(query)
+      },
+      updateMany(query) {
+        assertActive()
+        return adapter.updateMany(query)
+      },
+    }
+    try {
+      const result = await run(scoped)
+      sqlite.exec('COMMIT')
+      return result
+    } catch (error) {
+      sqlite.exec('ROLLBACK')
+      throw error
+    }
+  }
+  const { options } = adapter
+  if (!options) throw new Error('Missing Better Auth adapter options')
+  return {
+    ...adapter,
+    transaction,
+    options: { ...options, adapterConfig: { ...options.adapterConfig, transaction } },
+  }
+}
+
+it.each([false, true])(
+  'skips deferred effects on an unregistered SQLite transaction (same owner=%s)',
+  async (sameOwner) => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    onTestFinished(() => errors.mockRestore())
+    const outer = setup()
+    const inner = setup()
+    for (const db of [outer, inner]) {
+      db.addSession('session')
+      db.addClient('client')
+      db.addRefresh('refresh', 'session', 'client')
+    }
+    const outerAuth = outer.auth as unknown as { $context: Promise<{ adapter: DBAdapter }> }
+    const innerAuth = inner.auth as unknown as { $context: Promise<{ adapter: DBAdapter }> }
+    const [{ adapter: outerAdapter }, { adapter: innerAdapter }] = await Promise.all([
+      outerAuth.$context,
+      innerAuth.$context,
+    ])
+    const result = await runWithAdapter(outerAdapter, () =>
+      runWithTransaction(withSqliteTransaction(inner.sqlite, innerAdapter), () =>
+        endOidcUserSessions(sameOwner ? inner.auth : outer.auth, USER_ID),
+      ),
+    )
+    await Promise.all([...outer.pending, ...inner.pending])
+    const query = 'SELECT session_id, revoked IS NOT NULL AS revoked FROM oauth_refresh_token'
+    expect(outer.sqlite.prepare(query).get()).toEqual({ session_id: 'session', revoked: 0 })
+    expect(inner.sqlite.prepare(query).get()).toEqual({ session_id: null, revoked: 0 })
+    expect(outer.pending).toEqual([])
+    expect(inner.pending).toEqual([])
+    expect(result).toEqual({ success: true, truncated: null, coverage: 'unknown' })
+    expect(errors).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'OIDC deferred logout skipped: transaction adapter binding is unverified',
+      ),
+    )
+  },
+)
+
+it('revokes on the transaction binding, not the restored outer adapter', async () => {
+  const outer = setup()
+  const inner = setup()
+  for (const db of [outer, inner]) {
+    db.addSession('session')
+    db.addClient('client')
+    db.addRefresh('refresh', 'session', 'client')
+  }
+  const outerAuth = outer.auth as unknown as { $context: Promise<{ adapter: DBAdapter }> }
+  const innerAuth = inner.auth as unknown as { $context: Promise<{ adapter: DBAdapter }> }
+  const [{ adapter: outerAdapter }, { adapter: innerAdapter }] = await Promise.all([
+    outerAuth.$context,
+    innerAuth.$context,
+  ])
+  await runWithAdapter(outerAdapter, () =>
+    runWithTransaction(innerAdapter, () => endOidcUserSessions(inner.auth, USER_ID)),
+  )
+  await Promise.all(inner.pending)
+  const query = 'SELECT session_id, revoked IS NOT NULL AS revoked FROM oauth_refresh_token'
+  expect(inner.sqlite.prepare(query).get()).toEqual({ session_id: null, revoked: 1 })
+  expect(outer.sqlite.prepare(query).get()).toEqual({ session_id: 'session', revoked: 0 })
+  expect(notifiedClients(inner.delivery)).toEqual(['client'])
+})
+
+it('keeps attempting refresh revocation and notification after a chunk fails', async () => {
+  let failedFirstUpdate = false
+  const { sqlite, auth, pending, delivery, addSession, addClient, addRefresh } = setup({
+    beforeQuery(sql) {
+      if (!failedFirstUpdate && /^\s*update\s+["`]?oauth_refresh_token\b/i.test(sql)) {
+        failedFirstUpdate = true
+        throw new Error('injected refresh update failure')
+      }
+    },
+  })
+  addSession('session')
+  addClient('client')
+  for (let i = 0; i < 101; i++) addRefresh(`refresh-${i}`, 'session', 'client')
+  await endOidcUserSessions(auth, USER_ID)
+  await Promise.all(pending)
+  expect(failedFirstUpdate).toBe(true)
+  expect(
+    sqlite
+      .prepare('SELECT count(*) AS count FROM oauth_refresh_token WHERE revoked IS NOT NULL')
+      .get(),
+  ).toEqual({ count: 21 })
+  expect(notifiedClients(delivery)).toEqual(['client'])
+})
+
+it('does not run queued logout effects when the session deletion rolls back', async () => {
+  const { sqlite, auth, pending, delivery, addSession, addClient, addRefresh } = setup()
+  addSession('session')
+  addClient('client')
+  addRefresh('refresh', 'session', 'client')
+  const contextAuth = auth as unknown as { $context: Promise<{ adapter: DBAdapter }> }
+  const { adapter } = await contextAuth.$context
+  const transactional = withSqliteTransaction(sqlite, adapter)
+  await expect(
+    runWithTransaction(transactional, async () => {
+      await endOidcUserSessions(auth, USER_ID)
+      expect(sqlite.prepare('SELECT count(*) AS count FROM session').get()).toEqual({ count: 0 })
+      throw new Error('abort logout')
+    }),
+  ).rejects.toThrow('abort logout')
+  expect(pending).toEqual([])
+  expect(delivery).not.toHaveBeenCalled()
+  expect(sqlite.prepare('SELECT id FROM session').get()).toEqual({ id: 'session' })
+  expect(sqlite.prepare('SELECT session_id, revoked FROM oauth_refresh_token').get()).toEqual({
+    session_id: 'session',
+    revoked: null,
+  })
+})
+
 it('matches adapter scope decoding for legacy refresh rows', async () => {
   const { sqlite, auth, pending, delivery, addSession, addClient, addRefresh } = setup()
   addSession('session')

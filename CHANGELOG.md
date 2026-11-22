@@ -4,6 +4,14 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ## Unreleased
 
+### OIDC logout
+
+- Preserve back-channel notification and refresh revocation for legacy D1 BLOB scopes.
+  Unsupported stored scopes mark planning coverage unknown without dropping other sessions.
+- Chunk deferred refresh revocation writes to stay within D1's bind limit
+  (go-silex/unkillable-kit#102). Skip deferred logout effects if the transaction
+  adapter's live binding cannot be verified, and report unknown coverage.
+
 ### OpenID provider
 
 - Discovery omits the unsupported `create` prompt. Authorization requests using
