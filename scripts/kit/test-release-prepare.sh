@@ -86,9 +86,9 @@ fixture() {
   repo="$STATE/work"
   git -C "$repo" init -q -b main
   printf 'release:\n  component: kit\n' > "$repo/.dev/stack.yml"
-  # Keep a no-final-newline, CRLF release section to catch normalization.
-  printf '## kit/v0.1.0 — 2026-01-01\r\n\r\n- Previously released\r\n\r\nOld tail  ' > "$STATE/old"
-  printf '# Changelog\r\n\r\n## Unreleased\r\n\r\n' > "$repo/CHANGELOG.md"
+  # Keep trailing spaces and no final newline to catch normalization.
+  printf '## kit/v0.1.0 — 2026-01-01\n\n- Previously released\n\nOld tail  ' > "$STATE/old"
+  printf '# Changelog\n\n## Unreleased\n\n' > "$repo/CHANGELOG.md"
   cat "$STATE/old" >> "$repo/CHANGELOG.md"
   git -C "$repo" add .
   git -C "$repo" commit -qm initial
@@ -110,11 +110,11 @@ source_commit() {
 }
 entries() {
   {
-    printf '\r\n### Consumer changes\r\n\r\n'
-    printf '%s\r\n' "$@"
-    printf '\r\n'
+    printf '\n### Consumer changes\n\n'
+    printf '%s\n' "$@"
+    printf '\n'
   } > "$STATE/notes"
-  printf '# Changelog\r\n\r\n## Unreleased\r\n' > "$repo/CHANGELOG.md"
+  printf '# Changelog\n\n## Unreleased\n' > "$repo/CHANGELOG.md"
   cat "$STATE/notes" "$STATE/old" >> "$repo/CHANGELOG.md"
   source_commit 'record the pending notes'
 }
@@ -137,8 +137,8 @@ assert_preserved() {
   local tag=$1 prepared actual_header
   prepared=$(head) || return 1
   git --git-dir="$STATE/origin.git" show "$prepared:CHANGELOG.md" > "$STATE/actual"
-  actual_header=$(awk '/^## kit\/v/{ sub(/\r$/, ""); print; exit }' "$STATE/actual")
-  printf '# Changelog\r\n\r\n## Unreleased\r\n\r\n## kit/%s — %s\r\n' "$tag" "$(date -u +%F)" > "$STATE/expected"
+  actual_header=$(awk '/^## kit\/v/{ print; exit }' "$STATE/actual")
+  printf '# Changelog\n\n## Unreleased\n\n## kit/%s — %s\n' "$tag" "$(date -u +%F)" > "$STATE/expected"
   cat "$STATE/notes" "$STATE/old" >> "$STATE/expected"
   cmp -s "$STATE/expected" "$STATE/actual" || {
     printf 'FAIL: expected byte-identical tagged sections and notes (release heading: %s)\n' "$actual_header" >&2
@@ -168,7 +168,7 @@ assert_full_action() {
   jq -j '.body | split("### Product actions\n\n")[1] | split("\n\n## kit/")[0]' \
     "$STATE/pull" > "$STATE/summary"
   cmp -s "$STATE/action" "$STATE/summary" ||
-    fail 'expected byte-identical Product action bullets in the summary'
+    fail 'expected byte-identical Product action bullets apart from pinned destinations'
 }
 
 
@@ -230,8 +230,8 @@ apply
 [[ $(cat "$STATE/writes") == $'POST pulls\nPATCH pulls/7\nPATCH pulls/7' ]]
 pass 'minor bump, untrusted notes as data, one-commit branch, idempotent refresh and metadata-only repair'
 
-for closing in 'Closes fixture/kit#7' 'FiXeD: https://github.com/fixture/kit/issues/7' \
-    'resolve: https://github.com/fixture/kit/pull/7' $'Resolves\r\n  fixture/kit#7'; do
+for closing in 'Closes fixture/kit#7' 'FiXeD: [issue](https://github.com/fixture/kit/issues/7)' \
+    'resolve: [pull request](https://github.com/fixture/kit/pull/7)' $'Resolves\n  fixture/kit#7'; do
   fixture "closing-${closing%%[ :]*}"
   entries "- $closing"
   assert_closing_notes_rejected
@@ -248,10 +248,13 @@ jq -e '.body | index("Proposed tag:") < index("### Manual publication") and
 pass 'neutral references stay verbatim; metadata and checklist precede generated Markdown'
 
 for invalid in fence tilde-fence nested-fence html-comment html-block quote table table-delimiter nested-heading nested-item \
-    lazy reference multiline-reference continuation-reference setext thematic pipe-free-table tabs code indented-blank \
+    lazy reference item-reference multiline-reference continuation-reference setext thematic pipe-free-table tabs code indented-blank \
     star plus ordered heading disconnected empty-action action-spaces near-miss lower-case italic-action \
     duplicate-unreleased duplicate-release inline-release nbsp-release formatted-unreleased wrong-component \
-    trailing-release ascii-date semver-order unreleased-first html-decimal html-hex html-named; do
+    trailing-release ascii-date semver-order unreleased-first html-decimal html-hex html-named \
+    literal-url angle-autolink inline-html html-bracket unicode-line code-line separator-control crlf \
+    nbsp-title title angle-destination empty-destination empty-angle query-only root-relative protocol-relative \
+    other-scheme shortcut unmatched-code escaped-bracket bare-www bare-mailto; do
   fixture "grammar-$invalid"
   line=7
   case $invalid in
@@ -267,12 +270,13 @@ for invalid in fence tilde-fence nested-fence html-comment html-block quote tabl
     nested-item) rule='block marker'; line=8; entries '- Item' '  - Nested' ;;
     lazy) rule='plain paragraph'; line=8; entries '- Item' 'Lazy continuation' ;;
     reference) rule='link reference'; entries '[label]: /url' ;;
+    item-reference) rule='expected [text](destination)'; entries '- [x]: y' ;;
     multiline-reference) rule='link reference'; entries '[label' 'continued]: /url' ;;
     continuation-reference) rule='link reference'; line=8; entries '- Item' '  [label]: /url' ;;
     setext) rule='setext'; line=8; entries 'Text' '====' ;;
     thematic) rule='thematic breaks'; entries '- - -' ;;
     pipe-free-table) rule='table delimiter'; line=8; entries 'Column' ':---:' ;;
-    tabs) rule=tabs; entries $'- Tab\there' ;;
+    tabs) rule='only ASCII space and LF'; entries $'- Tab\there' ;;
     code) rule=indentation; entries '    code' ;;
     indented-blank) rule=indentation; entries '    ' ;;
     star) rule='list items'; entries '* Item' ;;
@@ -288,7 +292,7 @@ for invalid in fence tilde-fence nested-fence html-comment html-block quote tabl
     duplicate-unreleased) rule='duplicate ## Unreleased'; line=8; entries '- First change' '## Unreleased' '- **Product action:** Another change.' ;;
     duplicate-release) rule='duplicate release version'; line=10; entries '## kit/v0.1.0 — 2026-01-02' '- Duplicate section' ;;
     inline-release) rule='expected canonical'; line=8; entries '- First change' '## `kit/v0.1.1` — 2026-01-02' ;;
-    nbsp-release) rule='expected canonical'; entries $'## kit/v0.1.1\u00a0—\u00a02026-01-02' ;;
+    nbsp-release) rule='only ASCII space and LF'; entries $'## kit/v0.1.1\u00a0—\u00a02026-01-02' ;;
     formatted-unreleased) rule='expected canonical'; line=8; entries '- First change' '## **Unreleased**' '- **Product action:** Another change.' ;;
     wrong-component) rule='expected canonical'; entries '## other-kit/v0.1.1 — 2026-01-02' ;;
     trailing-release) rule='expected canonical'; entries '## kit/v0.1.1 — 2026-01-02 ' ;;
@@ -296,13 +300,35 @@ for invalid in fence tilde-fence nested-fence html-comment html-block quote tabl
     semver-order) rule='strictly descending'; line=8; entries '## kit/v0.2.0 — 2026-01-02' '## kit/v0.10.0 — 2026-01-03' ;;
     unreleased-first)
       rule='first ## heading'; line=3; entries '- First change'
-      { printf '# Changelog\r\n\r\n## kit/v0.2.0 — 2026-01-02\r\n'; tail -n +3 "$repo/CHANGELOG.md"; } > "$STATE/out-of-order"
+      { printf '# Changelog\n\n## kit/v0.2.0 — 2026-01-02\n'; tail -n +3 "$repo/CHANGELOG.md"; } > "$STATE/out-of-order"
       mv "$STATE/out-of-order" "$repo/CHANGELOG.md"
       source_commit 'put a release before Unreleased'
       ;;
     html-decimal) rule='HTML character references'; entries '- **Product&#32;action:** Migrate.' ;;
     html-hex) rule='HTML character references'; entries '- Item' '  More&nbsp information&#x20;here.'; line=8 ;;
     html-named) rule='HTML character references'; entries '### Named &nbsp; text' ;;
+    literal-url) rule='bare URLs are not allowed'; entries '- Visit https://example.com/[label](docs/page.md).' ;;
+    angle-autolink) rule='< is not allowed'; entries '- Read [<https://example.com>](docs/relative.md).' ;;
+    inline-html) rule='< is not allowed'; entries '- Keep <span title="[fake](docs/fake.md)">literal</span>.' ;;
+    html-bracket) rule='< is not allowed'; entries '- Read [<span title="]">label</span>](docs/real.md).' ;;
+    unicode-line) rule='only ASCII space and LF'; entries $'- Keep `code\u2028- [x](y)`.' ;;
+    code-line) rule='same backtick run on the same line'; entries '- Keep `code' '  with [x](y)`.' ;;
+    separator-control) rule='only ASCII space and LF'; entries $'- Keep `x\u0085y`.' ;;
+    crlf) rule='only ASCII space and LF'; entries $'- Record a CRLF\r' ;;
+    nbsp-title) rule='only ASCII space and LF'; entries $'- Read [x](docs/page.md "title"\u00a0).' ;;
+    title) rule='no title'; entries '- Read [x](docs/page.md "title").' ;;
+    angle-destination) rule='non-empty destination'; entries '- Read [x](<docs/page.md>).' ;;
+    empty-destination) rule='non-empty destination'; entries '- Read [x]().' ;;
+    empty-angle) rule='non-empty destination'; entries '- Read [x](<> "t").' ;;
+    query-only) rule='HTTPS URL, a fragment, or a relative path'; entries '- Read [x](?plain=1).' ;;
+    root-relative) rule='HTTPS URL, a fragment, or a relative path'; entries '- Read [x](/docs/page.md).' ;;
+    protocol-relative) rule='HTTPS URL, a fragment, or a relative path'; entries '- Read [x](//example.com).' ;;
+    other-scheme) rule='HTTPS URL, a fragment, or a relative path'; entries '- Read [x](mailto:kit@example.com).' ;;
+    shortcut) rule='expected [text](destination)'; entries '- Read [x].' ;;
+    unmatched-code) rule='same backtick run on the same line'; entries '- Keep ``code`.' ;;
+    escaped-bracket) rule='backslashes are not allowed'; entries '- Keep \[x](y).' ;;
+    bare-www) rule='bare URLs are not allowed'; entries '- Visit www.example.com.' ;;
+    bare-mailto) rule='bare URLs are not allowed'; entries '- Send to mailto:kit@example.com.' ;;
   esac
   assert_grammar_rejected "$line" "$rule"
   if invoke --check-changelog; then fail "doc gate accepted $invalid"; fi
@@ -323,7 +349,7 @@ assert_grammar_rejected 7 'HTML comments'
 pass 'same-count marker substitution fails before writing'
 
 fixture invalid-tagged-section
-printf '\r\n\r\n> Forbidden in a tagged section' >> "$STATE/old"
+printf '\n\n> Forbidden in a tagged section' >> "$STATE/old"
 entries '- Valid unreleased change'
 assert_grammar_rejected 15 'HTML, blockquotes and tables'
 pass 'the grammar also checks tagged sections'
@@ -331,25 +357,73 @@ pass 'the grammar also checks tagged sections'
 fixture multiline-action
 action=('- **Product action:** Set the header.' '  Restart the client.' '  Verify the response.')
 entries "${action[@]}" '- This is a long ordinary description with the **Product action:** phrase later in the same line.'
-printf '%s\r\n%s\r\n%s' "${action[@]}" > "$STATE/action"
+printf '%s\n%s\n%s' "${action[@]}" > "$STATE/action"
 invoke --check-changelog
 apply
 assert_preserved v0.2.0
 assert_full_action
 pass 'the complete multiline Product action appears in the PR summary'
 
-fixture marker-before-link-or-fence
-link='- **Product action:** [migration]: /guide'
-fence='- **Product action:** ```sh'
-entries "$link" '  "title"' "$fence"
-printf '%s\r\n%s\r\n%s' "$link" '  "title"' "$fence" > "$STATE/action"
+fixture marker-before-inline-markup
+link='- **Product action:** [migration](#guide)'
+code='- **Product action:** Keep ```sh ` [x](y)``` as an example.'
+entries "$link" '  "title"' "$code"
+printf '%s\n%s\n%s' "$link" '  "title"' "$code" > "$STATE/action"
 invoke --check-changelog
 apply
 assert_full_action
-pass 'a link or fence after a Product action marker keeps the marker verbatim'
+pass 'a link or code span in a Product action keeps the marker verbatim'
+
+fixture release-links
+relative='- **Product action:** Follow the [manual Kit sync](docs/kit/product-consumer-contract.md#pulling-kit-upgrades).'
+image='  See ![diagram](images/flow%20chart.svg) and the [guide with `]`](docs/guide.md).'
+literal='- Keep `[single](../example.md)` and ``literal ` [double](../example.md)`` and `<span> \[x](y) https://example.com`.'
+external='- Keep [HTTPS](https://example.com/doc?q=1#heading) and [anchor](#heading).'
+section_only='- [Kit docs](docs/kit/README.md?next=%2Fdocs#part%2e1)'
+entries "$relative" "$image" "$literal" "$external" "$section_only"
+pin="https://github.com/fixture/kit/blob/$source"
+relative_pinned="- **Product action:** Follow the [manual Kit sync]($pin/docs/kit/product-consumer-contract.md#pulling-kit-upgrades)."
+image_pinned="  See ![diagram]($pin/images/flow%20chart.svg) and the [guide with \`]\`]($pin/docs/guide.md)."
+printf '%s\n%s' "$relative_pinned" "$image_pinned" > "$STATE/action"
+apply
+assert_full_action
+printf '\n### Consumer changes\n\n%s\n%s\n%s\n%s\n%s\n\n' \
+  "$relative_pinned" "$image_pinned" "$literal" "$external" \
+  "- [Kit docs]($pin/docs/kit/README.md?next=%2Fdocs#part%2e1)" > "$STATE/expected-body"
+jq -j '.body | split("\n\n## kit/")[1] | sub("^[^\n]*\n"; "")' \
+  "$STATE/pull" > "$STATE/rendered-body"
+cmp -s "$STATE/expected-body" "$STATE/rendered-body" ||
+  fail 'expected byte-identical full notes apart from pinned destinations'
+assert_preserved v0.2.0
+invoke --dry-run
+expect_log "$relative_pinned"
+git -C "$repo" remote set-url origin git@github.com:fixture/kit.git
+(unset GITHUB_REPOSITORY; invoke --dry-run)
+expect_log "$relative_pinned"
+git -C "$repo" remote set-url origin "$STATE/origin.git"
+(unset GITHUB_REPOSITORY; invoke --dry-run)
+expect_log 'cannot identify a GitHub repository'
+expect_log "$relative"
+pass 'proposal destinations pin to the source SHA without changing Markdown or commit bytes'
+
+for target in docs/kit//../README.md docs/kit//README.md docs/kit/ \
+    docs/kit/%2e%2e/README.md ./docs/x.md docs/x/./y.md docs/../../outside.md \
+    docs/x%2Fy.md docs/x%5Cy.md docs/file%2Emd docs/x%252fy.md; do
+  fixture "invalid-relative-path-${target//\//_}"
+  entries "- Read [Kit docs]($target)."
+  case "$target" in
+    *//*|*/) rule='without doubled or trailing slashes' ;;
+    *) rule='without . or .. segments or encoded' ;;
+  esac
+  assert_grammar_rejected 7 "$rule"
+  if invoke --check-changelog; then fail 'doc gate accepted an ambiguous relative path'; fi
+  expect_log 'CHANGELOG.md line 7:'
+  expect_log "$rule"
+done
+pass 'relative paths reject empty and dot segments and encoded separators, dots, and percent signs'
 
 fixture pending-publication
-printf '\r\n## kit/v0.1.1 — 2026-01-02\r\n\r\n- Merged, not tagged\r\n' > "$STATE/pending"
+printf '\n## kit/v0.1.1 — 2026-01-02\n\n- Merged, not tagged\n' > "$STATE/pending"
 cat "$STATE/old" >> "$STATE/pending"
 mv "$STATE/pending" "$STATE/old"
 entries '- **Product action:** New migration after the merged patch.'
@@ -376,7 +450,7 @@ cmp -s "$STATE/remote.before" <(remote_tags)
 pass 'an existing tag off the source history blocks the proposal without moving tags'
 
 fixture older-than-latest-heading
-printf '## kit/v0.10.0 — 2026-01-02\r\n\r\n- Newer release\r\n\r\n' > "$STATE/releases"
+printf '## kit/v0.10.0 — 2026-01-02\n\n- Newer release\n\n' > "$STATE/releases"
 cat "$STATE/old" >> "$STATE/releases"
 mv "$STATE/releases" "$STATE/old"
 entries '- New change with a bare &'
@@ -541,27 +615,27 @@ mutant allow-closing-notes 'if (closingReference)' 'if (false && closingReferenc
 killed allow-closing-notes 'expected issue-closing notes to be rejected' assert_closing_notes_rejected
 
 fixture mutant-skip-grammar
-entries '<!--' '- Omitted pending note'
+entries '> A forbidden quote' '- Omitted pending note'
 mutant skip-grammar 'const kind = lineKind(content, previous, number)' \
   'const kind = content.startsWith("#") ? "heading" : "plain"'
-killed skip-grammar 'expected invalid CHANGELOG grammar to stop preparation' assert_grammar_rejected 7 'HTML comments'
+killed skip-grammar 'expected invalid CHANGELOG grammar to stop preparation' assert_grammar_rejected 7 'HTML, blockquotes and tables'
 
 fixture mutant-first-line-only
 entries '- **Product action:** Set the header.' '  Restart the client.' '  Verify the response.'
-printf '%s\r\n%s\r\n%s' '- **Product action:** Set the header.' '  Restart the client.' \
+printf '%s\n%s\n%s' '- **Product action:** Set the header.' '  Restart the client.' \
   '  Verify the response.' > "$STATE/action"
 mutant first-line-only 'text.slice(action.start, action.end)' \
-  'text.slice(action.start, action.end).split(/\r?\n/)[0]'
+  'text.slice(action.start, action.end).split(newline)[0]'
 apply
-killed first-line-only 'expected byte-identical Product action bullets in the summary' assert_full_action
+killed first-line-only 'expected byte-identical Product action bullets apart from pinned destinations' assert_full_action
 
 fixture mutant-strip-marker
-entries '- **Product action:** [migration]: /guide' '  "title"'
-printf '%s\r\n%s' '- **Product action:** [migration]: /guide' '  "title"' > "$STATE/action"
+entries '- **Product action:** [migration](#guide)' '  "title"'
+printf '%s\n%s' '- **Product action:** [migration](#guide)' '  "title"' > "$STATE/action"
 mutant strip-marker 'text.slice(action.start, action.end)' \
   '"- " + text.slice(action.start + actionPrefix.length, action.end)'
 apply
-killed strip-marker 'expected byte-identical Product action bullets in the summary' assert_full_action
+killed strip-marker 'expected byte-identical Product action bullets apart from pinned destinations' assert_full_action
 
 fixture mutant-duplicate-unreleased
 entries '- First change' '## Unreleased' '- **Product action:** Another change.'
@@ -576,3 +650,35 @@ mutant noncanonical-release 'const prefix = `## ${component}/v`' \
   'content = content.replaceAll(String.fromCharCode(96), ""); const prefix = `## ${component}/v`'
 killed noncanonical-release 'expected invalid CHANGELOG grammar to stop preparation' \
   assert_grammar_rejected 8 'expected canonical'
+
+fixture mutant-skip-link-rewrite
+entries '- Read [the guide](docs/guide.md#first).'
+mutant skip-link-rewrite 'if (!root) return text' 'if (true) return text'
+assert_dry_run_link() {
+  invoke --dry-run && expect_log "$1"
+}
+killed skip-link-rewrite 'missing output: - Read [the guide](https://' assert_dry_run_link \
+  "- Read [the guide](https://github.com/fixture/kit/blob/$source/docs/guide.md#first)."
+
+fixture mutant-rewrite-code-spans
+entries '- Keep ``literal ` [example](docs/example.md)``.'
+mutant rewrite-code-spans 'tokens.lastIndex = codeSpanEnd(line, marker, tokens.lastIndex, number)' \
+  'if (root) break; tokens.lastIndex = codeSpanEnd(line, marker, tokens.lastIndex, number)'
+killed rewrite-code-spans 'missing output: - Keep ``literal ` [example](docs/example.md)``.' \
+  assert_dry_run_link '- Keep ``literal ` [example](docs/example.md)``.'
+
+fixture mutant-drop-angle-rule
+entries '- Keep <span title="[fake](docs/fake.md)">literal</span>.'
+mutant drop-angle-rule "if (marker === '<')" \
+  "if (marker === '<') return"
+assert_doc_rejected() {
+  if invoke --check-changelog; then fail 'doc gate accepted HTML outside inline code'; return 1; fi
+  expect_log 'CHANGELOG.md line 7: < is not allowed outside inline code; write `a < b` or `<component>`'
+}
+killed drop-angle-rule 'doc gate accepted HTML outside inline code' assert_doc_rejected
+
+fixture mutant-drop-empty-segment-rule
+entries '- [Kit docs](docs/kit//README.md)'
+mutant drop-empty-segment-rule "if (path.split('/').includes(''))" 'if (false)'
+killed drop-empty-segment-rule 'expected invalid CHANGELOG grammar to stop preparation' \
+  assert_grammar_rejected 7 'without doubled or trailing slashes'

@@ -10,16 +10,22 @@ const shaPattern = /^[a-f0-9]{40}$/
 const requiredWorkflows = ['.github/workflows/ci.yml', '.github/workflows/secret-scan.yml']
 // Cover the repository's close-linked-issues workflow as well as GitHub's URL references.
 const issueClosing =
-  /(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?\s+(?:(?:[\w.-]+\/[\w.-]+)?#\d+|https?:\/\/[^\s/]+\/[\w.-]+\/[\w.-]+\/(?:issues|pulls?)\/\d+)/i
+  /(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?\s+(?:(?:[\w.-]+\/[\w.-]+)?#\d+|(?:\[[^\]\n]*\]\()?https?:\/\/[^\s/]+\/[\w.-]+\/[\w.-]+\/(?:issues|pulls?)\/\d+)/i
 const actionMarker = '- **Product action:**'
 const actionPrefix = `${actionMarker} `
 const semver = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 const releaseHeading = /^([0-9]+\.[0-9]+\.[0-9]+) — [0-9]{4}-[0-9]{2}-[0-9]{2}(?![\s\S])/
+const newline = '\n'
+const invalidWhitespace = /[^\S ]|\p{Cc}/u
 const characterReference = /&(?:#[xX][0-9a-fA-F]+|#[0-9]+|[a-zA-Z][a-zA-Z0-9]*);/
+const repoPattern = /^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/
+const scheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:/
+const https = /^https:\/\/[^/?#]+/i
+const linkDestination = /\(([^ ()<>"'\\[\]]+)\)/y
 
 type Version = readonly [bigint, bigint, bigint]
 type Base = { tag: string; sha: string; version: Version }
-type Heading = { start: number; end: number; eol: string }
+type Heading = { start: number; end: number }
 type ReleaseHeading = Heading & { tag: string; version: Version }
 type LineKind = 'blank' | 'heading' | 'item' | 'continuation' | 'plain'
 const bareBlock = /^(?:#{1,}|[-*+](?: |$)|\d+[.)](?: |$)|[<>|])/
@@ -28,7 +34,6 @@ type ReleaseSection = {
   prefix: string
   body: string
   rest: string
-  eol: string
   headings: ReleaseHeading[]
   actions: string[]
 }
@@ -77,15 +82,16 @@ function grammarError(line: number, rule: string): never {
   throw new Error(`CHANGELOG.md line ${line}: ${rule}`)
 }
 
-function rejectBlock(content: string, number: number): void {
+function rejectBlock(content: string, number: number, inItem = false): void {
   if (fence.test(content)) grammarError(number, 'code fences are not allowed')
   if (/^[-*_= :|]+$/.test(content))
     grammarError(number, 'thematic breaks, setext underlines and table delimiters are not allowed')
-  if (content.startsWith('['))
+  if (!inItem && content.startsWith('['))
     grammarError(
       number,
       'lines starting with [ are not allowed because they can define a link reference',
     )
+  if (content.startsWith('<!--')) grammarError(number, 'HTML comments are not allowed')
   if (/^[<>|]/.test(content)) grammarError(number, 'HTML, blockquotes and tables are not allowed')
 }
 
@@ -100,7 +106,7 @@ function continuation(content: string, previous: LineKind, number: number): Line
 
 function validateItem(item: string, number: number): void {
   if (!/^\S/.test(item)) grammarError(number, 'list items must start with one space after -')
-  rejectBlock(item, number)
+  rejectBlock(item, number, true)
   if (bareBlock.test(item))
     grammarError(number, 'a list item cannot start with a nested block marker')
 }
@@ -132,10 +138,11 @@ function lineKind(content: string, previous: LineKind, number: number): LineKind
     if (content !== '# Changelog') grammarError(number, 'the first line must be # Changelog')
     return 'heading'
   }
-  if (content.includes('\t')) grammarError(number, 'tabs are not allowed')
-  if (content.includes('<!--')) grammarError(number, 'HTML comments are not allowed')
-  if (characterReference.test(content))
-    grammarError(number, 'HTML character references are not allowed')
+  if (invalidWhitespace.test(content))
+    grammarError(
+      number,
+      'only ASCII space and LF are allowed as whitespace; controls are forbidden',
+    )
   if (/^ {0,3}$/.test(content)) return 'blank'
   const trimmed = content.trimStart()
   rejectBlock(trimmed, number)
@@ -197,16 +204,17 @@ function releaseSection(text: string, component: string): ReleaseSection {
   const actions: { start: number; end: number }[] = []
   let action: (typeof actions)[number] | undefined
   let previous: LineKind = 'blank'
+  let offset = 0
   let number = 0
-  for (const line of text.matchAll(/([^\r\n]*)(\r\n|\r|\n|$)/g)) {
-    const [, content = '', eol = ''] = line
+  for (const content of text.split(newline)) {
     number++
     const kind = lineKind(content, previous, number)
-    const end = line.index + content.length
+    inlineLinks(content, number)
+    const end = offset + content.length
     if (kind === 'heading' && content.startsWith('## ')) {
       unreleased = parseSectionHeading(
         content,
-        { start: line.index, end: end + eol.length, eol },
+        { start: offset, end: Math.min(end + 1, text.length) },
         unreleased,
         headings,
         component,
@@ -215,11 +223,12 @@ function releaseSection(text: string, component: string): ReleaseSection {
     }
     if (kind !== 'continuation') action = undefined
     if (kind === 'item' && isProductAction(content, number)) {
-      action = { start: line.index, end }
+      action = { start: offset, end }
       actions.push(action)
     }
     if (action) action.end = end
     previous = kind
+    offset = end + 1
   }
   if (!unreleased) grammarError(1, 'missing ## Unreleased section')
   const start = unreleased.end
@@ -228,12 +237,110 @@ function releaseSection(text: string, component: string): ReleaseSection {
     prefix: text.slice(0, start),
     body: text.slice(start, end),
     rest: text.slice(end),
-    eol: unreleased.eol || '\n',
     headings,
     actions: actions
       .filter((action) => action.start >= start && action.start < end)
       .map((action) => text.slice(action.start, action.end)),
   }
+}
+
+function relativeDestination(target: string, number: number): boolean {
+  if (target.startsWith('#')) return false
+  if (https.test(target) && URL.canParse(target)) return false
+  if (scheme.test(target) || /^[?/]/.test(target))
+    grammarError(number, 'link destination must be an HTTPS URL, a fragment, or a relative path')
+  return true
+}
+
+function validateRelativePath(target: string, number: number): void {
+  const path = target.split(/[?#]/, 1)[0]!
+  if (path.split('/').includes(''))
+    grammarError(number, `use a relative path without doubled or trailing slashes: ${target}`)
+  if (/(?:^|\/)\.{1,2}(?:\/|$)/.test(path) || /%(?:2f|5c|2e|25)/i.test(path))
+    grammarError(
+      number,
+      `use a repository-root-relative path without . or .. segments or encoded /, backslash, . or %: ${target}`,
+    )
+}
+
+function codeSpanEnd(line: string, opening: string, after: number, number: number): number {
+  const runs = /`+/g
+  runs.lastIndex = after
+  for (let run = runs.exec(line); run; run = runs.exec(line)) {
+    if (run[0].length === opening.length) return runs.lastIndex
+  }
+  grammarError(number, 'inline code must close with the same backtick run on the same line')
+}
+
+function rejectInline(marker: string, number: number): never {
+  if (marker === '<!--') grammarError(number, 'HTML comments are not allowed')
+  if (marker === '<')
+    grammarError(number, '< is not allowed outside inline code; write `a < b` or `<component>`')
+  if (marker === '\\') grammarError(number, 'backslashes are not allowed outside inline code')
+  if (marker.startsWith('&')) grammarError(number, 'HTML character references are not allowed')
+  grammarError(number, 'bare URLs are not allowed; use [text](destination)')
+}
+
+function readDestination(line: string, after: number, number: number): string {
+  linkDestination.lastIndex = after
+  const match = linkDestination.exec(line)
+  if (!match)
+    grammarError(number, 'expected [text](destination) with a non-empty destination and no title')
+  const target = match[1]!
+  if (characterReference.test(target))
+    grammarError(number, 'HTML character references are not allowed')
+  return target
+}
+
+function pinnedDestination(target: string, number: number, root?: string): string {
+  if (!relativeDestination(target, number)) return target
+  validateRelativePath(target, number)
+  return root ? root + target : target
+}
+
+/** Validate one line and, for proposal rendering only, replace relative destinations. */
+function inlineLinks(line: string, number: number, root?: string): string {
+  const tokens =
+    /`+|<!--|[<\\[\]]|&(?:#[xX][0-9a-fA-F]+|#[0-9]+|[a-zA-Z][a-zA-Z0-9]*);|https?:\/\/|www\.|mailto:/gi
+  let label = false
+  let copied = 0
+  let result = ''
+  for (let token = tokens.exec(line); token; token = tokens.exec(line)) {
+    const marker = token[0]
+    switch (marker[0]) {
+      case '`':
+        tokens.lastIndex = codeSpanEnd(line, marker, tokens.lastIndex, number)
+        break
+      case '[':
+        if (label) grammarError(number, 'nested link labels are not allowed')
+        label = true
+        break
+      case ']': {
+        if (!label) grammarError(number, 'unexpected ] outside inline code')
+        label = false
+        const start = tokens.lastIndex + 1
+        const target = readDestination(line, tokens.lastIndex, number)
+        tokens.lastIndex = linkDestination.lastIndex
+        const pinned = pinnedDestination(target, number, root)
+        if (pinned === target) break
+        result += line.slice(copied, start) + pinned
+        copied = start + target.length
+        break
+      }
+      default:
+        rejectInline(marker, number)
+    }
+  }
+  if (label) grammarError(number, 'unclosed link label (link reference syntax is not allowed)')
+  return result + line.slice(copied)
+}
+
+function renderNotes(text: string, root: string | undefined): string {
+  if (!root) return text
+  return text
+    .split(newline)
+    .map((line, index) => inlineLinks(line, index + 1, root))
+    .join(newline)
 }
 
 /** Pure: only the supplied source data and UTC date can affect the proposal. */
@@ -244,12 +351,13 @@ function propose(
   count: string,
   section: ReleaseSection,
   date: string,
+  repo: string | undefined,
 ): Proposal | null {
   if (!section.body.trim()) return null
   const closingReference = issueClosing.exec(section.body)
   if (closingReference) {
     const before = section.prefix + section.body.slice(0, closingReference.index)
-    const line = before.split(/\r\n|\r|\n/).length
+    const line = before.split(newline).length
     throw new Error(`rephrase CHANGELOG.md line ${line}: release notes must not close issues`)
   }
   const { actions } = section
@@ -264,13 +372,14 @@ function propose(
     )
   }
   const header = `## ${tag} — ${date}`
+  const root = repo ? `https://github.com/${repo}/blob/${sha}/` : undefined
   const body = [
     `Proposed tag: \`${tag}\`  \nBase tag: \`${base.tag}\` (\`${base.sha}\`)  \nSource SHA: \`${sha}\`  \nCommits in range: ${count}`,
     '### Manual publication\n\n- [ ] Merge this pull request after review.\n- [ ] Wait for successful CI and Secret scan push runs on the merge commit.\n' +
       `- [ ] Create the annotated tag \`${tag}\` on that merge commit. Never move an existing tag.\n` +
       '- [ ] Publish the GitHub Release from the new CHANGELOG section, with Product actions first.',
-    `### Product actions\n\n${actions.join(section.eol) || 'None.'}`,
-    `${header}\n${section.body}`,
+    `### Product actions\n\n${renderNotes(actions.join(newline), root) || 'None.'}`,
+    `${header}\n${renderNotes(section.body, root)}`,
   ].join('\n\n')
   return {
     branch: `release/${component}`,
@@ -278,7 +387,7 @@ function propose(
     tag,
     title: `chore(release): ${tag}`,
     body,
-    text: `${section.prefix}${section.eol}${header}${section.eol}${section.body}${section.rest}`,
+    text: `${section.prefix}\n${header}\n${section.body}${section.rest}`,
   }
 }
 
@@ -314,6 +423,7 @@ function proposalAt(
   sha: string,
   section: ReleaseSection,
   component: string,
+  repo: string | undefined,
 ): Proposal | 'unpublished' | null {
   const tags = new Set(
     git(['for-each-ref', '--format=%(refname:lstrip=2)', `refs/tags/${component}/v*`]).split('\n'),
@@ -332,6 +442,7 @@ function proposalAt(
     count,
     section,
     new Date().toISOString().slice(0, 10),
+    repo,
   )
   if (proposal && tags.has(proposal.tag))
     throw new Error(`tag ${proposal.tag} already exists; will not prepare or move it`)
@@ -605,13 +716,26 @@ function readArgs() {
   return { mode, sha }
 }
 
-function dryRun(sha: string, section: ReleaseSection, component: string): void {
-  const proposal = proposalAt(sha, section, component)
+function originGithubRepository(): string | undefined {
+  try {
+    const remote = git(['remote', 'get-url', 'origin']).trim()
+    return /^(?:https?:\/\/github\.com\/|ssh:\/\/git@github\.com\/|git@github\.com:)([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/.exec(
+      remote,
+    )?.[1]
+  } catch {
+    return undefined
+  }
+}
+
+function dryRun(sha: string, section: ReleaseSection, component: string, repo?: string): void {
+  const proposal = proposalAt(sha, section, component, repo)
   const eligibility = 'eligibility: not checked (dry-run)'
   if (proposal === 'unpublished') {
     output(eligibility)
     return
   }
+  if (proposal && !repo)
+    output('release-prepare: cannot identify a GitHub repository; relative links are unchanged')
   const detail = proposal ? `${proposal.title}\n\n${proposal.body}` : 'No unreleased changes.'
   output(`${eligibility}\n\n${detail}`)
 }
@@ -639,13 +763,14 @@ function main(): void {
   }
   const component = releaseComponent(git(['show', '--no-textconv', `${sha}:.dev/stack.yml`]))
   const section = releaseSection(git(['show', '--no-textconv', `${sha}:${changelog}`]), component)
+  const repo = process.env.GITHUB_REPOSITORY
+  if (repo !== undefined && !repoPattern.test(repo))
+    throw new Error('set GITHUB_REPOSITORY to owner/repo')
   if (mode === '--dry-run') {
-    dryRun(sha, section, component)
+    dryRun(sha, section, component, repo ?? originGithubRepository())
     return
   }
-  const repo = process.env.GITHUB_REPOSITORY ?? ''
-  if (!/^[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/.test(repo))
-    throw new Error('set GITHUB_REPOSITORY to owner/repo')
+  if (!repo) throw new Error('set GITHUB_REPOSITORY to owner/repo')
   const github = new GitHub(repo)
   const tip = github.tip()
   if (!shaPattern.test(tip)) throw new Error('invalid main SHA from GitHub')
@@ -657,7 +782,7 @@ function main(): void {
     output('release-prepare: CI and Secret scan are not both green for this main push; skipped')
     return
   }
-  const proposal = proposalAt(sha, section, component)
+  const proposal = proposalAt(sha, section, component, repo)
   if (proposal === 'unpublished') return
   const action = proposal && reconcile(github, proposal, mode === '--apply')
   if (action && mode === '--plan' && process.env.GITHUB_OUTPUT)

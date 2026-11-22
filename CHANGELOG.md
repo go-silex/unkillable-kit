@@ -4,6 +4,12 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ## Unreleased
 
+### Release proposal links
+
+- Release preparation pins relative links and images in the proposal to the source commit, without changing the CHANGELOG.
+  Use LF line endings and write links and images with a relative path, an HTTPS URL, or a fragment. Titles, angle destinations, bare URLs, HTML, and escapes outside inline code are rejected.
+  Write relative paths from the repository root without dot segments, doubled or trailing slashes, or encoded separators, dots, or percent signs.
+
 ### Auth throttle test clock
 
 - Pin the clock in Example API and Auth Package rate-limit tests so crossing a
