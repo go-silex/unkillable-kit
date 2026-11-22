@@ -4,6 +4,8 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ## Unreleased
 
+## unkillable-kit/v0.2.0 — 2026-11-22
+
 ### Kit release preparation
 
 - **Product action:** Before upgrading, set `.dev/stack.yml` `release.component` to your own component if it is `roxabi-boilerplate-cf` or `unkillable-kit`. The Product stack contract rejects both Kit values.
