@@ -4,6 +4,7 @@ import { APIError, createAuthMiddleware } from 'better-auth/api'
 import { jwt } from 'better-auth/plugins'
 import type { KitBetterAuth } from '../better-auth-factory'
 import type { OidcProviderConfig } from './oidc-config'
+import { oidcFreshLoginGuard } from './oidc-fresh-login-guard'
 import { createOidcLogoutPlugin } from './oidc-logout'
 
 export { endOidcUserSessions } from './oidc-logout'
@@ -138,6 +139,7 @@ export function createOidcProvider(options: OidcProviderOptions): OidcProviderCo
             ],
           },
         },
+        oidcFreshLoginGuard,
         // OpenID Connect Core §15.1 requires RS256 support; the JWT plugin defaults to EdDSA.
         jwt({ jwks: { keyPairConfig: { alg: 'RS256' } }, disableSettingJwtHeader: true }),
         withOidcMetadataPolicy(
