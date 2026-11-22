@@ -59,14 +59,26 @@ function output(text: string): void {
   )
 }
 
-function command(cmd: string, args: string[], input?: string, extra?: NodeJS.ProcessEnv): string {
+type CommandTimeout = { ms: number; message: string }
+
+function command(
+  cmd: string,
+  args: string[],
+  input?: string,
+  extra?: NodeJS.ProcessEnv,
+  timeout?: CommandTimeout,
+): string {
   const env = { ...process.env, ...extra }
   delete env.RELEASE_WRITE_TOKEN
   const { status, stdout, stderr, error } = spawnSync(cmd, args, {
     env,
     input,
     maxBuffer: 32 * 1024 * 1024,
+    timeout: timeout?.ms,
+    killSignal: 'SIGKILL',
   })
+  if (timeout && error && 'code' in error && error.code === 'ETIMEDOUT')
+    throw new Error(timeout.message)
   if (status !== 0) {
     throw new Error(`${cmd} ${args[0]} failed: ${error?.message ?? stderr.toString().trim()}`)
   }
@@ -452,6 +464,7 @@ function proposalAt(
 type Pull = {
   number: number
   head: { sha: string; ref: string; repo: { full_name: string } | null }
+  base: { ref: string; repo: { full_name: string } | null }
   title: string
   body: string | null
   state: string
@@ -474,7 +487,12 @@ class GitHub {
 
   private api<T>(
     path: string,
-    options?: { pages?: boolean; method?: string; body?: Record<string, string> },
+    options?: {
+      pages?: boolean
+      method?: string
+      body?: Record<string, string>
+      timeout?: CommandTimeout
+    },
   ): T {
     const args = ['api', `repos/${this.repo}/${path}`]
     if (options?.pages) args.push('--paginate', '--slurp')
@@ -483,7 +501,13 @@ class GitHub {
     const token = write ? process.env.RELEASE_WRITE_TOKEN : process.env.GH_TOKEN
     if (!token) throw new Error(`missing ${write ? 'RELEASE_WRITE_TOKEN' : 'GH_TOKEN'}`)
     return JSON.parse(
-      command('gh', args, write ? JSON.stringify(options.body) : undefined, { GH_TOKEN: token }),
+      command(
+        'gh',
+        args,
+        write ? JSON.stringify(options.body) : undefined,
+        { GH_TOKEN: token },
+        options?.timeout,
+      ),
     ) as T
   }
 
@@ -531,7 +555,7 @@ class GitHub {
     return found?.object.sha ?? null
   }
 
-  pull(branch: string): Pull | undefined {
+  private pull(branch: string): Pull | undefined {
     const owner = this.repo.split('/')[0]
     const pulls = this.api<Pull[][]>(
       `pulls?state=open&base=main&head=${encodeURIComponent(`${owner}:${branch}`)}&per_page=100`,
@@ -541,6 +565,50 @@ class GitHub {
       .filter((pull) => pull.head.repo?.full_name === this.repo && pull.head.ref === branch)
     if (pulls.length > 1) throw new Error('multiple open proposals on the release branch')
     return pulls[0]
+  }
+
+  proposalState(branch: string): { pull: Pull | undefined; head: string | null } {
+    const pull = this.pull(branch)
+    const head = this.head(branch)
+    if (!pull) return { pull, head }
+    if (!head) throw new Error('proposal branch changed; rerun release preparation')
+    const synced = this.waitForPullHead(pull, head)
+    if (this.head(branch) !== head)
+      throw new Error('proposal branch changed; rerun release preparation')
+    return { pull: synced, head }
+  }
+
+  private assertPullTarget(current: Pull, previous: Pull, target: string): void {
+    const { sha, ref, repo } = current.head
+    if (
+      current.state !== 'open' ||
+      ref !== previous.head.ref ||
+      repo?.full_name !== this.repo ||
+      (sha !== previous.head.sha && sha !== target)
+    )
+      throw new Error('proposal changed; rerun release preparation')
+    if (current.base?.ref !== 'main' || current.base.repo?.full_name !== this.repo)
+      throw new Error(
+        'proposal no longer targets main in this repository; rerun release preparation',
+      )
+  }
+
+  private waitForPullHead(pull: Pull, target: string): Pull {
+    const deadline = performance.now() + 30_000
+    const message =
+      'proposal PR head did not sync; rerun release preparation via workflow_dispatch without sha'
+    // The fake-GitHub tests can skip sleeps; no override can extend the polling window.
+    const pollMs = process.env.KIT_RELEASE_TEST_POLL_MS === '0' ? 0 : 2_000
+    for (let retry = 0; retry <= 15; retry++) {
+      const ms = Math.ceil(deadline - performance.now())
+      if (ms <= 0) break
+      const current = this.api<Pull>(`pulls/${pull.number}`, { timeout: { ms, message } })
+      this.assertPullTarget(current, pull, target)
+      if (current.head.sha === target) return current
+      if (retry === 15 || performance.now() + pollMs >= deadline) break
+      if (pollMs) Bun.sleepSync(pollMs)
+    }
+    throw new Error(message)
   }
 
   comment(pull: Pull, bot: Bot): Comment | undefined {
@@ -559,9 +627,10 @@ class GitHub {
       throw new Error('proposal branch changed; rerun release preparation')
     const { title, body, branch } = proposal
     if (pull) {
-      const current = this.api<Pull>(`pulls/${pull.number}`)
-      if (current.state !== 'open' || current.head.sha !== head)
-        throw new Error('proposal changed; rerun release preparation')
+      const current = this.waitForPullHead(pull, head)
+      if (this.head(branch) !== head)
+        throw new Error('proposal branch changed; rerun release preparation')
+      // The lease protects the branch update, not the subsequent title and body write.
       if (current.title !== title || current.body !== body)
         this.api(`pulls/${pull.number}`, { method: 'PATCH', body: { title, body } })
     } else {
@@ -681,10 +750,7 @@ function pushProposal(
 
 function reconcile(github: GitHub, proposal: Proposal, apply: boolean): string | null {
   const { branch, sha, title, body } = proposal
-  const pull = github.pull(branch)
-  const head = github.head(branch)
-  if (pull && pull.head.sha !== head)
-    throw new Error('proposal branch changed; rerun release preparation')
+  const { pull, head } = github.proposalState(branch)
   const bot = github.bot()
   if (head && hasMaintainerCommit(head, sha, bot)) {
     return maintainerNotice(github, proposal, pull, head, bot, apply)

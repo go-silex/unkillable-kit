@@ -8,6 +8,7 @@ trap 'rm -rf "$tmp"' EXIT
 mkdir "$tmp/bin"
 export PATH="$tmp/bin:$PATH"
 export GITHUB_REPOSITORY=fixture/kit GH_TOKEN=read-token RELEASE_BOT_USER_ID=42
+export KIT_RELEASE_TEST_POLL_MS=0
 export GIT_AUTHOR_NAME=Maintainer GIT_AUTHOR_EMAIL=maintainer@example.invalid
 export GIT_COMMITTER_NAME=$GIT_AUTHOR_NAME GIT_COMMITTER_EMAIL=$GIT_AUTHOR_EMAIL
 export GIT_ALLOW_PROTOCOL=file
@@ -41,7 +42,25 @@ else
 fi
 ref() { git --git-dir="$STATE/origin.git" rev-parse --verify "$1"; }
 show_pull() {
-  jq --arg sha "$(ref refs/heads/release/kit)" '.head = {sha:$sha,ref:"release/kit",repo:{full_name:"fixture/kit"}}' "$STATE/pull"
+  local sha=${1:-} status=${2:-open} base_ref=${3:-main} base_repo=${4:-fixture/kit}
+  if [[ -z $sha ]]; then sha=$(ref refs/heads/release/kit); fi
+  jq --arg sha "$sha" --arg status "$status" --arg base_ref "$base_ref" --arg base_repo "$base_repo" \
+    '.state = $status
+    | .head = {sha:$sha,ref:"release/kit",repo:{full_name:"fixture/kit"}}
+    | .base = {ref:$base_ref,repo:{full_name:$base_repo}}' "$STATE/pull"
+}
+show_pull_detail() {
+  local read=1 sha status base_ref base_repo
+  if [[ -f $STATE/pull-reads ]]; then read=$(( $(cat "$STATE/pull-reads") + 1 )); fi
+  printf '%s\n' "$read" > "$STATE/pull-reads"
+  if [[ -f $STATE/pull-sequence ]]; then
+    # Repeat the last queued response. Use '-' as the current remote branch SHA.
+    read -r sha status base_ref base_repo < <(awk -v n="$read" 'NR == n { print; found = 1; exit } END { if (!found) print }' "$STATE/pull-sequence")
+    if [[ $sha == - ]]; then sha=''; fi
+    show_pull "$sha" "$status" "$base_ref" "$base_repo"
+  else
+    show_pull
+  fi
 }
 case "$method $path" in
   'GET git/ref/heads/main')
@@ -60,8 +79,12 @@ case "$method $path" in
       jq -n --arg sha "$head" '[{ref:"refs/heads/release/kit",object:{sha:$sha}}]'
     else echo '[]'; fi ;;
   'GET pulls?'*)
-    if [[ -f $STATE/pull ]]; then show_pull | jq '[[.]]'; else echo '[[]]'; fi ;;
-  'GET pulls/7') show_pull ;;
+    if [[ -f $STATE/pull ]]; then
+      stale=''
+      if [[ -f $STATE/list-sha ]]; then stale=$(cat "$STATE/list-sha"); fi
+      show_pull "$stale" | jq '[[.]]'
+    else echo '[[]]'; fi ;;
+  'GET pulls/7') show_pull_detail ;;
   'GET user/42') echo '{"type":"Bot","id":42,"login":"kit-ci[bot]"}' ;;
   'GET issues/7/comments?'*) jq '[.]' "$STATE/comments" ;;
   'POST pulls'|'PATCH pulls/7')
@@ -229,6 +252,95 @@ apply
 [[ $(head) == "$refreshed" && $(jq -r .title "$STATE/pull") == 'chore(release): kit/v0.2.0' ]]
 [[ $(cat "$STATE/writes") == $'POST pulls\nPATCH pulls/7\nPATCH pulls/7' ]]
 pass 'minor bump, untrusted notes as data, one-commit branch, idempotent refresh and metadata-only repair'
+
+refresh_fixture() {
+  fixture "$1"
+  entries '- A patch proposal.'
+  apply
+  previous_head=$(head)
+  cp "$STATE/pull" "$STATE/original-pull"
+  entries '- **Product action:** Follow the new instructions.'
+}
+assert_refresh() {
+  apply || { fail 'expected the lagging proposal refresh to succeed'; return 1; }
+  [[ $(head) != "$previous_head" ]] || fail 'expected a new proposal branch head'
+  assert_refresh_metadata
+}
+assert_refresh_metadata() {
+  [[ $(cat "$STATE/writes") == $'POST pulls\nPATCH pulls/7' ]] ||
+    fail 'expected exactly one proposal PATCH'
+  jq -e --arg sha "$source" '.title == "chore(release): kit/v0.2.0" and
+    (.body | contains($sha) and contains("Follow the new instructions."))' "$STATE/pull" >/dev/null ||
+    fail 'expected the proposal title and body to describe the new source'
+}
+assert_refresh_refused() {
+  if apply; then fail 'expected an unsafe or unsynced proposal refresh to stop'; return 1; fi
+  expect_log "$1"
+  [[ $(cat "$STATE/writes") == 'POST pulls' ]] || fail 'expected no proposal PATCH'
+  cmp -s "$STATE/original-pull" "$STATE/pull" || fail 'expected unchanged proposal metadata'
+  [[ $(cat "$STATE/pull-reads") == "$2" ]] || fail 'unexpected number of proposal reads'
+}
+
+refresh_fixture lagging-after-push
+printf -- '- open\n%s open\n%s open\n- open\n' "$previous_head" "$previous_head" > "$STATE/pull-sequence"
+assert_refresh
+[[ $(cat "$STATE/pull-reads") == 4 ]]
+pass 'refresh waits for a lagging PR head before patching the title and body once'
+
+refresh_fixture third-head-after-push
+printf -- '- open\n%s open\n%s open\n- open\n' "$previous_head" "$base" > "$STATE/pull-sequence"
+assert_refresh_refused 'proposal changed; rerun release preparation' 3
+pass 'a third PR head stops the refresh without a PATCH'
+
+refresh_fixture closed-during-wait
+printf -- '- open\n%s open\n- closed\n- open\n' "$previous_head" > "$STATE/pull-sequence"
+assert_refresh_refused 'proposal changed; rerun release preparation' 3
+pass 'a PR closing during the wait stops the refresh without a PATCH'
+
+refresh_fixture never-syncs-after-push
+printf -- '- open\n%s open\n' "$previous_head" > "$STATE/pull-sequence"
+assert_refresh_refused 'workflow_dispatch without sha' 17
+pass 'a PR head that never syncs stops after the bound and names the dispatch recovery'
+
+refresh_fixture lagging-at-start
+printf -- '- open\n%s open\n' "$previous_head" > "$STATE/pull-sequence"
+assert_refresh_refused 'workflow_dispatch without sha' 17
+refreshed=$(head)
+printf '%s\n' "$previous_head" > "$STATE/list-sha"
+printf '%s open\n- open\n' "$previous_head" > "$STATE/pull-sequence"
+rm "$STATE/pull-reads"
+apply
+[[ $(head) == "$refreshed" && $(cat "$STATE/pull-reads") == 3 ]]
+assert_refresh_metadata
+pass 'reconciliation waits for a stale list result to sync and repairs metadata without a push'
+
+refresh_fixture never-syncs-at-start
+printf '%s\n' "$base" > "$STATE/list-sha"
+printf '%s open\n' "$base" > "$STATE/pull-sequence"
+assert_refresh_refused 'workflow_dispatch without sha' 16
+[[ $(head) == "$previous_head" ]]
+pass 'reconciliation stops before pushing if the start heads never converge'
+
+assert_retarget_refused() {
+  assert_refresh_refused 'proposal no longer targets main in this repository' 1 || return 1
+  [[ $(head) == "$previous_head" ]] || fail 'expected no branch update for a retargeted proposal'
+}
+
+refresh_fixture retargeted-at-start
+printf -- '- open staging\n' > "$STATE/pull-sequence"
+assert_retarget_refused
+pass 'a stale list entry for a retargeted PR cannot authorize a branch update or PATCH'
+
+refresh_fixture wrong-base-repo-at-start
+printf -- '- open main other/kit\n' > "$STATE/pull-sequence"
+assert_retarget_refused
+pass 'a detail response targeting main in another repository cannot authorize a branch update or PATCH'
+
+refresh_fixture retargeted-during-wait
+printf -- '- open\n%s open\n- open staging\n' "$previous_head" > "$STATE/pull-sequence"
+assert_refresh_refused 'proposal no longer targets main in this repository' 3
+[[ $(head) != "$previous_head" ]]
+pass 'a PR retargeted during the post-push wait cannot authorize a PATCH'
 
 for closing in 'Closes fixture/kit#7' 'FiXeD: [issue](https://github.com/fixture/kit/issues/7)' \
     'resolve: [pull request](https://github.com/fixture/kit/pull/7)' $'Resolves\n  fixture/kit#7'; do
@@ -682,3 +794,23 @@ entries '- [Kit docs](docs/kit//README.md)'
 mutant drop-empty-segment-rule "if (path.split('/').includes(''))" 'if (false)'
 killed drop-empty-segment-rule 'expected invalid CHANGELOG grammar to stop preparation' \
   assert_grammar_rejected 7 'without doubled or trailing slashes'
+
+script="$ROOT/scripts/kit/release-prepare.ts"
+refresh_fixture mutant-no-post-push-wait
+printf -- '- open\n%s open\n- open\n' "$previous_head" > "$STATE/pull-sequence"
+mutant no-post-push-wait 'const current = this.waitForPullHead(pull, head)' \
+  'const current = this.api<Pull>(`pulls/${pull.number}`); if (current.head.sha !== head) throw new Error("proposal changed")'
+killed no-post-push-wait 'expected the lagging proposal refresh to succeed' assert_refresh
+
+script="$ROOT/scripts/kit/release-prepare.ts"
+refresh_fixture mutant-accept-third-head
+printf -- '- open\n%s open\n%s open\n- open\n' "$previous_head" "$base" > "$STATE/pull-sequence"
+mutant accept-third-head '(sha !== previous.head.sha && sha !== target)' 'false'
+killed accept-third-head 'expected an unsafe or unsynced proposal refresh to stop' \
+  assert_refresh_refused 'proposal changed; rerun release preparation' 3
+
+script="$ROOT/scripts/kit/release-prepare.ts"
+refresh_fixture mutant-accept-retargeted
+printf -- '- open staging\n' > "$STATE/pull-sequence"
+mutant accept-retargeted "current.base?.ref !== 'main' || current.base.repo?.full_name !== this.repo" 'false'
+killed accept-retargeted 'expected an unsafe or unsynced proposal refresh to stop' assert_retarget_refused
