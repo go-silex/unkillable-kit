@@ -4,6 +4,8 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ## Unreleased
 
+## unkillable-kit/v0.3.0 — 2026-11-22
+
 ### OIDC logout
 
 - Preserve back-channel notification and refresh revocation for legacy D1 BLOB scopes.
