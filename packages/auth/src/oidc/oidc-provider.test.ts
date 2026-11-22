@@ -30,12 +30,11 @@ function setup(enabled: boolean, accountStateFailure?: () => boolean) {
       ),
     )
   }
-  const auth = createBetterAuth({
+  const options = {
     database: createSqliteD1(sqlite),
     secret: SECRET,
     baseURL: ORIGIN,
     trustedOrigins: [ORIGIN],
-    allowPublicSignup: true,
     ...(enabled
       ? {
           oidcProvider: (() => {
@@ -74,8 +73,10 @@ function setup(enabled: boolean, accountStateFailure?: () => boolean) {
           })(),
         }
       : {}),
-  })
-  return { auth, sqlite, pending }
+  }
+  const createAuth = (allowPublicSignup?: boolean) =>
+    createBetterAuth({ ...options, allowPublicSignup })
+  return { auth: createAuth(true), createAuth, sqlite, pending }
 }
 
 function request(auth: KitBetterAuth, path: string, init?: RequestInit) {
@@ -202,6 +203,103 @@ describe('opt-in OpenID Provider', () => {
     expect((await request(auth, '/api/auth/oauth2/token', { method: 'POST' })).status).toBe(404)
   })
 
+  it.each([undefined, true])(
+    'does not advertise the create prompt (allowPublicSignup = %s)',
+    async (allowPublicSignup) => {
+      const { createAuth } = setup(true)
+      const response = await request(
+        createAuth(allowPublicSignup),
+        '/api/auth/.well-known/openid-configuration',
+      )
+      expect(response.status).toBe(200)
+      expect(await response.json()).toMatchObject({
+        prompt_values_supported: ['login', 'consent', 'select_account', 'none'],
+      })
+    },
+  )
+
+  it.each([undefined, true])(
+    'rejects the create prompt at the registered redirect (allowPublicSignup = %s)',
+    async (allowPublicSignup) => {
+      const fixture = setup(true)
+      const { client, cookie } = await clientSession(fixture.auth)
+      const auth = fixture.createAuth(allowPublicSignup)
+      const discovery = await request(auth, '/api/auth/.well-known/openid-configuration')
+      const { issuer } = (await discovery.json()) as { issuer: string }
+      expect(issuer).toBe(ISSUER)
+      const get = await authorize(auth, client.client_id, cookie, { prompt: 'create' })
+      const form = new URL(
+        await authorizationUrl(client.client_id, { prompt: 'consent create' }),
+        ORIGIN,
+      )
+      const post = await request(auth, form.pathname, {
+        method: 'POST',
+        headers: {
+          accept: 'text/html',
+          'content-type': 'application/x-www-form-urlencoded',
+          origin: ORIGIN,
+        },
+        body: form.searchParams,
+      })
+
+      for (const response of [get, post]) {
+        expect(response.status).toBe(302)
+        const redirect = new URL(response.headers.get('location') ?? '', ORIGIN)
+        expect(`${redirect.origin}${redirect.pathname}`).toBe(REDIRECT)
+        expect(redirect.searchParams.get('error')).toBe('invalid_request')
+        expect(redirect.searchParams.getAll('state')).toEqual(['expected-state'])
+        expect(redirect.searchParams.getAll('iss')).toEqual([issuer])
+        expect(redirect.searchParams.has('code')).toBe(false)
+        expect(redirect.searchParams.has('sig')).toBe(false)
+      }
+    },
+  )
+
+  it('rejects duplicate form prompts before they can start login or issue a code', async () => {
+    const { auth } = setup(true)
+    const { client, cookie } = await clientSession(auth)
+    const form = new URL(await authorizationUrl(client.client_id, { prompt: 'create' }), ORIGIN)
+    form.searchParams.append('prompt', 'none')
+    const response = await request(auth, form.pathname, {
+      method: 'POST',
+      headers: { cookie, accept: 'text/html', origin: ORIGIN },
+      body: form.searchParams,
+    })
+
+    expect(response.status).toBe(400)
+    expect(response.headers.get('location')).toBeNull()
+    expect(await response.json()).toEqual({
+      error: 'invalid_request',
+      error_description: 'prompt must not be repeated',
+    })
+  })
+
+  it('does not send a create prompt error to an unregistered redirect URI', async () => {
+    const { auth } = setup(true)
+    const { client, cookie } = await clientSession(auth)
+    const response = await authorize(auth, client.client_id, cookie, {
+      prompt: 'create',
+      redirect_uri: `${REDIRECT}/unregistered`,
+    })
+    expect(response.status).toBe(302)
+    const redirect = new URL(response.headers.get('location') ?? '', ORIGIN)
+    expect(redirect.origin).toBe(ORIGIN)
+    expect(redirect.pathname).toBe('/api/auth/error')
+  })
+
+  it('still honors none and consent prompts', async () => {
+    const { auth } = setup(true)
+    const { client, cookie } = await clientSession(auth)
+    await codeFor(auth, client.client_id, cookie, { prompt: 'none' })
+
+    const response = await authorize(auth, client.client_id, cookie, { prompt: 'consent' })
+    expect(response.status).toBe(302)
+    const redirect = new URL(response.headers.get('location') ?? '', ORIGIN)
+    expect(redirect.origin).toBe(ORIGIN)
+    expect(redirect.pathname).toBe('/consent')
+    expect(redirect.searchParams.get('sig')).toBeTruthy()
+  })
+
   it('rejects client registrations without the openid scope', async () => {
     const { auth, sqlite } = setup(true)
     const { cookie } = await clientSession(auth)
@@ -220,6 +318,41 @@ describe('opt-in OpenID Provider', () => {
     expect(sqlite.prepare('SELECT count(*) AS count FROM oauth_client').get()).toEqual({
       count: 1,
     })
+  })
+
+  it('refuses callbacks with reserved OAuth response query parameters', async () => {
+    const { auth } = setup(true)
+    const { cookie } = await clientSession(auth)
+    const registration = { headers: new Headers({ cookie }), firstParty: true }
+    for (const key of ['code', 'state', 'iss', 'error', 'error_description', 'error_uri']) {
+      await expect(
+        registerOidcClient(auth, {
+          ...registration,
+          redirectUris: [`${REDIRECT}?return=example`, `${REDIRECT}?${key}=reserved`],
+        }),
+      ).rejects.toMatchObject({ body: { error: 'invalid_redirect_uri' } })
+    }
+    const registered = await registerOidcClient(auth, {
+      ...registration,
+      redirectUris: [`${REDIRECT}?return=example`],
+    })
+    expect(registered.client_id).toBeTruthy()
+  })
+
+  it('does not redirect authorization errors to legacy callbacks with reserved query keys', async () => {
+    const { auth, sqlite } = setup(true)
+    const { client, cookie } = await clientSession(auth)
+    const uri = `${REDIRECT}?%73tate=reserved&iss=reserved`
+    sqlite
+      .prepare('UPDATE oauth_client SET redirect_uris = ? WHERE client_id = ?')
+      .run(JSON.stringify([uri]), client.client_id)
+    const response = await authorize(auth, client.client_id, cookie, {
+      prompt: 'create',
+      redirect_uri: uri,
+    })
+    expect(response.status).toBe(302)
+    const redirect = new URL(response.headers.get('location') ?? '', ORIGIN)
+    expect(`${redirect.origin}${redirect.pathname}`).toBe(`${ISSUER}/error`)
   })
 
   it('uses registered scopes when authorization omits scope and issues an ID token', async () => {

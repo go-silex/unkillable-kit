@@ -5,6 +5,7 @@ import { jwt } from 'better-auth/plugins'
 import type { KitBetterAuth } from '../better-auth-factory'
 import type { OidcProviderConfig } from './oidc-config'
 import { createOidcLogoutPlugin } from './oidc-logout'
+import { rejectOidcSignupPrompt, withOidcPromptPolicy } from './oidc-prompt-create'
 
 export { endOidcUserSessions } from './oidc-logout'
 
@@ -26,33 +27,11 @@ const protectedClaims = (
   '__proto__ constructor'
 ).split(' ')
 
-function withOidcMetadataPolicy(provider: ReturnType<typeof oauthProvider>) {
-  const onRequest = provider.onRequest
-  return {
-    ...provider,
-    onRequest: async (...args: Parameters<NonNullable<typeof onRequest>>) => {
-      const result = await onRequest?.(...args)
-      if (!(result && 'response' in result)) return result
-      const response = result.response
-      if (!response.ok) return result
-      const headers = new Headers(response.headers)
-      headers.delete('content-length')
-      if (args[0].method === 'HEAD') {
-        return { ...result, response: new Response(null, { status: response.status, headers }) }
-      }
-      const metadata = (await response.clone().json()) as Record<string, unknown>
-      if (!('claims_parameter_supported' in metadata)) return result
-      metadata.claims_parameter_supported = false
-      return {
-        ...result,
-        response: new Response(JSON.stringify(metadata), {
-          status: response.status,
-          statusText: response.statusText,
-          headers,
-        }),
-      }
-    },
-  }
+const reservedResponseParams = ['code', 'state', 'iss', 'error', 'error_description', 'error_uri']
+
+function hasSafeOidcResponseQuery(uri: string) {
+  const query = URL.parse(uri)?.searchParams
+  return query !== undefined && !reservedResponseParams.some((key) => query.has(key))
 }
 
 /** Separate entry point keeps the provider peer out of the default factory import. */
@@ -91,6 +70,7 @@ export function createOidcProvider(options: OidcProviderOptions): OidcProviderCo
           id: 'kit-oidc-policy',
           hooks: {
             before: [
+              rejectOidcSignupPrompt,
               {
                 matcher: (ctx) => ctx.path === '/oauth2/token',
                 handler: createAuthMiddleware(async (ctx) => {
@@ -140,13 +120,15 @@ export function createOidcProvider(options: OidcProviderOptions): OidcProviderCo
         },
         // OpenID Connect Core §15.1 requires RS256 support; the JWT plugin defaults to EdDSA.
         jwt({ jwks: { keyPairConfig: { alg: 'RS256' } }, disableSettingJwtHeader: true }),
-        withOidcMetadataPolicy(
+        withOidcPromptPolicy(
           oauthProvider({
             loginPage: options.loginPage,
             consentPage: options.consentPage ?? options.loginPage,
             scopes: ['openid', 'email', 'profile'],
             grantTypes: ['authorization_code'],
             allowDynamicClientRegistration: false,
+            validateRedirectUri: (uri, _registered, matches) =>
+              matches && hasSafeOidcResponseQuery(uri),
             advertisedMetadata: {
               claims_supported: [
                 'iss',
@@ -251,6 +233,12 @@ export async function registerOidcClient(
     throw new APIError('BAD_REQUEST', {
       error: 'invalid_scope',
       error_description: 'openid scope is required',
+    })
+  }
+  if (!input.redirectUris.every(hasSafeOidcResponseQuery)) {
+    throw new APIError('BAD_REQUEST', {
+      error: 'invalid_redirect_uri',
+      error_description: 'redirect URI must be absolute and omit OAuth response query parameters',
     })
   }
   const api = auth.api as unknown as AdminClientApi
