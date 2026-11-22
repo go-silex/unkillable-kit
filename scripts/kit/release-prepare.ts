@@ -11,7 +11,8 @@ const requiredWorkflows = ['.github/workflows/ci.yml', '.github/workflows/secret
 // Cover the repository's close-linked-issues workflow as well as GitHub's URL references.
 const issueClosing =
   /(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?\s+(?:(?:[\w.-]+\/[\w.-]+)?#\d+|https?:\/\/[^\s/]+\/[\w.-]+\/[\w.-]+\/(?:issues|pulls?)\/\d+)/i
-const actionPrefix = '- **Product action:** '
+const actionMarker = '- **Product action:**'
+const actionPrefix = `${actionMarker} `
 const semver = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 
 type Version = readonly [bigint, bigint, bigint]
@@ -19,7 +20,6 @@ type Base = { tag: string; sha: string; version: Version }
 type ReleaseHeading = { name: string; start: number; end: number; eol: string }
 type LineKind = 'blank' | 'heading' | 'item' | 'continuation' | 'plain'
 const bareBlock = /^(?:#{1,}|[-*+](?: |$)|\d+[.)](?: |$)|[<>|])/
-const referenceDefinition = /^\[(?:\\.|[^\]\\])+\]:/
 const fence = /^(?:`{3,}|~{3,})/
 type ReleaseSection = {
   prefix: string
@@ -76,13 +76,14 @@ function grammarError(line: number, rule: string): never {
 
 function rejectBlock(content: string, number: number): void {
   if (fence.test(content)) grammarError(number, 'code fences are not allowed')
+  if (/^[-*_= :|]+$/.test(content))
+    grammarError(number, 'thematic breaks, setext underlines and table delimiters are not allowed')
+  if (content.startsWith('['))
+    grammarError(
+      number,
+      'lines starting with [ are not allowed because they can define a link reference',
+    )
   if (/^[<>|]/.test(content)) grammarError(number, 'HTML, blockquotes and tables are not allowed')
-  if (/^(?=.*\|):?-+:?(?: *\| *:?-+:?)*(?: *\|)? *$/.test(content))
-    grammarError(number, 'table delimiter lines are not allowed')
-  if (referenceDefinition.test(content))
-    grammarError(number, 'link reference definitions are not allowed')
-  if (/^[-*_= ]+$/.test(content))
-    grammarError(number, 'thematic breaks and setext underlines are not allowed')
 }
 
 function continuation(content: string, previous: LineKind, number: number): LineKind {
@@ -99,6 +100,18 @@ function validateItem(item: string, number: number): void {
   rejectBlock(item, number)
   if (bareBlock.test(item))
     grammarError(number, 'a list item cannot start with a nested block marker')
+}
+
+function isProductAction(content: string, number: number): boolean {
+  if (content.startsWith(actionPrefix) && /^\S/.test(content.slice(actionPrefix.length)))
+    return true
+  if (content.startsWith(actionMarker) || /product action/i.test(content.slice(0, 40))) {
+    grammarError(
+      number,
+      'a Product action marker must be - **Product action:** followed by one space and text',
+    )
+  }
+  return false
 }
 
 function lineKind(content: string, previous: LineKind, number: number): LineKind {
@@ -125,8 +138,19 @@ function lineKind(content: string, previous: LineKind, number: number): LineKind
   return 'plain'
 }
 
+function uniqueHeading(content: string, number: number, headingNames: Set<string>): string {
+  const name = content
+    .slice(3)
+    .replace(/(?:^| +)#+ *$/, '')
+    .trim()
+  if (headingNames.has(name)) grammarError(number, 'duplicate ## heading')
+  headingNames.add(name)
+  return name
+}
+
 function releaseSection(text: string): ReleaseSection {
   const headings: ReleaseHeading[] = []
+  const headingNames = new Set<string>()
   const actions: { start: number; end: number }[] = []
   let action: (typeof actions)[number] | undefined
   let previous: LineKind = 'blank'
@@ -137,14 +161,11 @@ function releaseSection(text: string): ReleaseSection {
     const kind = lineKind(content, previous, number)
     const end = line.index + content.length
     if (kind === 'heading' && content.startsWith('## ')) {
-      const name = content
-        .slice(3)
-        .replace(/(?:^| +)#+ *$/, '')
-        .trim()
+      const name = uniqueHeading(content, number, headingNames)
       headings.push({ name, start: line.index, end: end + eol.length, eol })
     }
     if (kind !== 'continuation') action = undefined
-    if (kind === 'item' && content.startsWith(actionPrefix)) {
+    if (kind === 'item' && isProductAction(content, number)) {
       action = { start: line.index, end }
       actions.push(action)
     }
@@ -164,7 +185,7 @@ function releaseSection(text: string): ReleaseSection {
     headings,
     actions: actions
       .filter((action) => action.start >= start && action.start < end)
-      .map((action) => `- ${text.slice(action.start, action.end).slice(actionPrefix.length)}`),
+      .map((action) => text.slice(action.start, action.end)),
   }
 }
 
@@ -195,7 +216,7 @@ function propose(
     '### Manual publication\n\n- [ ] Merge this pull request after review.\n- [ ] Wait for successful CI and Secret scan push runs on the merge commit.\n' +
       `- [ ] Create the annotated tag \`${tag}\` on that merge commit. Never move an existing tag.\n` +
       '- [ ] Publish the GitHub Release from the new CHANGELOG section, with Product actions first.',
-    `### Product actions\n\n${actions.join('\n') || 'None.'}`,
+    `### Product actions\n\n${actions.join(section.eol) || 'None.'}`,
     `${header}\n${section.body}`,
   ].join('\n\n')
   return {

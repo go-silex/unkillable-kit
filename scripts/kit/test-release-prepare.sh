@@ -165,9 +165,10 @@ assert_grammar_rejected() {
   assert_no_proposal
 }
 assert_full_action() {
-  jq -e '.body | split("### Product actions\n\n")[1] | split("\n\n## kit/")[0] |
-    contains("- Set the header.\r\n  Restart the client.\r\n  Verify the response.")' "$STATE/pull" >/dev/null ||
-    fail 'expected the Product action summary to include every continuation'
+  jq -j '.body | split("### Product actions\n\n")[1] | split("\n\n## kit/")[0]' \
+    "$STATE/pull" > "$STATE/summary"
+  cmp -s "$STATE/action" "$STATE/summary" ||
+    fail 'expected byte-identical Product action bullets in the summary'
 }
 
 
@@ -201,11 +202,11 @@ fixture minor
 entries '- **Product action:** Set a header.' '- ${{ secrets.FAKE }}; $(touch dangerous)' '- ::error::printed as data'
 invoke --dry-run
 expect_tag v0.2.0
-expect_log '- Set a header.'
+expect_log '- **Product action:** Set a header.'
 reject_log '::error::'
 apply
 assert_preserved v0.2.0
-jq -e '.body | contains("- Set a header.") and contains("${{ secrets.FAKE }}; $(touch dangerous)") and contains("::error::printed as data")' "$STATE/pull" >/dev/null
+jq -e '.body | contains("- **Product action:** Set a header.") and contains("${{ secrets.FAKE }}; $(touch dangerous)") and contains("::error::printed as data")' "$STATE/pull" >/dev/null
 [[ ! -e $repo/dangerous ]]
 [[ $(git --git-dir="$STATE/origin.git" rev-list --parents -1 "$(head)") == "$(head) $source" ]]
 [[ $(git --git-dir="$STATE/origin.git" diff-tree --no-commit-id --name-only -r "$(head)") == 'CHANGELOG.md' ]]
@@ -247,7 +248,8 @@ jq -e '.body | index("Proposed tag:") < index("### Manual publication") and
 pass 'neutral references stay verbatim; metadata and checklist precede generated Markdown'
 
 for invalid in fence tilde-fence nested-fence html-comment html-block quote table table-delimiter nested-heading nested-item \
-    lazy reference setext thematic tabs code indented-blank star plus ordered heading disconnected; do
+    lazy reference multiline-reference continuation-reference setext thematic pipe-free-table tabs code indented-blank \
+    star plus ordered heading disconnected empty-action action-spaces near-miss lower-case italic-action duplicate-unreleased duplicate-release; do
   fixture "grammar-$invalid"
   line=7
   case $invalid in
@@ -263,8 +265,11 @@ for invalid in fence tilde-fence nested-fence html-comment html-block quote tabl
     nested-item) rule='block marker'; line=8; entries '- Item' '  - Nested' ;;
     lazy) rule='plain paragraph'; line=8; entries '- Item' 'Lazy continuation' ;;
     reference) rule='link reference'; entries '[label]: /url' ;;
+    multiline-reference) rule='link reference'; entries '[label' 'continued]: /url' ;;
+    continuation-reference) rule='link reference'; line=8; entries '- Item' '  [label]: /url' ;;
     setext) rule='setext'; line=8; entries 'Text' '====' ;;
     thematic) rule='thematic breaks'; entries '- - -' ;;
+    pipe-free-table) rule='table delimiter'; line=8; entries 'Column' ':---:' ;;
     tabs) rule=tabs; entries $'- Tab\there' ;;
     code) rule=indentation; entries '    code' ;;
     indented-blank) rule=indentation; entries '    ' ;;
@@ -273,6 +278,13 @@ for invalid in fence tilde-fence nested-fence html-comment html-block quote tabl
     ordered) rule='list items'; entries '1) Item' ;;
     heading) rule='heading'; entries '#### Heading' ;;
     disconnected) rule='continuation'; line=9; entries '- Item' '' '  Disconnected' ;;
+    empty-action) rule='Product action marker'; entries '- **Product action:**' '  Migrate the client.' ;;
+    action-spaces) rule='Product action marker'; entries '- **Product action:**  Migrate the client.' ;;
+    near-miss) rule='Product action marker'; entries '- **Product action**: Migrate the client.' ;;
+    lower-case) rule='Product action marker'; entries '- **product action:** Migrate the client.' ;;
+    italic-action) rule='Product action marker'; entries '- *Product action:* Migrate the client.' ;;
+    duplicate-unreleased) rule='duplicate ## heading'; line=8; entries '- First change' '## Unreleased' '- **Product action:** Another change.' ;;
+    duplicate-release) rule='duplicate ## heading'; line=10; entries '## kit/v0.1.0 — 2026-01-01' '- Duplicate section' ;;
   esac
   assert_grammar_rejected "$line" "$rule"
   if invoke --check-changelog; then fail "doc gate accepted $invalid"; fi
@@ -299,13 +311,24 @@ assert_grammar_rejected 15 'HTML, blockquotes and tables'
 pass 'the grammar also checks tagged sections'
 
 fixture multiline-action
-entries '- **Product action:** Set the header.' '  Restart the client.' '  Verify the response.' \
-  '- Description with **Product action:** in the middle.'
+action=('- **Product action:** Set the header.' '  Restart the client.' '  Verify the response.')
+entries "${action[@]}" '- This is a long ordinary description with the **Product action:** phrase later in the same line.'
+printf '%s\r\n%s\r\n%s' "${action[@]}" > "$STATE/action"
 invoke --check-changelog
 apply
 assert_preserved v0.2.0
 assert_full_action
 pass 'the complete multiline Product action appears in the PR summary'
+
+fixture marker-before-link-or-fence
+link='- **Product action:** [migration]: /guide'
+fence='- **Product action:** ```sh'
+entries "$link" '  "title"' "$fence"
+printf '%s\r\n%s\r\n%s' "$link" '  "title"' "$fence" > "$STATE/action"
+invoke --check-changelog
+apply
+assert_full_action
+pass 'a link or fence after a Product action marker keeps the marker verbatim'
 
 fixture pending-publication
 printf '\r\n## kit/v0.1.1 — 2026-01-02\r\n\r\n- Merged, not tagged\r\n' > "$STATE/pending"
@@ -485,14 +508,31 @@ mutant allow-closing-notes 'if (closingReference)' 'if (false && closingReferenc
 killed allow-closing-notes 'expected issue-closing notes to be rejected' assert_closing_notes_rejected
 
 fixture mutant-skip-grammar
-entries '<!--' '## kit/v0.1.0 — 2026-01-01' '-->' '- Omitted pending note'
+entries '<!--' '## Hidden heading' '-->' '- Omitted pending note'
 mutant skip-grammar 'const kind = lineKind(content, previous, number)' \
   'const kind = content.startsWith("#") ? "heading" : "plain"'
 killed skip-grammar 'expected invalid CHANGELOG grammar to stop preparation' assert_grammar_rejected 7 'HTML comments'
 
 fixture mutant-first-line-only
 entries '- **Product action:** Set the header.' '  Restart the client.' '  Verify the response.'
+printf '%s\r\n%s\r\n%s' '- **Product action:** Set the header.' '  Restart the client.' \
+  '  Verify the response.' > "$STATE/action"
 mutant first-line-only 'text.slice(action.start, action.end)' \
   'text.slice(action.start, action.end).split(/\r?\n/)[0]'
 apply
-killed first-line-only 'expected the Product action summary to include every continuation' assert_full_action
+killed first-line-only 'expected byte-identical Product action bullets in the summary' assert_full_action
+
+fixture mutant-strip-marker
+entries '- **Product action:** [migration]: /guide' '  "title"'
+printf '%s\r\n%s' '- **Product action:** [migration]: /guide' '  "title"' > "$STATE/action"
+mutant strip-marker 'text.slice(action.start, action.end)' \
+  '"- " + text.slice(action.start + actionPrefix.length, action.end)'
+apply
+killed strip-marker 'expected byte-identical Product action bullets in the summary' assert_full_action
+
+fixture mutant-duplicate-unreleased
+entries '- First change' '## Unreleased' '- **Product action:** Another change.'
+mutant duplicate-unreleased 'if (headingNames.has(name))' \
+  'if (name !== "Unreleased" && headingNames.has(name))'
+killed duplicate-unreleased 'expected invalid CHANGELOG grammar to stop preparation' \
+  assert_grammar_rejected 8 'duplicate ## heading'
