@@ -84,6 +84,32 @@ if $check; then
     else
       echo 'pending range not readable from local history'
     fi
+    # Only the cached Kit tree can name the Kit tag namespace. Parse its block
+    # mapping, not the Product's stack or a `component` key in another block.
+    if component=$(git show --no-textconv "$tip:.dev/stack.yml" 2>/dev/null | awk '
+      /^[[:space:]]*(#|$)/ { next }
+      /^[^[:space:]]/ { release = /^release:[[:space:]]*(#.*)?$/; next }
+      release && /^  component:[[:space:]]*/ {
+        count++
+        sub(/^  component:[[:space:]]*/, "")
+        sub(/[[:space:]]+#.*/, "")
+        sub(/[[:space:]]+$/, "")
+        if (/^"[a-zA-Z0-9][a-zA-Z0-9._-]*"$/ || /^\047[a-zA-Z0-9][a-zA-Z0-9._-]*\047$/)
+          $0 = substr($0, 2, length($0) - 2)
+        if (/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/) value = $0
+      }
+      END { if (count != 1 || value == "") exit 1; print value }
+    '); then
+      if releases=$(git for-each-ref --merged="$tip" --no-merged=HEAD \
+        --sort=refname --sort=creatordate --format='%(refname:lstrip=2)' "refs/tags/$component/v*" 2>/dev/null); then
+        releases=${releases//$'\n'/, }
+        printf 'Kit releases in range (oldest first): %s\n' "${releases:-(none)}"
+      else
+        echo 'Kit release tags not readable from local history'
+      fi
+    else
+      echo 'Kit release tags not reported: cannot read release.component at the cached tip'
+    fi
   fi
   # A regular file only: a directory or symlink named CHANGELOG.md would make the pointer misleading.
   changelog_entry=$'^100(644|755) blob [0-9a-f]+\tCHANGELOG\\.md$'

@@ -64,7 +64,7 @@ review:
       R-security-auditor: never
 release:
   model: trunk
-  component: roxabi-boilerplate-cf
+  component: unkillable-kit
 worktree:
   copy: []
   seed: []
@@ -286,7 +286,35 @@ prod_mutant "bun-version" "bun version key is forbidden: bun_version" \
 prod_mutant "name-equal" "name must differ from upstream" \
   'text = text.replace("name: acme", "name: cf-chemin-a", 1)'
 prod_mutant "component-equal" "release.component must differ from upstream" \
+  'text = text.replace("component: acme", "component: unkillable-kit", 1)'
+prod_mutant "component-legacy" "release.component must not reuse the legacy Kit component" \
   'text = text.replace("component: acme", "component: roxabi-boilerplate-cf", 1)'
+
+# Falsify the guard independently of the ordinary malformed-input fixtures.
+mutant_root="$TMP/allow-legacy-component-scanner"
+mkdir -p "$mutant_root/scripts/kit"
+ln -s "$ROOT/packages" "$mutant_root/packages"
+ln -s "$ROOT/scripts/kit/lib" "$mutant_root/scripts/kit/lib"
+mutant_scanner="$mutant_root/scripts/kit/check-stack-contract.ts"
+awk '
+  /if \(scalar\(head, .*=== .roxabi-boilerplate-cf.\) \{/ {
+    if (++mutations != 1) exit 2
+    print "  if (false) {"
+    next
+  }
+  { print }
+  END { if (mutations != 1) exit 2 }
+' "$SCANNER" > "$mutant_scanner"
+if output="$(STACK_CONTRACT_ROOT="$TMP/component-legacy" bun "$mutant_scanner" 2>&1)" &&
+  [[ "$output" == *'check-stack-contract: OK (product)'* ]]; then
+  echo 'PASS: mutant killed: allow-legacy-component'
+  printf 'FAIL: expected legacy Kit component refusal; mutant returned: %s\n' "$output"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: allow-legacy-component did not reproduce the acceptance hole: $output" >&2
+  FAIL=$((FAIL + 1))
+fi
+
 prod_mutant "name-missing" "name must differ from upstream" \
   'text = text.replace("name: acme\n", "", 1)'
 prod_mutant "path-equal" "backend.path must differ from upstream" \

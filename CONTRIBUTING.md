@@ -135,3 +135,13 @@ Qualified issue and pull-request references follow [AGENTS.md](AGENTS.md).
 ## Development
 
 Read [AGENTS.md](AGENTS.md) before changing Kit-owned paths. The development and review procedure is [dev-process.md](docs/kit/processes/dev-process.md). The root gate is the `validate:full` script in the root `package.json`; [testing.md](docs/kit/testing.md) owns the testing doctrine. Do not copy the gate's step list into a pull request or an issue.
+
+## Preparing a Kit release
+
+After `CI` and `Secret scan` pass on the same push to `main`, **Release preparation** opens or refreshes `release/unkillable-kit` with the dated CHANGELOG section. The workflow uses the [CI App](docs/kit/ci-app-setup.md). Reconciliation is eventual: `main` can advance after the tip check, and a stale manual dispatch can displace a pending run. Dispatch on `main` without `sha` to reconcile the latest tip.
+
+Review the version and Product actions in the PR. UI-only title and body edits are overwritten while the branch is bot-only. Push a commit to keep a correction; a maintainer commit stops automated refreshes, so bring that branch up to date yourself if needed. Rephrase issue-closing references in CHANGELOG notes before preparation.
+
+`doc:check` enforces the Kit CHANGELOG format: `# Changelog`, blank lines, exactly one `## Unreleased` as the first `##` heading, canonical `## <component>/vMAJOR.MINOR.PATCH — YYYY-MM-DD` headings using `.dev/stack.yml`'s release component, ASCII digits, and exactly the spaces shown, then strictly descending release versions. It allows column-zero `###` subheadings, `- ` items with adjacent two-space plain continuations, and plain paragraphs separated from lists by a blank line; no plain or continuation text starting with `[`, punctuation-only block delimiters, fenced code, HTML blocks, comments or character references, quotes, or tables. Write `- **Product action:** ` with text on the same line. Preparation waits if any Kit release section is still untagged.
+
+Publication stays manual. After merging, delete `release/<component>`; cleanup is required after a squash or rebase of a maintainer-edited proposal. Wait for both push checks on the merge commit. Create the annotated tag on that commit, then publish the GitHub Release from the new section with Product actions first. Never move an existing tag.

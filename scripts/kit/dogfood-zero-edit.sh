@@ -345,7 +345,7 @@ commands:
   worktree_setup: scripts/kit/worktree-setup.sh
 release:
   model: trunk
-  component: roxabi-boilerplate-cf
+  component: unkillable-kit
 worktree:
   copy: []
   seed: []
@@ -366,7 +366,7 @@ import pathlib, sys
 p = pathlib.Path(sys.argv[1])
 text = p.read_text()
 text = text.replace("name: cf-chemin-a", "name: acme", 1)
-text = text.replace("component: roxabi-boilerplate-cf", "component: acme", 1)
+text = text.replace("component: unkillable-kit", "component: acme", 1)
 p.write_text(text)
 PY
   local out rc
@@ -967,7 +967,7 @@ commands:
   worktree_setup: scripts/kit/worktree-setup.sh
 release:
   model: trunk
-  component: roxabi-boilerplate-cf
+  component: unkillable-kit
 backend:
   path: apps/example-api
 frontend:
@@ -985,7 +985,7 @@ pc_derive_product_stack() {
     let text = fs.readFileSync(process.argv[1], "utf8")
     const reps = [
       ["name: cf-chemin-a", "name: acme"],
-      ["component: roxabi-boilerplate-cf", "component: acme"],
+      ["component: unkillable-kit", "component: acme"],
       ["path: apps/example-api", "path: apps/acme-api"],
       ["path: apps/example-web", "path: apps/acme-web"],
       ["copy: []", "copy:\n    - apps/acme-api/.dev.vars"],

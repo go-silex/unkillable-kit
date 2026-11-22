@@ -64,6 +64,8 @@ run_case() {
   marker="$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).upstreamCommit' "$tree/config/product/inheritance.json")"
   [[ "$marker" == "$base" ]] || fail "$label inheritance pin"
   git -C "$tree" cat-file -e "$first:config/product/inheritance.json" || fail "$label uncommitted inheritance"
+  git -C "$tree" show "$first:.dev/stack.yml" | grep -x '  component: sample' >/dev/null ||
+    fail "$label inheritance commit did not set the Product release component"
   [[ -f "$tree/apps/sample-api/package.json" ]] || fail "$label missing API"
   if [[ " $* " == *' --web '* ]]; then [[ -f "$tree/apps/sample-web/package.json" ]] || fail "$label missing web"; else [[ ! -e "$tree/apps/sample-web" ]] || fail "$label unexpected web"; fi
   if [[ " $* " == *' --mcp '* ]]; then [[ -f "$tree/apps/sample-mcp/package.json" ]] || fail "$label missing MCP"; else [[ ! -e "$tree/apps/sample-mcp" ]] || fail "$label unexpected MCP"; fi

@@ -37,12 +37,13 @@ fixture() {
   local name=$1
   dir="$tmp/$name"
   export KIT_UPGRADE_TEST_LOG="$dir/bun.log"
-  mkdir -p "$dir/seed/scripts/kit" "$dir/seed/config/kit" "$dir/seed/.github/workflows"
+  mkdir -p "$dir/seed/scripts/kit" "$dir/seed/config/kit" "$dir/seed/.github/workflows" "$dir/seed/.dev"
   cp "$ROOT/scripts/kit/kit-upgrade.sh" "$ROOT/scripts/kit/resolve-tree-identity.mjs" "$dir/seed/scripts/kit/"
   printf '{"version":1,"kit_origin_allowlist":["kit"]}\n' > "$dir/seed/config/kit/zero-edit-zones.json"
   printf '{"packageManager":"bun@1.0"}\n' > "$dir/seed/package.json"
   echo lock > "$dir/seed/bun.lock"
   echo '# Changelog' > "$dir/seed/CHANGELOG.md"
+  printf 'release:\n  model: trunk\n  component: unkillable-kit\n' > "$dir/seed/.dev/stack.yml"
   echo upstream-license > "$dir/seed/LICENSE"
   git -C "$dir/seed" init -q -b main
   git -C "$dir/seed" add .
@@ -302,6 +303,7 @@ snapshot_git_state "$dir/before-check"
 run_upgrade --check
 grep -q 'upgrade pending' "$dir/out"
 grep -q '^Pending commits: 1$' "$dir/out"
+grep -qx 'Kit releases in range (oldest first): (none)' "$dir/out"
 grep -qx "Kit CHANGELOG at the cached tip: git show ${cached}:CHANGELOG.md" "$dir/out"
 [[ $(git -C "$dir/product" rev-parse HEAD) == "$before" ]]
 [[ $(git -C "$dir/product" rev-parse upstream/main) == "$cached" ]]
@@ -331,6 +333,45 @@ grep -qx 'Pending commits: 4' "$dir/out"
 grep -qx "Kit CHANGELOG at the cached tip: git show ${tip}:CHANGELOG.md" "$dir/out"
 assert_git_state_unchanged "$dir/before-report"
 pass '--check reports pending merge subjects without writes'
+
+fixture check-releases
+git -C "$dir/seed" tag unkillable-kit/v0.1.0
+git -C "$dir/seed" checkout -qb outside
+git -C "$dir/seed" commit -qm 'not on Kit main' --allow-empty
+git -C "$dir/seed" tag unkillable-kit/v9.0.0
+git -C "$dir/seed" checkout -q main
+git -C "$dir/seed" checkout -qb feature
+printf '# Changelog\n\n## Unreleased\n\n- Kit feature\n\n## unkillable-kit/v0.1.0 — 2026-11-21\n' > "$dir/seed/CHANGELOG.md"
+git -C "$dir/seed" commit -qam 'document Kit feature'
+git -C "$dir/seed" checkout -q main
+git -C "$dir/seed" merge -q --no-ff -m 'Merge Kit feature' feature
+GIT_COMMITTER_DATE='2026-11-22T01:00:00Z' git -C "$dir/seed" tag -am 'first pending release' unkillable-kit/v0.1.1
+git -C "$dir/seed" tag other-kit/v0.1.1
+printf '# Changelog\n\n## Unreleased\n\n## unkillable-kit/v0.1.2 — 2026-11-22\n\n- Kit feature\n\n## unkillable-kit/v0.1.0 — 2026-11-21\n' > "$dir/seed/CHANGELOG.md"
+git -C "$dir/seed" commit -qam 'move the pending entry into a release'
+GIT_COMMITTER_DATE='2026-11-22T02:00:00Z' git -C "$dir/seed" tag -am 'second pending release' unkillable-kit/v0.1.2
+git -C "$dir/seed" push -q "$dir/upstream.git" --tags main outside
+git -C "$dir/product" fetch -q --tags upstream
+printf 'release:\n  component: product-only\n' > "$dir/product/.dev/stack.yml"
+git -C "$dir/product" commit -qam 'use the Product tag namespace'
+tip=$(git -C "$dir/product" rev-parse upstream/main)
+snapshot_git_state "$dir/before-check"
+run_upgrade --check
+grep -qx 'Kit releases in range (oldest first): unkillable-kit/v0.1.1, unkillable-kit/v0.1.2' "$dir/out"
+grep -qx 'Pending commits: 3' "$dir/out"
+grep -qx 'Merge Kit feature' "$dir/out"
+grep -qx "Kit CHANGELOG at the cached tip: git show ${tip}:CHANGELOG.md" "$dir/out"
+assert_git_state_unchanged "$dir/before-check"
+pass '--check lists only pending Kit release tags after entries move out of Unreleased'
+
+fixture check-release-namespace-missing
+printf 'landing:\n  component: not-a-release\n' > "$dir/seed/.dev/stack.yml"
+advance
+git -C "$dir/product" fetch -q upstream
+run_upgrade --check
+[[ $(grep -c '^Kit release tags not reported:' "$dir/out") == 1 ]]
+if grep -q '^Kit releases in range' "$dir/out"; then exit 1; fi
+pass '--check omits releases and prints one notice without release.component'
 
 fixture check-ref-shadow
 advance
@@ -467,7 +508,7 @@ done
 git -C "$dir/seed" push -q "$dir/upstream.git" main
 git -C "$dir/product" fetch -q upstream
 run_upgrade --check
-merges=$(awk '/^First-parent merge subjects/{p=1;next} /^Kit CHANGELOG|^upgrade pending|^shallow|^pending range/{p=0} p' "$dir/out")
+merges=$(awk '/^First-parent merge subjects/{p=1;next} /^Kit |^upgrade pending|^shallow|^pending range/{p=0} p' "$dir/out")
 [[ $(printf '%s\n' "$merges" | grep -c '^Merge cap ') == 50 ]]
 [[ $(printf '%s\n' "$merges" | tail -n1) == '… 1 more' ]]
 pass '--check caps merge subjects at 50'
