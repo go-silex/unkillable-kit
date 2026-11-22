@@ -133,6 +133,28 @@ validate logout tokens, keep RP sessions short and periodically revalidate with
 the provider using `prompt=none`. Locally verified access tokens remain usable
 according to their expiry; logout is not an atomic global revocation guarantee.
 
+### Login method guidance
+
+When the pending request carries `prompt=login` or `max_age`, Apps should offer
+password sign-in and use the Better Auth provider client plugin to send the
+signed `oauth_query`. For a verified query with either parameter, the Kit
+returns HTTP 400 `OIDC_PASSWORD_REQUIRED` on magic-link send or social sign-in
+before sending mail or starting a redirect. This gives Apps a clear error
+instead of a login loop; it is not a freshness check.
+
+Better Auth 1.7.27 does not guarantee reauthentication for `prompt=login` or
+`max_age`:
+
+- Reissuing a session cookie (for example, on `/update-user` or during
+  authorization) can clear `prompt=login` without a new authentication.
+- The consent flow can clear both parameters based on session age alone.
+- Positive `max_age` is measured from local session creation.
+- Google sign-in neither forces upstream reauthentication nor checks Google's
+  `auth_time`.
+
+Relying parties that need proof of fresh authentication must not rely on these
+parameters from this provider.
+
 ## Google sign-in (opt-in)
 
 Pass `google: { clientId, clientSecret, allowedDomains }` to `createBetterAuth`.
