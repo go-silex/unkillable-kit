@@ -4,6 +4,17 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ## Unreleased
 
+### OpenID provider
+
+- Discovery omits the unsupported `create` prompt. Authorization requests using
+  it return `invalid_request` instead of going to the login page
+  (go-silex/unkillable-kit#86).
+- **Product action:** Before upgrading, check each registered OIDC redirect URI.
+  If its fixed query string uses `code`, `state`, `iss`, `error`,
+  `error_description` or `error_uri`, move those values to non-reserved keys in
+  both the client configuration and the registered redirect URI. The provider
+  now refuses such redirect URIs, even ones already registered.
+
 ### OpenID provider login guidance
 
 - When a signed authorization request carries `prompt=login` or `max_age`, magic-link and social sign-in return HTTP 400 `OIDC_PASSWORD_REQUIRED` instead of starting. Apps should offer password sign-in, so users no longer loop back to the login page (go-silex/unkillable-kit#84).
