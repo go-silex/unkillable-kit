@@ -193,16 +193,16 @@ AppError { code, status, message?, details?, cause? }
 #### Frontend
 
 ```text
-HttpError { status, message }  ← any non-OK HTTP response
-  └─ ApiError { code, requestId, details }  ← kit envelope
+HttpError { status, message, upstreamCode? }  ← any non-OK HTTP response
+  └─ ApiError { code, requestId, details }  ← Kit envelope
   → apiErrorToMessage / toast / field errors / ErrorBoundary
 ```
 
-Les contrôles par statut utilisent `HttpError`, pas seulement `ApiError`; les champs
-de l'enveloppe nécessitent un narrowing vers `ApiError`. Une erreur réseau n'est pas
-une erreur HTTP. Les corps non-kit ne sont pas affichés : message sûr `HTTP <status>`.
-Le callback `onUnauthorized(HttpError)` accepte une promesse; ses erreurs sont
-ignorées pour préserver le rejet HTTP. Migration : [guide client](../../../packages/api-client/README.md#http-errors-and-migration).
+Statut : `HttpError`. `requestId` et `details` : `ApiError`. Un corps plat non-Kit
+peut fournir un `upstreamCode` ; le message sûr reste `HTTP <status>`. Les erreurs réseau
+ne sont pas HTTP. `onUnauthorized(HttpError)` accepte une promesse ; ses erreurs
+sont ignorées pour préserver le rejet. [Guide client](../../../packages/api-client/README.md#http-errors-and-migration).
+Seuls les codes attendus, par ex. `INVALID_TOKEN`, déclenchent un état dédié.
 
 | Surface        | Comportement                                               |
 | -------------- | ---------------------------------------------------------- |

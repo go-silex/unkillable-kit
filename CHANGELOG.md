@@ -15,6 +15,17 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
   both the client configuration and the registered redirect URI. The provider
   now refuses such redirect URIs, even ones already registered.
 
+### OpenID provider login guidance
+
+- When a signed authorization request carries `prompt=login` or `max_age`, magic-link and social sign-in return HTTP 400 `OIDC_PASSWORD_REQUIRED` instead of starting. Apps should offer password sign-in, so users no longer loop back to the login page (go-silex/unkillable-kit#84).
+- Both routes reject an `oauth_query` that is not a string with HTTP 400 `OIDC_INVALID_OAUTH_QUERY`.
+- [Document](packages/auth/README.md#login-method-guidance) why these parameters do not guarantee reauthentication. Enforcement is tracked in go-silex/unkillable-kit#121.
+
+### Password reset
+
+- The example App offers a new reset link when Better Auth rejects an expired, used, or unknown token (go-silex/unkillable-kit#85).
+- `@kit/api-client` exposes the code of a flat Better Auth error as `HttpError.upstreamCode`. `ApiError.code` still carries only Kit error codes. An App with its own reset page can show the same invalid-link state on HTTP 400 `INVALID_TOKEN`.
+
 ## unkillable-kit/v0.2.3 — 2026-11-22
 
 ### Product release preparation

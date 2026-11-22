@@ -48,12 +48,19 @@ async function setup(firstParty: boolean) {
       ),
     )
   }
+  const send = vi.fn(async () => ({ ok: true as const, transport: 'log' as const }))
   const auth = createBetterAuth({
     database: createSqliteD1(sqlite),
     secret: 'test-better-auth-secret-xxxxxxxx32c!!',
     baseURL: ORIGIN,
     trustedOrigins: [ORIGIN],
     allowPublicSignup: true,
+    emailPort: { send },
+    emailConfig: {
+      productName: 'Example',
+      fallbackLocale: 'en',
+      resolveRecipientLocale: () => null,
+    },
     google: {
       clientId: GOOGLE_CLIENT,
       clientSecret: 'google-client-secret',
@@ -86,10 +93,15 @@ async function setup(firstParty: boolean) {
     )
     .run('google-user', 'Google User', 'google@example.test', Date.now(), Date.now())
   if (!client.client_secret) throw new Error('Client registration returned no secret')
-  return { auth, client: { ...client, client_secret: client.client_secret } }
+  return { auth, client: { ...client, client_secret: client.client_secret }, send }
 }
 
-async function start(auth: KitBetterAuth, clientId: string, method: 'GET' | 'POST') {
+async function start(
+  auth: KitBetterAuth,
+  clientId: string,
+  method: 'GET' | 'POST',
+  freshness?: { prompt: string } | { max_age: string },
+) {
   const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(VERIFIER))
   const params = new URLSearchParams({
     response_type: 'code',
@@ -100,6 +112,7 @@ async function start(auth: KitBetterAuth, clientId: string, method: 'GET' | 'POS
     nonce: 'expected-nonce',
     code_challenge: Buffer.from(hash).toString('base64url'),
     code_challenge_method: 'S256',
+    ...freshness,
   })
   const response = await request(
     auth,
@@ -204,8 +217,8 @@ function googleBoundary(emailVerified: boolean) {
   )
 }
 
-async function googleLogin(auth: KitBetterAuth, oauthQuery: string) {
-  const start = await request(auth, '/api/auth/sign-in/social', {
+function startGoogleLogin(auth: KitBetterAuth, oauthQuery: unknown) {
+  return request(auth, '/api/auth/sign-in/social', {
     method: 'POST',
     headers: { 'content-type': 'application/json', origin: ORIGIN },
     body: JSON.stringify({
@@ -214,6 +227,18 @@ async function googleLogin(auth: KitBetterAuth, oauthQuery: string) {
       oauth_query: oauthQuery,
     }),
   })
+}
+
+function sendMagicLink(auth: KitBetterAuth, oauthQuery: unknown) {
+  return request(auth, '/api/auth/sign-in/magic-link', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', origin: ORIGIN },
+    body: JSON.stringify({ email: 'user@example.test', oauth_query: oauthQuery }),
+  })
+}
+
+async function googleLogin(auth: KitBetterAuth, oauthQuery: string) {
+  const start = await startGoogleLogin(auth, oauthQuery)
   expect(start.status).toBe(200)
   const body = (await start.json()) as { url: string }
   const authorization = new URL(body.url)
@@ -230,6 +255,78 @@ async function googleLogin(auth: KitBetterAuth, oauthQuery: string) {
 }
 
 afterEach(() => vi.unstubAllGlobals())
+
+describe('OIDC login method guidance', () => {
+  describe.each([
+    ['prompt=login', { prompt: 'login' }],
+    ['max_age=0', { max_age: '0' }],
+    ['max_age=60', { max_age: '60' }],
+  ] as const)('%s', (_name, freshness) => {
+    it.each([
+      ['magic-link send', sendMagicLink],
+      ['social sign-in', startGoogleLogin],
+    ] as const)('refuses %s for a verified authorization request', async (_path, signIn) => {
+      const { auth, client, send } = await setup(true)
+      const oauthQuery = await start(auth, client.client_id, 'GET', freshness)
+      const response = await signIn(auth, oauthQuery)
+      expect(response.status).toBe(400)
+      expect(await response.json()).toMatchObject({
+        code: 'OIDC_PASSWORD_REQUIRED',
+        message: 'Use password sign-in for this authorization request.',
+      })
+      expect(response.headers.has('location')).toBe(false)
+      expect(response.headers.getSetCookie()).toEqual([])
+      expect(send).not.toHaveBeenCalled()
+    })
+
+    it('completes authorization after password sign-in', async () => {
+      vi.useFakeTimers({ toFake: ['Date'] })
+      vi.setSystemTime(new Date('2026-11-22T12:00:00Z'))
+      onTestFinished(() => {
+        vi.useRealTimers()
+      })
+      const { auth, client } = await setup(true)
+      const oauthQuery = await start(auth, client.client_id, 'GET', freshness)
+      const signedIn = await login(auth, oauthQuery)
+      await complete(auth, client, await continuation(signedIn), 'user@example.test')
+    })
+  })
+
+  it.each([
+    ['magic-link send', sendMagicLink],
+    ['social sign-in', startGoogleLogin],
+  ] as const)('rejects a signed oauth_query sent as pairs on %s', async (_path, signIn) => {
+    const { auth, client, send } = await setup(true)
+    const signed = await start(auth, client.client_id, 'GET', { prompt: 'login' })
+    const response = await signIn(auth, [...new URLSearchParams(signed)])
+    expect(response.status).toBe(400)
+    expect(await response.json()).toMatchObject({
+      code: 'OIDC_INVALID_OAUTH_QUERY',
+      message: 'oauth_query must be a string.',
+    })
+    expect(response.headers.getSetCookie()).toEqual([])
+    expect(send).not.toHaveBeenCalled()
+  })
+
+  it('lets the provider reject an invalid authorization signature', async () => {
+    const { auth, client, send } = await setup(true)
+    const query = new URLSearchParams(
+      await start(auth, client.client_id, 'GET', { prompt: 'login' }),
+    )
+    query.set('sig', 'invalid')
+    const response = await sendMagicLink(auth, query.toString())
+    expect(response.status).toBe(400)
+    expect(await response.json()).toMatchObject({ error: 'invalid_signature' })
+    expect(send).not.toHaveBeenCalled()
+  })
+
+  it('sends a magic link for an authorization request without a freshness constraint', async () => {
+    const { auth, client, send } = await setup(true)
+    const response = await sendMagicLink(auth, await start(auth, client.client_id, 'GET'))
+    expect(response.status).toBe(200)
+    expect(send).toHaveBeenCalledTimes(1)
+  })
+})
 
 describe('signed-out OIDC authorization', () => {
   for (const method of ['GET', 'POST'] as const) {
