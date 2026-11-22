@@ -4,13 +4,13 @@ import { Link, useNavigate, useSearch } from '@tanstack/react-router'
 import { GalleryVerticalEnd } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { apiErrorToMessage, apiFetch } from '../lib/api'
+import { apiErrorToMessage, apiFetch, HttpError } from '../lib/api'
 import { defaultHomePath, fetchMe } from '../lib/auth'
 import { useLocale } from '../lib/locale'
 import { safePostAuthPath } from '../lib/safe-return-path'
 
 /**
- * Complete password reset with BA token from email callback / query.
+ * Complete password reset with the token from the emailed link.
  * Token is captured into state then stripped from the URL (history/replace).
  * Form lives in `@kit/auth/react`; post-success navigation stays in the app.
  */
@@ -79,10 +79,10 @@ export function ResetPasswordPage() {
             <p className="text-sm text-muted-foreground">
               {linkError ? m.resetPasswordInvalidLink : m.resetPasswordMissingToken}
             </p>
-            <Button variant="outline" render={<Link to="/forgot-password" />}>
+            <Button variant="outline" nativeButton={false} render={<Link to="/forgot-password" />}>
               {m.forgotPassword}
             </Button>
-            <Button variant="ghost" render={<Link to="/login" />}>
+            <Button variant="ghost" nativeButton={false} render={<Link to="/login" />}>
               {m.backToLogin}
             </Button>
           </div>
@@ -91,7 +91,17 @@ export function ResetPasswordPage() {
             fetch={apiFetch}
             copy={m}
             token={token}
-            fallbackError={(e) => apiErrorToMessage(e, m)}
+            fallbackError={(error) => {
+              if (
+                error instanceof HttpError &&
+                error.status === 400 &&
+                error.upstreamCode === 'INVALID_TOKEN'
+              ) {
+                setLinkError(error.upstreamCode)
+                return m.resetPasswordInvalidLink
+              }
+              return apiErrorToMessage(error, m)
+            }}
             notify={{
               success: (title, description) => toast.success(title, { description }),
               error: (title, description) => toast.error(title, { description }),
@@ -99,7 +109,12 @@ export function ResetPasswordPage() {
             }}
             onSuccess={() => void afterReset()}
             loginLink={
-              <Button variant="ghost" className="w-full" render={<Link to="/login" />}>
+              <Button
+                variant="ghost"
+                className="w-full"
+                nativeButton={false}
+                render={<Link to="/login" />}
+              >
                 {m.backToLogin}
               </Button>
             }

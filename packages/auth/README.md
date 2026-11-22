@@ -89,18 +89,30 @@ const auth = createBetterAuth({
 The App owns the login and consent pages and the Better Auth provider client
 plugin needed to resume authorization. The issuer is `<auth-origin>/api/auth`,
 where `<auth-origin>` is the scheme and host of `BETTER_AUTH_URL` (which may already include `/api/auth`).
-Discovery is `{issuer}/.well-known/openid-configuration`; mount the auth
-handler on its usual path. The hosted MCP shell retains its own reserved paths
-and OAuth server. Do not expose this provider at the root RFC 8414 metadata path,
-or accept one server's tokens at the other.
+Serve discovery at `{issuer}/.well-known/openid-configuration` through
+`auth.handler`. Do not publish it with Better Auth's standalone metadata
+helpers, which bypass the Kit's discovery policy. The hosted MCP shell retains
+its own reserved paths and OAuth server. Do not expose this provider at the root
+RFC 8414 metadata path, or accept one server's tokens at the other.
+
+The provider has no OIDC signup page, even when `allowPublicSignup` enables
+ordinary sign-up. Discovery served by `auth.handler` omits `create`.
+`prompt=create` returns `invalid_request` with `state` to the registered
+redirect URI. Duplicate form `prompt` fields are rejected without redirecting.
+Apps should treat `create` as unsupported and key automatic resume on the authorization
+transaction, not on the signed query or its signature, which can change on retry.
 
 Use `registerOidcClient(auth, { headers, redirectUris, firstParty, ... })`
 from the same entry only in server code after checking administrator permission
 and request Origin. The response contains the client secret once; store it
 securely on the confidential web client. Setting `firstParty: true` skips
-consent; only the App may make that decision. Registration uses exact redirect
-URIs, authorization code and PKCE S256. If an authorization request omits
-`scope`, Better Auth uses the client's registered scopes; those scopes must
+consent; only the App may make that decision. Authorization uses exact redirect
+URIs, authorization code and PKCE S256. The fixed query string of a registered
+redirect URI cannot include `code`, `state`, `iss`, `error`, `error_description`
+or `error_uri`. The provider appends these authorization response parameters
+itself. Replace existing redirect URIs that use these keys; the provider rejects
+them even if already registered.
+If a request omits `scope`, Better Auth uses the client's registered scopes; those scopes must
 contain `openid` for an OpenID request. Dynamic registration, CIMD, refresh
 tokens, `offline_access`, pairwise subjects and front-channel logout are not
 supported. Revisit session revocation and logout semantics before enabling
@@ -142,6 +154,28 @@ not retried. RP-initiated logout can end a browser session too. Clients must
 validate logout tokens, keep RP sessions short and periodically revalidate with
 the provider using `prompt=none`. Locally verified access tokens remain usable
 according to their expiry; logout is not an atomic global revocation guarantee.
+
+### Login method guidance
+
+When the pending request carries `prompt=login` or `max_age`, Apps should offer
+password sign-in and use the Better Auth provider client plugin to send the
+signed `oauth_query`. For a verified query with either parameter, the Kit
+returns HTTP 400 `OIDC_PASSWORD_REQUIRED` on magic-link send or social sign-in
+before sending mail or starting a redirect. This gives Apps a clear error
+instead of a login loop; it is not a freshness check.
+
+Better Auth 1.7.27 does not guarantee reauthentication for `prompt=login` or
+`max_age`:
+
+- Reissuing a session cookie (for example, on `/update-user` or during
+  authorization) can clear `prompt=login` without a new authentication.
+- The consent flow can clear both parameters based on session age alone.
+- Positive `max_age` is measured from local session creation.
+- Google sign-in neither forces upstream reauthentication nor checks Google's
+  `auth_time`.
+
+Relying parties that need proof of fresh authentication must not rely on these
+parameters from this provider.
 
 ## Google sign-in (opt-in)
 
