@@ -4,6 +4,8 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ## Unreleased
 
+## unkillable-kit/v0.2.2 — 2026-11-22
+
 ### Materialize memory self-test
 
 - The materialization self-test bounds sampled post-GC Buffer memory instead of RSS,
