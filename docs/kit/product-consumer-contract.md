@@ -3,7 +3,10 @@
 **Goal:** a product repo that takes this kit as `upstream` must **not** modify kit-owned files in divergent ways.  
 Pulling `upstream/main` should only conflict when the **product** deliberately touches a shared surface or when kit deletes/renames something the product depended on (acceptable: fix forward).
 
-**Expected conflict:** `.dev/stack.yml` is co-owned. On merge, keep product fills (`name`, `backend.path`, `frontend.path` or `frontend: null`, `release.component`, any `worktree.copy` additions); take Kit keys otherwise. Before upgrading, replace `roxabi-boilerplate-cf` or `unkillable-kit` with your own component. API-only Products keep the whole `frontend: null` replacement. Never keep the full Product file: dropping Kit `release.model` / `landing.mode` can make `/promote` default to staging-train.
+**Expected conflict:** `.dev/stack.yml` is co-owned. Before upgrading, choose a
+Product `release.component`. Merge only the [Product fills](#stack-map-devstackyml)
+into the Kit file; losing `release.model` or `landing.mode` can make `/promote`
+default to staging-train.
 
 **OK:** product breaks after pull → fix product.  
 **Not OK:** product and kit both edit `lefthook.yml` / `package.json` / workflows in different directions forever.
@@ -99,7 +102,8 @@ Those scripts name the product Worker and local database; do not modify the root
 
 ## Stack map (`.dev/stack.yml`)
 
-Product-owned after inheritance ([ADR-0009](./architecture/adr/0009-kit-namespace-polarity-inheritance-marker.md) D3, [Roxabi/roxabi-boilerplate-cf#260](https://github.com/Roxabi/roxabi-boilerplate-cf/issues/260)). Not in `protected_files`. Byte-equality is replaced by `scripts/kit/check-stack-contract.ts` (`bun run stack-contract:check`): kit mode checks shape; product mode diffs HEAD against `git show <upstreamCommit>:.dev/stack.yml`.
+After inheritance, `.dev/stack.yml` is Product-owned, not in `protected_files` ([ADR-0009](./architecture/adr/0009-kit-namespace-polarity-inheritance-marker.md) D3, [Roxabi/roxabi-boilerplate-cf#260](https://github.com/Roxabi/roxabi-boilerplate-cf/issues/260)).
+Instead of byte-equality, `bun run stack-contract:check` runs `scripts/kit/check-stack-contract.ts`: Kit mode checks shape; Product mode diffs HEAD against `git show <upstreamCommit>:.dev/stack.yml`.
 
 | Key                         | Who fills it                                                                                                                                                                                                                                                                                                                                                                                                              |
 | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -111,7 +115,16 @@ Product-owned after inheritance ([ADR-0009](./architecture/adr/0009-kit-namespac
 | `landing.mode`              | inherited `merge-on-green`; override to `native` only on native branch protection                                                                                                                                                                                                                                                                                                                                         |
 | `landing.required_checks`   | forbidden — `check-stack-contract` rejects any value; `.github/workflows/merge-on-green.yml` owns the list                                                                                                                                                                                                                                                                                                                |
 
-On `git merge upstream/main`, keep the product fill scalars (`name`, `backend.path`, `frontend.path` or an API-only `frontend: null`, a valid `release.component`, and any `worktree.copy` additions) and take kit keys for everything else. Replacing the whole `frontend` block is how an API-only product fills it: keep `frontend: null` rather than the incoming kit map. Do not add a `bun.*version` key. Do not add a `review.roster` `never` the upstream file does not already have, and do not lower `max_agents`.
+On `git merge upstream/main`, keep `name`, `backend.path`, `frontend.path` or the API-only `frontend: null`, a valid `release.component`, and `worktree.copy` additions. Take Kit keys otherwise. No `bun.*version` keys or `review.roster` `never` entries absent upstream; do not lower `max_agents`.
+
+## Product release preparation (opt-in)
+
+Opt in via the [workflow example](./templates/product-release-prepare.example.yml).
+Product changes come only from `docs/product/CHANGELOG.md`, not Kit history.
+The newest released heading needs its exact local tag on a Product commit
+(with the inheritance marker) ancestral to the source. No heading means first
+release, regardless of tags. Strict Kit changelogs list releases; legacy pins
+link to their changelog. Publish manually.
 
 ---
 
@@ -503,17 +516,16 @@ apps/<product>-web/src/theme/*.css         # design token overrides
 
 ### Product CI (recommended DoD when product apps exist)
 
-Kit `ci.yml` / `validate:full` stay **kit-only** and must not fail when product apps are absent.  
-**Kit bar ≠ product tested** — green `validate:full` does not typecheck/test/build `apps/<product>-*`.
+Kit `ci.yml` / `validate:full` stay Kit-only: they must pass without Product apps
+and do not typecheck, test or build them. With `apps/<product>-*`, Product CI is
+recommended DoD and required by the [start checklist](./playbooks/start-product.md).
 
-When the product repo has `apps/<product>-*`, product CI is **recommended DoD** (required in the [start-product playbook](./playbooks/start-product.md) checklist):
-
-1. **Copy** kit templates (do not dual-edit kit `ci.yml` / `test-coverage.sh` / root `package.json`):
-   - [`docs/kit/templates/product-validate.example.sh`](./templates/product-validate.example.sh) → `scripts/product/validate.sh`  
-     (or `apps/<product>-api/scripts/kit/product-validate.sh`)
-   - [`docs/kit/templates/product-ci.example.yml`](./templates/product-ci.example.yml) → `.github/workflows/product-ci.yml`
-2. Replace `<product>` placeholders with real package names.
-3. Keep kit `bun run validate:full` green **and** run product-validate in product CI.
+1. Copy the templates; do not dual-edit Kit `ci.yml`, `test-coverage.sh` or root `package.json`:
+   - [Validation](./templates/product-validate.example.sh) → `scripts/product/validate.sh`
+     (or `apps/<product>-api/scripts/kit/product-validate.sh`).
+   - [CI](./templates/product-ci.example.yml) → `.github/workflows/product-ci.yml`.
+2. Replace `<product>` with real package names. Keep `bun run validate:full` green
+   and run Product validation in Product CI.
 
 ```text
 .github/workflows/product-ci.yml           # product-only; never edit kit ci.yml

@@ -1,13 +1,16 @@
 import { spawnSync } from 'node:child_process'
-import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { appendFileSync, existsSync, lstatSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 const mainRef = 'refs/remotes/origin/main'
 const marker = '<!-- kit-release-proposal -->'
 const changelog = 'CHANGELOG.md'
+const productChangelog = 'docs/product/CHANGELOG.md'
+const inheritancePath = 'config/product/inheritance.json'
 const shaPattern = /^[a-f0-9]{40}$/
 const requiredWorkflows = ['.github/workflows/ci.yml', '.github/workflows/secret-scan.yml']
+const workflowPath = /^\.github\/workflows\/[\w.-]+\.yml(?![\s\S])/
 // Cover the repository's close-linked-issues workflow as well as GitHub's URL references.
 const issueClosing =
   /(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?\s+(?:(?:[\w.-]+\/[\w.-]+)?#\d+|(?:\[[^\]\n]*\]\()?https?:\/\/[^\s/]+\/[\w.-]+\/[\w.-]+\/(?:issues|pulls?)\/\d+)/i
@@ -25,8 +28,16 @@ const linkDestination = /\(([^ ()<>"'\\[\]]+)\)/y
 
 type Version = readonly [bigint, bigint, bigint]
 type Base = { tag: string; sha: string; version: Version }
+type Product = { pin: string; kitComponent: string }
+type Source = {
+  sha: string
+  component: string
+  path: string
+  gates: string[]
+  product: Product | undefined
+}
 type Heading = { start: number; end: number }
-type ReleaseHeading = Heading & { tag: string; version: Version }
+type ReleaseHeading = Heading & { tag: string; version: Version; text: string }
 type LineKind = 'blank' | 'heading' | 'item' | 'continuation' | 'plain'
 const bareBlock = /^(?:#{1,}|[-*+](?: |$)|\d+[.)](?: |$)|[<>|])/
 const fence = /^(?:`{3,}|~{3,})/
@@ -36,9 +47,11 @@ type ReleaseSection = {
   rest: string
   headings: ReleaseHeading[]
   actions: string[]
+  actionSpans: { start: number; end: number }[]
 }
 type Proposal = {
   branch: string
+  path: string
   sha: string
   tag: string
   title: string
@@ -60,6 +73,8 @@ function output(text: string): void {
 }
 
 type CommandTimeout = { ms: number; message: string }
+
+class InvalidUtf8 extends Error {}
 
 function command(
   cmd: string,
@@ -83,7 +98,11 @@ function command(
     throw new Error(`${cmd} ${args[0]} failed: ${error?.message ?? stderr.toString().trim()}`)
   }
   // Fail closed rather than round-trip an invalid UTF-8 changelog with altered bytes.
-  return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(stdout)
+  try {
+    return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(stdout)
+  } catch (cause) {
+    throw new InvalidUtf8(`${cmd} ${args[0]} returned invalid UTF-8`, { cause })
+  }
 }
 
 function git(args: string[], input?: string, extra?: NodeJS.ProcessEnv): string {
@@ -177,7 +196,7 @@ function parseReleaseHeading(
   component: string,
   previous: ReleaseHeading | undefined,
   number: number,
-): Pick<ReleaseHeading, 'tag' | 'version'> {
+): Pick<ReleaseHeading, 'tag' | 'version' | 'text'> {
   const prefix = `## ${component}/v`
   const label = content.startsWith(prefix)
     ? releaseHeading.exec(content.slice(prefix.length))?.[1]
@@ -190,7 +209,7 @@ function parseReleaseHeading(
     if (order === 0) grammarError(number, 'duplicate release version')
     if (order < 0) grammarError(number, 'release versions must be strictly descending')
   }
-  return { tag: `${component}/v${label}`, version }
+  return { tag: `${component}/v${label}`, version, text: content }
 }
 
 function parseSectionHeading(
@@ -250,6 +269,7 @@ function releaseSection(text: string, component: string): ReleaseSection {
     body: text.slice(start, end),
     rest: text.slice(end),
     headings,
+    actionSpans: actions,
     actions: actions
       .filter((action) => action.start >= start && action.start < end)
       .map((action) => text.slice(action.start, action.end)),
@@ -355,27 +375,13 @@ function renderNotes(text: string, root: string | undefined): string {
     .join(newline)
 }
 
-/** Pure: only the supplied source data and UTC date can affect the proposal. */
-function propose(
-  component: string,
-  sha: string,
-  base: Base,
-  count: string,
-  section: ReleaseSection,
-  date: string,
-  repo: string | undefined,
-): Proposal | null {
-  if (!section.body.trim()) return null
-  const closingReference = issueClosing.exec(section.body)
-  if (closingReference) {
-    const before = section.prefix + section.body.slice(0, closingReference.index)
-    const line = before.split(newline).length
-    throw new Error(`rephrase CHANGELOG.md line ${line}: release notes must not close issues`)
+function nextRelease(section: ReleaseSection, component: string, base: Base | undefined): string {
+  let nextVersion: Version = [0n, 1n, 0n]
+  if (base) {
+    const [major, minor, patch] = base.version
+    const { actions } = section
+    nextVersion = actions.length > 0 ? [major, minor + 1n, 0n] : [major, minor, patch + 1n]
   }
-  const { actions } = section
-  const [major, minor, patch] = base.version
-  const nextVersion: Version =
-    actions.length > 0 ? [major, minor + 1n, 0n] : [major, minor, patch + 1n]
   const tag = `${component}/v${nextVersion.join('.')}`
   const latest = section.headings[0]
   if (latest && compareVersions(nextVersion, latest.version) <= 0) {
@@ -383,18 +389,53 @@ function propose(
       `proposed tag ${tag} must be newer than the latest CHANGELOG release ${latest.tag}`,
     )
   }
+  return tag
+}
+
+function publication(tag: string, gates: string[]): string {
+  const checks =
+    gates === requiredWorkflows
+      ? 'CI and Secret scan push runs'
+      : `push runs of ${gates.map((path) => `\`${path}\``).join(', ')}`
+  return (
+    `### Manual publication\n\n- [ ] Merge this pull request after review.\n- [ ] Wait for successful ${checks} on the merge commit.\n` +
+    `- [ ] Create the annotated tag \`${tag}\` on that merge commit. Never move an existing tag.\n` +
+    '- [ ] Publish the GitHub Release from the new CHANGELOG section, with Product actions first.'
+  )
+}
+
+function propose(
+  source: Source,
+  base: Base | undefined,
+  count: string | undefined,
+  section: ReleaseSection,
+  date: string,
+  repo: string | undefined,
+  update: string | undefined,
+): Proposal {
+  const { component, sha, path, gates } = source
+  const closingReference = issueClosing.exec(section.body)
+  if (closingReference) {
+    const before = section.prefix + section.body.slice(0, closingReference.index)
+    const line = before.split(newline).length
+    throw new Error(`rephrase ${path} line ${line}: release notes must not close issues`)
+  }
+  const tag = nextRelease(section, component, base)
   const header = `## ${tag} — ${date}`
-  const root = repo ? `https://github.com/${repo}/blob/${sha}/` : undefined
+  const directory = path.slice(0, path.lastIndexOf('/') + 1)
+  const root = repo ? `https://github.com/${repo}/blob/${sha}/${directory}` : undefined
+  const baseline = base ? `\`${base.tag}\` (\`${base.sha}\`)` : 'None (first Product release)'
+  const range = count === undefined ? '' : `  \nCommits in range: ${count}`
   const body = [
-    `Proposed tag: \`${tag}\`  \nBase tag: \`${base.tag}\` (\`${base.sha}\`)  \nSource SHA: \`${sha}\`  \nCommits in range: ${count}`,
-    '### Manual publication\n\n- [ ] Merge this pull request after review.\n- [ ] Wait for successful CI and Secret scan push runs on the merge commit.\n' +
-      `- [ ] Create the annotated tag \`${tag}\` on that merge commit. Never move an existing tag.\n` +
-      '- [ ] Publish the GitHub Release from the new CHANGELOG section, with Product actions first.',
-    `### Product actions\n\n${renderNotes(actions.join(newline), root) || 'None.'}`,
+    `Proposed tag: \`${tag}\`  \nBase tag: ${baseline}  \nSource SHA: \`${sha}\`${range}`,
+    publication(tag, gates),
+    `### Product actions\n\n${renderNotes(section.actions.join(newline), root) || 'None.'}`,
+    ...(update ? [`### Kit update\n\n${update}`] : []),
     `${header}\n${renderNotes(section.body, root)}`,
   ].join('\n\n')
   return {
     branch: `release/${component}`,
+    path,
     sha,
     tag,
     title: `chore(release): ${tag}`,
@@ -414,7 +455,276 @@ function releaseComponent(text: string): string {
   return value
 }
 
-function baseAt(sha: string, component: string): Base {
+function sourceFile(sha: string, path: string): string {
+  return git(['show', '--no-textconv', `${sha}:${path}`])
+}
+
+function sourceDate(sha: string): string {
+  const seconds = git(['show', '-s', '--format=%ct', sha]).trim()
+  return new Date(Number(seconds) * 1_000).toISOString().slice(0, 10)
+}
+
+function readPin(text: string): string | undefined {
+  try {
+    const { upstreamCommit } = JSON.parse(text)
+    const pin = typeof upstreamCommit === 'string' ? upstreamCommit.toLowerCase() : ''
+    if (shaPattern.test(pin)) return pin
+  } catch {
+    // A malformed marker does not identify a pin.
+  }
+}
+
+function isLocalCommit(pin: string): boolean {
+  return git(['cat-file', '--batch-check=%(objecttype)'], `${pin}\n`).trim() === 'commit'
+}
+
+function isAncestor(ancestor: string, descendant: string): boolean {
+  return git(['rev-list', '--count', '-n', '1', ancestor, `^${descendant}`]).trim() === '0'
+}
+
+function isInheritedTip(pin: string): boolean {
+  // Match the inherited-tip check in check-zero-edit-zones.sh.
+  const added = git([
+    'log',
+    '--full-history',
+    '--root',
+    '-m',
+    '--no-renames',
+    '--diff-filter=A',
+    '-1',
+    '--format=%H',
+    pin,
+    '--',
+    inheritancePath,
+  ]).trim()
+  return added === ''
+}
+
+function inheritancePin(text: string, sha: string): string {
+  const pin = readPin(text)
+  if (pin && isLocalCommit(pin) && isAncestor(pin, sha)) return pin
+  throw new Error(
+    'invalid Product inheritance pin: expected a commit that is an ancestor of the source SHA',
+  )
+}
+
+function hasInheritanceMarker(sha: string): boolean {
+  return Boolean(git(['ls-tree', sha, '--', inheritancePath]).trim())
+}
+
+function markerPin(commit: string): string | undefined {
+  if (regularModeAt(commit, inheritancePath)) return readPin(sourceFile(commit, inheritancePath))
+}
+
+function productAt(text: string, sha: string, component: string): Product {
+  if (git(['rev-parse', '--is-shallow-repository']).trim() === 'true')
+    throw new Error('shallow clone; cannot verify Product inheritance lineage')
+  const pin = inheritancePin(text, sha)
+  if (!isInheritedTip(pin))
+    throw new Error('Product inheritance pin must point at an inherited Kit or mirror tip')
+  const kitComponent = releaseComponent(sourceFile(pin, '.dev/stack.yml'))
+  if (component === kitComponent)
+    throw new Error('Product release.component must differ from the inherited Kit component')
+  return { pin, kitComponent }
+}
+
+type KitRelease = { tag: string; heading: string; anchor: string; actions: string[] }
+
+function uniqueKitAnchor(title: string, used: Map<string, number>): string {
+  const slug = title
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N} _-]/gu, '')
+    .replaceAll(' ', '-')
+  let anchor = slug
+  let suffix = used.get(slug) ?? 0
+  while (used.has(anchor)) anchor = `${slug}-${++suffix}`
+  used.set(slug, suffix)
+  if (anchor !== slug) used.set(anchor, 0)
+  return anchor
+}
+
+function kitTopicTitle(heading: string): string {
+  // Slug visible text, not link destinations or emphasis delimiters.
+  const plain = (text: string) => text
+  return Bun.markdown.render(heading, {
+    heading: plain,
+    text: plain,
+    link: plain,
+    image: () => '',
+    codespan: plain,
+    emphasis: plain,
+    strong: plain,
+    strikethrough: plain,
+  })
+}
+
+function kitAnchors(text: string): Map<number, string> {
+  const offsets = new Map<number, string>()
+  const used = new Map<string, number>()
+  for (const heading of text.matchAll(/^#{1,3} (.+)$/gm)) {
+    const title = heading[0].startsWith('### ') ? kitTopicTitle(heading[0]) : heading[1]!
+    offsets.set(heading.index, uniqueKitAnchor(title, used))
+  }
+  return offsets
+}
+
+function kitReleases(pin: string, component: string): KitRelease[] | undefined {
+  if (!regularModeAt(pin, changelog)) return undefined
+  let text: string
+  try {
+    text = sourceFile(pin, changelog)
+  } catch (error) {
+    if (error instanceof InvalidUtf8) return undefined
+    throw error
+  }
+  let section: ReleaseSection
+  try {
+    section = releaseSection(text, component)
+  } catch {
+    return undefined
+  }
+  const anchors = kitAnchors(text)
+  const { headings, actionSpans } = section
+  let actionIndex = 0
+  return headings.map(({ start, end, tag }, index) => {
+    const limit = headings[index + 1]?.start ?? text.length
+    const actions: string[] = []
+    for (; actionIndex < actionSpans.length; actionIndex++) {
+      const action = actionSpans[actionIndex]!
+      if (action.start >= limit) break
+      if (action.start >= end) actions.push(text.slice(action.start, action.end))
+    }
+    return {
+      tag,
+      heading: text.slice(start + 3, end).trimEnd(),
+      anchor: anchors.get(start)!,
+      actions,
+    }
+  })
+}
+
+function kitReleaseLabel(release: KitRelease, root: string | undefined): string {
+  return root ? `[${release.heading}](${root}${changelog}#${release.anchor})` : release.heading
+}
+
+function kitReleaseNotes(release: KitRelease, root: string | undefined): string {
+  const label = `- ${kitReleaseLabel(release, root)}`
+  const { actions } = release
+  if (actions.length === 0) return `${label}\n  - No Product action`
+  if (actions.some((action) => issueClosing.test(action))) return label
+  const notes = renderNotes(actions.join(newline), root).replace(/^/gm, '  ')
+  return `${label}\n${notes}`
+}
+
+function legacyKitChangelog(pin: string): string {
+  return `Kit changelog at \`${pin}\` predates the strict grammar`
+}
+
+function kitBaseline(pin: string, component: string, root: string | undefined): string {
+  const releases = kitReleases(pin, component)
+  const latest = releases?.[0]
+  const summary = `Kit baseline: \`${pin}\``
+  if (latest) return `${summary}\n\n- ${kitReleaseLabel(latest, root)}`
+  return releases ? summary : `${summary}; ${legacyKitChangelog(pin)}.\n\n${kitChangelogLink(root)}`
+}
+
+function kitChangelogLink(root: string | undefined): string {
+  return root ? `[Kit CHANGELOG](${root}${changelog})` : 'Kit CHANGELOG'
+}
+
+function comparableKitComponent(pin: string): string | undefined {
+  if (!regularModeAt(pin, '.dev/stack.yml')) return undefined
+  const text = sourceFile(pin, '.dev/stack.yml')
+  try {
+    return releaseComponent(text)
+  } catch {
+    return undefined
+  }
+}
+
+function kitMoveNotes(oldPin: string, pin: string, component: string, root?: string): string {
+  const moved = `Kit pin moved from \`${oldPin}\` to \`${pin}\``
+  const fallback = (reason: string) => `${moved}; ${reason}.\n\n${kitChangelogLink(root)}`
+  if (!isAncestor(oldPin, pin)) return fallback('not a forward update')
+  const oldComponent = comparableKitComponent(oldPin)
+  if (!oldComponent) return fallback(legacyKitChangelog(oldPin))
+  if (oldComponent !== component) return fallback('Kit component changed')
+  const previous = kitReleases(oldPin, oldComponent)
+  if (!previous) return fallback(legacyKitChangelog(oldPin))
+  const current = kitReleases(pin, component)
+  if (!current) return fallback(legacyKitChangelog(pin))
+  return addedKitNotes(previous, current, oldPin, pin, root)
+}
+
+function addedKitNotes(
+  previous: KitRelease[],
+  current: KitRelease[],
+  oldPin: string,
+  pin: string,
+  root: string | undefined,
+): string {
+  const previousTags = new Set(previous.map(({ tag }) => tag))
+  const added = current.filter(({ tag }) => !previousTags.has(tag))
+  const summary = `Kit updated from \`${oldPin}\` to \`${pin}\``
+  return added.length
+    ? `${summary}.\n\n${added.map((release) => kitReleaseNotes(release, root)).join(newline)}`
+    : `${summary}; no Kit release in range.`
+}
+
+function kitUpdate(product: Product, base: Base | undefined, repo?: string): string | undefined {
+  const { pin, kitComponent } = product
+  const root = repo ? `https://github.com/${repo}/blob/${pin}/` : undefined
+  if (!base) return kitBaseline(pin, kitComponent, root)
+  const oldPin = markerPin(base.sha)
+  if (!(oldPin && isLocalCommit(oldPin)))
+    return `Previous Kit pin unavailable; current Kit pin: \`${pin}\`.\n\n${kitChangelogLink(root)}`
+  if (oldPin !== pin) return kitMoveNotes(oldPin, pin, kitComponent, root)
+}
+
+function productTagCommit(tag: string): string | undefined {
+  try {
+    return git(['rev-parse', '--verify', `refs/tags/${tag}^{commit}`]).trim()
+  } catch {
+    return undefined
+  }
+}
+
+function assertProductBaseHeading(
+  commit: string,
+  component: string,
+  heading: ReleaseHeading,
+): void {
+  const context = `Product base tag ${heading.tag} target ${productChangelog}`
+  if (!regularModeAt(commit, productChangelog)) throw new Error(`${context} is not a regular file`)
+  let actual: ReleaseHeading | undefined
+  try {
+    actual = releaseSection(sourceFile(commit, productChangelog), component).headings[0]
+  } catch (cause) {
+    const reason = cause instanceof Error ? cause.message : String(cause)
+    throw new Error(`${context} cannot be read as a strict Product changelog: ${reason}`, { cause })
+  }
+  if (actual?.text !== heading.text)
+    throw new Error(`${context} must have ${heading.text} as its newest released heading`)
+}
+
+function productBaseAt(
+  sha: string,
+  component: string,
+  heading: ReleaseHeading | undefined,
+): Base | undefined {
+  if (!heading) return undefined
+  const { tag, version } = heading
+  const commit = productTagCommit(tag)
+  if (!commit) throw new Error(`Product base tag ${tag} does not point to a commit`)
+  if (!regularModeAt(commit, inheritancePath))
+    throw new Error(`Product base tag ${tag} does not point to a Product commit`)
+  if (!isAncestor(commit, sha))
+    throw new Error(`Product base tag ${tag} is not an ancestor of the source SHA`)
+  assertProductBaseHeading(commit, component, heading)
+  return { tag, version, sha: commit }
+}
+
+function baseAt(sha: string, component: string): Base | undefined {
   const prefix = `${component}/v`
   const tags = git([
     'for-each-ref',
@@ -427,36 +737,38 @@ function baseAt(sha: string, component: string): Base {
     const version = parseVersion(tag.slice(prefix.length))
     if (version && (!best || compareVersions(version, best.version) > 0)) best = { tag, version }
   }
-  if (!best) throw new Error(`no ${prefix}X.Y.Z tag is an ancestor of the source SHA`)
-  return { ...best, sha: git(['rev-parse', `refs/tags/${best.tag}^{commit}`]).trim() }
+  if (best) return { ...best, sha: git(['rev-parse', `refs/tags/${best.tag}^{commit}`]).trim() }
 }
 
 function proposalAt(
-  sha: string,
+  source: Source,
   section: ReleaseSection,
-  component: string,
   repo: string | undefined,
 ): Proposal | 'unpublished' | null {
+  const { sha, component, product } = source
   const tags = new Set(
     git(['for-each-ref', '--format=%(refname:lstrip=2)', `refs/tags/${component}/v*`]).split('\n'),
   )
-  const unpublished = section.headings.find(({ tag }) => !tags.has(tag))?.tag
+  const unpublished = !product && section.headings.find(({ tag }) => !tags.has(tag))?.tag
   if (unpublished) {
     console.log(`::warning::${unpublished} already has a CHANGELOG section; publish its tag first.`)
     return 'unpublished'
   }
-  const base = baseAt(sha, component)
-  const count = git(['rev-list', '--count', `${base.sha}..${sha}`]).trim()
+  const base = product ? productBaseAt(sha, component, section.headings[0]) : baseAt(sha, component)
+  if (!(base || product))
+    throw new Error(`no ${component}/vX.Y.Z tag is an ancestor of the source SHA`)
+  if (!section.body.trim()) return null
+  const count = product ? undefined : git(['rev-list', '--count', `${base!.sha}..${sha}`]).trim()
   const proposal = propose(
-    component,
-    sha,
+    source,
     base,
     count,
     section,
-    new Date().toISOString().slice(0, 10),
+    sourceDate(sha),
     repo,
+    product && kitUpdate(product, base, repo),
   )
-  if (proposal && tags.has(proposal.tag))
+  if (tags.has(proposal.tag))
     throw new Error(`tag ${proposal.tag} already exists; will not prepare or move it`)
   return proposal
 }
@@ -515,7 +827,7 @@ class GitHub {
     return this.api<Ref>('git/ref/heads/main').object.sha
   }
 
-  green(sha: string): boolean {
+  green(sha: string, gates: string[]): boolean {
     const runs = this.api<{ workflow_runs: WorkflowRun[] }[]>(
       `actions/runs?head_sha=${sha}&branch=main&event=push&per_page=100`,
       { pages: true },
@@ -524,7 +836,7 @@ class GitHub {
       .filter(
         (item) => item.head_sha === sha && item.head_branch === 'main' && item.event === 'push',
       )
-    return requiredWorkflows.every(
+    return gates.every(
       (path) =>
         runs.filter((item) => item.path === path).sort((a, b) => b.id - a.id)[0]?.conclusion ===
         'success',
@@ -558,12 +870,13 @@ class GitHub {
   private pull(branch: string): Pull | undefined {
     const owner = this.repo.split('/')[0]
     const pulls = this.api<Pull[][]>(
-      `pulls?state=open&base=main&head=${encodeURIComponent(`${owner}:${branch}`)}&per_page=100`,
+      `pulls?state=open&head=${encodeURIComponent(`${owner}:${branch}`)}&per_page=100`,
       { pages: true },
     )
       .flat()
       .filter((pull) => pull.head.repo?.full_name === this.repo && pull.head.ref === branch)
     if (pulls.length > 1) throw new Error('multiple open proposals on the release branch')
+    if (pulls[0]) this.assertPullBase(pulls[0])
     return pulls[0]
   }
 
@@ -587,6 +900,10 @@ class GitHub {
       (sha !== previous.head.sha && sha !== target)
     )
       throw new Error('proposal changed; rerun release preparation')
+    this.assertPullBase(current)
+  }
+
+  private assertPullBase(current: Pull): void {
     if (current.base?.ref !== 'main' || current.base.repo?.full_name !== this.repo)
       throw new Error(
         'proposal no longer targets main in this repository; rerun release preparation',
@@ -651,23 +968,28 @@ function authenticatedGit(args: string[], token: string | undefined): void {
   )
 }
 
-function modeAt(sha: string): string {
-  const mode = /^(100644|100755) blob /.exec(git(['ls-tree', sha, '--', changelog]))?.[1]
-  if (!mode) throw new Error('CHANGELOG.md is not a regular file')
+function regularModeAt(sha: string, path: string): string | undefined {
+  return /^(100644|100755) blob /.exec(git(['ls-tree', sha, '--', path]))?.[1]
+}
+
+function modeAt(sha: string, path: string): string {
+  const mode = regularModeAt(sha, path)
+  if (!mode) throw new Error(`${path} is not a regular file`)
   return mode
 }
 
 function sameCommit(head: string, proposal: Proposal): boolean {
+  const { path } = proposal
   if (
     git(['rev-list', '--parents', '-n', '1', head]).trim() !== `${head} ${proposal.sha}` ||
     git(['show', '-s', '--format=%s', head]).trimEnd() !== proposal.title ||
     git(['diff', '--no-textconv', '--no-ext-diff', '--name-only', proposal.sha, head]).trimEnd() !==
-      changelog
+      path
   )
     return false
   return (
-    modeAt(head) === modeAt(proposal.sha) &&
-    git(['rev-parse', `${head}:${changelog}`]).trim() ===
+    modeAt(head, path) === modeAt(proposal.sha, path) &&
+    git(['rev-parse', `${head}:${path}`]).trim() ===
       git(['hash-object', '--stdin'], proposal.text).trim()
   )
 }
@@ -676,10 +998,10 @@ function createCommit(proposal: Proposal, bot: Bot): string {
   const dir = mkdtempSync(join(tmpdir(), 'kit-release-index-'))
   const env = { GIT_INDEX_FILE: join(dir, 'index') }
   try {
-    const mode = modeAt(proposal.sha)
+    const mode = modeAt(proposal.sha, proposal.path)
     const blob = git(['hash-object', '-w', '--stdin'], proposal.text).trim()
     git(['read-tree', proposal.sha], undefined, env)
-    git(['update-index', '--cacheinfo', `${mode},${blob},${changelog}`], undefined, env)
+    git(['update-index', '--cacheinfo', `${mode},${blob},${proposal.path}`], undefined, env)
     const tree = git(['write-tree'], undefined, env).trim()
     return git(
       ['-c', 'commit.gpgSign=false', 'commit-tree', tree, '-p', proposal.sha, '-m', proposal.title],
@@ -766,20 +1088,64 @@ function reconcile(github: GitHub, proposal: Proposal, apply: boolean): string |
   return pull ? 'refresh the release proposal' : 'open the release proposal'
 }
 
-function readArgs() {
-  const [mode, flag, rev, ...extra] = process.argv.slice(2)
-  const usage =
-    'usage: release-prepare.ts (--check-changelog | (--dry-run|--plan|--apply) [--sha <commit>])'
-  if (mode !== '--dry-run' && mode !== '--plan' && mode !== '--apply') throw new Error(usage)
-  if (flag !== undefined && (flag !== '--sha' || !rev || extra.length)) throw new Error(usage)
-  const sha = git([
-    'rev-parse',
-    '--verify',
-    '--end-of-options',
-    `${rev ?? mainRef}^{commit}`,
-  ]).trim()
+function releaseMode(arg: string | undefined) {
+  switch (arg) {
+    case '--check-changelog':
+    case '--dry-run':
+    case '--plan':
+    case '--apply':
+      return arg
+    default:
+      throw new Error(
+        'usage: release-prepare.ts (--check-changelog | (--dry-run|--plan|--apply) [--sha <commit>] [--gate <workflow path>]...) [--product]',
+      )
+  }
+}
+
+function requireGate(gate: string | undefined, gates: string[]): string {
+  if (!(gate && workflowPath.test(gate)))
+    throw new Error('--gate requires a .github/workflows/<name>.yml path')
+  if (gates.includes(gate)) throw new Error(`duplicate --gate ${gate}`)
+  return gate
+}
+
+function readFlags(args: string[], product: boolean) {
+  let rev: string | undefined
+  const gates: string[] = []
+  for (let i = 0; i < args.length; i++) {
+    switch (args[i]) {
+      case '--product':
+        if (product) throw new Error('duplicate --product')
+        product = true
+        break
+      case '--sha':
+        if (rev) throw new Error('duplicate --sha')
+        rev = args[++i]
+        if (!rev || rev.startsWith('--')) throw new Error('--sha requires a commit')
+        break
+      case '--gate':
+        gates.push(requireGate(args[++i], gates))
+        break
+      default:
+        throw new Error(`unexpected argument: ${args[i]}`)
+    }
+  }
+  return { rev, product, gates: gates.length ? gates : requiredWorkflows }
+}
+
+function readArgs(args: string[]) {
+  const offset = args[0] === '--product' ? 1 : 0
+  const mode = releaseMode(args[offset])
+  const flags = readFlags(args.slice(offset + 1), offset === 1)
+  if (mode === '--check-changelog' && (flags.rev || flags.gates !== requiredWorkflows))
+    throw new Error('--check-changelog does not accept --sha or --gate')
+  return { mode, ...flags }
+}
+
+function resolveSourceSha(rev: string = mainRef): string {
+  const sha = git(['rev-parse', '--verify', '--end-of-options', `${rev}^{commit}`]).trim()
   if (!shaPattern.test(sha)) throw new Error('invalid source SHA')
-  return { mode, sha }
+  return sha
 }
 
 function originGithubRepository(): string | undefined {
@@ -793,8 +1159,8 @@ function originGithubRepository(): string | undefined {
   }
 }
 
-function dryRun(sha: string, section: ReleaseSection, component: string, repo?: string): void {
-  const proposal = proposalAt(sha, section, component, repo)
+function dryRun(source: Source, section: ReleaseSection, repo?: string): void {
+  const proposal = proposalAt(source, section, repo)
   const eligibility = 'eligibility: not checked (dry-run)'
   if (proposal === 'unpublished') {
     output(eligibility)
@@ -806,37 +1172,93 @@ function dryRun(sha: string, section: ReleaseSection, component: string, repo?: 
   output(`${eligibility}\n\n${detail}`)
 }
 
-function checkChangelog(): void {
-  if (existsSync('config/product/inheritance.json')) return
-  const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(
-    readFileSync(changelog),
-  )
-  releaseSection(text, releaseComponent(readFileSync('.dev/stack.yml', 'utf8')))
-  output('release-prepare: CHANGELOG grammar OK')
+function changelogPath(product: boolean): string {
+  return product ? productChangelog : changelog
 }
 
-function isChangelogCheck(): boolean {
-  if (process.argv[2] !== '--check-changelog') return false
-  if (process.argv.length !== 3) throw new Error('usage: release-prepare.ts --check-changelog')
+function requireProductMarker(): never {
+  throw new Error(`--product requires ${inheritancePath}`)
+}
+
+function productChangelogPresent(): boolean {
+  for (const directory of ['docs', 'docs/product']) {
+    const entry = lstatSync(directory, { throwIfNoEntry: false })
+    if (!entry) return false
+    if (!entry.isDirectory()) throw new Error(`${directory} is not a real directory`)
+  }
+  const entry = lstatSync(productChangelog, { throwIfNoEntry: false })
+  if (!entry) return false
+  if (!entry.isFile()) throw new Error(`${productChangelog} is not a regular file`)
   return true
 }
 
+function checkChangelog(product: boolean): void {
+  const hasMarker = existsSync(inheritancePath)
+  if (product && !hasMarker) requireProductMarker()
+  if (!product && hasMarker) return
+  const path = changelogPath(product)
+  if (product && !productChangelogPresent()) {
+    output('release-prepare: Product CHANGELOG.md is absent; skipped')
+    return
+  }
+  const component = releaseComponent(readFileSync('.dev/stack.yml', 'utf8'))
+  if (product) productAt(readFileSync(inheritancePath, 'utf8'), resolveSourceSha('HEAD'), component)
+  const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(readFileSync(path))
+  releaseSection(text, component)
+  output('release-prepare: CHANGELOG grammar OK')
+}
+
+function readSource(sha: string, product: boolean, gates: string[]): Source | undefined {
+  const hasMarker = hasInheritanceMarker(sha)
+  if (product && !hasMarker) requireProductMarker()
+  if (!product && hasMarker) return undefined
+  const component = releaseComponent(sourceFile(sha, '.dev/stack.yml'))
+  const path = changelogPath(product)
+  if (product) modeAt(sha, inheritancePath)
+  const productInfo = product
+    ? productAt(sourceFile(sha, inheritancePath), sha, component)
+    : undefined
+  if (product) modeAt(sha, path)
+  return {
+    sha,
+    component,
+    path,
+    gates,
+    product: productInfo,
+  }
+}
+
 function main(): void {
-  const { mode, sha } = readArgs()
-  if (git(['ls-tree', sha, '--', 'config/product/inheritance.json']).trim()) {
+  const { mode, rev, product, gates } = readArgs(process.argv.slice(2))
+  if (mode === '--check-changelog') {
+    checkChangelog(product)
+    return
+  }
+  const source = readSource(resolveSourceSha(rev), product, gates)
+  if (!source) {
     output('release-prepare: Product tree; skipped')
     return
   }
-  const component = releaseComponent(git(['show', '--no-textconv', `${sha}:.dev/stack.yml`]))
-  const section = releaseSection(git(['show', '--no-textconv', `${sha}:${changelog}`]), component)
+  const { sha, path, component } = source
+  const section = releaseSection(sourceFile(sha, path), component)
   const repo = process.env.GITHUB_REPOSITORY
   if (repo !== undefined && !repoPattern.test(repo))
     throw new Error('set GITHUB_REPOSITORY to owner/repo')
   if (mode === '--dry-run') {
-    dryRun(sha, section, component, repo ?? originGithubRepository())
+    dryRun(source, section, repo ?? originGithubRepository())
     return
   }
+  reconcileSource(source, section, repo, mode === '--apply')
+}
+
+function reconcileSource(
+  source: Source,
+  section: ReleaseSection,
+  repo: string | undefined,
+  apply: boolean,
+): void {
   if (!repo) throw new Error('set GITHUB_REPOSITORY to owner/repo')
+  const { sha, gates } = source
   const github = new GitHub(repo)
   const tip = github.tip()
   if (!shaPattern.test(tip)) throw new Error('invalid main SHA from GitHub')
@@ -844,14 +1266,18 @@ function main(): void {
     output('release-prepare: source is not the current first-parent tip of main; skipped')
     return
   }
-  if (!github.green(sha)) {
-    output('release-prepare: CI and Secret scan are not both green for this main push; skipped')
+  if (!github.green(sha, gates)) {
+    output(
+      gates === requiredWorkflows
+        ? 'release-prepare: CI and Secret scan are not both green for this main push; skipped'
+        : 'release-prepare: required workflow gates are not all green for this main push; skipped',
+    )
     return
   }
-  const proposal = proposalAt(sha, section, component, repo)
+  const proposal = proposalAt(source, section, repo)
   if (proposal === 'unpublished') return
-  const action = proposal && reconcile(github, proposal, mode === '--apply')
-  if (action && mode === '--plan' && process.env.GITHUB_OUTPUT)
+  const action = proposal && reconcile(github, proposal, apply)
+  if (action && !apply && process.env.GITHUB_OUTPUT)
     appendFileSync(process.env.GITHUB_OUTPUT, 'write=true\n')
   output(
     action ? `release-prepare: ${action}` : 'release-prepare: unchanged or no unreleased changes',
@@ -859,8 +1285,7 @@ function main(): void {
 }
 
 try {
-  if (isChangelogCheck()) checkChangelog()
-  else main()
+  main()
 } catch (error) {
   output(`release-prepare: ${error instanceof Error ? error.message : String(error)}`)
   process.exitCode = 1
