@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 /**
- * Compare peak RSS growth during materializeTree with a bound that separates
- * streaming from buffering the whole blob.
+ * Bound live external memory during materializeTree. Report RSS separately:
+ * it also includes allocator pages retained after Buffers are reclaimed.
  *
  * Usage: bun scripts/kit/lib/materialize-memory-selftest.ts [MiB=128]
  */
@@ -67,11 +67,20 @@ try {
   git(['add', '.'])
   git(['commit', '-qm', 'mem'])
 
-  Bun.gc(true)
-  const baseline = process.memoryUsage.rss()
-  let peak = baseline
+  function sampleMemory() {
+    // Bun updates its external-memory accounting on GC. Sample RSS first so
+    // the diagnostic also sees pages that the collection is about to release.
+    const rss = process.memoryUsage.rss()
+    Bun.gc(true)
+    return { rss, external: process.memoryUsage().external }
+  }
+  const baseline = sampleMemory()
+  let peakRss = baseline.rss
+  let peakExternal = baseline.external
   const sample = () => {
-    peak = Math.max(peak, process.memoryUsage.rss())
+    const { rss, external } = sampleMemory()
+    peakRss = Math.max(peakRss, rss)
+    peakExternal = Math.max(peakExternal, external)
   }
   const timer = setInterval(sample, 5)
   const t0 = performance.now()
@@ -82,7 +91,7 @@ try {
     clearInterval(timer)
   }
   const ms = performance.now() - t0
-  const growth = peak - baseline
+  const growth = peakExternal - baseline.external
 
   const fd = openSync(join(snap, 'data.bin'), 'r')
   try {
@@ -101,23 +110,26 @@ try {
     closeSync(fd)
   }
 
-  // On Bun 1.4.4, the original sampler at 128 MiB measured 28–33 MiB
-  // streaming vs. 265–267 MiB for the full-buffer mutant. CI once measured
-  // 58 MiB streaming at 64 MiB. At the default fixture size, 96 MiB leaves
-  // room for that variance and is still 32 MiB below a single full blob.
-  const limit = Math.max(96 * MIB, Math.floor(bytes * 0.75))
+  // On Bun 1.4.4 with a pinned core and a slowed writer, a 128 MiB blob
+  // reached at most 2.2 MiB of sampled live external memory and 9 MiB of
+  // queued data; the mutant held about 128 MiB live. A 32 MiB bound at
+  // this fixture size leaves headroom without permitting full-blob buffering.
+  const limit = Math.max(16 * MIB, Math.floor(bytes / 4))
   console.log(
     JSON.stringify({
       mib,
       ms: Math.round(ms),
-      baseline_rss: baseline,
-      peak_rss: peak,
-      growth_rss: growth,
-      limit_rss: limit,
+      baseline_rss: baseline.rss,
+      peak_rss: peakRss,
+      growth_rss: peakRss - baseline.rss,
+      baseline_external: baseline.external,
+      peak_external: peakExternal,
+      growth_external: growth,
+      limit_external: limit,
     }),
   )
   if (growth > limit) {
-    console.error(`FAIL: RSS growth ${growth} exceeds ${limit} for ${mib} MiB blob`)
+    console.error(`FAIL: live external growth ${growth} exceeds ${limit} for ${mib} MiB blob`)
     process.exitCode = 1
   } else {
     console.log('PASS: materialize memory bound')

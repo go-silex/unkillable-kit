@@ -6,8 +6,9 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ### Materialize memory self-test
 
-- Use a larger fixture and more headroom for normal RSS variation while still
-  catching full-blob buffering (go-silex/unkillable-kit#116).
+- Measure live memory instead of RSS in the materialization self-test to avoid
+  spurious failures from allocator retention while still catching full-blob buffering
+  (go-silex/unkillable-kit#116).
 
 ## unkillable-kit/v0.2.1 — 2026-11-22
 
