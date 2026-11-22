@@ -4,6 +4,16 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ## Unreleased
 
+### Product release preparation
+
+- Products can opt in to [release preparation](docs/kit/product-consumer-contract.md#product-release-preparation-opt-in) using their own changelog and push gates, without changing the inherited Kit workflow or changelog.
+- Release headings use the source commit's UTC committer date, so running the same proposal on a different day does not change it.
+- Product changes come only from Product notes, with no commit count. Inherited Kit history appears only in the separate Kit section.
+- With no released heading, preparation starts at `v0.1.0` regardless of tags.
+  Otherwise, the newest released heading's exact local tag must point to a Product commit with the inheritance marker, ancestral to the source.
+  The tagged Product changelog must parse and have the same newest release heading.
+- Product proposals list Kit releases only from strict changelogs and link to the pinned Kit changelog instead for legacy pins.
+
 ## unkillable-kit/v0.2.2 — 2026-11-22
 
 ### Materialize memory self-test

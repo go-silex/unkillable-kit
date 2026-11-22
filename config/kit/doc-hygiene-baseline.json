@@ -75,9 +75,9 @@
     "fileBytes": 5068
   },
   "docs/kit/playbooks/start-product.md": {
-    "overLimitLines": 22,
+    "overLimitLines": 21,
     "maxLineBytes": 1323,
-    "fileBytes": 24663
+    "fileBytes": 24394
   },
   "docs/kit/processes/dev-process.md": {
     "overLimitLines": 11,
@@ -85,9 +85,9 @@
     "fileBytes": 19886
   },
   "docs/kit/product-consumer-contract.md": {
-    "overLimitLines": 125,
+    "overLimitLines": 122,
     "maxLineBytes": 2129,
-    "fileBytes": 179706
+    "fileBytes": 179528
   },
   "docs/kit/security-dependabot.md": {
     "overLimitLines": 28,

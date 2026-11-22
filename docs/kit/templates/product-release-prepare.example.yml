@@ -1,0 +1,187 @@
+# Copy to .github/workflows/product-release-prepare.yml in a Product that opts in.
+# Keep the inherited .github/workflows/release-prepare.yml unchanged.
+#
+# Match RELEASE_GATES paths and workflow_run display names to Product push
+# workflows (here: CI, Secret scan and Product CI). The latest push run of each
+# gate must pass on the exact current main tip. To retry that tip, dispatch on
+# main with no sha. A proposal neither replaces CI nor authorizes a deploy.
+#
+# Follow docs/kit/ci-app-setup.md#trust-and-setup in the Product repository:
+# set vars.CI_APP_ID to the App's Client ID, secrets.CI_APP_PRIVATE_KEY to
+# its PEM and vars.HEAD_AUTH_BOT_USER_ID to its numeric bot user ID. The
+# installed App needs Contents, Workflows and Pull requests write permissions.
+#
+# Keep Product notes in docs/product/CHANGELOG.md. Follow the Kit changelog
+# grammar (CONTRIBUTING.md#preparing-a-kit-release), using the Product's
+# release.component from .dev/stack.yml, distinct from the inherited Kit's.
+# Relative links and images resolve from docs/product/. The Product validation
+# template (docs/kit/templates/product-validate.example.sh) checks the changelog
+# if present. Preparation writes only the Product changelog; the root
+# CHANGELOG.md remains the Kit's.
+#
+# Nonempty ## Unreleased notes produce a proposal on release/<component>.
+# With no released heading, the first tag is <component>/v0.1.0 regardless of
+# existing tags. Otherwise the newest released heading's exact local tag must
+# point to a commit that carries the Product inheritance marker and is an
+# ancestor of the source commit. The tag target must have the same newest
+# release heading in its valid Product changelog; preparation never falls
+# back to another tag. A "- **Product action:** " note means minor; otherwise
+# bump patch. The proposal uses the source commit's UTC committer date.
+# Product notes are the only Product changes. There is no Product commit count;
+# inherited Kit history is not a Product change. A Kit-only upgrade without
+# Product notes is not a release. The proposal PR has a separate Kit section
+# for the first baseline or a pin change. Only forward moves within the same
+# Kit component with strict changelogs at both pins list new releases and
+# adoption actions.
+# A strict first baseline can show the latest Kit release. A legacy changelog
+# gets a grammar notice and pinned Kit CHANGELOG link, not release headings.
+#
+# Review and merge the proposal, delete its branch and wait for the same push
+# gates on the merge commit. Create the annotated Product tag there (never move
+# a tag), then publish the GitHub Release from the new notes with Product actions
+# first. Tag and Release publication are manual. No Package manifest bumps,
+# Kit version stamp, deploy or stable channel are part of preparation.
+name: Product release preparation
+
+on:
+  workflow_run:
+    # Display names of the push workflows listed in RELEASE_GATES below.
+    workflows: [CI, Secret scan, Product CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Main commit to reconcile (defaults to the current tip)
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    # Align these paths and the workflow_run names with the Product's push workflows.
+    env:
+      RELEASE_GATES: >-
+        .github/workflows/ci.yml
+        .github/workflows/secret-scan.yml
+        .github/workflows/product-ci.yml
+    # Completions wake the job; only the current tip can be a candidate.
+    concurrency:
+      group: product-release-main
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+
+      # Do not load Bun configuration or run a script from the checkout until
+      # the checked-out Product commit is confirmed green.
+      - name: Verify the checked-out Product tip
+        id: eligible
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.sha || '' }}
+        run: |
+          set -euo pipefail
+          export LC_ALL=C
+          # Normalize ASCII whitespace first; read -a otherwise stops at the first newline.
+          IFS=' ' read -r -a gates <<<"${RELEASE_GATES//[$'\t\n\v\f\r']/ }"
+          if [[ -z ${gates[0]:-} ]]; then
+            echo '::error::RELEASE_GATES must list at least one workflow path'
+            exit 1
+          fi
+          declare -A seen_gates=()
+          for gate in "${gates[@]}"; do
+            if [[ ! "$gate" =~ ^\.github/workflows/[A-Za-z0-9_.-]+\.yml$ ]]; then
+              echo '::error::RELEASE_GATES requires .github/workflows/<name>.yml paths'
+              exit 1
+            fi
+            if [[ ${seen_gates[$gate]+set} ]]; then
+              printf '::error::duplicate RELEASE_GATES path: %s\n' "$gate"
+              exit 1
+            fi
+            seen_gates[$gate]=1
+          done
+          if [[ ! -f config/product/inheritance.json || -L config/product/inheritance.json ]]; then
+            echo '::notice::Checkout is not a Product tree; no Product release preparation'
+            exit 0
+          fi
+          tip=$(git rev-parse HEAD)
+          if [[ -n "$REQUESTED_SHA" ]] && [[ $(git rev-parse --verify --end-of-options "${REQUESTED_SHA}^{commit}" 2>/dev/null) != "$tip" ]]; then
+            echo '::notice::Requested source is not the current first-parent tip of main'
+            exit 0
+          fi
+          current=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)
+          if [[ "$current" != "$tip" ]]; then
+            echo '::notice::The checked-out commit is stale'
+            exit 0
+          fi
+          runs=$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$tip&branch=main&event=push&per_page=100")
+          if ! jq -e --arg sha "$tip" '
+            [.[].workflow_runs[] | select(.head_sha == $sha and .head_branch == "main" and .event == "push")]
+            | group_by(.path) | map(max_by(.id) | select(.conclusion == "success") | .path) as $green
+            | all($ARGS.positional[]; . as $gate | $green | index($gate) != null)
+          ' --args "${gates[@]}" <<<"$runs" >/dev/null; then
+            echo '::notice::Not all release gates are green for the main push'
+            exit 0
+          fi
+          printf 'sha=%s\ngates=%s\n' "$tip" "${gates[*]}" >>"$GITHUB_OUTPUT"
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        if: steps.eligible.outputs.sha != ''
+        with:
+          bun-version-file: package.json
+
+      - name: Decide whether to write
+        id: proposal
+        if: steps.eligible.outputs.sha != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ steps.eligible.outputs.sha }}
+          ELIGIBLE_GATES: ${{ steps.eligible.outputs.gates }}
+          RELEASE_BOT_USER_ID: ${{ vars.HEAD_AUTH_BOT_USER_ID }}
+        run: |
+          IFS=' ' read -r -a gates <<<"${ELIGIBLE_GATES:?missing validated release gates}"
+          gate_flags=()
+          for gate in "${gates[@]}"; do gate_flags+=(--gate "$gate"); done
+          bun --no-env-file scripts/kit/release-prepare.ts --product --plan --sha "$SHA" "${gate_flags[@]}"
+
+      - name: Mint the proposal token
+        if: steps.proposal.outputs.write == 'true'
+        id: app
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.CI_APP_ID }}
+          private-key: ${{ secrets.CI_APP_PRIVATE_KEY }}
+          permission-contents: write
+          # Refreshing release/<component> onto a newer main carries main's workflow edits.
+          permission-workflows: write
+          permission-pull-requests: write
+
+      - name: Reconcile the release proposal
+        if: steps.proposal.outputs.write == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_WRITE_TOKEN: ${{ steps.app.outputs.token }}
+          SHA: ${{ steps.eligible.outputs.sha }}
+          ELIGIBLE_GATES: ${{ steps.eligible.outputs.gates }}
+          RELEASE_BOT_USER_ID: ${{ vars.HEAD_AUTH_BOT_USER_ID }}
+        run: |
+          IFS=' ' read -r -a gates <<<"${ELIGIBLE_GATES:?missing validated release gates}"
+          gate_flags=()
+          for gate in "${gates[@]}"; do gate_flags+=(--gate "$gate"); done
+          bun --no-env-file scripts/kit/release-prepare.ts --product --apply --sha "$SHA" "${gate_flags[@]}"

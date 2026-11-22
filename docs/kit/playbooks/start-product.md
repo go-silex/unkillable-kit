@@ -76,18 +76,21 @@ Land shared kit fixes on a kit clone; products receive them by fetching and merg
 
 ## Stack map
 
-After inherit, fill these keys in [`.dev/stack.yml`](../../../.dev/stack.yml) so they differ from the inherited file, or replace the whole `frontend` block with `frontend: null` when the product has no frontend App ([Roxabi/roxabi-boilerplate-cf#591](https://github.com/Roxabi/roxabi-boilerplate-cf/issues/591)). The file is product-owned ([Roxabi/roxabi-boilerplate-cf#260](https://github.com/Roxabi/roxabi-boilerplate-cf/issues/260)); no zero-edit exception. `check-stack-contract` is what replaces byte-equality. Keep `frontend: null` on upgrade. The guard compares values, not filesystem existence.
+Inherit [`.dev/stack.yml`](../../../.dev/stack.yml), then fill the values below so they differ from the Kit's. The file is [Product-owned](https://github.com/Roxabi/roxabi-boilerplate-cf/issues/260), without a zero-edit exception: `check-stack-contract` compares values, not filesystem existence or bytes.
 
 - `name`
 - `backend.path` — `apps/<product>-api`
-- `frontend` — `frontend.path` as `apps/<product>-web`, or replace the whole block with `frontend: null` when the product has no frontend App
+- `frontend` — `frontend.path` as `apps/<product>-web`, or replace the block with [`frontend: null`](https://github.com/Roxabi/roxabi-boilerplate-cf/issues/591) for an API-only Product
 - `release.component`
 
-On `git merge upstream/main`, keep those scalars, including an API-only `frontend: null`, and any `worktree.copy` additions; take kit keys for everything else. Never take the kit frontend map back over `frontend: null`. Never keep the product file wholesale. The guard compares values, not filesystem existence.
+On `git merge upstream/main`, keep those values (including `frontend: null`) and any
+`worktree.copy` additions; take Kit keys for everything else.
 
 `landing.mode` is inherited (`merge-on-green`). Override it to `native` only when the product is on native branch protection. `check-stack-contract` rejects any `landing.required_checks` (`merge-on-green.yml` owns the list) and any `bun.*version` key.
 
 `release.model` is inherited `trunk`. `/feature` bases on `main`. `/promote` with no ref named `staging` is `trunk_mode`: it does not apply; a release is an annotated tag, not a promote. A staging **environment** is optional and is not a PR base: fast-forward a pin named `staging` from `main`, and the Deploy gate (`SOURCE_BRANCH=staging`) moves `deploy/staging`. That pin must be a ref named `staging` — `promote-deploy.ts` sets `target = deploy/${source}`, so `deploy/staging` is not fed from `main` directly. omp-build `/promote` preflight treats any `refs/heads/staging` or `origin/staging` under trunk as `trunk_promote_pr` (opens a staging→main PR, never tags). It cannot tell that pin from a landing branch. Gap, not fixed here: [roxabi-plugins](https://github.com/Roxabi/roxabi-plugins) `plugins/omp-build/skills/promote/preflight.sh`. Do not create the pin unless you want that behaviour.
+
+When keeping release notes, consider [opting in to Product release preparation](../product-consumer-contract.md#product-release-preparation-opt-in).
 
 ## Core vs opt-in
 

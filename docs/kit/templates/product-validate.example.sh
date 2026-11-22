@@ -39,6 +39,9 @@ bun run deploy-gate:check
 # Product mode: kit zones clean vs upstream (or inheritance.json in CI).
 bun run zero-edit
 
+# Products may opt in to release notes without editing the inherited root CHANGELOG.
+bun --no-env-file scripts/kit/release-prepare.ts --check-changelog --product
+
 # Kit schema: exit 2 when the same sync would write (run it without --check and commit), 1 on
 # refusal. Uses the inherited catalog, never a KIT_SCHEMA_CATALOG override. Files only: it does
 # not prove remote migrations were applied. Drop it only if the Product has no API.
