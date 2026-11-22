@@ -4,6 +4,10 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ## Unreleased
 
+### Release proposal synchronization
+
+- Release preparation waits for GitHub to report the refreshed pull request head before updating its title and body. If it does not sync, rerun the workflow manually without a source SHA.
+
 ### Release proposal links
 
 - Release preparation pins relative links and images in the proposal to the source commit, without changing the CHANGELOG.
