@@ -4,6 +4,11 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ## Unreleased
 
+### Auth throttle test clock
+
+- Pin the clock in Example API and Auth Package rate-limit tests so crossing a
+  fixed-window boundary cannot reset their counters (go-silex/unkillable-kit#105).
+
 ## unkillable-kit/v0.2.0 — 2026-11-22
 
 ### Kit release preparation

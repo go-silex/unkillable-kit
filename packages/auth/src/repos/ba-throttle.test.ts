@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { rateLimitBuckets } from '../tenancy-schema'
 import {
   BA_THROTTLE_LIMIT,
@@ -11,6 +11,11 @@ import { createMemoryD1, createMemoryD1Binding } from './memory-d1'
 import { clientIp } from './rate-limit'
 
 const BASE = 'http://localhost:8787/api/auth'
+
+function pinThrottleClock() {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(Date.UTC(2026, 0, 1, 0, 1))
+}
 
 function req(method: string, path: string, init: { body?: string; type?: string } = {}): Request {
   const headers = new Headers()
@@ -52,6 +57,8 @@ describe('isBaThrottleExempt', () => {
 })
 
 describe('throttleBetterAuthRequest', () => {
+  afterEach(() => vi.useRealTimers())
+
   it('exempt reads spend nothing and never look the session up', async () => {
     const db = createMemoryD1()
     const sessionId = vi.fn(async () => 'sess-1')
@@ -63,6 +70,8 @@ describe('throttleBetterAuthRequest', () => {
   })
 
   it('every other request spends the address bucket; no platform address shares one', async () => {
+    pinThrottleClock()
+
     const db = createMemoryD1()
     for (let i = 0; i < BA_THROTTLE_LIMIT; i++) {
       await throttleBetterAuthRequest(db, input(req('GET', '/list-sessions'), { ip: null }))
@@ -110,6 +119,8 @@ describe('throttleBetterAuthRequest', () => {
   })
 
   it('one session rotating addresses ends on 429', async () => {
+    pinThrottleClock()
+
     const db = createMemoryD1()
     const at = (n: number) =>
       throttleBetterAuthRequest(
@@ -127,6 +138,8 @@ describe('throttleBetterAuthRequest', () => {
   })
 
   it('session-ending POSTs never charge or look up the session', async () => {
+    pinThrottleClock()
+
     const db = createMemoryD1()
     const sessionId = vi.fn(async () => 'sess-1')
     for (let i = 0; i < BA_THROTTLE_LIMIT; i++) {
@@ -164,6 +177,8 @@ describe('throttleBetterAuthRequest', () => {
   })
 
   it('one e-mail budget across sign-in, magic link, reset and verification mail', async () => {
+    pinThrottleClock()
+
     const db = createMemoryD1()
     const paths = [
       '/sign-in/email',
@@ -260,6 +275,8 @@ describe('throttleBetterAuthRequest', () => {
   })
 
   it('the count lives in D1: a fresh module and handle on the same binding still 429', async () => {
+    pinThrottleClock()
+
     const binding = createMemoryD1Binding()
     const first = createMemoryD1(binding)
     for (let i = 0; i < BA_THROTTLE_LIMIT; i++) {

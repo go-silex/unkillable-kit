@@ -1,10 +1,20 @@
 import { AppError } from '@kit/core'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createMemoryD1 } from './memory-d1'
 import { assertRateLimit, clientIp, resetRateLimits } from './rate-limit'
 
+function pinRateLimitClock() {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  // Pin the midpoint of the 60-second window.
+  vi.setSystemTime(Date.UTC(2026, 0, 1, 0, 0, 30))
+}
+
 describe('D1 rate limit (B-auth-harden go-silex/silex-boilerplate#61)', () => {
+  afterEach(() => vi.useRealTimers())
+
   it('allows up to limit then 429 with retryAfterSeconds', async () => {
+    pinRateLimitClock()
+
     const db = createMemoryD1()
     await assertRateLimit(db, 'k:a', 3, 60_000)
     await assertRateLimit(db, 'k:a', 3, 60_000)
@@ -12,10 +22,13 @@ describe('D1 rate limit (B-auth-harden go-silex/silex-boilerplate#61)', () => {
     await expect(assertRateLimit(db, 'k:a', 3, 60_000)).rejects.toMatchObject({
       code: 'RATE_LIMITED',
       status: 429,
+      details: { retryAfterSeconds: 30 },
     })
   })
 
   it('isolates keys', async () => {
+    pinRateLimitClock()
+
     const db = createMemoryD1()
     for (let i = 0; i < 3; i++) await assertRateLimit(db, 'k:1', 3, 60_000)
     await expect(assertRateLimit(db, 'k:1', 3, 60_000)).rejects.toBeInstanceOf(AppError)
@@ -23,6 +36,8 @@ describe('D1 rate limit (B-auth-harden go-silex/silex-boilerplate#61)', () => {
   })
 
   it('resetRateLimits clears buckets', async () => {
+    pinRateLimitClock()
+
     const db = createMemoryD1()
     for (let i = 0; i < 3; i++) await assertRateLimit(db, 'k:r', 3, 60_000)
     await resetRateLimits(db)
@@ -30,6 +45,8 @@ describe('D1 rate limit (B-auth-harden go-silex/silex-boilerplate#61)', () => {
   })
 
   it('concurrent awaits on same key do not under-count past limit', async () => {
+    pinRateLimitClock()
+
     const db = createMemoryD1()
     const limit = 5
     const results = await Promise.allSettled(
