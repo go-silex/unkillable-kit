@@ -42,10 +42,10 @@ try {
 
 ## HTTP errors and migration
 
-- Every non-OK HTTP response rejects with `HttpError`, exposing its numeric `status`. A kit error envelope with string `error.code` and `error.message` rejects with `ApiError`, a subtype of `HttpError` that additionally exposes `code`, `requestId` and `details`. Other response bodies are not exposed as error messages: the default message is `HTTP <status>`.
+- Every non-OK HTTP response rejects with `HttpError` and exposes its numeric `status`. A Kit envelope with string `error.code` and `error.message` takes precedence and rejects with `ApiError`, which exposes `code`, `requestId` and `details`. A flat response (such as Better Auth's) with string `code` and `message` exposes `HttpError.upstreamCode` instead and keeps the safe `HTTP <status>` message.
 - `onUnauthorized` receives an `HttpError` for any 401, including non-kit responses. It may return a promise; the client awaits it and swallows synchronous throws and rejected promises so the request still rejects with the original HTTP error.
 - Fetch/network failures remain their original errors, not `HttpError`; parse-on-read failures are `Error('Invalid API response', { cause })`. Do not infer an HTTP status by parsing an arbitrary error message.
-- **Migrating consumers:** replace `instanceof ApiError` with `instanceof HttpError` wherever behavior depends only on HTTP status (401 session handling, retries, 403/404 routing, 429). Keep `ApiError` checks for envelope-only fields such as `code`, `requestId` and validation details. Change `onUnauthorized` parameter annotations from `ApiError` to `HttpError`, narrowing to `ApiError` before accessing those fields.
+- **Migrating consumers:** use `instanceof HttpError` for behavior based on HTTP status (session handling, retries, routing). For upstream-specific handling, match `HttpError.upstreamCode` against expected codes. Narrow to `ApiError` for Kit envelope fields (`code`, `requestId`, validation details). Use `HttpError` for `onUnauthorized` parameter annotations.
 - `apiErrorToMessage` uses a catalog entry or the kit envelope message for `ApiError`; a generic `HttpError` uses its safe status message. Other `Error` messages may be returned as-is: use an application-owned fallback rather than displaying untrusted network or parser errors directly.
 
 ## `/api/me` wire contract

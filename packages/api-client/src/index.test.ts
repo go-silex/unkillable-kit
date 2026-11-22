@@ -160,15 +160,33 @@ describe('apiFetch / createApiClient', () => {
           JSON.stringify({
             error: { code: 'UNAUTHORIZED', message: 'Unauthorized' },
             requestId: 'req_x',
+            code: 'IGNORED',
+            message: 'Ignored flat message',
           }),
       }),
     )
     await expect(apiFetch('/api/me')).rejects.toMatchObject({
       name: 'ApiError',
       code: 'UNAUTHORIZED',
+      message: 'Unauthorized',
       requestId: 'req_x',
       status: 401,
     })
+  })
+
+  it('exposes a flat error code without exposing its wire message', async () => {
+    const fetch = vi.fn(async () =>
+      Response.json({ code: 'INVALID_TOKEN', message: 'Invalid token' }, { status: 400 }),
+    )
+    const error = await apiFetch('/api/auth/reset-password', { method: 'POST' }, { fetch }).catch(
+      (err: unknown) => err,
+    )
+
+    expect(error).toBeInstanceOf(HttpError)
+    expect(error).not.toBeInstanceOf(ApiError)
+    expect(error).toMatchObject({ status: 400, upstreamCode: 'INVALID_TOKEN' })
+    expect(error).not.toHaveProperty('code')
+    expect(apiErrorToMessage(error)).toBe('HTTP 400')
   })
 
   it('calls onUnauthorized on 401 before throw', async () => {

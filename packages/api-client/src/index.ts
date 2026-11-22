@@ -3,11 +3,13 @@ import type { ApiErrorBody, ErrorCodeName, FieldErrors, ValidationDetails } from
 /** An HTTP response outside the 2xx range, including non-Kit responses. */
 export class HttpError extends Error {
   readonly status: number
+  declare readonly upstreamCode?: string
 
-  constructor(status: number, message = `HTTP ${status}`) {
+  constructor(status: number, message = `HTTP ${status}`, upstreamCode?: string) {
     super(message)
     this.name = 'HttpError'
     this.status = status
+    if (upstreamCode !== undefined) this.upstreamCode = upstreamCode
   }
 }
 
@@ -109,6 +111,16 @@ function httpError(status: number, data: unknown): HttpError {
         requestId,
       })
     }
+  }
+  if (
+    data &&
+    typeof data === 'object' &&
+    'code' in data &&
+    'message' in data &&
+    typeof data.code === 'string' &&
+    typeof data.message === 'string'
+  ) {
+    return new HttpError(status, undefined, data.code)
   }
   return new HttpError(status)
 }
