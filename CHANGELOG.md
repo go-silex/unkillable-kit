@@ -4,6 +4,12 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ## Unreleased
 
+### Release proposal links
+
+- Release preparation pins relative links and images in the proposal to the source commit, without changing the CHANGELOG.
+  Use LF line endings and write links and images with a relative path, an HTTPS URL, or a fragment. Titles, angle destinations, bare URLs, HTML, and escapes outside inline code are rejected.
+  Write relative paths from the repository root without dot segments, doubled or trailing slashes, or encoded separators, dots, or percent signs.
+
 ## unkillable-kit/v0.2.0 — 2026-11-22
 
 ### Kit release preparation
