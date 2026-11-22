@@ -1,4 +1,4 @@
-import { resetPasswordIdentifier } from '@kit/auth/factory'
+import { RESET_PASSWORD_TOKEN_EXPIRES_IN_SEC, resetPasswordIdentifier } from '@kit/auth/factory'
 import { baAccount, baVerification } from '@kit/auth/schema'
 import { eq } from 'drizzle-orm'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -22,6 +22,14 @@ const BA_ENV = {
 
 async function seedEnv() {
   return createSeededDemoApi({ env: BA_ENV, seed: { notes: false, environment: 'test' } })
+}
+
+async function expectInvalidToken(response: Response) {
+  expect(response.status).toBe(400)
+  expect(await response.json()).toMatchObject({
+    code: 'INVALID_TOKEN',
+    message: expect.any(String),
+  })
 }
 
 describe('password reset (B3 S3)', () => {
@@ -178,7 +186,40 @@ describe('password reset (B3 S3)', () => {
       },
       env,
     )
-    expect(reuse.status).toBeGreaterThanOrEqual(400)
+    await expectInvalidToken(reuse)
+  })
+
+  it.each(['expired', 'unknown'] as const)('returns INVALID_TOKEN for %s tokens', async (kind) => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    const now = Date.UTC(2026, 0, 1, 0, 1)
+    vi.setSystemTime(now)
+    const { app, env } = await seedEnv()
+    let token = 'unknown'
+    if (kind === 'expired') {
+      const mail = captureMail()
+      const issued = await app.request(
+        '/api/auth/request-password-reset',
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', Origin: ORIGIN },
+          body: JSON.stringify({ email: DEMO_EMAIL, redirectTo: `${ORIGIN}/reset-password` }),
+        },
+        env,
+      )
+      expect(issued.status).toBe(200)
+      token = resetTokenFromLink(mail.link(DEMO_EMAIL, 'Reset link'))
+      vi.setSystemTime(now + (RESET_PASSWORD_TOKEN_EXPIRES_IN_SEC + 1) * 1000)
+    }
+    const reset = await app.request(
+      '/api/auth/reset-password',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', Origin: ORIGIN },
+        body: JSON.stringify({ newPassword: DEMO_PASSWORD, token }),
+      },
+      env,
+    )
+    await expectInvalidToken(reset)
   })
 
   it('request-password-reset is rate limited', async () => {
