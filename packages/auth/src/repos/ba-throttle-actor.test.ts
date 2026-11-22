@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { rateLimitBuckets } from '../tenancy-schema'
 import {
   BA_THROTTLE_LIMIT,
@@ -36,9 +36,10 @@ const rejectsWith = (p: Promise<unknown>, code: string, status: number) =>
   expect(p).rejects.toMatchObject({ code, status })
 describe('throttleBetterAuthActorRequest', () => {
   beforeEach(() => {
-    vi.useFakeTimers()
+    vi.useFakeTimers({ toFake: ['Date'] })
     vi.setSystemTime(new Date('2026-01-01T00:00:00Z'))
   })
+  afterEach(() => vi.useRealTimers())
 
   it('isolates actor sources while sharing each actor budget across requests and handles', async () => {
     const binding = createMemoryD1Binding()
