@@ -4,6 +4,8 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ## Unreleased
 
+## unkillable-kit/v0.2.1 — 2026-11-22
+
 ### Release proposal synchronization
 
 - Release preparation waits for GitHub to report the refreshed pull request head before updating its title and body. If it does not sync, rerun the workflow manually without a source SHA.
