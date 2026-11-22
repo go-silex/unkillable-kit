@@ -60,41 +60,9 @@ if printf '%s\n' "$package_diff" | grep '^+.*"packageManager"' >/dev/null; then
   echo "packageManager moves: set BUN_VERSION on each Workers Builds / Pages project just before this reaches its deploy/<branch> source branch (row 'Kit bumps packageManager')" >&2
 fi
 workflow_diff=$(git diff --no-textconv --no-ext-diff -U0 HEAD "$tip" -- .github/workflows) || preflight_stop .github/workflows
-uses_line='^[[:blank:]]*(-[[:blank:]]+)?uses[[:blank:]]*:[[:blank:]]*'
-token_refs() {
-  awk -v uses="$uses_line" '
-    $0 ~ uses {
-      sub(/\r$/, "")
-      sub(uses, "")
-      quote = substr($0, 1, 1)
-      if (quote == "\"" || quote == "\047") $0 = substr($0, 2)
-      else quote = ""
-      if (!sub(/^actions\/create-github-app-token@/, "")) next
-      if (quote != "") {
-        end = index($0, quote)
-        if (!end || substr($0, end + 1) !~ /^([[:blank:]]*|[[:blank:]]+#.*)$/) {
-          print "!"; next
-        }
-        $0 = substr($0, 1, end - 1)
-      } else {
-        sub(/[[:blank:]]+#.*/, "")
-        sub(/[[:blank:]]+$/, "")
-      }
-      print $0 == "" ? "!" : $0
-    }'
-}
-added_token_pins=$(printf '%s\n' "$workflow_diff" | awk '/^\+[^+]/ { print substr($0, 2) }' | token_refs)
-if [[ -n "$added_token_pins" ]]; then
-  rc=0
-  head_uses=$(git grep --no-textconv -h -E "$uses_line" HEAD -- .github/workflows) || rc=$?
-  if (( rc > 1 )); then preflight_stop .github/workflows; fi
-  existing_token_pins=$(printf '%s\n' "$head_uses" | token_refs)
-  while IFS= read -r added_pin; do
-    if [[ "$added_pin" =~ ^[0-9a-f]{40}$ ]] &&
-      grep -Fx -- "$added_pin" <<<"$existing_token_pins" >/dev/null; then continue; fi
-    echo "stop: this range bumps actions/create-github-app-token; establish the effective CI_APP_ID mode first (row 'Kit bumps actions/create-github-app-token')" >&2
-    exit 1
-  done <<<"$added_token_pins"
+if printf '%s\n' "$workflow_diff" | grep '^+.*create-github-app-token@' >/dev/null; then
+  echo "stop: this range bumps actions/create-github-app-token; establish the effective CI_APP_ID mode first (row 'Kit bumps actions/create-github-app-token')" >&2
+  exit 1
 fi
 if git merge-base --is-ancestor "$tip" HEAD; then
   echo 'already up to date with upstream/main'

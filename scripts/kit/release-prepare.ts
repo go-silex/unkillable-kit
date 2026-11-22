@@ -11,14 +11,24 @@ const requiredWorkflows = ['.github/workflows/ci.yml', '.github/workflows/secret
 // Cover the repository's close-linked-issues workflow as well as GitHub's URL references.
 const issueClosing =
   /(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?\s+(?:(?:[\w.-]+\/[\w.-]+)?#\d+|https?:\/\/[^\s/]+\/[\w.-]+\/[\w.-]+\/(?:issues|pulls?)\/\d+)/i
+const productAction = 'Product action:'
+const semver = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/
 
 type Version = readonly [bigint, bigint, bigint]
 type Base = { tag: string; sha: string; version: Version }
+type ReleaseHeading = { name: string; start: number; end: number; eol: string; number: number }
+type ReleaseSection = {
+  prefix: string
+  body: string
+  rest: string
+  eol: string
+  headings: ReleaseHeading[]
+  actions: string[]
+}
 type Proposal = {
   branch: string
   sha: string
   tag: string
-  alreadyInChangelog: boolean
   title: string
   body: string
   text: string
@@ -56,9 +66,55 @@ function git(args: string[], input?: string, extra?: NodeJS.ProcessEnv): string 
   return command('git', args, input, { GIT_NO_LAZY_FETCH: '1', ...extra })
 }
 
+// Renderer output is an event stream. NULs from document text cannot forge events.
+function markdownStructure(text: string) {
+  const headingTexts: string[] = []
+  const literal = (value: string) => value.replaceAll('\0', '\uFFFD')
+  const inline = (value: string) => `\0i${value}`
+  const rendered = Bun.markdown.render(text, {
+    text: literal,
+    codespan: (value) => inline(literal(value)),
+    link: inline,
+    image: inline,
+    emphasis: inline,
+    strikethrough: inline,
+    strong: (value) => (value === productAction ? '\0a' : inline(value)),
+    paragraph: (value) => `\0p${value}\0b`,
+    code: () => '\0b',
+    html: () => '\0b',
+    heading: (value, { level }) => {
+      if (level !== 2) return '\0b'
+      headingTexts.push(value.replaceAll('\0i', '').replaceAll('\0a', productAction))
+      return `\0h${headingTexts.length - 1}\0b`
+    },
+    blockquote: (value) => `\0q${value}\0e`,
+    listItem: (value) => `\0l${value}\0e`,
+  })
+  const headings: string[] = []
+  let depth = 0
+  let unreleased = false
+  let actionCount = 0
+  for (const [, headingId, event, action] of rendered.matchAll(
+    /\0(?:h(\d+)|([lqe])((?:\0p)?\0a)?)/g,
+  )) {
+    if (event === 'e') depth--
+    else if (event === 'l' || event === 'q') {
+      depth++
+      if (event === 'l' && unreleased && action) actionCount++
+    } else if (depth === 0) {
+      const heading = headingTexts[Number(headingId)]!
+      headings.push(heading)
+      unreleased = heading === 'Unreleased'
+    }
+  }
+  return { headings, actionCount }
+}
+
 function* outsideFences(text: string) {
   let fence: string | undefined
+  let number = 0
   for (const line of text.matchAll(/([^\r\n]*)(\r\n|\r|\n|$)/g)) {
+    number++
     const [, content = '', eol = ''] = line
     const [, delimiter = '', tail = ''] = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(content) ?? []
     if (
@@ -75,19 +131,41 @@ function* outsideFences(text: string) {
       fence = delimiter
       continue
     }
-    yield { content, eol, start: line.index, end: line.index + line[0].length }
+    yield { content, eol, number, start: line.index, end: line.index + line[0].length }
   }
 }
 
-function releaseSection(text: string) {
-  const headings = []
+function markdownDisagreement(line: number, kind: string): never {
+  throw new Error(`CHANGELOG.md line ${line}: Markdown and source scan disagree on ${kind}`)
+}
+
+function scanActionLines(body: string) {
+  const lines = []
+  for (const line of outsideFences(body)) {
+    const entry = /^ {0,3}(?:[-+*]|\d{1,9}[.)])[ \t]+\*\*Product action:\*\*[ \t]+(.+)$/.exec(
+      line.content,
+    )
+    if (entry) lines.push({ text: `- ${entry[1]}`, number: line.number })
+  }
+  return lines
+}
+
+function releaseSection(text: string): ReleaseSection {
+  const headings: ReleaseHeading[] = []
   for (const line of outsideFences(text)) {
-    const heading = /^ {0,3}##(?:[ \t]+(.*)|$)/.exec(line.content)
-    if (heading) {
-      headings.push({
-        ...line,
-        name: (heading[1] ?? '').replace(/(?:^|[ \t]+)#+[ \t]*$/, '').trim(),
-      })
+    if (line.content.startsWith('## ')) {
+      const name = line.content
+        .slice(3)
+        .replace(/(?:^|[ \t]+)#+[ \t]*$/, '')
+        .trim()
+      headings.push({ ...line, name })
+    }
+  }
+  const parsed = markdownStructure(text)
+  for (let i = 0; i < Math.max(headings.length, parsed.headings.length); i++) {
+    if (headings[i]?.name !== parsed.headings[i]) {
+      const line = headings[i]?.number ?? (headings.at(-1)?.number ?? 0) + 1
+      markdownDisagreement(line, 'release headings')
     }
   }
   const index = headings.findIndex(({ name }) => name === 'Unreleased')
@@ -95,12 +173,19 @@ function releaseSection(text: string) {
   const unreleased = headings[index]!
   const start = unreleased.end
   const end = headings[index + 1]?.start ?? text.length
+  const body = text.slice(start, end)
+  const actionLines = scanActionLines(body)
+  if (actionLines.length !== parsed.actionCount) {
+    const line = actionLines[parsed.actionCount]?.number ?? actionLines[0]?.number ?? 1
+    markdownDisagreement(unreleased.number + line, 'Product action markers')
+  }
   return {
     prefix: text.slice(0, start),
-    body: text.slice(start, end),
+    body,
     rest: text.slice(end),
     eol: unreleased.eol || '\n',
     headings,
+    actions: actionLines.map((line) => line.text),
   }
 }
 
@@ -110,10 +195,9 @@ function propose(
   sha: string,
   base: Base,
   count: string,
-  text: string,
+  section: ReleaseSection,
   date: string,
 ): Proposal | null {
-  const section = releaseSection(text)
   if (!section.body.trim()) return null
   const closingReference = issueClosing.exec(section.body)
   if (closingReference) {
@@ -121,13 +205,7 @@ function propose(
     const line = before.split(/\r\n|\r|\n/).length
     throw new Error(`rephrase CHANGELOG.md line ${line}: release notes must not close issues`)
   }
-  const actions: string[] = []
-  for (const { content } of outsideFences(section.body)) {
-    const entry = /^ {0,3}(?:[-+*]|\d{1,9}[.)])[ \t]+\*\*Product action:\*\*[ \t]+(.+)$/.exec(
-      content,
-    )
-    if (entry) actions.push(`- ${entry[1]}`)
-  }
+  const { actions } = section
   const [major, minor, patch] = base.version
   const nextVersion =
     actions.length > 0 ? `${major}.${minor + 1n}.0` : `${major}.${minor}.${patch + 1n}`
@@ -145,7 +223,6 @@ function propose(
     branch: `release/${component}`,
     sha,
     tag,
-    alreadyInChangelog: section.headings.some(({ name }) => name.split(/[ \t]/, 1)[0] === tag),
     title: `chore(release): ${tag}`,
     body,
     text: `${section.prefix}${section.eol}${header}${section.eol}${section.body}${section.rest}`,
@@ -173,7 +250,7 @@ function baseAt(sha: string, component: string): Base {
   ]).split('\n')
   let best: { tag: string; version: Version } | undefined
   for (const tag of tags) {
-    const parsed = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.exec(tag.slice(prefix.length))
+    const parsed = semver.exec(tag.slice(prefix.length))
     if (!parsed) continue
     const version: Version = [BigInt(parsed[1]!), BigInt(parsed[2]!), BigInt(parsed[3]!)]
     const firstDifference = best?.version.findIndex((value, index) => value !== version[index])
@@ -189,8 +266,31 @@ function baseAt(sha: string, component: string): Base {
   return { ...best, sha: git(['rev-parse', `refs/tags/${best.tag}^{commit}`]).trim() }
 }
 
+function firstUnpublished(
+  headings: ReleaseHeading[],
+  component: string,
+  tags: Set<string>,
+): string | undefined {
+  const prefix = `${component}/v`
+  for (const { name } of headings) {
+    const [tag = ''] = name.split(/[ \t]/, 1)
+    if (tag.startsWith(prefix) && semver.test(tag.slice(prefix.length)) && !tags.has(tag)) {
+      return tag
+    }
+  }
+}
+
 function proposalAt(sha: string): Proposal | 'unpublished' | null {
   const component = componentAt(sha)
+  const section = releaseSection(git(['show', '--no-textconv', `${sha}:${changelog}`]))
+  const tags = new Set(
+    git(['for-each-ref', '--format=%(refname:lstrip=2)', `refs/tags/${component}/v*`]).split('\n'),
+  )
+  const unpublished = firstUnpublished(section.headings, component, tags)
+  if (unpublished) {
+    console.log(`::warning::${unpublished} already has a CHANGELOG section; publish its tag first.`)
+    return 'unpublished'
+  }
   const base = baseAt(sha, component)
   const count = git(['rev-list', '--count', `${base.sha}..${sha}`]).trim()
   const proposal = propose(
@@ -198,20 +298,11 @@ function proposalAt(sha: string): Proposal | 'unpublished' | null {
     sha,
     base,
     count,
-    git(['show', '--no-textconv', `${sha}:${changelog}`]),
+    section,
     new Date().toISOString().slice(0, 10),
   )
-  if (!proposal) return null
-  const ref = `refs/tags/${proposal.tag}`
-  if (git(['for-each-ref', '--format=%(refname)', ref]).split('\n').includes(ref))
+  if (proposal && tags.has(proposal.tag))
     throw new Error(`tag ${proposal.tag} already exists; will not prepare or move it`)
-  if (proposal.alreadyInChangelog) {
-    // The tag is formed only from the validated component and numeric version.
-    console.log(
-      `::warning::${proposal.tag} already has a CHANGELOG section; publish its tag first.`,
-    )
-    return 'unpublished'
-  }
   return proposal
 }
 

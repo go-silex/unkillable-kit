@@ -158,6 +158,12 @@ assert_closing_notes_rejected() {
   expect_log 'rephrase CHANGELOG.md line'
   assert_no_proposal
 }
+assert_markdown_disagreement() {
+  if apply; then fail 'expected Markdown disagreement to stop preparation'; return 1; fi
+  expect_log "CHANGELOG.md line $1"
+  expect_log 'Markdown'
+  assert_no_proposal
+}
 
 
 fixture patch
@@ -227,6 +233,7 @@ done
 pass 'issue-closing keywords in generated notes stop before writing'
 
 fixture neutral-reference
+: > "$STATE/old"
 entries '- Refs fixture/kit#7' '<!--'
 apply
 jq -e '.body | index("Proposed tag:") < index("### Manual publication") and
@@ -250,11 +257,34 @@ assert_dry_run_patch
 expect_log 'None.'
 pass 'markers inside fences or in the middle of a list item do not bump'
 
+fixture nested-heading
+entries '- List item' '' '  ## Nested heading' '' '- **Product action:** Still required.'
+apply
+assert_preserved v0.2.0
+pass 'a heading nested in a list item is not a release boundary'
+
+fixture comment-heading
+entries '<!--' '## Comment heading' '-->' '- **Product action:** Still required.'
+assert_markdown_disagreement 8
+pass 'an apparent heading inside an HTML comment cannot silently truncate notes'
+
+fixture list-fence
+entries '- ```md' '  ## Example heading' '  - **Product action:** Example only.'
+assert_markdown_disagreement 9
+pass 'a marker in a list-contained fence cannot silently change the bump'
+
+fixture list-fence-boundary
+entries '- ```md' '  ## Example heading' '  Example text.'
+apply
+assert_preserved v0.1.1
+jq -e '.body | contains("## Example heading") and (contains("Previously released") | not)' "$STATE/pull" >/dev/null
+pass 'a fence that ends with its list item leaves tagged notes outside the proposal'
+
 fixture pending-publication
 printf '\r\n## kit/v0.1.1 — 2026-01-02\r\n\r\n- Merged, not tagged\r\n' > "$STATE/pending"
 cat "$STATE/old" >> "$STATE/pending"
 mv "$STATE/pending" "$STATE/old"
-entries '- Next patch'
+entries '- **Product action:** New migration after the merged patch.'
 apply
 expect_log '::warning::'
 expect_log 'kit/v0.1.1'
@@ -427,7 +457,7 @@ entries '- Closes fixture/kit#7'
 mutant allow-closing-notes 'if (closingReference)' 'if (false && closingReference)'
 killed allow-closing-notes 'expected issue-closing notes to be rejected' assert_closing_notes_rejected
 
-fixture mutant-ignore-fences
-entries '```md' '- **Product action:** Example only.' '```' '- Actual patch'
-mutant ignore-fences 'if (fence) continue' 'if (false && fence) continue'
-killed ignore-fences 'missing output: chore(release): kit/v0.1.1' assert_dry_run_patch
+fixture mutant-trust-line-scan
+entries '<!--' '## Comment heading' '-->' '- **Product action:** Still required.'
+mutant trust-line-scan 'const parsed = markdownStructure(text)' 'const parsed = { headings: headings.map(({ name }) => name), actionCount: 0 }'
+killed trust-line-scan 'expected Markdown disagreement to stop preparation' assert_markdown_disagreement 8
