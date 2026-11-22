@@ -6,9 +6,9 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ### Materialize memory self-test
 
-- Measure live memory instead of RSS in the materialization self-test to avoid
-  spurious failures from allocator retention while still catching full-blob buffering
-  (go-silex/unkillable-kit#116).
+- The materialization self-test bounds sampled post-GC Buffer memory instead of RSS,
+  so allocator retention on CI runners no longer fails it, while Buffer-held full-blob
+  buffering is still caught (go-silex/unkillable-kit#116).
 
 ## unkillable-kit/v0.2.1 — 2026-11-22
 

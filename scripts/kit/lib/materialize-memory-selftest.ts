@@ -1,7 +1,10 @@
 #!/usr/bin/env bun
 /**
- * Bound live external memory during materializeTree. Report RSS separately:
- * it also includes allocator pages retained after Buffers are reclaimed.
+ * Bound sampled post-GC external (Buffer) memory during materializeTree, which
+ * catches the full-buffer writeExact regression. It is not a bound on all
+ * memory: data held as JS heap values, or released within one event-loop turn,
+ * is not counted. Report RSS separately: it also includes allocator pages
+ * retained after Buffers are reclaimed.
  *
  * Usage: bun scripts/kit/lib/materialize-memory-selftest.ts [MiB=128]
  */
@@ -113,7 +116,8 @@ try {
   // On Bun 1.4.4 with a pinned core and a slowed writer, a 128 MiB blob
   // reached at most 2.2 MiB of sampled live external memory and 9 MiB of
   // queued data; the mutant held about 128 MiB live. A 32 MiB bound at
-  // this fixture size leaves headroom without permitting full-blob buffering.
+  // this fixture size leaves headroom without permitting Buffer-held full-blob
+  // buffering.
   const limit = Math.max(16 * MIB, Math.floor(bytes / 4))
   console.log(
     JSON.stringify({
