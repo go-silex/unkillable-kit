@@ -1,7 +1,7 @@
 import { baUser } from '@kit/auth/schema'
 import { createDb } from '@kit/db'
 import { eq } from 'drizzle-orm'
-import { describe, expect, it, onTestFinished, vi } from 'vitest'
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { createApp } from './app'
 import { schema } from './db/schema'
 import { emailConfig, emailTemplateOptions } from './lib/email-config'
@@ -28,6 +28,8 @@ async function seedEnv() {
 }
 
 describe('org invitations (B3 S2)', () => {
+  afterEach(() => vi.useRealTimers())
+
   it.each(['de', 'FR', 'fr-FR', '__proto__', '', null, undefined])(
     'falls back for unsupported recipient locale %s in invitation and welcome emails',
     async (preference) => {
@@ -441,6 +443,9 @@ describe('org invitations (B3 S2)', () => {
   })
 
   it('accept limiter keys on the subject without a platform address, never a shared bucket', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(Date.UTC(2026, 0, 1, 0, 1))
+
     const { app, env, db } = await seedEnv()
     const solo = await loginCookie(app, env, 'solo@kit.local', TENANCY_PASSWORD, ORIGIN)
     const staff = await loginCookie(app, env, 'staff@kit.local', TENANCY_PASSWORD, ORIGIN)

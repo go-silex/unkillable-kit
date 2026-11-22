@@ -1,7 +1,7 @@
 import { resetPasswordIdentifier } from '@kit/auth/factory'
 import { baAccount, baVerification } from '@kit/auth/schema'
 import { eq } from 'drizzle-orm'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DEMO_EMAIL, DEMO_PASSWORD } from './services/auth'
 import { createSeededDemoApi, loginCookie } from './test/api-fixture'
 import {
@@ -25,6 +25,8 @@ async function seedEnv() {
 }
 
 describe('password reset (B3 S3)', () => {
+  afterEach(() => vi.useRealTimers())
+
   it('request for known email returns generic success and stores token', async () => {
     const { app, env, db } = await seedEnv()
     const mail = captureMail()
@@ -180,6 +182,9 @@ describe('password reset (B3 S3)', () => {
   })
 
   it('request-password-reset is rate limited', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(Date.UTC(2026, 0, 1, 0, 1))
+
     const { app, env } = await seedEnv()
     let lastStatus = 200
     for (let i = 0; i < 25; i++) {

@@ -2,7 +2,7 @@ import { assertRateLimit } from '@kit/auth/repos/rate-limit'
 import { baUser, baVerification } from '@kit/auth/schema'
 import { createDb } from '@kit/db'
 import { eq } from 'drizzle-orm'
-import { describe, expect, it, onTestFinished, vi } from 'vitest'
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { createApp } from './app'
 import { schema } from './db/schema'
 import { emailConfig } from './lib/email-config'
@@ -38,6 +38,8 @@ async function userCountByEmail(db: ReturnType<typeof createDb>, email: string):
 }
 
 describe('magic link (B-magic go-silex/silex-boilerplate#59)', () => {
+  afterEach(() => vi.useRealTimers())
+
   it('uses the recipient locale for authentication mail, not the request language', async () => {
     const { app, env } = await seedEnv()
     const mail = captureMail()
@@ -162,6 +164,9 @@ describe('magic link (B-magic go-silex/silex-boilerplate#59)', () => {
   })
 
   it('magic-link path is rate-limited by the kit BA throttle', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(Date.UTC(2026, 0, 1, 0, 1))
+
     const app = createApp()
     const env = createMemoryEnv(BA_ENV)
     const db = createDb(env.DB as unknown as D1Database, schema)
@@ -188,6 +193,9 @@ describe('magic link (B-magic go-silex/silex-boilerplate#59)', () => {
   })
 
   it('magic-link/verify path is rate-limited by the kit BA throttle', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(Date.UTC(2026, 0, 1, 0, 1))
+
     const app = createApp()
     const env = createMemoryEnv(BA_ENV)
     const db = createDb(env.DB as unknown as D1Database, schema)

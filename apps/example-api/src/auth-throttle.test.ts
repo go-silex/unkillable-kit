@@ -10,7 +10,7 @@ import { assertRateLimit } from '@kit/auth/repos/rate-limit'
 import { baSession, baUser, rateLimitBuckets } from '@kit/auth/schema'
 import { createDb } from '@kit/db'
 import { eq } from 'drizzle-orm'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app'
 import { schema } from './db/schema'
 import type { Env } from './env'
@@ -22,6 +22,10 @@ import { hashFixtureCredential } from './test/fixture-credential'
 import { createMemoryEnv, type EnvLike } from './test/memory-env'
 
 const ORIGIN = 'http://localhost:5173'
+
+// One minute into a fixed throttle window, independent of the wall clock.
+const THROTTLE_TEST_NOW =
+  Math.floor(Date.UTC(2026, 0, 1) / BA_THROTTLE_WINDOW_MS) * BA_THROTTLE_WINDOW_MS + 60_000
 
 /** Secret, base URL and ENVIRONMENT come from `createMemoryEnv` defaults. */
 const BA_OVERRIDES = {
@@ -131,7 +135,12 @@ async function expectOutcome(res: Response, outcome: Outcome, where: string): Pr
 }
 
 describe('Better Auth throttle — deny by default (Roxabi/roxabi-boilerplate-cf#394)', () => {
+  afterEach(() => vi.useRealTimers())
+
   it('a full address bucket 429s every Better Auth endpoint but the two session reads', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(THROTTLE_TEST_NOW)
+
     const { app, env, db } = setup()
     const ip = '198.51.100.7'
     const all = endpoints(env)
@@ -259,6 +268,9 @@ describe('Better Auth throttle — deny by default (Roxabi/roxabi-boilerplate-cf
   })
 
   it('one session from 21 addresses gets 429 on /verify-password, with Retry-After', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(THROTTLE_TEST_NOW)
+
     const { app, env, db } = setup()
     await seedDemoDatabase(db, { notes: false, environment: 'test' }, hashFixtureCredential)
     const signIn = post('/sign-in/email', '203.0.113.200', {
@@ -272,28 +284,18 @@ describe('Better Auth throttle — deny by default (Roxabi/roxabi-boilerplate-cf
 
     const statuses: number[] = []
     let last: Response | undefined
-    // Keep the freshly created session valid while all requests share one fixed window.
-    const now = Date.now()
-    vi.useFakeTimers({ toFake: ['Date'] })
-    try {
-      vi.setSystemTime(now)
-      for (let n = 1; n <= BA_THROTTLE_LIMIT + 1; n++) {
-        // Validation failures still spend the session budget before reaching Better Auth.
-        const body = n === 1 || n === BA_THROTTLE_LIMIT + 1 ? { password: DEMO_PASSWORD } : {}
-        const r = post('/verify-password', `198.51.100.${n}`, body, cookie)
-        last = await app.request(r.url, r.init, env)
-        statuses.push(last.status)
-      }
-    } finally {
-      vi.useRealTimers()
+    for (let n = 1; n <= BA_THROTTLE_LIMIT + 1; n++) {
+      // Validation failures still spend the session budget before reaching Better Auth.
+      const body = n === 1 || n === BA_THROTTLE_LIMIT + 1 ? { password: DEMO_PASSWORD } : {}
+      const r = post('/verify-password', `198.51.100.${n}`, body, cookie)
+      last = await app.request(r.url, r.init, env)
+      statuses.push(last.status)
     }
     expect(statuses).toEqual([200, ...Array(BA_THROTTLE_LIMIT - 1).fill(400), 429])
     expect(last?.status).toBe(429)
     const body = (await last?.json()) as { error: { code: string } }
     expect(body.error.code).toBe('RATE_LIMITED')
-    const retryAfter = Number(last?.headers.get('retry-after'))
-    expect(retryAfter).toBeGreaterThanOrEqual(1)
-    expect(retryAfter).toBeLessThanOrEqual(BA_THROTTLE_WINDOW_MS / 1000)
+    expect(last?.headers.get('retry-after')).toBe('840')
 
     const [user] = await db.select().from(baUser).where(eq(baUser.email, DEMO_EMAIL))
     const [session] = await db.select().from(baSession).where(eq(baSession.userId, user!.id))
@@ -331,6 +333,9 @@ describe('Better Auth throttle — deny by default (Roxabi/roxabi-boilerplate-cf
   })
 
   it('one e-mail budget across sign-in, magic link and reset, from rotating addresses', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(THROTTLE_TEST_NOW)
+
     const { app, env, db } = setup()
     await seedDemoDatabase(db, { notes: false, environment: 'test' }, hashFixtureCredential)
     const victim = DEMO_EMAIL

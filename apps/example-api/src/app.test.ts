@@ -2,7 +2,7 @@ import type { BetterAuthEnvSlice } from '@kit/auth'
 import { assertRateLimit } from '@kit/auth/repos/rate-limit'
 import { AppError } from '@kit/core'
 import { createDb } from '@kit/db'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app'
 import { schema } from './db/schema'
 import { useSecureCookie } from './lib/session-env'
@@ -14,6 +14,11 @@ import { createMemoryEnv } from './test/memory-env'
 const ORIGIN = 'http://localhost:5173'
 /** Non-loopback SPA origin for staging/production env tests. */
 const SPA_ORIGIN = 'https://app.example.com'
+
+function pinThrottleClock(now = Date.UTC(2026, 0, 1, 0, 1)) {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(now)
+}
 
 async function loginAs(
   app: ReturnType<typeof createApp>,
@@ -139,6 +144,8 @@ describe('createApp shipped entry — health & errors', () => {
 })
 
 describe('createApp dual auth + D1 + R2 (happy path)', () => {
+  afterEach(() => vi.useRealTimers())
+
   it('login → cookie session → GET /api/me succeeds', async () => {
     const app = createApp()
     const env = createMemoryEnv()
@@ -802,6 +809,9 @@ describe('createApp dual auth + D1 + R2 (happy path)', () => {
   })
 
   it('assertRateLimit throws AppError RATE_LIMITED with retryAfterSeconds', async () => {
+    // Use the midpoint of this 60-second window.
+    pinThrottleClock(Date.UTC(2026, 0, 1, 0, 0, 30))
+
     const env = createMemoryEnv()
     const db = createDb(env.DB as unknown as D1Database, schema)
     await assertRateLimit(db, 'unit:test', 2, 60_000)
@@ -821,6 +831,8 @@ describe('createApp dual auth + D1 + R2 (happy path)', () => {
   })
 
   it('login returns 429 after rate limit exceeded', async () => {
+    pinThrottleClock()
+
     const app = createApp()
     const env = createMemoryEnv()
     const db = createDb(env.DB as unknown as D1Database, schema)
@@ -852,6 +864,8 @@ describe('createApp dual auth + D1 + R2 (happy path)', () => {
   })
 
   it('mint returns 429 after rate limit exceeded', async () => {
+    pinThrottleClock()
+
     const app = createApp()
     const env = createMemoryEnv()
     const cookie = await loginAs(app, env, DEMO_EMAIL, DEMO_PASSWORD)
@@ -880,6 +894,8 @@ describe('createApp dual auth + D1 + R2 (happy path)', () => {
   })
 
   it('demo email returns 429 after rate limit exceeded', async () => {
+    pinThrottleClock()
+
     const app = createApp()
     const env = createMemoryEnv()
     const cookie = await loginAs(app, env, DEMO_EMAIL, DEMO_PASSWORD)

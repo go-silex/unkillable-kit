@@ -10,6 +10,11 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
   Use LF line endings and write links and images with a relative path, an HTTPS URL, or a fragment. Titles, angle destinations, bare URLs, HTML, and escapes outside inline code are rejected.
   Write relative paths from the repository root without dot segments, doubled or trailing slashes, or encoded separators, dots, or percent signs.
 
+### Auth throttle test clock
+
+- Pin the clock in Example API and Auth Package rate-limit tests so crossing a
+  fixed-window boundary cannot reset their counters (go-silex/unkillable-kit#105).
+
 ## unkillable-kit/v0.2.0 — 2026-11-22
 
 ### Kit release preparation
