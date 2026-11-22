@@ -60,7 +60,7 @@ deploy:
   secrets_cmd: "wrangler secret put <KEY> --config apps/<app>/wrangler.toml"
 release:
   model: trunk
-  component: roxabi-boilerplate-cf
+  component: unkillable-kit
   version_files: []
 landing:
   # Inherited. A product on native branch protection overrides this to native.

@@ -135,3 +135,11 @@ Qualified issue and pull-request references follow [AGENTS.md](AGENTS.md).
 ## Development
 
 Read [AGENTS.md](AGENTS.md) before changing Kit-owned paths. The development and review procedure is [dev-process.md](docs/kit/processes/dev-process.md). The root gate is the `validate:full` script in the root `package.json`; [testing.md](docs/kit/testing.md) owns the testing doctrine. Do not copy the gate's step list into a pull request or an issue.
+
+## Preparing a Kit release
+
+After `CI` and `Secret scan` pass on the same push to `main`, **Release preparation** opens or refreshes `release/unkillable-kit` with the dated CHANGELOG section. The workflow uses the [CI App](docs/kit/ci-app-setup.md) and can be dispatched on `main` to reconcile manually.
+
+Review the version and Product actions in the PR. A maintainer commit stops automated refreshes; bring that branch up to date yourself if needed.
+
+Publication stays manual. After merging, wait for both push checks on the merge commit. Create the annotated tag on that commit, then publish the GitHub Release from the new section with Product actions first. Never move an existing tag.

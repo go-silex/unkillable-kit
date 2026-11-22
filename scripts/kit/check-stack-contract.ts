@@ -261,6 +261,9 @@ function compareProduct(head: unknown, upstream: unknown, headDocument: StackYam
   }
   mustDiffer(head, upstream, ['name'], 'name')
   mustDiffer(head, upstream, ['release', 'component'], 'release.component')
+  if (scalar(head, ['release', 'component']) === 'roxabi-boilerplate-cf') {
+    report('release.component must not reuse the legacy Kit component roxabi-boilerplate-cf')
+  }
   mustDiffer(head, upstream, ['backend', 'path'], 'backend.path')
   if (!explicitNoFrontend(headDocument)) {
     mustDiffer(head, upstream, ['frontend', 'path'], 'frontend.path')

@@ -60,9 +60,20 @@ if printf '%s\n' "$package_diff" | grep '^+.*"packageManager"' >/dev/null; then
   echo "packageManager moves: set BUN_VERSION on each Workers Builds / Pages project just before this reaches its deploy/<branch> source branch (row 'Kit bumps packageManager')" >&2
 fi
 workflow_diff=$(git diff --no-textconv --no-ext-diff -U0 HEAD "$tip" -- .github/workflows) || preflight_stop .github/workflows
-if printf '%s\n' "$workflow_diff" | grep '^+.*create-github-app-token@' >/dev/null; then
-  echo "stop: this range bumps actions/create-github-app-token; establish the effective CI_APP_ID mode first (row 'Kit bumps actions/create-github-app-token')" >&2
-  exit 1
+added_token_pins=$(printf '%s\n' "$workflow_diff" | awk '/^\+[^+].*create-github-app-token@/')
+if [[ -n "$added_token_pins" ]]; then
+  token_pattern="create-github-app-token@([[:xdigit:]]{40})([[:space:]\"']|$)"
+  existing_token_pins='' rc=0
+  existing_token_pins=$(git grep -E "$token_pattern" HEAD -- .github/workflows) || rc=$?
+  if (( rc > 1 )); then preflight_stop .github/workflows; fi
+  while IFS= read -r added_pin; do
+    if [[ "$added_pin" =~ $token_pattern ]]; then
+      existing_pattern="create-github-app-token@${BASH_REMATCH[1]}([[:space:]\"']|$)"
+      if [[ "$existing_token_pins" =~ $existing_pattern ]]; then continue; fi
+    fi
+    echo "stop: this range bumps actions/create-github-app-token; establish the effective CI_APP_ID mode first (row 'Kit bumps actions/create-github-app-token')" >&2
+    exit 1
+  done <<<"$added_token_pins"
 fi
 if git merge-base --is-ancestor "$tip" HEAD; then
   echo 'already up to date with upstream/main'
@@ -83,6 +94,32 @@ if $check; then
       fi
     else
       echo 'pending range not readable from local history'
+    fi
+    # Only the cached Kit tree can name the Kit tag namespace. Parse its block
+    # mapping, not the Product's stack or a `component` key in another block.
+    if component=$(git show --no-textconv "$tip:.dev/stack.yml" 2>/dev/null | awk '
+      /^[[:space:]]*(#|$)/ { next }
+      /^[^[:space:]]/ { release = /^release:[[:space:]]*(#.*)?$/; next }
+      release && /^  component:[[:space:]]*/ {
+        count++
+        sub(/^  component:[[:space:]]*/, "")
+        sub(/[[:space:]]+#.*/, "")
+        sub(/[[:space:]]+$/, "")
+        if (/^"[a-zA-Z0-9][a-zA-Z0-9._-]*"$/ || /^\047[a-zA-Z0-9][a-zA-Z0-9._-]*\047$/)
+          $0 = substr($0, 2, length($0) - 2)
+        if (/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/) value = $0
+      }
+      END { if (count != 1 || value == "") exit 1; print value }
+    '); then
+      if releases=$(git for-each-ref --merged="$tip" --no-merged=HEAD \
+        --sort=refname --sort=creatordate --format='%(refname:lstrip=2)' "refs/tags/$component/v*" 2>/dev/null); then
+        releases=${releases//$'\n'/, }
+        printf 'Kit releases in range (oldest first): %s\n' "${releases:-(none)}"
+      else
+        echo 'Kit release tags not readable from local history'
+      fi
+    else
+      echo 'Kit release tags not reported: cannot read release.component at the cached tip'
     fi
   fi
   # A regular file only: a directory or symlink named CHANGELOG.md would make the pointer misleading.

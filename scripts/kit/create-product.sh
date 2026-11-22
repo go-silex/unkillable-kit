@@ -121,7 +121,7 @@ function replace(from, to) {
 }
 replace('name: cf-chemin-a\n', `name: ${name}\n`)
 replace('  path: apps/example-api\n', `  path: apps/${name}-api\n`)
-replace('  component: roxabi-boilerplate-cf\n', `  component: ${name}\n`)
+replace('  component: unkillable-kit\n', `  component: ${name}\n`)
 if (web === '1') replace('  path: apps/example-web\n', `  path: apps/${name}-web\n`)
 else {
   const start = s.indexOf('\nfrontend:\n')

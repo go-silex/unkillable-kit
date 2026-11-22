@@ -1,8 +1,13 @@
 # Changelog
 
-New entries go under `Unreleased`. A release moves them under a `<component>/vX.Y.Z` section; tagged sections are not rewritten.
+New entries go under `Unreleased`. A release moves them under a `<component>/vX.Y.Z` section; tagged sections are not rewritten. Start a bullet with `**Product action:**` when Products must act because of a migration, an API or behaviour change, or new required configuration.
 
 ## Unreleased
+
+### Kit release preparation
+
+- After green CI and Secret scan on `main`, the Kit opens or refreshes one release-preparation PR. Maintainers review the proposal and publish the tag and GitHub Release manually.
+- Kit upgrades continue to stop on a new `actions/create-github-app-token` pin; adding a workflow that reuses an exact pin already in use is not a bump.
 
 ### Kit upgrade lock stability
 
@@ -11,11 +16,11 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ### Kit upgrade check
 
-- `kit-upgrade --check` prints the pending commit count and first-parent merges of the locally cached `upstream/main`, plus a `git show` pointer to that tip's CHANGELOG, without fetching or writing.
+- `kit-upgrade --check` prints the pending commit count, first-parent merges and release tags of the locally cached `upstream/main`, plus a `git show` pointer to that tip's CHANGELOG, without fetching or writing.
 
 ### API client body content type
 
-- `apiFetch` / `createApiClient` set `content-type: application/json` only for string bodies with no content type already set. `FormData`, `URLSearchParams`, and typed `Blob` bodies keep the content type `fetch` derives. Binary bodies (`ArrayBuffer`, typed arrays, streams) are now sent without a content type: a caller sending JSON that way must set `content-type` explicitly.
+- **Product action:** Set `content-type` explicitly when sending JSON as an `ArrayBuffer`, typed array or stream through `apiFetch` / `createApiClient`. The client now adds `content-type: application/json` only to string bodies without a content type. `FormData`, `URLSearchParams` and typed `Blob` bodies keep the content type derived by `fetch`.
 
 ### Shared CI install recipe
 

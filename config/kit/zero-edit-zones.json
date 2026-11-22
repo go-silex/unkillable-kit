@@ -48,6 +48,7 @@
     ".github/workflows/deploy-main.yml",
     ".github/workflows/secret-scan.yml",
     ".github/workflows/merge-on-green.yml",
+    ".github/workflows/release-prepare.yml",
     ".github/workflows/pr-title.yml",
     ".github/workflows/dependabot-automerge.yml",
     ".github/workflows/dependabot-alert-slack.yml",

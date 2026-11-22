@@ -1,0 +1,107 @@
+name: Release preparation
+
+on:
+  workflow_run:
+    workflows: [CI, Secret scan]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Main commit to reconcile (defaults to the current tip)
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    # Automatic completions are wakeups, not candidates: if a late completion
+    # replaces a queued run, the survivor still reads and evaluates main's tip.
+    concurrency:
+      group: kit-release-main
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+
+      # Read git data only until the checked-out commit is confirmed green. Do not run
+      # scripts or load Bun configuration from a stale, unverified or Product tree.
+      - name: Verify the checked-out Kit tip
+        id: eligible
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.sha || '' }}
+        run: |
+          set -euo pipefail
+          if [[ -e config/product/inheritance.json || -L config/product/inheritance.json ]]; then
+            echo '::notice::Product tree; no Kit release preparation'
+            exit 0
+          fi
+          tip=$(git rev-parse HEAD)
+          if [[ -n "$REQUESTED_SHA" ]] && [[ $(git rev-parse --verify --end-of-options "${REQUESTED_SHA}^{commit}" 2>/dev/null) != "$tip" ]]; then
+            echo '::notice::Requested source is not the current first-parent tip of main'
+            exit 0
+          fi
+          current=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)
+          if [[ "$current" != "$tip" ]]; then
+            echo '::notice::The checked-out commit is stale'
+            exit 0
+          fi
+          runs=$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$tip&branch=main&event=push&per_page=100")
+          if ! jq -e --arg sha "$tip" '
+            [.[].workflow_runs[] | select(.head_sha == $sha and .head_branch == "main" and .event == "push")]
+            | group_by(.path) | map(max_by(.id) | select(.conclusion == "success") | .path)
+            | contains([".github/workflows/ci.yml", ".github/workflows/secret-scan.yml"])
+          ' <<<"$runs" >/dev/null; then
+            echo '::notice::CI and Secret scan are not both green for the main push'
+            exit 0
+          fi
+          printf 'sha=%s\n' "$tip" >>"$GITHUB_OUTPUT"
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        if: steps.eligible.outputs.sha != ''
+        with:
+          bun-version-file: package.json
+
+      - name: Decide whether to write
+        id: proposal
+        if: steps.eligible.outputs.sha != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ steps.eligible.outputs.sha }}
+          RELEASE_BOT_USER_ID: ${{ vars.HEAD_AUTH_BOT_USER_ID }}
+        run: bun --no-env-file scripts/kit/release-prepare.ts --plan --sha "$SHA"
+
+      - name: Mint the proposal token
+        if: steps.proposal.outputs.write == 'true'
+        id: app
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.CI_APP_ID }}
+          private-key: ${{ secrets.CI_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Reconcile the release proposal
+        if: steps.proposal.outputs.write == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_WRITE_TOKEN: ${{ steps.app.outputs.token }}
+          SHA: ${{ steps.eligible.outputs.sha }}
+          RELEASE_BOT_USER_ID: ${{ vars.HEAD_AUTH_BOT_USER_ID }}
+        run: bun --no-env-file scripts/kit/release-prepare.ts --apply --sha "$SHA"

@@ -37,12 +37,13 @@ fixture() {
   local name=$1
   dir="$tmp/$name"
   export KIT_UPGRADE_TEST_LOG="$dir/bun.log"
-  mkdir -p "$dir/seed/scripts/kit" "$dir/seed/config/kit" "$dir/seed/.github/workflows"
+  mkdir -p "$dir/seed/scripts/kit" "$dir/seed/config/kit" "$dir/seed/.github/workflows" "$dir/seed/.dev"
   cp "$ROOT/scripts/kit/kit-upgrade.sh" "$ROOT/scripts/kit/resolve-tree-identity.mjs" "$dir/seed/scripts/kit/"
   printf '{"version":1,"kit_origin_allowlist":["kit"]}\n' > "$dir/seed/config/kit/zero-edit-zones.json"
   printf '{"packageManager":"bun@1.0"}\n' > "$dir/seed/package.json"
   echo lock > "$dir/seed/bun.lock"
   echo '# Changelog' > "$dir/seed/CHANGELOG.md"
+  printf 'release:\n  model: trunk\n  component: unkillable-kit\n' > "$dir/seed/.dev/stack.yml"
   echo upstream-license > "$dir/seed/LICENSE"
   git -C "$dir/seed" init -q -b main
   git -C "$dir/seed" add .
@@ -302,6 +303,7 @@ snapshot_git_state "$dir/before-check"
 run_upgrade --check
 grep -q 'upgrade pending' "$dir/out"
 grep -q '^Pending commits: 1$' "$dir/out"
+grep -qx 'Kit releases in range (oldest first): (none)' "$dir/out"
 grep -qx "Kit CHANGELOG at the cached tip: git show ${cached}:CHANGELOG.md" "$dir/out"
 [[ $(git -C "$dir/product" rev-parse HEAD) == "$before" ]]
 [[ $(git -C "$dir/product" rev-parse upstream/main) == "$cached" ]]
@@ -331,6 +333,45 @@ grep -qx 'Pending commits: 4' "$dir/out"
 grep -qx "Kit CHANGELOG at the cached tip: git show ${tip}:CHANGELOG.md" "$dir/out"
 assert_git_state_unchanged "$dir/before-report"
 pass '--check reports pending merge subjects without writes'
+
+fixture check-releases
+git -C "$dir/seed" tag unkillable-kit/v0.1.0
+git -C "$dir/seed" checkout -qb outside
+git -C "$dir/seed" commit -qm 'not on Kit main' --allow-empty
+git -C "$dir/seed" tag unkillable-kit/v9.0.0
+git -C "$dir/seed" checkout -q main
+git -C "$dir/seed" checkout -qb feature
+printf '# Changelog\n\n## Unreleased\n\n- Kit feature\n\n## unkillable-kit/v0.1.0 — 2026-11-21\n' > "$dir/seed/CHANGELOG.md"
+git -C "$dir/seed" commit -qam 'document Kit feature'
+git -C "$dir/seed" checkout -q main
+git -C "$dir/seed" merge -q --no-ff -m 'Merge Kit feature' feature
+GIT_COMMITTER_DATE='2026-11-22T01:00:00Z' git -C "$dir/seed" tag -am 'first pending release' unkillable-kit/v0.1.1
+git -C "$dir/seed" tag other-kit/v0.1.1
+printf '# Changelog\n\n## Unreleased\n\n## unkillable-kit/v0.1.2 — 2026-11-22\n\n- Kit feature\n\n## unkillable-kit/v0.1.0 — 2026-11-21\n' > "$dir/seed/CHANGELOG.md"
+git -C "$dir/seed" commit -qam 'move the pending entry into a release'
+GIT_COMMITTER_DATE='2026-11-22T02:00:00Z' git -C "$dir/seed" tag -am 'second pending release' unkillable-kit/v0.1.2
+git -C "$dir/seed" push -q "$dir/upstream.git" --tags main outside
+git -C "$dir/product" fetch -q --tags upstream
+printf 'release:\n  component: product-only\n' > "$dir/product/.dev/stack.yml"
+git -C "$dir/product" commit -qam 'use the Product tag namespace'
+tip=$(git -C "$dir/product" rev-parse upstream/main)
+snapshot_git_state "$dir/before-check"
+run_upgrade --check
+grep -qx 'Kit releases in range (oldest first): unkillable-kit/v0.1.1, unkillable-kit/v0.1.2' "$dir/out"
+grep -qx 'Pending commits: 3' "$dir/out"
+grep -qx 'Merge Kit feature' "$dir/out"
+grep -qx "Kit CHANGELOG at the cached tip: git show ${tip}:CHANGELOG.md" "$dir/out"
+assert_git_state_unchanged "$dir/before-check"
+pass '--check lists only pending Kit release tags after entries move out of Unreleased'
+
+fixture check-release-namespace-missing
+printf 'landing:\n  component: not-a-release\n' > "$dir/seed/.dev/stack.yml"
+advance
+git -C "$dir/product" fetch -q upstream
+run_upgrade --check
+[[ $(grep -c '^Kit release tags not reported:' "$dir/out") == 1 ]]
+if grep -q '^Kit releases in range' "$dir/out"; then exit 1; fi
+pass '--check omits releases and prints one notice without release.component'
 
 fixture check-ref-shadow
 advance
@@ -467,7 +508,7 @@ done
 git -C "$dir/seed" push -q "$dir/upstream.git" main
 git -C "$dir/product" fetch -q upstream
 run_upgrade --check
-merges=$(awk '/^First-parent merge subjects/{p=1;next} /^Kit CHANGELOG|^upgrade pending|^shallow|^pending range/{p=0} p' "$dir/out")
+merges=$(awk '/^First-parent merge subjects/{p=1;next} /^Kit |^upgrade pending|^shallow|^pending range/{p=0} p' "$dir/out")
 [[ $(printf '%s\n' "$merges" | grep -c '^Merge cap ') == 50 ]]
 [[ $(printf '%s\n' "$merges" | tail -n1) == '… 1 more' ]]
 pass '--check caps merge subjects at 50'
@@ -642,6 +683,87 @@ if run_upgrade --check; then exit 1; fi
 grep -q 'establish the effective CI_APP_ID' "$dir/out"
 if grep -q '^Pending commits:' "$dir/out"; then exit 1; fi
 pass '--check uses captured tip for token-pin notice'
+
+old_pin=64ab729a6294000f5aa4a4bc0b73d1f32bc45510
+new_pin=d53a697203d98c97647f4eb6e3a1389bee725299
+token_pin_fixture() {
+  fixture "$1"
+  printf 'uses: actions/create-github-app-token@%s\n' "$old_pin" > "$dir/seed/.github/workflows/original.yml"
+  git -C "$dir/seed" add .github/workflows
+  git -C "$dir/seed" commit -qm 'existing token pin'
+  git -C "$dir/seed" push -q "$dir/upstream.git" main
+  git -C "$dir/product" fetch -q upstream
+  git -C "$dir/product" merge -q --no-ff -m 'inherit existing token pin' upstream/main
+}
+commit_token_pins() {
+  git -C "$dir/seed" add .github/workflows
+  git -C "$dir/seed" commit -qm 'change workflow token pins'
+  git -C "$dir/seed" push -q "$dir/upstream.git" main
+  git -C "$dir/product" fetch -q upstream
+}
+assert_token_pin_stops() {
+  if run_upgrade --check; then
+    echo 'FAIL: expected the new CI App pin to stop the upgrade preflight' >&2
+    cat "$dir/out" >&2
+    return 1
+  fi
+  grep -q 'this range bumps actions/create-github-app-token' "$dir/out"
+}
+
+token_pin_fixture check-token-pin-reused
+printf 'uses: actions/create-github-app-token@%s\n' "$old_pin" > "$dir/seed/.github/workflows/new.yml"
+commit_token_pins
+run_upgrade --check
+grep -qx 'Pending commits: 1' "$dir/out"
+run_upgrade
+test -e "$dir/product/.github/workflows/new.yml"
+pass 'adding a workflow with the existing pin allows --check and the upgrade'
+
+for change in replaced added mixed malformed; do
+  token_pin_fixture "check-token-pin-$change"
+  case $change in
+    replaced) file=original; pin=$new_pin ;;
+    added) file=new; pin=$new_pin ;;
+    mixed)
+      printf 'uses: actions/create-github-app-token@%s\n' "$old_pin" > "$dir/seed/.github/workflows/new.yml"
+      file=other; pin=$new_pin ;;
+    malformed) file=new; pin="${old_pin}0" ;;
+  esac
+  printf 'uses: actions/create-github-app-token@%s\n' "$pin" > "$dir/seed/.github/workflows/$file.yml"
+  commit_token_pins
+  assert_token_pin_stops
+  pass "$change token pin stops a Product upgrade"
+done
+
+token_pin_fixture check-token-pin-read-failure
+printf 'uses: actions/create-github-app-token@%s\n' "$old_pin" > "$dir/seed/.github/workflows/new.yml"
+commit_token_pins
+mkdir "$dir/bin"
+cat > "$dir/bin/git" <<EOF
+#!/usr/bin/env bash
+if [[ \$1 == grep ]]; then echo 'fatal: cannot read HEAD workflow blobs' >&2; exit 128; fi
+exec "$real_git" "\$@"
+EOF
+chmod +x "$dir/bin/git"
+if PATH="$dir/bin:$PATH" run_upgrade --check; then exit 1; fi
+grep -q 'cannot compare .github/workflows with the cached upstream/main' "$dir/out"
+pass 'pin reuse fails closed when HEAD workflow blobs cannot be read'
+
+token_pin_fixture mutant-ignore-added-pins
+printf 'uses: actions/create-github-app-token@%s\n' "$new_pin" > "$dir/seed/.github/workflows/new.yml"
+commit_token_pins
+patched="$dir/product/scripts/kit/kit-upgrade.sh"
+awk '{ if ($0 == "if [[ -n \"$added_token_pins\" ]]; then") { print "if false; then"; n++; } else print; }
+  END { if (n != 1) exit 1; }' "$patched" > "$dir/mutant"
+cp "$dir/mutant" "$patched"
+git -C "$dir/product" commit -qam 'mutate the pin guard'
+if assert_token_pin_stops >"$dir/mutant-out" 2>&1; then
+  echo 'FAIL: mutant ignore-added-pins survived' >&2
+  exit 1
+fi
+grep -q '^FAIL: expected the new CI App pin' "$dir/mutant-out"
+pass 'mutant killed: ignore-added-pins'
+cat "$dir/mutant-out"
 
 fixture check-sticky-tip
 echo tip-a > "$dir/seed/tip-a"
