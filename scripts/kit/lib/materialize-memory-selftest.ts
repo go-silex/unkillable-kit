@@ -1,22 +1,32 @@
 #!/usr/bin/env bun
 /**
- * Deterministic memory bound for materializeTree: a N-MiB blob must not grow
- * RSS by nearly N MiB (the old full-buffer path did).
+ * Compare peak RSS growth during materializeTree with a bound that separates
+ * streaming from buffering the whole blob.
  *
- * Usage: bun scripts/kit/lib/materialize-memory-selftest.ts [MiB=64]
+ * Usage: bun scripts/kit/lib/materialize-memory-selftest.ts [MiB=128]
  */
 import { spawnSync } from 'node:child_process'
-import { createWriteStream, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  closeSync,
+  createWriteStream,
+  fstatSync,
+  mkdtempSync,
+  openSync,
+  readSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { materializeTree } from './materialize-tree.ts'
 
-const mib = Number(process.argv[2] ?? 64)
+const MIB = 1024 * 1024
+const mib = Number(process.argv[2] ?? 128)
 if (!Number.isFinite(mib) || mib < 1) {
   console.error('usage: materialize-memory-selftest.ts [MiB]')
   process.exit(2)
 }
-const bytes = Math.floor(mib * 1024 * 1024)
+const bytes = Math.floor(mib * MIB)
 const root = mkdtempSync(join(tmpdir(), 'mat-mem-'))
 const snap = join(root, 'out')
 
@@ -46,10 +56,10 @@ try {
     join(root, 'bun.lock'),
     '{\n  "lockfileVersion": 1,\n  "workspaces": { "": { "name": "mem", "dependencies": {} } },\n  "packages": {}\n}\n',
   )
-  // Deterministic content without holding the whole file in one Buffer in the parent longer than needed.
+  // Generate deterministic content without allocating the whole blob.
   const bin = join(root, 'data.bin')
   const out = createWriteStream(bin)
-  const chunk = Buffer.alloc(1024 * 1024, 0x5a)
+  const chunk = Buffer.alloc(MIB, 0x5a)
   for (let i = 0; i < mib; i += 1) {
     if (!out.write(chunk)) await new Promise((r) => out.once('drain', r))
   }
@@ -57,26 +67,45 @@ try {
   git(['add', '.'])
   git(['commit', '-qm', 'mem'])
 
-  const samples: number[] = []
-  const baseline = process.memoryUsage().rss
-  samples.push(baseline)
-  const timer = setInterval(() => samples.push(process.memoryUsage().rss), 20)
-  const t0 = performance.now()
-  await materializeTree(root, 'HEAD', snap)
-  clearInterval(timer)
-  samples.push(process.memoryUsage().rss)
-  const ms = performance.now() - t0
-  const peak = Math.max(...samples)
-  const growth = peak - baseline
-  const written = readFileSync(join(snap, 'data.bin'))
-  if (written.length !== bytes || written[0] !== 0x5a || written[bytes - 1] !== 0x5a) {
-    console.error(`FAIL: bytes mismatch len=${written.length} want=${bytes}`)
-    process.exit(1)
+  Bun.gc(true)
+  const baseline = process.memoryUsage.rss()
+  let peak = baseline
+  const sample = () => {
+    peak = Math.max(peak, process.memoryUsage.rss())
   }
-  // Peak growth must stay well under the blob size (old path buffered the whole
-  // blob and peaked near 10×). Fixed allocator noise dominates tiny blobs, so
-  // the bound is max(48 MiB, 90% of the blob).
-  const limit = Math.max(48 * 1024 * 1024, Math.floor(bytes * 0.9))
+  const timer = setInterval(sample, 5)
+  const t0 = performance.now()
+  try {
+    await materializeTree(root, 'HEAD', snap)
+    sample()
+  } finally {
+    clearInterval(timer)
+  }
+  const ms = performance.now() - t0
+  const growth = peak - baseline
+
+  const fd = openSync(join(snap, 'data.bin'), 'r')
+  try {
+    const size = fstatSync(fd).size
+    const ends = Buffer.alloc(2)
+    if (
+      size !== bytes ||
+      readSync(fd, ends, 0, 1, 0) !== 1 ||
+      readSync(fd, ends, 1, 1, bytes - 1) !== 1 ||
+      ends[0] !== 0x5a ||
+      ends[1] !== 0x5a
+    ) {
+      throw new Error(`FAIL: bytes mismatch len=${size} want=${bytes}`)
+    }
+  } finally {
+    closeSync(fd)
+  }
+
+  // On Bun 1.4.4, the original sampler at 128 MiB measured 28–33 MiB
+  // streaming vs. 265–267 MiB for the full-buffer mutant. CI once measured
+  // 58 MiB streaming at 64 MiB. At the default fixture size, 96 MiB leaves
+  // room for that variance and is still 32 MiB below a single full blob.
+  const limit = Math.max(96 * MIB, Math.floor(bytes * 0.75))
   console.log(
     JSON.stringify({
       mib,
@@ -89,9 +118,10 @@ try {
   )
   if (growth > limit) {
     console.error(`FAIL: RSS growth ${growth} exceeds ${limit} for ${mib} MiB blob`)
-    process.exit(1)
+    process.exitCode = 1
+  } else {
+    console.log('PASS: materialize memory bound')
   }
-  console.log('PASS: materialize memory bound')
 } finally {
   rmSync(root, { recursive: true, force: true })
 }

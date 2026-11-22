@@ -1013,9 +1013,11 @@ fi
 
 
 # Bounded-memory materialize + full-buffer mutant
-MEM_OUT="$(bun "$ROOT/scripts/kit/lib/materialize-memory-selftest.ts" 64 2>&1)" && mem_rc=0 || mem_rc=$?
+MEM_MIB=128
+MEM_OUT="$(bun "$ROOT/scripts/kit/lib/materialize-memory-selftest.ts" "$MEM_MIB" 2>&1)" && mem_rc=0 || mem_rc=$?
 if [[ "$mem_rc" -eq 0 && "$MEM_OUT" == *'PASS: materialize memory bound'* ]]; then
-  echo "PASS: materialize 64 MiB stays memory-bounded"
+  # Keep the measurement in CI logs: the bound is justified by runner figures.
+  echo "PASS: materialize $MEM_MIB MiB stays memory-bounded ${MEM_OUT%%$'\n'*}"
   PASS=$((PASS + 1))
 else
   echo "FAIL: materialize memory bound: $MEM_OUT" >&2
@@ -1027,9 +1029,9 @@ mkdir -p "$MEM_MUT/scripts/kit/lib"
 cp "$ROOT/scripts/kit/lib/materialize-tree.ts" "$MEM_MUT/scripts/kit/lib/"
 cp "$ROOT/scripts/kit/lib/materialize-memory-selftest.ts" "$MEM_MUT/scripts/kit/lib/"
 bun "$ROOT/scripts/kit/lib/patch-materialize-fullbuf-mutant.ts" "$MEM_MUT/scripts/kit/lib/materialize-tree.ts"
-output="$(cd "$MEM_MUT/scripts/kit/lib" && bun ./materialize-memory-selftest.ts 64 2>&1)" && rc=0 || rc=$?
-if [[ "$rc" -ne 0 && "$output" == *'RSS growth'* ]]; then
-  echo 'PASS: full-buffer writeExact mutant killed by memory test'
+output="$(cd "$MEM_MUT/scripts/kit/lib" && bun ./materialize-memory-selftest.ts "$MEM_MIB" 2>&1)" && rc=0 || rc=$?
+if [[ "$rc" -eq 1 && "$output" == *'FAIL: RSS growth'* ]]; then
+  echo "PASS: full-buffer writeExact mutant killed by memory test ${output%%$'\n'*}"
   PASS=$((PASS + 1))
 else
   echo "FAIL: full-buffer mutant survived (rc=$rc): $output" >&2
