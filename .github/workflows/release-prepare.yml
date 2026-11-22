@@ -95,6 +95,9 @@ jobs:
           client-id: ${{ vars.CI_APP_ID }}
           private-key: ${{ secrets.CI_APP_PRIVATE_KEY }}
           permission-contents: write
+          # Refreshing release/<component> onto a newer main carries main's workflow edits;
+          # GitHub refuses that ref update without workflows write (same as deploy-gate).
+          permission-workflows: write
           permission-pull-requests: write
 
       - name: Reconcile the release proposal
