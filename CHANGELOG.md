@@ -4,6 +4,12 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ## Unreleased
 
+### Materialize memory self-test
+
+- The materialization self-test bounds sampled post-GC Buffer memory instead of RSS,
+  so allocator retention on CI runners no longer fails it, while Buffer-held full-blob
+  buffering is still caught (go-silex/unkillable-kit#116).
+
 ## unkillable-kit/v0.2.1 — 2026-11-22
 
 ### Release proposal synchronization

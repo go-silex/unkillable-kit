@@ -1,22 +1,35 @@
 #!/usr/bin/env bun
 /**
- * Deterministic memory bound for materializeTree: a N-MiB blob must not grow
- * RSS by nearly N MiB (the old full-buffer path did).
+ * Bound sampled post-GC external (Buffer) memory during materializeTree, which
+ * catches the full-buffer writeExact regression. It is not a bound on all
+ * memory: data held as JS heap values, or released within one event-loop turn,
+ * is not counted. Report RSS separately: it also includes allocator pages
+ * retained after Buffers are reclaimed.
  *
- * Usage: bun scripts/kit/lib/materialize-memory-selftest.ts [MiB=64]
+ * Usage: bun scripts/kit/lib/materialize-memory-selftest.ts [MiB=128]
  */
 import { spawnSync } from 'node:child_process'
-import { createWriteStream, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  closeSync,
+  createWriteStream,
+  fstatSync,
+  mkdtempSync,
+  openSync,
+  readSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { materializeTree } from './materialize-tree.ts'
 
-const mib = Number(process.argv[2] ?? 64)
+const MIB = 1024 * 1024
+const mib = Number(process.argv[2] ?? 128)
 if (!Number.isFinite(mib) || mib < 1) {
   console.error('usage: materialize-memory-selftest.ts [MiB]')
   process.exit(2)
 }
-const bytes = Math.floor(mib * 1024 * 1024)
+const bytes = Math.floor(mib * MIB)
 const root = mkdtempSync(join(tmpdir(), 'mat-mem-'))
 const snap = join(root, 'out')
 
@@ -46,10 +59,10 @@ try {
     join(root, 'bun.lock'),
     '{\n  "lockfileVersion": 1,\n  "workspaces": { "": { "name": "mem", "dependencies": {} } },\n  "packages": {}\n}\n',
   )
-  // Deterministic content without holding the whole file in one Buffer in the parent longer than needed.
+  // Generate deterministic content without allocating the whole blob.
   const bin = join(root, 'data.bin')
   const out = createWriteStream(bin)
-  const chunk = Buffer.alloc(1024 * 1024, 0x5a)
+  const chunk = Buffer.alloc(MIB, 0x5a)
   for (let i = 0; i < mib; i += 1) {
     if (!out.write(chunk)) await new Promise((r) => out.once('drain', r))
   }
@@ -57,41 +70,74 @@ try {
   git(['add', '.'])
   git(['commit', '-qm', 'mem'])
 
-  const samples: number[] = []
-  const baseline = process.memoryUsage().rss
-  samples.push(baseline)
-  const timer = setInterval(() => samples.push(process.memoryUsage().rss), 20)
-  const t0 = performance.now()
-  await materializeTree(root, 'HEAD', snap)
-  clearInterval(timer)
-  samples.push(process.memoryUsage().rss)
-  const ms = performance.now() - t0
-  const peak = Math.max(...samples)
-  const growth = peak - baseline
-  const written = readFileSync(join(snap, 'data.bin'))
-  if (written.length !== bytes || written[0] !== 0x5a || written[bytes - 1] !== 0x5a) {
-    console.error(`FAIL: bytes mismatch len=${written.length} want=${bytes}`)
-    process.exit(1)
+  function sampleMemory() {
+    // Bun updates its external-memory accounting on GC. Sample RSS first so
+    // the diagnostic also sees pages that the collection is about to release.
+    const rss = process.memoryUsage.rss()
+    Bun.gc(true)
+    return { rss, external: process.memoryUsage().external }
   }
-  // Peak growth must stay well under the blob size (old path buffered the whole
-  // blob and peaked near 10×). Fixed allocator noise dominates tiny blobs, so
-  // the bound is max(48 MiB, 90% of the blob).
-  const limit = Math.max(48 * 1024 * 1024, Math.floor(bytes * 0.9))
+  const baseline = sampleMemory()
+  let peakRss = baseline.rss
+  let peakExternal = baseline.external
+  const sample = () => {
+    const { rss, external } = sampleMemory()
+    peakRss = Math.max(peakRss, rss)
+    peakExternal = Math.max(peakExternal, external)
+  }
+  const timer = setInterval(sample, 5)
+  const t0 = performance.now()
+  try {
+    await materializeTree(root, 'HEAD', snap)
+    sample()
+  } finally {
+    clearInterval(timer)
+  }
+  const ms = performance.now() - t0
+  const growth = peakExternal - baseline.external
+
+  const fd = openSync(join(snap, 'data.bin'), 'r')
+  try {
+    const size = fstatSync(fd).size
+    const ends = Buffer.alloc(2)
+    if (
+      size !== bytes ||
+      readSync(fd, ends, 0, 1, 0) !== 1 ||
+      readSync(fd, ends, 1, 1, bytes - 1) !== 1 ||
+      ends[0] !== 0x5a ||
+      ends[1] !== 0x5a
+    ) {
+      throw new Error(`FAIL: bytes mismatch len=${size} want=${bytes}`)
+    }
+  } finally {
+    closeSync(fd)
+  }
+
+  // On Bun 1.4.4 with a pinned core and a slowed writer, a 128 MiB blob
+  // reached at most 2.2 MiB of sampled live external memory and 9 MiB of
+  // queued data; the mutant held about 128 MiB live. A 32 MiB bound at
+  // this fixture size leaves headroom without permitting Buffer-held full-blob
+  // buffering.
+  const limit = Math.max(16 * MIB, Math.floor(bytes / 4))
   console.log(
     JSON.stringify({
       mib,
       ms: Math.round(ms),
-      baseline_rss: baseline,
-      peak_rss: peak,
-      growth_rss: growth,
-      limit_rss: limit,
+      baseline_rss: baseline.rss,
+      peak_rss: peakRss,
+      growth_rss: peakRss - baseline.rss,
+      baseline_external: baseline.external,
+      peak_external: peakExternal,
+      growth_external: growth,
+      limit_external: limit,
     }),
   )
   if (growth > limit) {
-    console.error(`FAIL: RSS growth ${growth} exceeds ${limit} for ${mib} MiB blob`)
-    process.exit(1)
+    console.error(`FAIL: live external growth ${growth} exceeds ${limit} for ${mib} MiB blob`)
+    process.exitCode = 1
+  } else {
+    console.log('PASS: materialize memory bound')
   }
-  console.log('PASS: materialize memory bound')
 } finally {
   rmSync(root, { recursive: true, force: true })
 }
