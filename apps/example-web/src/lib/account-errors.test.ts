@@ -1,5 +1,9 @@
+import {
+  changePasswordErrorMessage as authChangePasswordErrorMessage,
+  isRateLimited as isAuthRateLimited,
+} from '@kit/auth/react'
 import type { ErrorCodeName } from '@kit/types'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { en } from '../messages/en'
 import {
   changePasswordErrorMessage,
@@ -9,7 +13,7 @@ import {
   profileErrorMessage,
   signupErrorMessage,
 } from './account-errors'
-import { ApiError, HttpError } from './api'
+import { ApiError, apiFetch, HttpError } from './api'
 
 function apiErr(status: number, code: ErrorCodeName): ApiError {
   return new ApiError(status, {
@@ -17,6 +21,24 @@ function apiErr(status: number, code: ErrorCodeName): ApiError {
     requestId: 'req_test',
   })
 }
+
+describe('flat upstream error classification', () => {
+  it.each([
+    ['RATE_LIMITED', '/api/auth/request-password-reset'],
+    ['UNAUTHORIZED', '/api/auth/change-password'],
+  ])('treats flat %s on HTTP 400 as an ordinary bad request', async (code, path) => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Response.json({ code, message: 'Bad request' }, { status: 400 })),
+    )
+    const error = await apiFetch(path, { method: 'POST' }).catch((err: unknown) => err)
+
+    expect(error).toBeInstanceOf(HttpError)
+    expect(isAuthRateLimited(error)).toBe(false)
+    expect(isRateLimited(error)).toBe(false)
+    expect(authChangePasswordErrorMessage(error, en, () => en.error)).toBe(en.changePasswordWrong)
+  })
+})
 
 describe('isRateLimited', () => {
   it('detects HttpError 429 or ApiError RATE_LIMITED', () => {

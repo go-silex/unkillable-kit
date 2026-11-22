@@ -152,18 +152,12 @@ Workers email uses log transport; Mailpit/SMTP is Node `@kit/email/server` only.
 
 ### Password reset local E2E (B3 S3)
 
-Automated suite: `apps/example-api/src/password-reset.test.ts` (request known/unknown, reset + single-use, rate limit).
+Checks: Example API `password-reset.test.ts` (request, single use, rate limit), Example Web `reset-password.test.tsx` (URL stripping, recovery). Starter Web has no reset page.
 
-BA 1.6 paths: `POST /api/auth/request-password-reset` · `POST /api/auth/reset-password`.
-
-Manual dogfood:
-
-1. Open `/forgot-password` → submit an account whose inbox you control.
-2. Use a real transport: `log` sends nothing and redacts tokens (local: mail-capture tests).
-3. Open the emailed link `/reset-password?token=<token>` (query, not path).
-4. Set new password (≥ 8 chars) → redirect login → sign in with **new** password; old fails.
-5. Reuse token → error.
-
-Mailpit: optional via Node `@kit/email/server` only — **not** the Worker path. Prod CF Email is epic **go-silex/silex-boilerplate#21**.
+1. Submit `/forgot-password` for your inbox (`POST /api/auth/request-password-reset`).
+2. Use real mail: `log` redacts tokens and sends nothing. Tests capture mail. Mailpit needs Node `@kit/email/server`, not Workers. CF Email: go-silex/silex-boilerplate#21.
+3. Open `/reset-password?token=…`; the App keeps the token but strips it from the URL.
+4. Set a password (≥ 8 chars; `POST /api/auth/reset-password`); only the new one works at login.
+5. A used, expired, or unknown token yields 400 `INVALID_TOKEN`: the App shows an action to request a new link.
 
 ---
