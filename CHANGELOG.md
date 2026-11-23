@@ -4,6 +4,8 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ## Unreleased
 
+## unkillable-kit/v0.4.0 — 2026-11-23
+
 ### OpenID provider
 
 - Enforce `prompt=login` and `max_age` at authorization code issuance using
