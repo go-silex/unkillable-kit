@@ -126,7 +126,7 @@ type ByteReader = {
  * Chunk-queue reader: never Buffer.concat's the whole stream into one growing buffer.
  * Only allocates for small reads (headers / symlink targets).
  */
-function createByteReader(stream: Readable): ByteReader {
+export function createByteReader(stream: Readable): ByteReader {
   const chunks: Buffer[] = []
   let offset = 0
   let buffered = 0

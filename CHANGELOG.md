@@ -6,9 +6,10 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ### Tooling
 
-- The `test:lock-ranges` memory self-test detects its full-buffer mutant from
-  queued bytes instead of timed samples. This removes a timer-dependent failure of
-  the inherited tooling lane on hosted runners (go-silex/unkillable-kit#149).
+- `test:lock-ranges` now checks that `writeExact` writes each paced chunk before
+  the next arrives. The full-buffer mutant fails without timing or memory
+  thresholds, and the large-blob check compares all materialized bytes
+  (go-silex/unkillable-kit#149).
 
 ## unkillable-kit/v0.5.0 — 2026-11-23
 

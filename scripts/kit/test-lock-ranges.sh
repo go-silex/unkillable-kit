@@ -1012,15 +1012,14 @@ else
 fi
 
 
-# Bounded-memory materialize + full-buffer mutant
+# Paced writer + exact large blob + full-buffer mutant
 MEM_MIB=128
 MEM_OUT="$(bun "$ROOT/scripts/kit/lib/materialize-memory-selftest.ts" "$MEM_MIB" 2>&1)" && mem_rc=0 || mem_rc=$?
-if [[ "$mem_rc" -eq 0 && "$MEM_OUT" == *'PASS: materialize memory bound'* ]]; then
-  # Keep the queue high-water mark, external memory and RSS in CI logs.
-  echo "PASS: materialize $MEM_MIB MiB stays memory-bounded ${MEM_OUT%%$'\n'*}"
+if [[ "$mem_rc" -eq 0 && "$MEM_OUT" == *'PASS: writeExact streams paced chunks and materialize preserves blob bytes'* ]]; then
+  echo "PASS: paced writeExact streams and materialize preserves $MEM_MIB MiB byte for byte"
   PASS=$((PASS + 1))
 else
-  echo "FAIL: materialize memory bound: $MEM_OUT" >&2
+  echo "FAIL: paced writeExact or large-blob materialize: $MEM_OUT" >&2
   FAIL=$((FAIL + 1))
 fi
 MEM_MUT="$TMP/mem-mutant"
@@ -1030,8 +1029,8 @@ cp "$ROOT/scripts/kit/lib/materialize-tree.ts" "$MEM_MUT/scripts/kit/lib/"
 cp "$ROOT/scripts/kit/lib/materialize-memory-selftest.ts" "$MEM_MUT/scripts/kit/lib/"
 bun "$ROOT/scripts/kit/lib/patch-materialize-fullbuf-mutant.ts" "$MEM_MUT/scripts/kit/lib/materialize-tree.ts"
 output="$(cd "$MEM_MUT/scripts/kit/lib" && bun ./materialize-memory-selftest.ts "$MEM_MIB" 2>&1)" && rc=0 || rc=$?
-if [[ "$rc" -eq 1 && "$output" == *'FAIL: queued blob bytes'* ]]; then
-  echo "PASS: full-buffer writeExact mutant killed by memory test ${output%%$'\n'*}"
+if [[ "$rc" -eq 1 && "$output" == 'FAIL: writeExact did not stream before next chunk ('* ]]; then
+  echo "PASS: full-buffer writeExact mutant killed by paced writer test: ${output#FAIL: }"
   PASS=$((PASS + 1))
 else
   echo "FAIL: full-buffer mutant survived (rc=$rc): $output" >&2
