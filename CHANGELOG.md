@@ -4,6 +4,11 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ## Unreleased
 
+### OpenID provider
+
+- Use the Web Crypto input type for retained-key verification so the OIDC provider
+  typechecks with Cloudflare Worker declarations as well as DOM declarations.
+
 ## unkillable-kit/v0.4.1 — 2026-11-23
 
 ### Observability guide
