@@ -43,6 +43,10 @@ Package. Promote a shared implementation only after at least two Products need i
 
 See `packages/ui/src/index.ts` for the current export map (Button, Dialog, Sheet, Sidebar, AlertDialog, Select, Empty, …). Prefer the living design-system page over duplicating a long inventory here.
 
+Use `Tabs`, `TabsList`, `TabsTrigger` and `TabsContent` to switch between panels
+on the same page. Arrow keys activate the focused tab by default; pass
+`activateOnFocus={false}` to `TabsList` for manual activation.
+
 ### Tasks-related primitives (shadcn, 2026-08)
 
 | Export                                | Source                                                            | Use                                                                                                      |

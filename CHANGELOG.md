@@ -4,6 +4,11 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ## Unreleased
 
+### UI tabs
+
+- Add accessible Tabs to `@kit/ui` and demonstrate them in the Example App
+  design-system catalogue (go-silex/unkillable-kit#136).
+
 ## unkillable-kit/v0.4.1 — 2026-11-23
 
 ### Observability guide
