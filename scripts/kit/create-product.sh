@@ -138,7 +138,11 @@ git commit -m 'chore(product): pin kit inheritance'
 copy_starter() {
   local kind=$1 target="apps/$name-$1"
   mkdir -p "$target"
-  git archive "$parent_sha" "apps/starter-$kind" | tar -x -C "$target" --strip-components=2 --exclude='apps/starter-api/src/worker-configuration.d.ts'
+  # Products set their own route budgets; the Starter inventory is specific to the Kit App.
+  git archive "$parent_sha" "apps/starter-$kind" |
+    tar -x -C "$target" --strip-components=2 \
+      --exclude='apps/starter-api/src/worker-configuration.d.ts' \
+      --exclude='apps/starter-api/src/test/d1-budgets'
 }
 copy_starter api
 if ((web)); then copy_starter web; fi

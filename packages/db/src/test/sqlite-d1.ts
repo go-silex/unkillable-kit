@@ -2,6 +2,8 @@ import type Database from 'better-sqlite3'
 import type { KitD1Database, KitD1Statement } from '../index'
 import { callSqlite } from '../sqlite-error'
 
+export { countD1RoundTrips } from './d1-round-trips'
+
 export type SqliteD1Options = {
   onBind?: (parameterCount: number) => void
 }

@@ -15,9 +15,11 @@
  *   INTEGRITY_CHANGED           same name@version, different integrity hash (tarball swapped under a lock)
  *   ADVISORY                    the registry's advisory database matches the new version and not the one it replaces
  *   REGENERATE_TYPES            `wrangler` changed: agents must regenerate the committed worker-configuration.d.ts
+ *   BETTER_AUTH_REVIEW          a Better Auth lock resolution was added, changed or removed
  *   METADATA_UNAVAILABLE        the registry has no record of the version or its publish time (fail closed)
  */
 import { diffLocks, type LockChange, parseLock } from './lock.ts'
+import { BETTER_AUTH_REVIEW_DETAIL, isBetterAuthPackage } from './metadata.ts'
 import type { LockPackage, Reason, Registry, Verdict, VersionMeta } from './types.ts'
 
 export type NpmContext = { registry: Registry; cooldownSeconds: number; now: Date }
@@ -217,17 +219,42 @@ async function advisoryReasons(changes: LockChange[], ctx: NpmContext): Promise<
   return reasons
 }
 
+function betterAuthReasons(base: readonly LockPackage[], head: readonly LockPackage[]): Reason[] {
+  const baseByKey = new Map<string, LockPackage>()
+  for (const pkg of base) if (isBetterAuthPackage(pkg.name)) baseByKey.set(pkg.key, pkg)
+  const reasons: Reason[] = []
+  const withhold = (pkg: LockPackage) =>
+    reasons.push({
+      code: 'BETTER_AUTH_REVIEW',
+      subject: `${pkg.name}@${pkg.version}`,
+      detail: BETTER_AUTH_REVIEW_DETAIL,
+    })
+  for (const pkg of head) {
+    if (!isBetterAuthPackage(pkg.name)) continue
+    const previous = baseByKey.get(pkg.key)
+    baseByKey.delete(pkg.key)
+    // A new resolution at this key matters even if its version was already locked elsewhere.
+    if (previous?.name !== pkg.name || previous.version !== pkg.version) withhold(pkg)
+  }
+  // Removing a nested resolution can select an unchanged ancestor version instead.
+  for (const pkg of baseByKey.values()) withhold(pkg)
+  return reasons
+}
+
 export async function evaluateLockChange(
   baseText: string,
   headText: string,
   ctx: NpmContext,
 ): Promise<Verdict> {
-  const { changes, integrityChanged } = diffLocks(parseLock(baseText), parseLock(headText))
+  const base = parseLock(baseText)
+  const head = parseLock(headText)
+  const { changes, integrityChanged } = diffLocks(base, head)
   const reasons: Reason[] = integrityChanged.map(({ head, base }) => ({
     code: 'INTEGRITY_CHANGED',
     subject: `${head.name}@${head.version}`,
     detail: `integrity ${base.integrity ?? 'none'} -> ${head.integrity ?? 'none'} for an unchanged version`,
   }))
+  reasons.push(...betterAuthReasons(base, head))
   for (const { head } of changes.filter((c) => c.head.name === 'wrangler')) {
     reasons.push({
       code: 'REGENERATE_TYPES',

@@ -124,16 +124,14 @@ A deleted `deploy/<branch>` is not this case. The gate goes red (`Deploy branch 
 
 ### Product consumer — deploy _your_ product
 
-Showcase scripts refuse without `KIT_SHOWCASE_DEPLOY=1` and refuse any branch ≠ `deploy/main`.
+Use Product Apps, bindings, hosts and Builds. Never enable `KIT_SHOWCASE_DEPLOY=1`
+or use `cf:showcase:*`.
 
-```text
-1. apps/<product>-api + apps/<product>-web   # new paths
-2. wrangler with YOUR worker / D1 / hosts    # not boilerplate-*
-3. CF Builds on YOUR projects  OR  product-deploy.yml
-4. Never KIT_SHOWCASE_DEPLOY=1  ·  never cf:showcase:*
-```
+#### Production Worker placement
 
-See [product-consumer-contract](./product-consumer-contract.md).
+Set production `placement.region` near the D1 primary. For a real read, verify
+`served_by_primary` and match `served_by_colo` to the primary, not `cf-placement`.
+See [region selection and trace checks](./observability.md#verify-d1-placement).
 
 ---
 

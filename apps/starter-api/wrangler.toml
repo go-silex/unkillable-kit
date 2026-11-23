@@ -3,6 +3,16 @@ main = "src/index.ts"
 compatibility_date = "2026-07-01"
 compatibility_flags = ["nodejs_compat"]
 
+[observability]
+enabled = true
+redact_query_string = true
+
+[observability.logs]
+enabled = true
+
+[observability.traces]
+enabled = true
+
 [[d1_databases]]
 binding = "DB"
 database_name = "starter-api-local"

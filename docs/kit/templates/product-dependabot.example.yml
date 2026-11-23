@@ -19,6 +19,12 @@ updates:
           - patch
         exclude-patterns:
           - "wrangler"
+          - "better-auth"
+          - "@better-auth/*"
+      better-auth:
+        patterns:
+          - "better-auth"
+          - "@better-auth/*"
       vitest:
         patterns:
           - "vitest"

@@ -4,11 +4,12 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ## Unreleased
 
-### Merge on green
-
-- Delayed push and reopen jobs preserve authorizations issued after the
-  original workflow run was created. Successful revocation checks wake merge
-  evaluation again (go-silex/unkillable-kit#158).
+- New Product API starters enable Workers logs and traces with query strings
+  redacted. Production onboarding now includes Worker placement near the D1
+  primary and verification with D1 spans (go-silex/unkillable-kit#161).
+- **Product action:** Refresh the generated Dependabot configuration when
+  inheriting this Kit version. Better Auth version updates are grouped separately
+  and require human review before landing (go-silex/unkillable-kit#161).
 
 ## unkillable-kit/v0.5.1 — 2026-11-23
 

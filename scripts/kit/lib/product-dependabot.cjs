@@ -73,6 +73,12 @@ ${directories.map((p) => `      - ${JSON.stringify(p)}\n`).join('')}    schedule
           - patch
         exclude-patterns:
           - "wrangler"
+          - "better-auth"
+          - "@better-auth/*"
+      better-auth:
+        patterns:
+          - "better-auth"
+          - "@better-auth/*"
       vitest:
         patterns:
           - "vitest"

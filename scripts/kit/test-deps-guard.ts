@@ -580,7 +580,7 @@ const SNAPSHOT = {
   baseRef: 'main',
 }
 const metadata = (name = 'hono', type = 'version-update:semver-patch') =>
-  `Bump dependency\n\n---\nupdated-dependencies:\n- dependency-name: ${name}\n  update-type: ${type}\n...\n`
+  `Bump dependency\n\n---\nupdated-dependencies:\n- dependency-name: ${JSON.stringify(name)}\n  update-type: ${type}\n...\n`
 const dependabotCommit = {
   sha: HEAD,
   author: { login: 'dependabot[bot]' },
@@ -603,6 +603,7 @@ type PrOptions = {
   policyReadError?: boolean
   workflowHeadSha?: string
   now?: Date
+  base?: LockRow[]
   head?: LockRow[]
   message?: string
   actualHead?: string
@@ -657,7 +658,7 @@ function prIdentityResponse(opts: PrOptions) {
 }
 
 function prFixtureApi(opts: PrOptions) {
-  const baseLock = lock([['hono', '4.13.9']])
+  const baseLock = lock(opts.base ?? [['hono', '4.13.9']])
   const headLock = lock(opts.head ?? [['hono', '4.13.12']])
   let pullReads = 0
   const fixtureFetch = githubFetch({
@@ -934,6 +935,57 @@ test('metadata is taken from the evaluated commit, never a second PR head', asyn
   }
 })
 
+test('Better Auth metadata withholds automatic admission in Kit and Product PRs', async () => {
+  for (const product of [false, true]) {
+    for (const [name, type] of [
+      ['better-auth', 'version-update:semver-patch'],
+      ['@better-auth/core', 'version-update:semver-minor'],
+    ]) {
+      const single = metadata(name, type)
+      const mixed = `${metadata().replace('...\n', '')}${single.split('updated-dependencies:\n')[1]}`
+      for (const message of [single, mixed]) {
+        const v = await prVerdict({ product, message })
+        assert.equal(v.verdict, 'WITHHOLD')
+        assert.match(v.reasons[0]?.detail ?? '', /Better Auth.*human review/)
+      }
+    }
+    for (const type of ['version-update:semver-patch', 'version-update:semver-minor']) {
+      const v = await prVerdict({ product, message: metadata('hono', type) })
+      assert.equal(v.verdict, 'PASS')
+    }
+  }
+})
+
+test('an unrelated bump cannot repoint Better Auth to another already-locked version', async () => {
+  const nested: LockRow = ['other/better-auth', '1.7.15', 'sha512-new', '', 'better-auth@1.7.15']
+  const base: LockRow[] = [['hono', '4.13.9'], ['better-auth', '1.7.14'], nested]
+  const unchanged = await prVerdict({
+    base,
+    head: [['hono', '4.13.12'], ['better-auth', '1.7.14'], nested],
+    product: true,
+  })
+  assert.equal(unchanged.verdict, 'PASS')
+  const repointed = await prVerdict({
+    base,
+    head: [['hono', '4.13.12'], ['better-auth', '1.7.15', 'sha512-new'], nested],
+    product: true,
+  })
+  assert.equal(repointed.verdict, 'WITHHOLD')
+  assert.deepEqual(codes(repointed), ['BETTER_AUTH_REVIEW'])
+})
+
+test('deduplicating a nested Better Auth resolution still requires human review', async () => {
+  const current: LockRow = ['better-auth', '1.7.15']
+  const nested: LockRow = ['other/better-auth', '1.7.14', undefined, '', 'better-auth@1.7.14']
+  const v = await prVerdict({
+    base: [['hono', '4.13.9'], current, nested],
+    head: [['hono', '4.13.12'], current],
+    product: true,
+  })
+  assert.equal(v.verdict, 'WITHHOLD')
+  assert.deepEqual(codes(v), ['BETTER_AUTH_REVIEW'])
+})
+
 test('comparison truncation or uncertain file cap never passes', async () => {
   await assert.rejects(() => prVerdict({ compareTotal: 101 }), /incomplete comparison commits/)
   const firstPage = Array.from({ length: 100 }, (_, i) => ({
@@ -975,6 +1027,23 @@ test('bunfig.toml minimumReleaseAge equals every Dependabot cooldown — one age
       `${u['package-ecosystem']} cooldown vs bunfig.toml`,
     )
   }
+})
+
+test('Better Auth version updates are grouped separately from other Bun minor and patch updates', async () => {
+  const { updates } = Bun.YAML.parse(
+    readFileSync(join(ROOT, '.github/dependabot.yml'), 'utf8'),
+  ) as {
+    updates: Array<{
+      'package-ecosystem': string
+      groups: Record<string, Record<string, string[]>>
+    }>
+  }
+  const groups = updates.find((entry) => entry['package-ecosystem'] === 'bun')?.groups
+  assert.ok(groups)
+  const betterAuth = ['better-auth', '@better-auth/*']
+  assert.deepEqual(groups['better-auth'], { patterns: betterAuth })
+  for (const name of betterAuth)
+    assert.ok(groups['bun-dependencies']?.['exclude-patterns']?.includes(name))
 })
 
 test("package.json declares trustedDependencies (omitting it silently re-enables Bun's default allow list)", async () => {
