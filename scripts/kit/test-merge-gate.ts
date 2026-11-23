@@ -2424,6 +2424,10 @@ test('a fresh grant published during the withdrawal write survives with its revi
   assert.equal(state.allowed, true)
   assert.equal(state.receipt?.id, fake.comments[7][1].id)
   assert.deepEqual(fake.prs[7].labels, [{ name: 'reviewed' }])
+  fake.edited.add(fake.comments[7][2].id)
+  const edited = await readAuthorization(prAuthorization(fake))
+  assert.equal(edited.allowed, false)
+  assert.equal(edited.reason, 'unproven authorization association or edit')
 })
 
 test('event withdrawal requires a valid run cutoff and does not count a tie as fresh', async () => {
@@ -2461,6 +2465,25 @@ test('a later event still targets a grant behind consecutive superseded withdraw
   assert.equal(state.reason, 'withdrawn')
   assert.equal(state.receipt?.record?.previous, grant.id)
   assert.deepEqual(fake.prs[7].labels, [])
+})
+
+test('human PR event wakes merge evaluation only after its revocation check succeeds', async () => {
+  const gate = workflowJobs(WORKFLOW)['merge-on-green']
+  for (const action of ['synchronize', 'reopened']) {
+    for (const result of ['success', 'failure', 'skipped']) {
+      const event = {
+        github: { event_name: 'pull_request_target', event: { action } },
+        needs: {
+          preflight: {
+            result: 'success',
+            outputs: { eligible: 'true', trusted_sha: BASE_A, enabled: 'true' },
+          },
+          'revoke-reviewed-on-push': { result },
+        },
+      }
+      assert.equal(guardOpen(gate.if, event), result === 'success', `${action}: ${result}`)
+    }
+  }
 })
 
 test('unprivileged pull_request preflight does not require the default-branch adapter', async () => {
