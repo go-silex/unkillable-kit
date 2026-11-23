@@ -80,7 +80,11 @@ Anyone with **write** (or admin) can:
 - merge a PR in the UI / `gh pr merge` without the receipt and without waiting for `ci` + TruffleHog;
 - push directly to `main`.
 
-When configured, the maintained workflow scans eligible open PRs on trusted wakeups; a label is only a hint. It requires an open, mergeable, non-draft PR and a valid current receipt. The whole authenticated stream is read before selecting its newest effective record. A proven event withdrawal is skipped only if the receipt it targeted was superseded; other withdrawals deny all lanes. A malformed, wrong-scope, edited or duplicate-operation selected record holds. Numeric issuer identity, predecessor and GraphQL edit/association proof are checked. A fresh explicit admission is required to reissue after an effective withdrawal.
+On trusted wakeups, the gate requires an open, mergeable, non-draft PR and a valid receipt.
+It reads the entire authenticated stream and ignores only proven event withdrawals whose target
+was superseded. Other withdrawals deny all lanes. Invalid scope, issuer, record, predecessor,
+duplicate operation or missing GraphQL edit/association proof holds. A fresh explicit admission
+is required after an effective withdrawal.
 
 Initial evaluation checks admission before quality. An unadmitted PR is reported with its authorization reason; its quality is **not evaluated**, not green. An admitted PR receives the complete quality assessment. Default-ref dispatch still scans eligible open PRs; its configured-App mint diagnostic does not bypass admission or quality.
 
