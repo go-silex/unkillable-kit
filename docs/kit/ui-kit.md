@@ -24,6 +24,10 @@ Do **not** patch `packages/ui` for product colors or copy.
 
 SSoT: [`docs/kit/product-consumer-contract.md`](product-consumer-contract.md) (design_overrides).
 
+Set `--overlay` on `:root` and `.dark` in App CSS to change the backdrop color of `Dialog`, `AlertDialog`, and `Sheet`. The Kit default is 10% black in both modes.
+
+The vendored `dialog.tsx`, `alert-dialog.tsx`, and `sheet.tsx` files use `bg-overlay` instead of upstream's `bg-black/10`. Preserve this local change when re-syncing with `ui:add`.
+
 Client-facing release notes belong in the Product App, not shared Kit paths.
 The Example App demonstrates an in-app changelog; it is not a shared patchlog
 Package. Promote a shared implementation only after at least two Products need it.

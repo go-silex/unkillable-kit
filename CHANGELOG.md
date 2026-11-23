@@ -4,6 +4,11 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ## Unreleased
 
+### UI
+
+- Let Apps set the Dialog, AlertDialog, and Sheet backdrop color via `--overlay`
+  in light and dark modes without changing the defaults (go-silex/unkillable-kit#138).
+
 ## unkillable-kit/v0.4.1 — 2026-11-23
 
 ### Observability guide
