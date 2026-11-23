@@ -4,6 +4,8 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ## Unreleased
 
+## unkillable-kit/v0.4.1 — 2026-11-23
+
 ### Observability guide
 
 - Correct the Wrangler `[observability]` inheritance rule: an environment that
