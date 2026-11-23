@@ -16,6 +16,11 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 - Add `@kit/ui/base.css` for shared styles without Geist, using the system font
   stack unless the App overrides it (go-silex/unkillable-kit#139).
 
+### UI tabs
+
+- Add accessible Tabs to `@kit/ui` and demonstrate them in the Example App
+  design-system catalogue (go-silex/unkillable-kit#136).
+
 ## unkillable-kit/v0.4.1 — 2026-11-23
 
 ### Observability guide

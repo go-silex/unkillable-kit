@@ -1,5 +1,5 @@
 /**
- * Browser smoke for design-system overlays (and admin gate).
+ * Browser smoke for design-system tabs and overlays (and admin gate).
  * Fails on pageerror / console Base UI contract messages.
  *
  * Prerequisites:
@@ -162,6 +162,18 @@ try {
     .getByRole('button', { name: 'Dropdown' })
     .waitFor({ state: 'visible', timeout: 15_000 })
   assertClean('design-system load')
+
+  const tabsSection = page.locator('#tabs')
+  const tabs = tabsSection.getByRole('tablist')
+  const firstTab = tabs.getByRole('tab').first()
+  const secondTab = tabs.getByRole('tab').nth(1)
+  await firstTab.waitFor({ state: 'visible' })
+  await firstTab.press('ArrowRight')
+  await secondTab.and(page.locator(':focus[aria-selected="true"]')).waitFor({ state: 'visible' })
+  await tabsSection
+    .getByRole('tabpanel', { name: await secondTab.textContent(), exact: true })
+    .waitFor({ state: 'visible' })
+  assertClean('tabs keyboard navigation')
 
   /**
    * Base UI overlays can leave Playwright's real click stuck on "performing click action".

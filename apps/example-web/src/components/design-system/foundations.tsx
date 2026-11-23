@@ -7,6 +7,10 @@ import {
   FieldLabel,
   Input,
   Label,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
   Textarea,
 } from '@kit/ui'
 import { ChevronRight, Plus, Settings } from 'lucide-react'
@@ -137,6 +141,19 @@ export function Foundations() {
               <Input id="ds-alone" className="max-w-xs" />
             </div>
           </FieldGroup>
+        </DemoBox>
+      </Section>
+
+      <Section id="tabs" title={m.dsTabs} description={m.dsTabsDesc}>
+        <DemoBox>
+          <Tabs defaultValue="first">
+            <TabsList aria-label={m.dsTabs}>
+              <TabsTrigger value="first">{m.dsTabsFirst}</TabsTrigger>
+              <TabsTrigger value="second">{m.dsTabsSecond}</TabsTrigger>
+            </TabsList>
+            <TabsContent value="first">{m.dsTabsFirstPanel}</TabsContent>
+            <TabsContent value="second">{m.dsTabsSecondPanel}</TabsContent>
+          </Tabs>
         </DemoBox>
       </Section>
     </>

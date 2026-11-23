@@ -35,7 +35,9 @@ Keep branding, shells, and release notes in the App. Share changelog code only w
 
 ## Exports
 
-See `packages/ui/src/index.ts` for the current export map (Button, Dialog, Sheet, Sidebar, AlertDialog, Select, Empty, …). Prefer the living design-system page over duplicating a long inventory here.
+See `packages/ui/src/index.ts` and the catalogue for exports.
+`Tabs` + `TabsList` + `TabsTrigger` + `TabsContent` switch local panels.
+Set `activateOnFocus={false}` on `TabsList` for manual activation.
 
 ### Tasks-related primitives (shadcn, 2026-08)
 
