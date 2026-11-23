@@ -4,6 +4,11 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ## Unreleased
 
+### OpenID provider
+
+- Use the Web Crypto input type for retained-key verification so the OIDC provider
+  typechecks with Cloudflare Worker declarations as well as DOM declarations.
+
 ### UI
 
 - Let Apps set the Dialog, AlertDialog, and Sheet backdrop color via `--overlay`
