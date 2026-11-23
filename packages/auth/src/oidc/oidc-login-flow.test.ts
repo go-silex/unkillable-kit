@@ -3,6 +3,7 @@ import { drizzle } from 'drizzle-orm/d1'
 import { Hono } from 'hono'
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { type BetterAuthHandlerEnv, createBetterAuthHandler } from '../policy/better-auth-handler'
+import { trackAuthorizationResponses } from './oidc-authorization-response'
 import { capsuleField, createOidcProvenance } from './oidc-fresh-login-provenance'
 import {
   codeCount,
@@ -76,15 +77,16 @@ describe('OIDC login method guidance', () => {
     expect(send).not.toHaveBeenCalled()
   })
 
-  it('lets the provider reject an invalid authorization signature', async () => {
+  it('requests restart when a continuation signature is no longer valid', async () => {
     const { auth, client, send } = await setup(true)
     const query = new URLSearchParams(
       await start(auth, client.client_id, 'GET', { prompt: 'login' }),
     )
     query.set('sig', 'invalid')
     const response = await sendMagicLink(auth, query.toString())
-    expect(response.status).toBe(400)
-    expect(await response.json()).toMatchObject({ error: 'invalid_signature' })
+    expect(response.status).toBe(409)
+    expect(await response.json()).toMatchObject({ code: 'OIDC_RESTART_REQUIRED' })
+    expect(response.headers.get('cache-control')).toBe('no-store')
     expect(send).not.toHaveBeenCalled()
   })
 
@@ -94,6 +96,60 @@ describe('OIDC login method guidance', () => {
     expect(response.status).toBe(200)
     expect(send).toHaveBeenCalledTimes(1)
   })
+})
+
+it('restarts expired REST continuations without changing consent denial', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  onTestFinished(() => {
+    vi.useRealTimers()
+  })
+  vi.setSystemTime(new Date('2026-11-01T12:00:00Z'))
+  const { auth, client, secret, signupCookie, sqlite } = await setup(true)
+  const pending = await start(auth, client.client_id, 'GET')
+  vi.setSystemTime((Number(new URLSearchParams(pending).get('exp')) + 1) * 1000)
+  expect(await verifyOAuthQueryParams(pending, secret)).toBe(false)
+  const post = (path: string, body: Record<string, unknown>) =>
+    request(auth, `/api/auth${path}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: ORIGIN, cookie: signupCookie },
+      body: JSON.stringify({ ...body, oauth_query: pending }),
+    })
+  for (const response of [
+    await startGoogleLogin(auth, pending),
+    await post('/oauth2/continue', { postLogin: true }),
+    await post('/oauth2/consent', { accept: true }),
+  ]) {
+    expect(response.status).toBe(409)
+    expect(response.headers.get('cache-control')).toBe('no-store')
+    expect(response.headers.getSetCookie()).toEqual([])
+    expect(response.headers.has('location')).toBe(false)
+    expect(await response.json()).toMatchObject({ code: 'OIDC_RESTART_REQUIRED' })
+  }
+  const denied = await post('/oauth2/consent', { accept: false })
+  expect(denied.status).toBe(400)
+  expect(await denied.json()).toMatchObject({ error: 'invalid_signature' })
+  expect(codeCount(sqlite)).toBe(0)
+})
+
+it('replaces provisional response headers only for the request with a server restart decision', async () => {
+  const { database } = await setup(true)
+  const { restart, protectResponse } = trackAuthorizationResponses(database)
+  const requestWithRestart = new Request(`${ORIGIN}/api/auth/callback/google`)
+  const ordinaryRequest = new Request(requestWithRestart.url)
+  const provisional = new Response(null, {
+    status: 302,
+    headers: { location: `${ORIGIN}/done`, 'set-cookie': 'fixture-session=provisional' },
+  })
+  const result = await protectResponse(requestWithRestart, async (currentRequest) => {
+    restart(currentRequest)
+    return provisional
+  })
+  expect(result.status).toBe(409)
+  expect(result.headers.get('cache-control')).toBe('no-store')
+  expect(result.headers.getSetCookie()).toEqual([])
+  expect(result.headers.has('location')).toBe(false)
+  expect(await result.json()).toMatchObject({ code: 'OIDC_RESTART_REQUIRED' })
+  expect(await protectResponse(ordinaryRequest, async () => provisional)).toBe(provisional)
 })
 
 describe('signed-out OIDC authorization', () => {

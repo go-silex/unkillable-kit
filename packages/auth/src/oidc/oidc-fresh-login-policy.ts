@@ -12,19 +12,12 @@ import {
   freshnessFrom,
   signedQuery,
 } from './oidc-fresh-login-provenance'
+import { requiresPasswordSignIn, supportedPrompts } from './oidc-prompt-create'
 import { createOidcSessionAuthentication } from './oidc-session-authentication'
 
 const consentPath = '/oauth2/consent'
 const passwordPath = '/sign-in/email'
 const signupPath = '/sign-up/email'
-const restartCode = 'OIDC_RESTART_REQUIRED'
-
-function restart() {
-  return new APIError('CONFLICT', {
-    code: restartCode,
-    message: 'Restart authorization from the client.',
-  })
-}
 
 function invalidRequest() {
   return new APIError('BAD_REQUEST', { error: 'invalid_request' })
@@ -80,23 +73,6 @@ function classifyEntry(ctx: GenericEndpointContext, started?: number): Query {
   return query
 }
 
-function supportedPrompts(query: Query) {
-  const prompt =
-    typeof query.prompt === 'string'
-      ? query.prompt
-          .split(' ')
-          .map((token) => token.trim())
-          .filter(Boolean)
-      : []
-  if (
-    (query.prompt !== undefined && prompt.length === 0) ||
-    prompt.includes('create') ||
-    (prompt.includes('none') && new Set(prompt).size !== 1)
-  )
-    return
-  return prompt
-}
-
 function requireInteraction(query: Query, prompt: string[]) {
   if (prompt.includes('none')) query.max_age = '0'
   else if (!prompt.includes('login')) query.prompt = [...prompt, 'login'].join(' ')
@@ -116,7 +92,20 @@ function isAlternateSignIn(path?: string) {
 export function createOidcFreshLoginPolicy(db: KitD1Database, loginPage: string) {
   const provenance = createOidcProvenance()
   const sessions = createOidcSessionAuthentication(db)
-  const { deny, trackMint, hasTrackedMint, protectResponse } = trackAuthorizationResponses(db)
+  const { deny, restart, trackMint, hasTrackedMint, protectResponse } =
+    trackAuthorizationResponses(db)
+
+  function preflightQuery(ctx: GenericEndpointContext, alternate: boolean): string | undefined {
+    const raw = ctx.body.oauth_query
+    if (typeof raw === 'string') return raw
+    if (alternate) {
+      throw new APIError('BAD_REQUEST', {
+        code: 'OIDC_INVALID_OAUTH_QUERY',
+        message: 'oauth_query must be a string.',
+      })
+    }
+    if (ctx.path === passwordPath || ctx.path === signupPath) throw restart(ctx.request)
+  }
 
   async function checkMint(fields: MintFields, { baseURL, secret }: AuthContext) {
     if (fields.capsule !== (await provenance.pinned.get())) throw invalidRequest()
@@ -175,12 +164,13 @@ export function createOidcFreshLoginPolicy(db: KitD1Database, loginPage: string)
     clearSatisfiedPrompts(query, prompt)
   }
 
-  async function readProviderContinuation(raw: string, { baseURL, secret }: AuthContext) {
+  async function readProviderContinuation(raw: string, ctx: GenericEndpointContext) {
     const providerState = await getOAuthProviderState()
     const query = signedQuery(raw)
-    if (!(query && providerState?.query)) throw restart()
+    if (!(query && providerState?.query)) throw restart(ctx.request)
+    const { baseURL, secret } = ctx.context
     const authorization = await provenance.read(query, baseURL, secret)
-    if (!authorization) throw restart()
+    if (!authorization) throw restart(ctx.request)
     return authorization
   }
 
@@ -198,20 +188,28 @@ export function createOidcFreshLoginPolicy(db: KitD1Database, loginPage: string)
       before: [
         {
           matcher: (ctx) =>
-            (ctx.path === passwordPath || ctx.path === signupPath) &&
-            ctx.body?.oauth_query !== undefined,
+            ctx.body?.oauth_query !== undefined &&
+            (ctx.path === passwordPath ||
+              ctx.path === signupPath ||
+              ctx.path === '/oauth2/continue' ||
+              isAlternateSignIn(ctx.path) ||
+              (ctx.path === consentPath && ctx.body.accept === true)),
           handler: createAuthMiddleware(async (ctx) => {
-            const raw = ctx.body.oauth_query
+            const alternate = isAlternateSignIn(ctx.path)
+            const raw = preflightQuery(ctx, alternate)
+            if (raw === undefined) return
+            // The provider's query hook would otherwise reject an expired envelope first.
             const { baseURL, secret } = ctx.context
-            const query = typeof raw === 'string' && signedQuery(raw)
-            if (
-              !(
-                query &&
-                (await verifyOAuthQueryParams(raw, secret)) &&
-                (await provenance.read(query, baseURL, secret))
-              )
-            )
-              throw restart()
+            const query = signedQuery(raw)
+            if (!(query && (await verifyOAuthQueryParams(raw, secret)))) throw restart(ctx.request)
+            const authorization = await provenance.read(query, baseURL, secret)
+            if (!authorization) throw restart(ctx.request)
+            if (alternate && requiresPasswordSignIn(query, authorization)) {
+              throw new APIError('BAD_REQUEST', {
+                code: 'OIDC_PASSWORD_REQUIRED',
+                message: 'Use password sign-in for this authorization request.',
+              })
+            }
           }),
         },
       ],
@@ -246,7 +244,9 @@ export function createOidcFreshLoginPolicy(db: KitD1Database, loginPage: string)
               const { baseURL, secret } = ctx.context
               const authorization = await provenance.read(query, baseURL, secret)
               const capsule = query[capsuleField]
-              if (!authorization || typeof capsule !== 'string') throw restart()
+              if (!authorization || typeof capsule !== 'string') {
+                throw restart(started === undefined ? ctx.request : undefined)
+              }
               await provenance.pinned.set(capsule)
               await stepUp(ctx, query, authorization, started !== undefined)
             } catch (error) {
@@ -256,26 +256,12 @@ export function createOidcFreshLoginPolicy(db: KitD1Database, loginPage: string)
           }),
         },
         {
-          matcher: (ctx) =>
-            ctx.path === consentPath ||
-            ctx.path === '/oauth2/continue' ||
-            isAlternateSignIn(ctx.path),
+          matcher: (ctx) => ctx.path === consentPath && ctx.body?.accept === true,
           handler: createAuthMiddleware(async (ctx) => {
             const oauthQuery = ctx.body?.oauth_query
-            if (
-              typeof oauthQuery !== 'string' ||
-              (ctx.path === consentPath && ctx.body.accept !== true)
-            )
-              return
-            const authorization = await readProviderContinuation(oauthQuery, ctx.context)
-            if (!authorization.freshness) return
-            if (isAlternateSignIn(ctx.path)) {
-              throw new APIError('BAD_REQUEST', {
-                code: 'OIDC_PASSWORD_REQUIRED',
-                message: 'Use password sign-in for this authorization request.',
-              })
-            }
-            if (ctx.path !== consentPath || !(await consentNeedsLogin(ctx, authorization))) return
+            if (typeof oauthQuery !== 'string') return
+            const authorization = await readProviderContinuation(oauthQuery, ctx)
+            if (!(authorization.freshness && (await consentNeedsLogin(ctx, authorization)))) return
             const target = new URL(loginPage, ctx.context.baseURL)
             target.search = oauthQuery
             return ctx.json({ redirect: true, url: target.toString() })

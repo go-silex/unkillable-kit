@@ -224,8 +224,11 @@ Ineligible sessions normally return to login. With `prompt=none`, the relying
 party receives `error=login_required` instead. A denial at code issuance returns
 `invalid_request` without a code.
 
-On HTTP 409 `OIDC_RESTART_REQUIRED`, start a new authorization at the relying
-party, not another sign-in retry with the same `oauth_query`. During
+The Kit returns HTTP 409 `OIDC_RESTART_REQUIRED` for an invalid or expired
+signed continuation during sign-in, continue, or consent acceptance, and when
+a nested authorization requires a restart. The response is not cacheable and
+carries neither an auth cookie nor a redirect. Start a new authorization at
+the relying party rather than retrying with the same `oauth_query`. During
 an upgrade, serve both authorization and continuation traffic on one Kit version,
 and restart **all** pending pre-upgrade authorizations, including those without
 freshness constraints.
