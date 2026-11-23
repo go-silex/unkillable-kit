@@ -287,12 +287,12 @@ An active App-only `main` ruleset blocks manual landing, including inactive-App 
 
 Customize look & feel **without** forking `@kit/ui`. Machine-readable list: `config/kit/zero-edit-zones.json` → `design_overrides`.
 
-| Pattern                    | Where                                  | How                                                                                                                                            |
-| -------------------------- | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| **CSS token override**     | `apps/<product>-web/src/**/*.css`      | Keep `@import "@kit/ui/styles.css"`, then redeclare tokens on `:root` / `.dark` (`--primary`, `--radius`, `--overlay`, fonts, sidebar, charts) |
-| **Compose / wrap**         | `apps/<product>-web/src/components/**` | Import primitives from `@kit/ui`; build product shells (`LoadingButton`, `BrandHeader`)                                                        |
-| **App Tailwind `@source`** | product CSS                            | `@source` kit UI + product app only                                                                                                            |
-| **Assets**                 | `apps/<product>-web/public/**`         | Favicon, OG, logo — not in `packages/ui`                                                                                                       |
+| Pattern                    | Where                                  | How                                                                                                                                |
+| -------------------------- | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| **CSS token override**     | `apps/<product>-web/src/**/*.css`      | `@import "@kit/ui/styles.css"`, then declare `--primary`, `--radius`, `--overlay`, fonts, sidebar, or charts on `:root` / `.dark`. |
+| **Compose / wrap**         | `apps/<product>-web/src/components/**` | Import primitives from `@kit/ui`; build product shells (`LoadingButton`, `BrandHeader`)                                            |
+| **App Tailwind `@source`** | product CSS                            | `@source` kit UI + product app only                                                                                                |
+| **Assets**                 | `apps/<product>-web/public/**`         | Favicon, OG, logo — not in `packages/ui`                                                                                           |
 
 Use `ThemeProvider` from `@kit/ui` with an App-owned storage key, for example `<ThemeProvider storageKey="ua.theme">`. Use `useTheme()` for the selection and resolved color scheme; keep any pre-React boot script aligned with that key. See [`@kit/ui` theme](./ui-kit.md#theme).
 
