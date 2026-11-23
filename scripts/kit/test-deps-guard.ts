@@ -974,6 +974,18 @@ test('an unrelated bump cannot repoint Better Auth to another already-locked ver
   assert.deepEqual(codes(repointed), ['BETTER_AUTH_REVIEW'])
 })
 
+test('deduplicating a nested Better Auth resolution still requires human review', async () => {
+  const current: LockRow = ['better-auth', '1.7.15']
+  const nested: LockRow = ['other/better-auth', '1.7.14', undefined, '', 'better-auth@1.7.14']
+  const v = await prVerdict({
+    base: [['hono', '4.13.9'], current, nested],
+    head: [['hono', '4.13.12'], current],
+    product: true,
+  })
+  assert.equal(v.verdict, 'WITHHOLD')
+  assert.deepEqual(codes(v), ['BETTER_AUTH_REVIEW'])
+})
+
 test('comparison truncation or uncertain file cap never passes', async () => {
   await assert.rejects(() => prVerdict({ compareTotal: 101 }), /incomplete comparison commits/)
   const firstPage = Array.from({ length: 100 }, (_, i) => ({

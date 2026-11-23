@@ -48,9 +48,10 @@ For Products using Kit password-reset emails, links sent before the Kit moved re
    targets a nearby Cloudflare data center; it does not move D1 or pin the Worker to an exact colo.
 2. After the change goes live, send an authorized request that makes a representative read
    against the production D1 binding. Open the read span in [Workers traces](https://developers.cloudflare.com/workers/observability/traces/).
-   Check that `cloudflare.d1.response.served_by_primary` is `true` and `served_by_colo` matches
-   the known primary colo. Compare it with `cloudflare.colo` on the invocation span: the D1
-   value alone says where the query ran, not where the Worker ran.
+   Check that `cloudflare.d1.response.served_by_primary` is `true` and
+   `cloudflare.d1.response.served_by_colo` matches the known primary colo. Compare it with
+   `cloudflare.colo` on the invocation span: the D1 value alone says where the query ran,
+   not where the Worker ran.
 3. If the exact colo is missing, record it as unverified. With `served_by_primary = true`, the
    [documented `cloudflare.d1.response.served_by_region`](https://developers.cloudflare.com/workers/observability/traces/spans-and-attributes/#d1)
    can corroborate the primary region, not exact colocation. Compare D1 span durations on

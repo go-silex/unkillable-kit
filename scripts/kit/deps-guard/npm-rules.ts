@@ -15,7 +15,7 @@
  *   INTEGRITY_CHANGED           same name@version, different integrity hash (tarball swapped under a lock)
  *   ADVISORY                    the registry's advisory database matches the new version and not the one it replaces
  *   REGENERATE_TYPES            `wrangler` changed: agents must regenerate the committed worker-configuration.d.ts
- *   BETTER_AUTH_REVIEW          a Better Auth lock resolution was added or changed
+ *   BETTER_AUTH_REVIEW          a Better Auth lock resolution was added, changed or removed
  *   METADATA_UNAVAILABLE        the registry has no record of the version or its publish time (fail closed)
  */
 import { diffLocks, type LockChange, parseLock } from './lock.ts'
@@ -223,18 +223,21 @@ function betterAuthReasons(base: readonly LockPackage[], head: readonly LockPack
   const baseByKey = new Map<string, LockPackage>()
   for (const pkg of base) if (isBetterAuthPackage(pkg.name)) baseByKey.set(pkg.key, pkg)
   const reasons: Reason[] = []
-  for (const pkg of head) {
-    if (!isBetterAuthPackage(pkg.name)) continue
-    // A different resolution at this key can change the runtime even if the new version was
-    // already locked elsewhere and therefore does not appear among the registry checks.
-    const previous = baseByKey.get(pkg.key)
-    if (previous?.name === pkg.name && previous.version === pkg.version) continue
+  const withhold = (pkg: LockPackage) =>
     reasons.push({
       code: 'BETTER_AUTH_REVIEW',
       subject: `${pkg.name}@${pkg.version}`,
       detail: BETTER_AUTH_REVIEW_DETAIL,
     })
+  for (const pkg of head) {
+    if (!isBetterAuthPackage(pkg.name)) continue
+    const previous = baseByKey.get(pkg.key)
+    baseByKey.delete(pkg.key)
+    // A new resolution at this key matters even if its version was already locked elsewhere.
+    if (previous?.name !== pkg.name || previous.version !== pkg.version) withhold(pkg)
   }
+  // Removing a nested resolution can select an unchanged ancestor version instead.
+  for (const pkg of baseByKey.values()) withhold(pkg)
   return reasons
 }
 
