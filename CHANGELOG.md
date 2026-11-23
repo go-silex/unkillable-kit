@@ -42,6 +42,14 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
   token-link validation, with Kit templates unchanged by default
   (go-silex/unkillable-kit#135).
 
+### Dependencies
+
+- The inherited `@vitest/coverage-v8` moves to `5.1.1`, and Kit workspaces now
+  require `vitest` `^5.1.1` to match it (go-silex/unkillable-kit#130).
+- **Product action:** For each Product workspace tested by the inherited V8
+  coverage gate, make `bun.lock` resolve its `vitest` to `5.1.1`, the version the
+  provider supports. Change its manifest range only if the range excludes `5.1.1`.
+
 ## unkillable-kit/v0.4.1 — 2026-11-23
 
 ### Observability guide
