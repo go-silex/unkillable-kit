@@ -16,11 +16,11 @@ The Example App keeps `kit.theme` and its existing `public/theme-boot.js` to app
 
 ## Zero-edit / product brand
 
-Keep branding in the App. For a custom font, import `@kit/ui/base.css` instead of the Geist entry, then the App fonts, then the App tokens. Set `--font-sans` on `:root`; `font-heading` follows it. Without an override, `base.css` uses the system stack.
+Custom font: import `@kit/ui/base.css` → App fonts → [App tokens](product-consumer-contract.md#design-overrides-accepted--no-exception-needed). Set `--font-sans` on `:root`; headings follow. Base alone uses system fonts.
 
-Wrap Kit components in App-owned shells; see [design overrides](product-consumer-contract.md#design-overrides-accepted--no-exception-needed).
+Modal backdrops: set `--overlay` on `:root` and `.dark` (default 10% black). On `ui:add`, keep `bg-overlay` in `dialog.tsx`, `alert-dialog.tsx`, and `sheet.tsx`.
 
-Release notes live in the App. Share changelog code only when two Products need it.
+Keep branding, shells, and release notes in the App. Share changelog code only when two Products need it.
 
 ## Conventions for example-web
 

@@ -4,8 +4,15 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ## Unreleased
 
+### OpenID provider
+
+- Use the Web Crypto input type for retained-key verification so the OIDC provider
+  typechecks with Cloudflare Worker declarations as well as DOM declarations.
+
 ### UI
 
+- Let Apps set the Dialog, AlertDialog, and Sheet backdrop color via `--overlay`
+  in light and dark modes without changing the defaults (go-silex/unkillable-kit#138).
 - Add `@kit/ui/base.css` for shared styles without Geist, using the system font
   stack unless the App overrides it (go-silex/unkillable-kit#139).
 

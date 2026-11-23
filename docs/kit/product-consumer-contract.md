@@ -287,12 +287,12 @@ An active App-only `main` ruleset blocks manual landing, including inactive-App 
 
 Customize look and feel without forking `@kit/ui`. Machine-readable list: `config/kit/zero-edit-zones.json` → `design_overrides`.
 
-| Pattern          | Where                                  | How                                                                                      |
-| ---------------- | -------------------------------------- | ---------------------------------------------------------------------------------------- |
-| Tokens           | `apps/<product>-web/src/**/*.css`      | Redeclare tokens on `:root` / `.dark` (`--primary`, `--radius`, fonts, sidebar, charts). |
-| Composition      | `apps/<product>-web/src/components/**` | Wrap `@kit/ui` primitives in App shells.                                                 |
-| Tailwind sources | App CSS                                | `@source` Kit UI + App only.                                                             |
-| Assets           | `apps/<product>-web/public/**`         | Keep favicons, OG and logos out of the Kit.                                              |
+| Pattern          | Where                                  | How                                                                                 |
+| ---------------- | -------------------------------------- | ----------------------------------------------------------------------------------- |
+| Tokens           | `apps/<product>-web/src/**/*.css`      | On `:root` / `.dark`: `--primary`, `--radius`, `--overlay`, fonts, sidebar, charts. |
+| Composition      | `apps/<product>-web/src/components/**` | Wrap `@kit/ui` primitives in App shells.                                            |
+| Tailwind sources | App CSS                                | `@source` Kit UI + App only.                                                        |
+| Assets           | `apps/<product>-web/public/**`         | Keep favicons, OG and logos out of the Kit.                                         |
 
 Give `ThemeProvider` an App-owned storage key such as `ua.theme` and keep any pre-React boot script aligned with it. Use `useTheme()` for the selection and resolved color scheme; see the [theme guide](./ui-kit.md#theme).
 
