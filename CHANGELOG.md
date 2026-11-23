@@ -4,19 +4,6 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ## Unreleased
 
-- New Product API starters enable Workers logs and traces with query strings
-  redacted. Production onboarding now includes Worker placement near the D1
-  primary and verification with D1 spans (go-silex/unkillable-kit#161).
-- **Product action:** Refresh the generated Dependabot configuration when
-  inheriting this Kit version. Better Auth version updates are grouped separately
-  and require human review before landing (go-silex/unkillable-kit#161).
-
-### Merge on green
-
-- Delayed push and reopen jobs preserve authorizations issued after the
-  original workflow run was created. Successful revocation checks wake merge
-  evaluation again (go-silex/unkillable-kit#158).
-
 ### CI
 
 - Root is the single quality gate for Kit and Product workspaces. Root
@@ -32,6 +19,27 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
   removing their old calls. Keep deployment builds and Product-specific guards.
   One Product must pilot the release and prove the hosted 300-second Root budget
   before wider adoption (go-silex/unkillable-kit#156).
+
+## unkillable-kit/v0.6.0 — 2026-11-23
+
+- New Product API starters enable Workers logs and traces with query strings
+  redacted. Production onboarding now includes Worker placement near the D1
+  primary and verification with D1 spans (go-silex/unkillable-kit#161).
+- **Product action:** Refresh the generated Dependabot configuration when
+  inheriting this Kit version. Better Auth version updates are grouped separately
+  and require human review before landing (go-silex/unkillable-kit#161).
+
+### Merge on green
+
+- Delayed push and reopen jobs preserve authorizations issued after the
+  original workflow run was created. Successful revocation checks wake merge
+  evaluation again (go-silex/unkillable-kit#158).
+
+### Testing
+
+- The Example and Starter APIs now test D1 round-trip ceilings for authenticated
+  routes. Products can use `countD1RoundTrips` from `@kit/db/testing` to set their
+  own ceilings (go-silex/unkillable-kit#160).
 
 ## unkillable-kit/v0.5.1 — 2026-11-23
 
