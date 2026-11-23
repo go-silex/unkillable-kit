@@ -26,6 +26,6 @@
     "@kit/core": "workspace:*"
   },
   "devDependencies": {
-    "vitest": "^5.1.0"
+    "vitest": "^5.1.1"
   }
 }
