@@ -154,6 +154,9 @@ describe('ResetPasswordForm', () => {
     )
     await user.type(screen.getByLabelText('New'), '12345678')
     await user.type(screen.getByLabelText('Confirm'), '12345678')
+    for (const toggle of screen.getAllByRole('button', { name: 'Show password' })) {
+      await user.click(toggle)
+    }
     await user.click(screen.getByRole('button', { name: 'Reset' }))
     await waitFor(() => {
       expect(authFetch).toHaveBeenCalledWith(
@@ -165,6 +168,12 @@ describe('ResetPasswordForm', () => {
       )
     })
     expect(onSuccess).toHaveBeenCalled()
+    for (const label of ['New', 'Confirm']) {
+      const input = screen.getByLabelText(label)
+      expect(input).toHaveValue('')
+      await user.type(input, 'nextpass')
+      expect(input).toHaveAttribute('type', 'password')
+    }
   })
 })
 
@@ -177,6 +186,9 @@ describe('ChangePasswordForm', () => {
     await user.type(screen.getByLabelText('Current'), 'oldpass1')
     await user.type(screen.getByLabelText('New'), '12345678')
     await user.type(screen.getByLabelText('Confirm'), '12345678')
+    for (const toggle of screen.getAllByRole('button', { name: 'Show password' })) {
+      await user.click(toggle)
+    }
     await user.click(screen.getByRole('button', { name: 'Update' }))
     await waitFor(() => {
       expect(authFetch).toHaveBeenCalledWith(
@@ -192,6 +204,39 @@ describe('ChangePasswordForm', () => {
       )
     })
     expect(notify.success).toHaveBeenCalledWith('updated')
-    expect(screen.getByLabelText('Current')).toHaveValue('')
+    for (const label of ['Current', 'New', 'Confirm']) {
+      const input = screen.getByLabelText(label)
+      expect(input).toHaveValue('')
+      await user.type(input, 'nextpass')
+      expect(input).toHaveAttribute('type', 'password')
+    }
+  })
+
+  it('masks the next password after a failed change clears the new and confirmation fields', async () => {
+    const user = userEvent.setup()
+    const authFetch = vi.fn().mockRejectedValue(new Error('Request failed'))
+    const notify = { success: vi.fn(), error: vi.fn(), message: vi.fn() }
+    render(<ChangePasswordForm fetch={authFetch} copy={changeCopy} notify={notify} />)
+    const current = screen.getByLabelText('Current')
+    const next = screen.getByLabelText('New')
+    const confirm = screen.getByLabelText('Confirm')
+    await user.type(current, 'oldpass1')
+    await user.type(next, '12345678')
+    await user.type(confirm, '12345678')
+    for (const toggle of screen.getAllByRole('button', { name: 'Show password' })) {
+      await user.click(toggle)
+    }
+    expect(next).toHaveAttribute('type', 'text')
+    expect(confirm).toHaveAttribute('type', 'text')
+    await user.click(screen.getByRole('button', { name: 'Update' }))
+    await waitFor(() => {
+      expect(next).toHaveValue('')
+      expect(confirm).toHaveValue('')
+    })
+    expect(current).toHaveValue('oldpass1')
+    for (const input of [next, confirm]) {
+      await user.type(input, 'nextpass')
+      expect(input).toHaveAttribute('type', 'password')
+    }
   })
 })

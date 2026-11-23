@@ -51,7 +51,7 @@ export function ResetPasswordForm({
         }
       },
     },
-    onSubmit: async ({ value }) => {
+    onSubmit: async ({ value, formApi }) => {
       if (!token) {
         notify.error(copy.error, copy.resetPasswordMissingToken)
         return
@@ -61,6 +61,7 @@ export function ResetPasswordForm({
           method: 'POST',
           body: JSON.stringify({ newPassword: value.password, token }),
         })
+        formApi.reset()
         notify.success(copy.resetPasswordSuccess)
         await onSuccess?.()
       } catch (e) {

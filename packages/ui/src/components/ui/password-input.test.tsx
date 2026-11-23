@@ -25,11 +25,13 @@ describe('PasswordInput', () => {
     const input = screen.getByLabelText('Password')
     const showButton = screen.getByRole('button', { name: 'Show password', pressed: false })
     expect(input).toHaveAttribute('type', 'password')
+    expect(input).toHaveAttribute('spellcheck', 'false')
     await user.type(input, 'my-password')
     await user.click(showButton)
 
     const hideButton = screen.getByRole('button', { name: 'Hide password', pressed: true })
     expect(input).toHaveAttribute('type', 'text')
+    expect(input).toHaveAttribute('spellcheck', 'false')
     expect(input).toHaveAttribute('autocomplete', 'current-password')
     expect(input).toHaveValue('my-password')
 
@@ -40,5 +42,25 @@ describe('PasswordInput', () => {
     expect(input).toHaveAttribute('autocomplete', 'current-password')
     expect(input).toHaveValue('my-password')
     expect(onSubmit).not.toHaveBeenCalled()
+  })
+
+  it('masks an uncontrolled field after the user clears the revealed value', async () => {
+    const user = userEvent.setup()
+    render(
+      <PasswordInput
+        aria-label="Password"
+        defaultValue="my-password"
+        showPasswordLabel="Show password"
+        hidePasswordLabel="Hide password"
+      />,
+    )
+    const input = screen.getByLabelText('Password')
+    await user.click(screen.getByRole('button', { name: 'Show password' }))
+    expect(input).toHaveAttribute('type', 'text')
+    await user.clear(input)
+    expect(input).toHaveAttribute('type', 'password')
+    await user.type(input, 'next-password')
+    expect(input).toHaveAttribute('type', 'password')
+    expect(input).toHaveValue('next-password')
   })
 })
