@@ -4,6 +4,12 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ## Unreleased
 
+### Merge on green
+
+- Workflow completions now use at most one runner in the shared repository merge
+  queue. The gate still scans all eligible PRs using trusted default-branch code
+  and fresh authorization and check evidence (go-silex/unkillable-kit#147).
+
 ### OpenID provider
 
 - Use the Web Crypto input type for retained-key verification so the OIDC provider

@@ -613,7 +613,7 @@ const pair = (declared?: string[]) => {
   return fake
 }
 
-type Step = { id?: string; name?: string; run?: string; with?: { script?: string } }
+type Step = { id?: string; name?: string; run?: string; with?: { script?: string; ref?: string } }
 function shippedSteps(): Step[] {
   // The shipped workflow is trusted repository source, so a named shape is enough here.
   const workflow = Bun.YAML.parse(readFileSync(WORKFLOW, 'utf8')) as {
@@ -672,54 +672,77 @@ function runFinalStep(evaluateUnreadable: string[], mergeUnreadable: string | un
 const cases: Array<[string, () => Promise<void>]> = []
 const test = (name: string, run: () => Promise<void>) => cases.push([name, run])
 
-test('shipped eligibility admits only validated wakeups into the serialized merge job', async () => {
-  const workflow = Bun.YAML.parse(readFileSync(WORKFLOW, 'utf8')) as {
-    jobs: { 'merge-on-green': { if: string } }
-  }
-  const gate = workflow.jobs['merge-on-green']
-  type Context = { [key: string]: string | Context }
-  const dictionary = (value: Context): data.Dictionary =>
-    new data.Dictionary(
-      ...Object.entries(value).map(([key, item]) => ({
-        key,
-        value: typeof item === 'string' ? new data.StringData(item) : dictionary(item),
-      })),
-    )
-  const expression = new Parser(
-    new Lexer(`!!(${gate.if})`).lex().tokens,
-    ['github', 'needs'],
-    [],
-  ).parse()
-  for (const [event, action, ref, eligible, expected] of [
-    ['workflow_run', '', 'refs/heads/main', 'true', true],
-    ['workflow_dispatch', '', 'refs/heads/main', 'true', true],
-    ['workflow_dispatch', '', 'refs/heads/feature', 'true', false],
-    ['pull_request_target', 'labeled', 'refs/heads/main', 'true', true],
-    ['pull_request_target', 'synchronize', 'refs/heads/main', 'true', false],
-    ['issue_comment', 'created', 'refs/heads/main', 'true', true],
-    ['issue_comment', 'created', 'refs/heads/main', '', false],
-  ] as Array<[string, string, string, string, boolean]>) {
-    const context = dictionary({
-      needs: { preflight: { outputs: { eligible } } },
-      github: {
-        event_name: event,
-        actor: 'operator',
-        ref,
-        repository: 'kit/fixture',
-        event: {
-          action,
-          label: { name: 'reviewed' },
-          issue: { pull_request: { url: 'pr' } },
-          pull_request: { head: { repo: { full_name: 'kit/fixture' } } },
-          repository: { default_branch: 'main' },
+test('completion alone can enter the merge queue after skipped preflight, on the receiver branch', async () => {
+  const jobs = workflowJobs(WORKFLOW)
+  const gate = jobs['merge-on-green']
+  const checkout = gate.steps.find((step) => step.uses?.startsWith('actions/checkout@'))
+  const checkoutRef = checkout?.with?.ref
+  assert.ok(checkoutRef)
+  const completed = completionContext()
+  assert.equal(guardOpen(jobs.preflight.if, completed), false)
+  assert.equal(guardOpen(jobs['revoke-reviewed-on-push'].if, completed), false)
+  assert.equal(guardOpen(gate.if, completed), true)
+  assert.equal(guardOpen(gate.if, completed, true), false)
+  const forkCompletion = {
+    ...completed,
+    github: {
+      ...completed.github,
+      event: {
+        ...completed.github.event,
+        repository: { id: '1', default_branch: 'main' },
+        workflow_run: {
+          event: 'pull_request',
+          head_repository: { id: '2', full_name: 'fork/fixture' },
+          head_sha: BASE_A,
         },
       },
-    })
-    assert.equal(
-      new Evaluator(expression, context).evaluate().coerceString(),
-      String(expected),
-      event,
-    )
+    },
+  }
+  assert.equal(guardOpen(gate.if, forkCompletion), true)
+  assert.equal(workflowValue(checkoutRef, forkCompletion), 'refs/heads/main')
+  for (const github of [
+    { ...completed.github, ref: 'refs/tags/main' },
+    { ...completed.github, ref: 'refs/heads/feature' },
+  ]) {
+    assert.equal(guardOpen(gate.if, { ...completed, github }), false)
+  }
+
+  for (const [event, action, ref, expected] of [
+    ['workflow_dispatch', '', 'refs/heads/main', true],
+    ['workflow_dispatch', '', 'refs/heads/feature', false],
+    ['push', '', 'refs/heads/staging', true],
+    ['status', '', 'refs/heads/main', true],
+    ['pull_request_target', 'labeled', 'refs/heads/main', true],
+    ['pull_request_target', 'synchronize', 'refs/heads/main', false],
+    ['issue_comment', 'created', 'refs/heads/main', true],
+  ] as const) {
+    const github = {
+      ...completed.github,
+      event_name: event,
+      ref,
+      event: {
+        action,
+        label: { name: 'reviewed' },
+        issue: { pull_request: { url: 'pr' } },
+        pull_request: { head: { repo: { full_name: 'kit/fixture' } } },
+        repository: { default_branch: 'main' },
+      },
+    }
+    for (const [result, eligible, trusted_sha, approved] of [
+      ['success', 'true', BASE_B, true],
+      ['success', '', BASE_B, false],
+      ['success', 'true', '', false],
+      ['skipped', 'true', BASE_B, false],
+      ['failure', 'true', BASE_B, false],
+      ['cancelled', 'true', BASE_B, false],
+    ] as const) {
+      const context = {
+        github,
+        needs: { preflight: { result, outputs: { eligible, trusted_sha } } },
+      }
+      assert.equal(guardOpen(gate.if, context), expected && approved, `${event}/${result}`)
+      if (expected && approved) assert.equal(workflowValue(checkoutRef, context), BASE_B)
+    }
   }
 })
 
@@ -2085,16 +2108,18 @@ const VALID_POLICY = {
   HEAD_AUTH_BOT_USER_ID: '21',
 }
 type GateStep = Step & { if?: string; uses?: string }
-type ExprNode = string | { [key: string]: ExprNode }
+type GateJob = { if?: string; env?: Record<string, string>; steps: GateStep[] }
+type ExprNode = string | ExprContext
+type ExprContext = { [key: string]: ExprNode }
 
 function workflowJobs(file: string) {
   return (
     Bun.YAML.parse(readFileSync(file, 'utf8')) as {
-      jobs: Record<string, { if?: string; steps: GateStep[] }>
+      jobs: Record<string, GateJob>
     }
   ).jobs
 }
-function exprDictionary(value: { [key: string]: ExprNode }): data.Dictionary {
+function exprDictionary(value: ExprContext): data.Dictionary {
   return new data.Dictionary(
     ...Object.entries(value).map(([key, item]): { key: string; value: data.ExpressionData } => ({
       key,
@@ -2102,33 +2127,66 @@ function exprDictionary(value: { [key: string]: ExprNode }): data.Dictionary {
     })),
   )
 }
-function guardOpen(expression: string | undefined, context: { [key: string]: ExprNode }) {
-  if (!expression?.trim()) return true
+function workflowValue(expression: string, context: ExprContext, cancelled = false, guard = false) {
   const body = expression
     .replace(/\s+/g, ' ')
     .trim()
     .replace(/^\$\{\{\s*/, '')
     .replace(/\s*\}\}$/, '')
+  const source = guard ? `!!(${body})` : body
   const names = ['cancelled', 'success', 'always']
   const parsed = new Parser(
-    new Lexer(body).lex().tokens,
-    ['github', 'needs', 'steps', 'vars'],
+    new Lexer(source).lex().tokens,
+    ['github', 'needs', 'steps', 'vars', 'env'],
     names.map((name) => ({ name, minArgs: 0, maxArgs: 0 })),
   ).parse()
-  const evaluated = new Evaluator(
+  return new Evaluator(
     parsed,
     exprDictionary(context),
     new Map(
       names.map((name) => [
         name,
-        { name, minArgs: 0, maxArgs: 0, call: () => new data.BooleanData(name !== 'cancelled') },
+        {
+          name,
+          minArgs: 0,
+          maxArgs: 0,
+          call: () =>
+            new data.BooleanData(name === 'always' || (name === 'cancelled') === cancelled),
+        },
       ]),
     ),
-  ).evaluate()
-  return evaluated.coerceString() === 'true'
+  )
+    .evaluate()
+    .coerceString()
 }
-function prComment() {
-  const fake = new Fake()
+function guardOpen(expression: string | undefined, context: ExprContext, cancelled = false) {
+  if (!expression?.trim()) return true
+  return workflowValue(expression, context, cancelled, true) === 'true'
+}
+function jobEnv(job: GateJob, context: ExprContext): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(job.env ?? {}).map(([key, binding]) => [key, workflowValue(binding, context)]),
+  )
+}
+function completionContext(vars: Record<string, string> = EMPTY_AUTH) {
+  return {
+    github: {
+      event_name: 'workflow_run',
+      actor: 'operator',
+      ref: 'refs/heads/main',
+      sha: BASE_A,
+      repository: 'kit/fixture',
+      event: {
+        action: 'completed',
+        repository: { default_branch: 'main' },
+        workflow_run: { head_branch: 'feature', head_sha: HEAD },
+      },
+    },
+    needs: { preflight: { result: 'skipped', outputs: {} } },
+    vars,
+  }
+}
+function prComment(fake = new Fake()) {
   const comment = {
     ...fake.comments[7][0],
     issue_url: 'https://api.github.com/repos/kit/fixture/issues/7',
@@ -2234,22 +2292,21 @@ test('inactive workflow_run, revoke, comments, and Dependabot capture do not min
   const merge = workflowJobs(WORKFLOW)
   const validate = merge.preflight.steps.find((step) => step.id === 'validate')?.with?.script
   assert.ok(validate)
-  const workflowRun = await runShipped(validate, EMPTY_AUTH, {
-    eventName: 'workflow_run',
-    payload: {},
-  })
-  assert.equal(workflowRun.outputs.eligible, 'true')
-  assert.equal(workflowRun.outputs.enabled, 'false')
+  const completed = completionContext()
   const mergeJob = merge['merge-on-green']
   const skipped = {
-    github: { event_name: 'workflow_run' },
-    needs: { preflight: { outputs: workflowRun.outputs } },
+    ...completed,
+    env: jobEnv(mergeJob, completed),
     steps: {
       app: { outcome: 'skipped' },
       evaluate: { outputs: { to_merge: '', unreadable: '' } },
       merge: { outputs: { unreadable: '' } },
     },
   }
+  assert.equal(
+    guardOpen(mergeJob.steps.find((step) => step.name === 'Report inactive kit-ci')?.if, skipped),
+    true,
+  )
   assert.equal(guardOpen(mergeJob.steps.find((step) => step.id === 'evaluate')?.if, skipped), false)
   assert.equal(
     guardOpen(
@@ -2311,28 +2368,22 @@ test('inactive workflow_run, revoke, comments, and Dependabot capture do not min
 
 test('valid policy with the App disabled queues a receipt and stays red when Evaluate is unreadable', async () => {
   const merge = workflowJobs(WORKFLOW)
+  const mergeJob = merge['merge-on-green']
   const validate = merge.preflight.steps.find((step) => step.id === 'validate')?.with?.script
-  const evaluateStep = merge['merge-on-green'].steps.find((step) => step.id === 'evaluate')
+  const evaluateStep = mergeJob.steps.find((step) => step.id === 'evaluate')
   const evaluateScript = evaluateStep?.with?.script
-  const failStep = merge['merge-on-green'].steps.find(
-    (step) => step.name === 'Fail on unreadable merge gate',
-  )
+  const failStep = mergeJob.steps.find((step) => step.name === 'Fail on unreadable merge gate')
   assert.ok(validate)
   assert.ok(evaluateScript)
+  assert.ok(evaluateStep?.if)
   assert.ok(failStep?.if)
-  const classified = await runShipped(validate, VALID_POLICY, {
-    eventName: 'workflow_run',
-    payload: {},
-  })
-  assert.equal(classified.outputs.eligible, 'true')
-  assert.equal(
-    guardOpen(evaluateStep.if, { needs: { preflight: { outputs: classified.outputs } } }),
-    true,
-  )
+  const completed = completionContext(VALID_POLICY)
+  const env = jobEnv(mergeJob, completed)
+  assert.equal(guardOpen(evaluateStep.if, { ...completed, env }), true)
   const fake = new Fake()
-  const selected = await runShipped(evaluateScript, VALID_POLICY, {
+  const selected = await runShipped(evaluateScript, env, {
     eventName: 'workflow_run',
-    payload: { inputs: { pr: '7' } },
+    payload: completed.github.event,
     github: fake.github,
   })
   const queue = JSON.parse(selected.outputs.to_merge) as Queue[]
@@ -2342,10 +2393,9 @@ test('valid policy with the App disabled queues a receipt and stays red when Eva
   assert.equal(queue[0].receipt.id, fake.comments[7][0].id)
   assert.equal(queue[0].receipt.body, fake.comments[7][0].body)
   assert.deepEqual(JSON.parse(selected.outputs.unreadable), [])
-  assert.equal(classified.outputs.enabled, 'false')
   const held = {
-    needs: { preflight: { outputs: classified.outputs } },
-    github: { event_name: 'workflow_run' },
+    ...completed,
+    env,
     steps: {
       app: { outcome: 'skipped' },
       evaluate: {
@@ -2369,9 +2419,9 @@ test('valid policy with the App disabled queues a receipt and stays red when Eva
   assert.equal(guardOpen(failStep.if, held), false)
   const blocked = new Fake()
   blocked.errors['pulls.get:7'] = 502
-  const unreadable = await runShipped(evaluateScript, VALID_POLICY, {
+  const unreadable = await runShipped(evaluateScript, env, {
     eventName: 'workflow_run',
-    payload: { inputs: { pr: '7' } },
+    payload: completed.github.event,
     github: blocked.github,
   })
   const heldOpen = JSON.parse(unreadable.outputs.unreadable) as string[]
@@ -2385,6 +2435,11 @@ test('valid policy with the App disabled queues a receipt and stays red when Eva
     true,
   )
   assert.notEqual(runFinalStep(heldOpen, '[]').exitCode, 0)
+  const classified = await runShipped(validate, VALID_POLICY, {
+    eventName: 'pull_request_target',
+    payload: { action: 'synchronize', pull_request: { number: 7 } },
+  })
+  assert.equal(classified.outputs.enabled, 'false')
   for (const step of merge['revoke-reviewed-on-push'].steps) {
     if (step.uses?.includes('create-github-app-token') || step.with?.script) {
       assert.equal(
@@ -2434,16 +2489,33 @@ test('partial, malformed, and App-without-policy reject while an active App stil
   assert.ok(validate)
   assert.ok(capture)
   const wake = prComment()
-  await assert.rejects(() =>
-    runShipped(
-      validate,
-      { ...EMPTY_AUTH, HEAD_AUTH_OPERATOR_IDS: '[10]' },
-      {
-        eventName: 'workflow_run',
-        payload: {},
-      },
-    ),
-  )
+  const mergeJob = workflowJobs(WORKFLOW)['merge-on-green']
+  const evaluate = mergeJob.steps.find((step) => step.id === 'evaluate')
+  const mint = mergeJob.steps.find((step) => step.id === 'app')?.if
+  const evaluateScript = evaluate?.with?.script
+  assert.ok(evaluateScript)
+  assert.ok(evaluate?.if)
+  for (const vars of [
+    { ...EMPTY_AUTH, HEAD_AUTH_OPERATOR_IDS: '[10]' },
+    { ...EMPTY_AUTH, HEAD_AUTH_OPERATOR_IDS: 'not-json' },
+    { ...EMPTY_AUTH, CI_APP_ID: '12345' },
+  ]) {
+    const completed = completionContext(vars)
+    const env = jobEnv(mergeJob, completed)
+    assert.equal(guardOpen(evaluate.if, { ...completed, env }), true)
+    await assert.rejects(
+      () =>
+        runShipped(evaluateScript, env, {
+          eventName: completed.github.event_name,
+          payload: completed.github.event,
+        }),
+      /invalid (HEAD_AUTH_OPERATOR_IDS|head authorization policy)/,
+    )
+    assert.equal(
+      guardOpen(mint, { ...completed, env, steps: { evaluate: { outputs: { to_merge: '' } } } }),
+      false,
+    )
+  }
   await assert.rejects(() =>
     runShipped(
       validate,
@@ -2485,29 +2557,18 @@ test('partial, malformed, and App-without-policy reject while an active App stil
       },
     ),
   )
-  const active = await runShipped(
-    validate,
-    { ...VALID_POLICY, CI_APP_ID: '12345' },
-    {
-      eventName: 'workflow_run',
-      payload: {},
-    },
-  )
-  assert.equal(
-    guardOpen(
-      workflowJobs(WORKFLOW)['merge-on-green'].steps.find((step) =>
-        step.uses?.includes('create-github-app-token'),
-      )?.if,
-      {
-        github: { event_name: 'workflow_dispatch' },
-        needs: { preflight: { outputs: active.outputs } },
-        steps: { evaluate: { outputs: { to_merge: '[]' } } },
-      },
-    ),
-    true,
-  )
+  const vars = { ...VALID_POLICY, CI_APP_ID: '12345' }
+  const active = await runShipped(validate, vars, { eventName: 'push', payload: {} })
+  const dispatch = {
+    github: { event_name: 'workflow_dispatch' },
+    needs: { preflight: { outputs: active.outputs } },
+    vars,
+    steps: { evaluate: { outputs: { to_merge: '[]' } } },
+  }
+  assert.equal(guardOpen(mint, { ...dispatch, env: jobEnv(mergeJob, dispatch) }), true)
   assert.equal(active.outputs.enabled, 'true')
-  const mint = workflowJobs(WORKFLOW)['merge-on-green'].steps.find((step) => step.id === 'app')?.if
+  const completed = completionContext(vars)
+  const env = jobEnv(mergeJob, completed)
   for (const [queue, expected] of [
     ['[]', false],
     ['', false],
@@ -2515,8 +2576,8 @@ test('partial, malformed, and App-without-policy reject while an active App stil
   ] as const) {
     assert.equal(
       guardOpen(mint, {
-        github: { event_name: 'workflow_run' },
-        needs: { preflight: { outputs: active.outputs } },
+        ...completed,
+        env,
         steps: { evaluate: { outputs: { to_merge: queue } } },
       }),
       expected,
@@ -2830,13 +2891,25 @@ test('Actions freshness replaces old suite evidence only with the latest exact a
   const attempt = freshnessFixture()
   attempt.runs[HEAD][1].run_attempt = 2
   attempt.jobs[2] = { 1: [actionsJob(12000, 'CI')], 2: [actionsJob(12001, 'CI', 'failure')] }
-  assert.deepEqual((await evaluateFake(attempt)).toMerge, [])
+  const mergeJob = workflowJobs(WORKFLOW)['merge-on-green']
+  const source = mergeJob.steps.find((step) => step.id === 'evaluate')?.with?.script
+  assert.ok(source)
+  const completed = completionContext(VALID_POLICY)
+  const replay = async () => {
+    const selected = await runShipped(source, jobEnv(mergeJob, completed), {
+      eventName: completed.github.event_name,
+      payload: { workflow_run: { run_attempt: 2, conclusion: 'success' } },
+      github: attempt.github,
+    })
+    return JSON.parse(selected.outputs.to_merge) as Queue[]
+  }
+  assert.deepEqual(await replay(), [])
   attempt.jobs[2][2] = [actionsJob(12001, 'CI')]
-  assert.equal((await evaluateFake(attempt)).toMerge.length, 1)
+  assert.equal((await replay()).length, 1)
   attempt.afterJobs = () => {
     attempt.runs[HEAD][1].run_attempt = 3
   }
-  assert.deepEqual((await evaluateFake(attempt)).toMerge, [])
+  assert.deepEqual(await replay(), [])
 })
 
 test('Actions incomplete or conflicting freshness proof holds rather than using old green', async () => {
@@ -2906,33 +2979,122 @@ test('each required alias succeeds while optional neutral and skipped checks rem
   assert.equal((await evaluateFake(fake)).toMerge.length, 1)
 })
 
-test('last check and corrected title recover using current evidence', async () => {
-  for (const name of ['CI', 'Secret scan', 'PR Title', 'Product CI']) {
-    const fake = new Fake()
+test('a surviving completion with unrelated PR data sees the last current check and corrected title', async () => {
+  const mergeJob = workflowJobs(WORKFLOW)['merge-on-green']
+  const source = mergeJob.steps.find((step) => step.id === 'evaluate')?.with?.script
+  assert.ok(source)
+  const completed = completionContext(VALID_POLICY)
+  const env = jobEnv(mergeJob, completed)
+  const replay = async (fake: Fake) => {
+    const selected = await runShipped(source, env, {
+      eventName: completed.github.event_name,
+      payload: {
+        workflow_run: { head_sha: OTHER, conclusion: 'success', pull_requests: [{ number: 8 }] },
+      },
+      github: fake.github,
+    })
+    assert.deepEqual(JSON.parse(selected.outputs.unreadable), [])
+    return JSON.parse(selected.outputs.to_merge) as Queue[]
+  }
+  for (const name of ['CI', 'Secret scan', 'PR Title']) {
+    const fake = pair()
+    fake.comments[8] = []
     let check = fake.checks[HEAD].find((item) => item.name === name)
+    if (check) {
+      fake.checks[HEAD] = fake.checks[HEAD].filter((item) => item !== check)
+      assert.deepEqual(await replay(fake), [], `missing ${name}`)
+      fake.checks[HEAD].push(check)
+    }
     if (!check) {
       check = job(name)
       fake.checks[HEAD].push(check)
     }
     check.conclusion = 'failure'
-    assert.deepEqual((await evaluateFake(fake)).toMerge, [])
+    assert.deepEqual(await replay(fake), [], `failed ${name}`)
     check.status = 'in_progress'
     check.conclusion = null
-    assert.deepEqual((await evaluateFake(fake)).toMerge, [])
+    assert.deepEqual(await replay(fake), [], `pending ${name}`)
     check.status = 'completed'
     check.conclusion = 'success'
-    await landFake(fake, (await evaluateFake(fake)).toMerge)
-    assert.equal(fake.merges.length, 1, name)
+    await landFake(fake, await replay(fake))
+    assert.deepEqual(fake.merges, [{ number: 7, sha: HEAD }], name)
   }
 })
 
-test('additional declared Product workflow finishing last permits landing', async () => {
+test('green checks still need admission, and a validated comment can wake the gate last', async () => {
+  const jobs = workflowJobs(WORKFLOW)
+  const mergeJob = jobs['merge-on-green']
+  const validate = jobs.preflight.steps.find((step) => step.id === 'validate')?.with?.script
+  const evaluateStep = mergeJob.steps.find((step) => step.id === 'evaluate')
+  const source = evaluateStep?.with?.script
+  assert.ok(validate)
+  assert.ok(source)
+  assert.ok(evaluateStep?.if)
+  const fake = new Fake()
+  const comments = fake.comments[7]
+  fake.comments[7] = []
+  const completed = completionContext(VALID_POLICY)
+  const before = await runShipped(source, jobEnv(mergeJob, completed), {
+    eventName: completed.github.event_name,
+    payload: completed.github.event,
+    github: fake.github,
+  })
+  assert.deepEqual(JSON.parse(before.outputs.to_merge), [])
+
+  fake.comments[7] = comments
+  const comment = prComment(fake)
+  const admission = await runShipped(validate, VALID_POLICY, {
+    eventName: 'issue_comment',
+    payload: comment.payload,
+    github: comment.github,
+  })
+  assert.deepEqual(comment.reads, ['getComment', 'pulls.get'])
+  const admitted = {
+    ...completed,
+    github: {
+      ...completed.github,
+      event_name: 'issue_comment',
+      event: { issue: { pull_request: comment.payload.issue.pull_request } },
+    },
+    needs: {
+      preflight: { result: 'success', outputs: { ...admission.outputs, trusted_sha: BASE_A } },
+    },
+  }
+  const env = jobEnv(mergeJob, admitted)
+  assert.equal(guardOpen(mergeJob.if, admitted), true)
+  assert.equal(guardOpen(evaluateStep.if, { ...admitted, env }), true)
+  const after = await runShipped(source, env, {
+    eventName: admitted.github.event_name,
+    payload: comment.payload,
+    github: fake.github,
+  })
+  await landFake(fake, JSON.parse(after.outputs.to_merge) as Queue[])
+  assert.deepEqual(fake.merges, [{ number: 7, sha: HEAD }])
+})
+
+test('a completion evaluates current jobs from the exact attempt of a declared Product workflow', async () => {
+  const mergeJob = workflowJobs(WORKFLOW)['merge-on-green']
+  const source = mergeJob.steps.find((step) => step.id === 'evaluate')?.with?.script
+  assert.ok(source)
+  const completed = completionContext(VALID_POLICY)
+  const env = jobEnv(mergeJob, completed)
   const fake = new Fake({ trees: { [BASE_A]: tree([E2E]), [HEAD]: tree([E2E]) } })
-  assert.deepEqual((await evaluateFake(fake)).toMerge, [])
-  fake.runs[HEAD] = [run(1, E2E)]
-  fake.jobs[1] = { 1: [job()] }
-  await landFake(fake, (await evaluateFake(fake)).toMerge)
-  assert.equal(fake.merges.length, 1)
+  const replay = async () => {
+    const selected = await runShipped(source, env, {
+      eventName: completed.github.event_name,
+      payload: { workflow_run: { head_sha: HEAD, run_attempt: 2, conclusion: 'success' } },
+      github: fake.github,
+    })
+    assert.deepEqual(JSON.parse(selected.outputs.unreadable), [])
+    return JSON.parse(selected.outputs.to_merge) as Queue[]
+  }
+  assert.deepEqual(await replay(), [])
+  fake.runs[HEAD] = [run(1, E2E, 'completed', 'success', 2)]
+  fake.jobs[1] = { 1: [job()], 2: [job('e2e', 'completed', 'failure')] }
+  assert.deepEqual(await replay(), [])
+  fake.jobs[1][2] = [job('e2e')]
+  await landFake(fake, await replay())
+  assert.deepEqual(fake.merges, [{ number: 7, sha: HEAD }])
 })
 
 test('active gate job is ignored without losing any self-workflow revocation checks', async () => {
