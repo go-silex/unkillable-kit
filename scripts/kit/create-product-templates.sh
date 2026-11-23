@@ -10,16 +10,11 @@ mcp="${3:?mcp flag required}"
 
 mkdir -p scripts/product config/product docs/product .github/workflows
 # The maintained consumer templates are the CI and validation source of truth.
-sed "s/<product>/$name/g" docs/kit/templates/product-ci.example.yml > .github/workflows/product-ci.yml
+cp docs/kit/templates/product-ci.example.yml .github/workflows/product-ci.yml
 awk -v name="$name" -v web="$web" '
-  /bun run --filter "@kit\/<product>-web"/ && web == "0" { next }
+  /apps\/<product>-web/ && web == "0" { next }
   { gsub(/<product>/, name); print }
 ' docs/kit/templates/product-validate.example.sh > scripts/product/validate.sh
-if [[ "$mcp" == 1 ]]; then
-  # Add MCP checks before the final success message.
-  awk -v name="$name" '/^echo "✓ product-validate OK"/ { print "bun run --filter \"@kit/" name "-mcp\" typecheck"; print "bun run --filter \"@kit/" name "-mcp\" test" } { print }' scripts/product/validate.sh > scripts/product/validate.sh.tmp
-  mv scripts/product/validate.sh.tmp scripts/product/validate.sh
-fi
 chmod +x scripts/product/validate.sh
 printf '{"workflows":[".github/workflows/product-ci.yml"]}\n' > config/product/deploy-gate.json
 {
@@ -31,8 +26,9 @@ cat > docs/product/AGENTS.md <<'EOF'
 # Product agent instructions
 
 Product-owned applications live under `apps/`. Preserve kit-owned zones and the
-inheritance pin; follow `docs/kit/product-consumer-contract.md`. Run both the kit
-and product validation bars when verifying product changes.
+inheritance pin; follow `docs/kit/product-consumer-contract.md`. Run Root for
+workspace quality and `scripts/product/validate.sh` for deployment builds and
+Product-specific guards.
 EOF
 
 if [[ "$mcp" == 1 ]]; then

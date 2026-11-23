@@ -268,7 +268,7 @@ cat >"${SHARDED_CI}/.github/workflows/ci.yml" <<'EOF'
 jobs:
   quality:
     steps:
-      - run: bun run validate:full -- --ci-join "$RUNNER_TEMP/root-receipts" --producers-result "$PRODUCERS_RESULT"
+      - run: bun run validate:full -- --ci-join "$RUNNER_TEMP/root-receipts" --producers-result "$PRODUCERS_RESULT" --coverage-result "$COVERAGE_RESULT" --parts-result "$PARTS_RESULT"
       - run: bun scripts/kit/select-tooling.ts
       - run: |
           bun run validate:tooling -- --ci-tooling-shard '${{ matrix.shard.index }}/${{ matrix.shard.count }}' --receipt "$RUNNER_TEMP/tooling-receipts/tooling-${{ matrix.shard.index }}.json"
@@ -277,6 +277,10 @@ EOF
 assert_exit "ci canonical shard and join → 0" 0 "${SHARDED_CI}"
 
 workflow="$(<"${SHARDED_CI}/.github/workflows/ci.yml")"
+for omitted in ' --coverage-result "$COVERAGE_RESULT"' ' --parts-result "$PARTS_RESULT"'; do
+  printf '%s\n' "${workflow/"${omitted}"/}" >"${SHARDED_CI}/.github/workflows/ci.yml"
+  assert_exit "root join missing a coverage producer result → 1" 1 "${SHARDED_CI}"
+done
 shard="bun run validate:tooling -- --ci-tooling-shard '\${{ matrix.shard.index }}/\${{ matrix.shard.count }}' --receipt \"\$RUNNER_TEMP/tooling-receipts/tooling-\${{ matrix.shard.index }}.json\""
 join='bun run validate:tooling -- --ci-tooling-join "$RUNNER_TEMP/tooling-receipts" --producers-result "$PRODUCERS_RESULT"'
 for replacement in \

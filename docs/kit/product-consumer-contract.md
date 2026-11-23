@@ -419,14 +419,14 @@ Legacy history already published through a Product remains outside the new Kit c
 
 The independent-history cases in `scripts/kit/dogfood-zero-edit.sh` exercise synthetic direct and mediated consumers. They do not prove the final public candidate, a real Product migration, hosted CI settings or deployment. The candidate's fresh-clone reader journey and final public-tip checks remain separate publication evidence.
 
-### Local / product-validate parity
+### Local / CI zero-edit parity
 
 ```bash
 # Local and CI — same path (marker only):
 bun run zero-edit
 ```
 
-The inherited root gate still runs its live current-tree checks in Product mode. After validating context, its gate-tooling self-tests may skip in a Product clone. A zero-edit exception covering a tooling input or changes to Product configuration, manifests or the shared, unprotected `bun.lock` select `validate:tooling`; uncertain context runs it conservatively. An exception does not authorize a protected edit by itself. Run `bun run validate:tooling` explicitly when needed; it does not replace Product app validation. Local and CI selection and its limits are documented in [testing.md](./testing/ops-model.md#ops-model--local-first-ci-guardrail).
+Root runs its current-tree checks in both Kit and Product mode. After validating context, its gate-tooling self-tests may skip in a Product clone. A zero-edit exception covering a tooling input or changes to Product configuration, manifests or the shared, unprotected `bun.lock` select `validate:tooling`; uncertain context runs it conservatively. An exception does not authorize a protected edit by itself. Run `bun run validate:tooling` explicitly when needed; it replaces neither live workspace checks nor Product deployment builds. Local and CI selection and its limits are documented in the [ops model](./testing/ops-model.md#ops-model--local-first-ci-guardrail).
 
 Do **not** dual-edit kit `ci.yml` for this — the pattern lives in the kit.  
 Do **not** rely on org secrets to fetch private `upstream` solely for zero-edit when the kit tip is already in product history after merge.  
@@ -495,9 +495,9 @@ Pull kit updates from `upstream/main` into `main`. For `.dev/stack.yml`, keep th
 6. Choose the Product's terms in the root `LICENSE` ([Zones](#zones)), then add product apps under `apps/<product>-*` only.
    Stage the Product App manifests, then run `node scripts/kit/configure-product-dependabot.cjs` ([bounded configuration](#product-dependabot-configuration)); commit the generated file with the Product setup.
 7. When `apps/<product>-api` exists: `bash scripts/kit/kit-schema-sync.sh --app apps/<product>-api`. A fresh default selects `core,audit`, required by the Better Auth throttle. Existing manifests retain their recorded selection; add `audit` explicitly if absent before mounting Better Auth. Last-resort clones: `--adopt` immediately. Product domain SQL starts at `1000_`.
-8. Keep `bun run validate:full` green (kit bar). When `apps/<product>-*` exist, also wire product-validate / product-ci (see Product CI DoD below).
+8. Enroll each Product App in Root and keep `bun run validate:full` green. Wire Product CI for deployment builds and Product-specific checks (see below).
 
-Optional product-only files (safe for upstream merge):
+Product-owned paths (safe for upstream merge):
 
 ```text
 apps/<product>-api/
@@ -509,53 +509,48 @@ config/product/inheritance.json           # upstreamCommit = last-merged parent 
 docs/product/deny-upstream.json            # extra private chassis slugs (optional; not kit HEAD)
 config/product/zero-edit-exceptions.json     # last-resort dual-edit exceptions
 config/product/file_exemptions.txt         # product-owned file-length caps (optional)
-config/product/coverage-order.txt         # product coverage risk tiers: "<high|medium|lower> <workspace>" (optional)
+config/product/coverage-order.txt         # required with Product Apps; risk tiers: "<high|medium|lower> <workspace>"
 config/product/coverage-partitions.txt    # CI coverage parts: "apps/<product>-<name> <N>", N in 2-4 (optional; ADR-0023)
 .github/workflows/product-*.yml
 scripts/product/                           # product helpers; not required by kit
 apps/<product>-web/src/theme/*.css         # design token overrides
 ```
 
-### Product CI (recommended DoD when product apps exist)
+### Root and Product CI
 
-Kit `ci.yml` / `validate:full` stay Kit-only: they must pass without Product apps
-and do not typecheck, test or build them. With `apps/<product>-*`, Product CI is
-recommended DoD and required by the [start checklist](./playbooks/start-product.md).
+[Root](./architecture/adr/0024-root-single-quality-gate.md) alone owns workspace
+lint, typecheck, Knip, license, file-length, folder-size and import-boundary checks
+and tests under coverage floors. Inherit Root files unchanged.
 
-1. Copy the templates; do not dual-edit Kit `ci.yml`, `test-coverage.sh` or root `package.json`:
-   - [Validation](./templates/product-validate.example.sh) → `scripts/product/validate.sh`
-     (or `apps/<product>-api/scripts/kit/product-validate.sh`).
-   - [CI](./templates/product-ci.example.yml) → `.github/workflows/product-ci.yml`.
-2. Replace `<product>` with real package names. Keep `bun run validate:full` green
-   and run Product validation in Product CI.
+Each Product App (an `apps/<name>` workspace outside the protected Kit prefixes)
+must be discovered by Root and declare `typecheck` and `test:coverage`. Set floors
+through `makeCoverage` and a risk tier in `config/product/coverage-order.txt`.
+For heavy Apps, declare partitions in `config/product/coverage-partitions.txt`
+as needed ([ADR-0023](./architecture/adr/0023-ci-coverage-partitions.md)).
 
-```text
-.github/workflows/product-ci.yml           # product-only; never edit kit ci.yml
-scripts/product/validate.sh                # preferred (zero-edit allowed)
-# or: apps/<product>-api/scripts/kit/product-validate.sh
-```
+Root validates the full Coverage bar before selection. Only a trusted, non-empty
+Product-only PR diff omits Kit coverage. Product workspaces stay selected; local
+runs and pushes execute the full bar.
 
-Typical `product-validate` shape (SSoT template is the file under `docs/kit/templates/`):
+The [start checklist](./playbooks/start-product.md#day-0-checklist) requires Product CI:
 
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
-ROOT="$(cd "$(dirname "$0")/../.." && pwd)"   # adjust if app-local path
-cd "$ROOT"
+1. Copy the [script](./templates/product-validate.example.sh) to
+   `scripts/product/validate.sh` and substitute the App prefix for `<product>`.
+2. Build the SPA with Vite directly, without `tsc`; omit it for API-only Products.
+   Dry-run every deployed Wrangler environment (unnamed by default in the
+   starter). Never deploy from Product CI.
+3. Keep Product changelog and API schema guards. Do not rerun typecheck, tests
+   (including MCP), `zero-edit` or `deploy-gate:check`.
+4. Copy the [workflow](./templates/product-ci.example.yml) to
+   `.github/workflows/product-ci.yml` and list it in `config/product/deploy-gate.json`.
+   Use full Git history, Node/Bun setup and the inherited frozen install.
+   Delegate to the one Product script, using its direct path if App-local.
 
-bun run deploy-gate:check   # deploy-gate.json + its workflows (Roxabi/roxabi-boilerplate-cf#317), main and staging when deploy/staging exists
-bun run zero-edit
-bun run --filter @kit/<product>-api typecheck
-bun run --filter @kit/<product>-api test
-bun run --filter @kit/<product>-web typecheck
-bun run --filter @kit/<product>-web test
-bun run --filter @kit/<product>-api build   # e.g. wrangler dry-run
-```
+In the upgrade PR, enroll every App with floors and any needed partitions and
+trim copied Product CI. Before wider adoption, one Product must prove the
+300-second Root DAG budget on hosted runs.
 
-Workflow job: checkout with **`fetch-depth: 0`** → Node/Bun setup → `bash scripts/kit/ci-install.sh` → `bash scripts/product/validate.sh` ([template](./templates/product-ci.example.yml); existing-Product opt-in in that template header).
-(`bun run zero-edit` reads `config/product/inheritance.json`; frozen install only reproduces the lock — [security-dependabot.md](./security-dependabot.md)).
-
-`promote-deploy.ts --check` reads `config/product/deploy-gate.json` and each declared workflow with promotion's own loader (name `Product CI`, push branches, no path filters, no job-level `if` it cannot prove true on push, and any YAML shape it does not model — quote `!` patterns, keep `needs` and local `uses:` callees resolvable, call no remote reusable workflow — is a finding; a local callee's jobs are judged by the same job rules). Kit `ci.yml` and `secret-scan.yml` are judged by the same push and job rules, without the Product CI name rule (Roxabi/roxabi-boilerplate-cf#325). An undeclared product workflow file stays admissible unless the local `refs/remotes/origin/deploy/<SOURCE_BRANCH>` snapshot still requires it (Roxabi/roxabi-boilerplate-cf#331). Those retained paths are judged in this working tree, not in the old blob; the check does not fetch. `continue-on-error` must be absent or boolean false on every inspected job, step, and callee. A local callee whose `on` has no `workflow_call` is a finding even when the tree is not a git project. A clean semantic check then runs pinned actionlint 1.7.12 with `-config-file config/kit/actionlint.yaml`, so a product `.github/actionlint.yaml` cannot ignore expression or reusable-call syntax errors; the binary is pinned in `config/kit/actionlint.version` and is never taken from PATH. It never reads GitHub and never moves `deploy/<branch>`. The enforcing run is the kit's: `validate:full` runs `deploy-gate:check` (for `main`, and for `staging` when `origin/deploy/staging` exists) in the required `ci` job. The call in `scripts/product/validate.sh` is an early signal only: it runs inside Product CI, the workflow under check, so a PR that stops Product CI from running never reaches it. Keep the template's draft-PR condition as is: it passes. A step-level `if` is still not a claim that the step runs. Once a product inherits it (Roxabi/roxabi-boilerplate-cf#317) and the kit-bar `lock-ranges:check` (Roxabi/roxabi-boilerplate-cf#319), it deletes its own copies of those checks from `scripts/product/validate.sh` — a second loader drifts from the gate's.
+`promote-deploy.ts --check` reads `config/product/deploy-gate.json` and each declared workflow with promotion's own loader (name `Product CI`, push branches, no path filters, no job-level `if` it cannot prove true on push, and any YAML shape it does not model — quote `!` patterns, keep `needs` and local `uses:` callees resolvable, call no remote reusable workflow — is a finding; a local callee's jobs are judged by the same job rules). Kit `ci.yml` and `secret-scan.yml` are judged by the same push and job rules, without the Product CI name rule (Roxabi/roxabi-boilerplate-cf#325). An undeclared product workflow file stays admissible unless the local `refs/remotes/origin/deploy/<SOURCE_BRANCH>` snapshot still requires it (Roxabi/roxabi-boilerplate-cf#331). Those retained paths are judged in this working tree, not in the old blob; the check does not fetch. `continue-on-error` must be absent or boolean false on every inspected job, step, and callee. A local callee whose `on` has no `workflow_call` is a finding even when the tree is not a git project. A clean semantic check then runs pinned actionlint 1.7.12 with `-config-file config/kit/actionlint.yaml`, so a product `.github/actionlint.yaml` cannot ignore expression or reusable-call syntax errors; the binary is pinned in `config/kit/actionlint.version` and is never taken from PATH. It never reads GitHub and never moves `deploy/<branch>`. Root runs `deploy-gate:check` (for `main`, and for `staging` when `origin/deploy/staging` exists) in the required `ci` job. Keep the template's draft-PR condition: it is provable on push. A step-level `if` is still not a claim that the step runs.
 
 `merge-on-green` uses the same pure declaration parser as promotion / `--check`, but judges a PR rather than a deploy branch: it resolves the **current** base once for each verdict, reads `config/product/inheritance.json` and `config/product/deploy-gate.json` at that immutable base SHA and at the PR head, and requires the union of declared `product-*.yml` workflows. A base without a declaration is allowed only for bootstrap; once Product mode is indicated, the head declaration is mandatory, readable and valid. Each declared workflow **MUST execute on the PR head**: its latest matching run must be completed `success`, name a valid explicit attempt, have a non-empty job list whose jobs on that exact attempt all succeed, and still be completed/successful when reread. A skipped, neutral, missing, queued, cancelled or failed Product run holds the merge; optional Kit checks may conclude `neutral` or `skipped`, but required Kit checks must succeed.
 

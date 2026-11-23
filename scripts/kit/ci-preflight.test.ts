@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict'
-import { spawnSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { type SpawnSyncReturns, spawnSync } from 'node:child_process'
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { data, Evaluator, Lexer, Parser } from '@actions/expressions'
@@ -78,6 +86,7 @@ function evaluate(expression: string, context: Record<string, Value>, successful
 }
 
 type Result = 'success' | 'failure' | 'skipped' | 'cancelled'
+type Plan = { groups?: string; parts?: string; draft?: boolean }
 function dependencies(job: Job): string[] {
   return job.needs === undefined ? [] : Array.isArray(job.needs) ? job.needs : [job.needs]
 }
@@ -85,10 +94,10 @@ function context(
   event: 'push' | 'pull_request',
   results: Record<string, Result>,
   tooling = '',
-  parts = '[]',
+  plan: Plan = {},
 ): Record<string, Value> {
   return {
-    github: { event_name: event, event: { pull_request: { draft: false } } },
+    github: { event_name: event, event: { pull_request: { draft: plan.draft ?? false } } },
     needs: Object.fromEntries(
       Object.entries(results).map(([key, result]) => [
         key,
@@ -96,7 +105,8 @@ function context(
           result,
           outputs: {
             tooling: key === 'coverage-plan' ? tooling : '',
-            parts: key === 'coverage-plan' ? parts : '',
+            groups: key === 'coverage-plan' ? (plan.groups ?? '') : '',
+            parts: key === 'coverage-plan' ? (plan.parts ?? '') : '',
           },
         },
       ]),
@@ -108,6 +118,7 @@ function enabled(
   event: 'push' | 'pull_request',
   results: Record<string, Result>,
   tooling = '',
+  plan: Plan = {},
 ): boolean {
   const needs = dependencies(job)
   for (const id of needs) assert.ok(results[id], `missing result for dependency ${id}`)
@@ -118,7 +129,7 @@ function enabled(
   return (
     evaluate(
       `!!(${condition.replace(/^\$\{\{\s*/, '').replace(/\s*\}\}$/, '')})`,
-      context(event, results, tooling),
+      context(event, results, tooling, plan),
       successful,
     ) === 'true'
   )
@@ -127,7 +138,6 @@ function joinVerdict(
   event: 'push' | 'pull_request',
   results: Record<string, Result>,
   tooling = '',
-  parts = '[]',
 ): string {
   const job = jobs.ci
   assert.ok(enabled(job, event, results), 'final ci must run after failure or skip')
@@ -137,9 +147,9 @@ function joinVerdict(
     joinStep.if && /\b(always|failure|cancelled)\s*\(/.test(joinStep.if),
     'receipt join must run after earlier step failure',
   )
-  assert.equal(evaluate(joinStep.if, context(event, results, tooling, parts), false), 'true')
+  assert.equal(evaluate(joinStep.if, context(event, results, tooling), false), 'true')
   const direct = Object.fromEntries(dependencies(job).map((id) => [id, results[id]]))
-  return evaluate(joinStep.env!.PRODUCERS_RESULT, context(event, direct, tooling, parts), false)
+  return evaluate(joinStep.env!.PRODUCERS_RESULT, context(event, direct, tooling), false)
 }
 
 function preflight(cwd: string, env = process.env, output: string[] = []): boolean {
@@ -171,11 +181,10 @@ function failedPreflight() {
     assert.equal(preflight(fixture), false)
     for (const event of ['push', 'pull_request'] as const) {
       const results: Record<string, Result> = { 'coverage-plan': 'failure' }
-      for (const id of ['quality', 'coverage', 'tooling']) {
+      for (const id of ['quality', 'coverage', 'coverage-partitions', 'tooling']) {
         assert.equal(enabled(jobs[id], event, results), false, `${id} must not start`)
         results[id] = 'skipped'
       }
-      results['coverage-partitions'] = 'skipped'
       assert.equal(joinVerdict(event, results), 'failure')
     }
   } finally {
@@ -247,11 +256,10 @@ function protectedDriftPreflight() {
     assert.match(output.join(''), /FORBIDDEN package\.json/)
     for (const event of ['push', 'pull_request'] as const) {
       const results: Record<string, Result> = { 'coverage-plan': 'failure' }
-      for (const id of ['quality', 'coverage', 'tooling']) {
+      for (const id of ['quality', 'coverage', 'coverage-partitions', 'tooling']) {
         assert.equal(enabled(jobs[id], event, results), false, `${id} must not start`)
         results[id] = 'skipped'
       }
-      results['coverage-partitions'] = 'skipped'
       assert.equal(joinVerdict(event, results), 'failure')
     }
   } finally {
@@ -259,18 +267,63 @@ function protectedDriftPreflight() {
   }
 }
 
-function assertPartitionJobResults(
-  event: 'push' | 'pull_request',
-  results: Record<string, Result>,
-) {
-  const passing = { ...results, 'coverage-partitions': 'success' as const }
-  assert.equal(joinVerdict(event, passing, 'true'), 'success')
-  for (const result of ['failure', 'skipped', 'cancelled'] as const) {
+function coverageParticipation() {
+  const results = { 'coverage-plan': 'success' } as const
+  const producers = [
+    ['coverage', 'groups'],
+    ['coverage-partitions', 'parts'],
+  ] as const
+  for (const [id, output] of producers) {
+    const job = jobs[id]
+    const selected = '[{}]'
+    assert.equal(enabled(job, 'pull_request', results, '', { [output]: selected }), true, id)
+    assert.equal(enabled(job, 'pull_request', results, '', { [output]: '[]' }), false, id)
+    assert.equal(enabled(job, 'pull_request', results, '', { [output]: '' }), true, id)
     assert.equal(
-      joinVerdict(event, { ...passing, 'coverage-partitions': result }, 'true'),
-      'failure',
+      enabled(job, 'pull_request', results, '', { [output]: selected, draft: true }),
+      false,
+      id,
     )
+    assert.equal(enabled(job, 'push', results, '', { [output]: '[]' }), true, id)
+    assert.equal(enabled(job, 'push', { 'coverage-plan': 'failure' }), false, id)
   }
+}
+
+function coverageJoinArguments(event: 'push' | 'pull_request', results: Record<string, Result>) {
+  const joinStep = jobs.ci.steps?.find((step) => step.name === 'Join Root receipts')
+  assert.ok(joinStep?.run && joinStep.env)
+  const direct = Object.fromEntries(dependencies(jobs.ci).map((id) => [id, results[id]]))
+  const evaluationContext = context(event, direct, 'true')
+  // Exercise the checked-in shell invocation with evaluated Actions expressions.
+  const env = {
+    ...process.env,
+    RUNNER_TEMP: '/fixture with spaces',
+    ...Object.fromEntries(
+      Object.entries(joinStep.env).map(([key, expression]) => [
+        key,
+        evaluate(expression, evaluationContext, false),
+      ]),
+    ),
+  }
+  const args = spawnSync('bash', ['-euc', `bun() { printf '%s\\0' "$@"; }\n${joinStep.run}`], {
+    env,
+    encoding: 'utf8',
+  })
+  if (args.error) throw args.error
+  assert.equal(args.status, 0, args.stderr)
+  assert.deepEqual(args.stdout.split('\0').slice(0, -1), [
+    'run',
+    'validate:full',
+    '--',
+    '--ci-join',
+    '/fixture with spaces/root-receipts',
+    '--producers-result',
+    'success',
+    '--coverage-result',
+    results.coverage,
+    '--parts-result',
+    results['coverage-partitions'],
+  ])
 }
 
 function successfulPreflight() {
@@ -284,9 +337,15 @@ function successfulPreflight() {
     assert.equal(enabled(jobs.tooling, event, results, 'true'), true)
     results.tooling = 'success'
     results['coverage-partitions'] = 'success'
-    assertPartitionJobResults(event, results)
-    for (const result of ['failure', 'skipped', 'cancelled'] as const) {
-      assert.equal(joinVerdict(event, { ...results, tooling: result }, 'true'), 'failure')
+    for (const [coverage, parts] of [
+      ['success', 'success'],
+      ['skipped', 'success'],
+      ['success', 'skipped'],
+      ['skipped', 'skipped'],
+      ['failure', 'cancelled'],
+      ['cancelled', 'failure'],
+    ] as const) {
+      coverageJoinArguments(event, { ...results, coverage, 'coverage-partitions': parts })
     }
     assert.equal(enabled(jobs.tooling, event, results, 'false'), true)
     const toolingStep = jobs.tooling.steps?.find((step) => step.name === 'Validate tooling')
@@ -298,6 +357,8 @@ function successfulPreflight() {
     assert.equal(evaluate(toolingJoin.if, context(event, results, 'true'), false), 'true')
     assert.equal(evaluate(toolingJoin.if, context(event, results, 'false'), false), 'false')
     for (const result of ['failure', 'skipped', 'cancelled'] as const) {
+      assert.equal(joinVerdict(event, { ...results, tooling: result }, 'true'), 'failure')
+      assert.equal(joinVerdict(event, { ...results, tooling: result }, 'false'), 'failure')
       assert.equal(
         evaluate(
           toolingJoin.env.PRODUCERS_RESULT,
@@ -309,11 +370,8 @@ function successfulPreflight() {
     }
     assert.equal(joinVerdict(event, results, 'invalid'), 'failure')
     assert.equal(joinVerdict(event, results, 'false'), 'success')
-    for (const result of ['failure', 'skipped', 'cancelled'] as const) {
-      assert.equal(joinVerdict(event, { ...results, tooling: result }, 'false'), 'failure')
-    }
     assert.equal(joinVerdict(event, results), 'failure')
-    for (const id of ['coverage-plan', 'quality', 'coverage']) {
+    for (const id of ['coverage-plan', 'quality']) {
       for (const result of ['failure', 'skipped', 'cancelled'] as const) {
         assert.equal(
           joinVerdict(event, { ...results, [id]: result }, 'true'),
@@ -340,6 +398,76 @@ function rawArtifactPattern() {
   assert.equal(matches('coverage-raw-123-1-apps__example-api-2-of-2'), true)
   assert.equal(matches('coverage-raw-123-1-apps__example-api-v2-1-of-2'), false)
   assert.equal(matches('coverage-raw-123-1-apps__example-api-1-of-2-extra'), false)
+}
+
+function coverageReceiptStaging() {
+  const steps = jobs.ci.steps
+  const download = steps?.find((step) => step.name === 'Download Coverage receipts')
+  const staging = steps?.find((step) => step.name === 'Stage Coverage receipts')
+  assert.ok(staging?.run, 'coverage receipts need exclusive staging before the join')
+  assert.ok(download?.with)
+  assert.equal(
+    download.with.pattern,
+    `root-coverage-\${{ github.run_id }}-\${{ github.run_attempt }}-*`,
+  )
+  assert.notEqual(String(download.with['merge-multiple']), 'true')
+  assert.equal(
+    evaluate(
+      download.if ?? 'success()',
+      context('pull_request', { coverage: 'skipped', 'coverage-partitions': 'skipped' }),
+      false,
+    ),
+    'true',
+  )
+
+  const ordinary = 'root-coverage-packages__example.json'
+  const partitioned = 'root-coverage-apps__example-api.json'
+  const group = 'root-coverage-123-1-packages-1'
+  const merge = 'root-coverage-123-1-merge-apps__example-api'
+  for (const [inputs, expected] of [
+    [[], []],
+    [[ordinary], [ordinary]],
+    [
+      [`${group}/${ordinary}`, `${merge}/${partitioned}`],
+      [ordinary, partitioned],
+    ],
+    [[`${group}/${ordinary}`, `${merge}/${ordinary}`], null],
+    [[`${group}/nested/${ordinary}`, `${merge}/${partitioned}`], null],
+  ] as const) {
+    const fixture = mkdtempSync(join(tmpdir(), 'ci-receipt-staging-'))
+    try {
+      const target = join(fixture, 'root-receipts')
+      mkdirSync(target)
+      writeFileSync(join(target, 'root-core.json'), 'core')
+      for (const file of inputs) {
+        const receipt = join(fixture, 'coverage-receipts', file)
+        mkdirSync(resolve(receipt, '..'), { recursive: true })
+        writeFileSync(receipt, file)
+      }
+      const staged: SpawnSyncReturns<string> = spawnSync('bash', ['-euc', staging.run], {
+        env: {
+          ...process.env,
+          RUNNER_TEMP: fixture,
+          GITHUB_RUN_ID: '123',
+          GITHUB_RUN_ATTEMPT: '1',
+        },
+        encoding: 'utf8',
+      })
+      if (staged.error) throw staged.error
+      if (expected === null) {
+        assert.notEqual(staged.status, 0, inputs.join(', '))
+      } else {
+        assert.equal(staged.status, 0, staged.stderr)
+        assert.deepEqual(readdirSync(target).sort(), ['root-core.json', ...expected].sort())
+        for (const file of expected) {
+          const source: string | undefined = inputs.find((candidate) => candidate.endsWith(file))
+          assert.equal(readFileSync(join(target, file), 'utf8'), source)
+        }
+      }
+    } finally {
+      rmSync(fixture, { recursive: true, force: true })
+    }
+  }
 }
 
 function appIsolation() {
@@ -369,6 +497,8 @@ function appIsolation() {
   )
 }
 
+coverageReceiptStaging()
+coverageParticipation()
 failedPreflight()
 protectedDriftPreflight()
 successfulPreflight()

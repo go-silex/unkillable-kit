@@ -5,14 +5,14 @@
 # under the kit's .github/workflows/ — GH runs every YAML there, and the bare
 # kit has no product apps.
 #
-# Pair with scripts/product/validate.sh (or app-local product-validate.sh)
-# copied from docs/kit/templates/product-validate.example.sh
+# Pair with scripts/product/validate.sh, copied from product-validate.example.sh.
+# Root already owns workspace quality. This workflow builds deployment artifacts
+# and runs only Product-specific guards, through that one script.
 #
-# Existing Products (one-time after Kit upgrade ships `scripts/kit/ci-install.sh`):
-# add the pinned `setup-node` step below if missing; set Install to `bash scripts/kit/ci-install.sh`.
-# Keep Product-specific steps (dependency resolution / SQLite / validation). Do not edit Kit files.
+# Existing Products: keep Product-specific setup and checks; use the pinned Node
+# setup and inherited install step below. Do not edit Kit files.
 #
-# See: docs/kit/product-consumer-contract.md · docs/kit/playbooks/start-product.md §8
+# See: docs/kit/product-consumer-contract.md · docs/kit/playbooks/start-product.md#day-0-checklist
 name: Product CI
 
 on:
@@ -53,21 +53,5 @@ jobs:
       - name: Install
         run: bash scripts/kit/ci-install.sh
 
-      # Product CI on Actions has no `upstream` remote — zero-edit uses
-      # config/product/inheritance.json (full history required above).
       - name: Product validate
-        run: |
-          set -euo pipefail
-          if [[ ! -f config/product/inheritance.json ]]; then
-            echo "::error::missing config/product/inheritance.json — pin upstreamCommit after merge upstream"
-            exit 1
-          fi
-          # Prefer scripts/product/validate.sh; fall back to app-local path.
-          if [[ -f scripts/product/validate.sh ]]; then
-            bash scripts/product/validate.sh
-          elif [[ -f apps/<product>-api/scripts/kit/product-validate.sh ]]; then
-            bash apps/<product>-api/scripts/kit/product-validate.sh
-          else
-            echo "::error::missing product-validate script — copy docs/kit/templates/product-validate.example.sh"
-            exit 1
-          fi
+        run: bash scripts/product/validate.sh

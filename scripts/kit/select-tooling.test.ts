@@ -129,7 +129,7 @@ try {
   chmodSync(join(bin, 'git'), 0o755)
   chmodSync(join(bin, 'gh'), 0o755)
   mkdirSync(join(root, 'scripts/kit'), { recursive: true })
-  for (const name of ['select-tooling.ts', 'resolve-tree-identity.mjs'])
+  for (const name of ['select-tooling.ts', 'resolve-tree-identity.mjs', 'root-gate-ci-context.ts'])
     cpSync(join(source, 'scripts/kit', name), join(root, 'scripts/kit', name))
   put(
     'config/kit/zero-edit-zones.json',

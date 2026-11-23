@@ -109,7 +109,7 @@ line_invokes_validate_full() {
   fi
   [[ "${stripped}" == \#* ]] && return 1
   local full='^(run:[[:space:]]*)?bun[[:space:]]+run[[:space:]]+validate:full[[:space:]]*(#.*)?$'
-  local join='^(run:[[:space:]]*)?bun[[:space:]]+run[[:space:]]+validate:full[[:space:]]+--[[:space:]]+--ci-join[[:space:]]+[^[:space:]]+[[:space:]]+--producers-result[[:space:]]+[^[:space:]]+[[:space:]]*(#.*)?$'
+  local join='^(run:[[:space:]]*)?bun[[:space:]]+run[[:space:]]+validate:full[[:space:]]+--[[:space:]]+--ci-join[[:space:]]+[^[:space:]]+[[:space:]]+--producers-result[[:space:]]+[^[:space:]]+[[:space:]]+--coverage-result[[:space:]]+[^[:space:]]+[[:space:]]+--parts-result[[:space:]]+[^[:space:]]+[[:space:]]*(#.*)?$'
   [[ "${stripped}" =~ ${full} ]] || { [[ "${role}" == ci ]] && [[ "${stripped}" =~ ${join} ]]; }
 }
 
