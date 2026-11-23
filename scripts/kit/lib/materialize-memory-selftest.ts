@@ -1,10 +1,10 @@
 #!/usr/bin/env bun
 /**
- * Bound sampled post-GC external (Buffer) memory during materializeTree, which
- * catches the full-buffer writeExact regression. It is not a bound on all
- * memory: data held as JS heap values, or released within one event-loop turn,
- * is not counted. Report RSS separately: it also includes allocator pages
- * retained after Buffers are reclaimed.
+ * Bound unread cat-file payload as chunks enter the reader queue. This catches
+ * full-blob queuing even if the event loop never samples the live buffers.
+ * Also bound sampled post-GC external memory; this is not a bound on the JS
+ * heap or on allocations released between samples. RSS is diagnostic only,
+ * since it includes allocator pages retained after Buffers are reclaimed.
  *
  * Usage: bun scripts/kit/lib/materialize-memory-selftest.ts [MiB=128]
  */
@@ -15,13 +15,14 @@ import {
   fstatSync,
   mkdtempSync,
   openSync,
+  readFileSync,
   readSync,
   rmSync,
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { materializeTree } from './materialize-tree.ts'
+import type { materializeTree } from './materialize-tree.ts'
 
 const MIB = 1024 * 1024
 const mib = Number(process.argv[2] ?? 128)
@@ -49,6 +50,28 @@ function git(args: string[], cwd = root) {
   return r.stdout
 }
 
+/** Instrument both writers in a scratch copy; leave the shipped reader untouched. */
+async function loadMaterializer() {
+  const source = readFileSync(new URL('./materialize-tree.ts', import.meta.url), 'utf8')
+  const anchor = '    buffered += chunk.length\n'
+  const [before, after, ...extra] = source.split(anchor)
+  if (after === undefined || extra.length > 0) {
+    throw new Error('cannot attach memory probe to the cat-file queue')
+  }
+  const path = join(root, 'materialize-tree.ts')
+  writeFileSync(
+    path,
+    `${before}${anchor}    onQueued?.(buffered)\n${after}
+let onQueued: ((bytes: number) => void) | undefined
+export function observeQueue(observer: (bytes: number) => void) { onQueued = observer }
+`,
+  )
+  return (await import(path)) as {
+    materializeTree: typeof materializeTree
+    observeQueue: (observer: (bytes: number) => void) => void
+  }
+}
+
 try {
   git(['init', '-q'])
   writeFileSync(
@@ -70,6 +93,8 @@ try {
   git(['add', '.'])
   git(['commit', '-qm', 'mem'])
 
+  const { materializeTree, observeQueue } = await loadMaterializer()
+
   function sampleMemory() {
     // Bun updates its external-memory accounting on GC. Sample RSS first so
     // the diagnostic also sees pages that the collection is about to release.
@@ -85,6 +110,13 @@ try {
     peakRss = Math.max(peakRss, rss)
     peakExternal = Math.max(peakExternal, external)
   }
+  let peakBuffered = 0
+  observeQueue((buffered) => {
+    // Take one synchronous external sample with the whole fixture still live,
+    // if it ever fits in the queue. Timer samples alone can miss that window.
+    if (peakBuffered < bytes && buffered >= bytes) sample()
+    peakBuffered = Math.max(peakBuffered, buffered)
+  })
   const timer = setInterval(sample, 5)
   const t0 = performance.now()
   try {
@@ -113,11 +145,10 @@ try {
     closeSync(fd)
   }
 
-  // On Bun 1.4.4 with a pinned core and a slowed writer, a 128 MiB blob
-  // reached at most 2.2 MiB of sampled live external memory and 9 MiB of
-  // queued data; the mutant held about 128 MiB live. A 32 MiB bound at
-  // this fixture size leaves headroom without permitting Buffer-held full-blob
-  // buffering.
+  // With a 128 MiB blob on Bun 1.4.4 (including one busy core), the streaming
+  // writer queued at most 7.2 MiB and grew sampled external memory by at most
+  // 0.7 MiB. The mutant reached 128 MiB queued and about 128 MiB external
+  // growth. Keep the same 32 MiB ceiling for each independent measurement.
   const limit = Math.max(16 * MIB, Math.floor(bytes / 4))
   console.log(
     JSON.stringify({
@@ -130,9 +161,14 @@ try {
       peak_external: peakExternal,
       growth_external: growth,
       limit_external: limit,
+      peak_buffered: peakBuffered,
+      limit_buffered: limit,
     }),
   )
-  if (growth > limit) {
+  if (peakBuffered > limit) {
+    console.error(`FAIL: queued blob bytes ${peakBuffered} exceed ${limit} for ${mib} MiB blob`)
+    process.exitCode = 1
+  } else if (growth > limit) {
     console.error(`FAIL: live external growth ${growth} exceeds ${limit} for ${mib} MiB blob`)
     process.exitCode = 1
   } else {
