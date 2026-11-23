@@ -45,21 +45,32 @@ env -u KIT_SCHEMA_CATALOG bash scripts/kit/kit-schema-sync.sh --app apps/<produc
 (
   cd "apps/<product>-api"
   bun --no-env-file -e '
+    import { mkdtempSync, rmSync } from "node:fs"
+    import { join } from "node:path"
+
     const config = Bun.TOML.parse(await Bun.file("wrangler.toml").text())
     const environments = Object.keys(config.env ?? {}).sort()
     const command = [
       "bun", "x", "--no-install", "wrangler", "deploy", "--dry-run", "--config", "wrangler.toml",
     ]
-    function build(args) {
-      const result = Bun.spawnSync([...command, ...args], {
-        stdin: "inherit", stdout: "inherit", stderr: "inherit",
-      })
-      if (!result.success) process.exit(result.exitCode || 1)
+    // Never write Wrangler output to a pre-existing checkout path.
+    const output = mkdtempSync(join(process.cwd(), ".wrangler-dry-run-"))
+    function build(name, args) {
+      const result = Bun.spawnSync(
+        [...command, ...args, "--outdir", join(output, name)],
+        { stdin: "inherit", stdout: "inherit", stderr: "inherit" },
+      )
+      if (!result.success) process.exitCode = result.exitCode || 1
+      return result.success
     }
-    if (!environments.length) build(["--outdir", "dist"])
-    // A Wrangler environment name is an argument, never a path component.
-    for (const [index, env] of environments.entries()) {
-      build([`--env=${env}`, "--outdir", `dist/env-${index + 1}`])
+    try {
+      if (!environments.length) build("default", [])
+      // The Wrangler environment name is an argument, never a path component.
+      for (const [index, env] of environments.entries()) {
+        if (!build(`env-${index + 1}`, [`--env=${env}`])) break
+      }
+    } finally {
+      rmSync(output, { recursive: true, force: true })
     }
   '
 )

@@ -7,7 +7,7 @@ const [workspace, ...args] = process.argv.slice(2)
 // Vitest is installed by each App, not declared as a Root dependency.
 const fromApp = createRequire(join(process.cwd(), 'package.json'))
 const moduleUrl = pathToFileURL(fromApp.resolve('vitest/node')).href
-const { parseCLI, startVitest } = await import(moduleUrl)
+const { createVitest, parseCLI } = await import(moduleUrl)
 
 // Both native run and replay produce makeCoverage's canonical json-summary.
 // Remove stale evidence even if Product has configured the reporters not to clean.
@@ -21,11 +21,19 @@ for (const dir of [reportsDir, appReportsDir]) {
 const summaryPath = join(appReportsDir, 'coverage-summary.json')
 rmSync(summaryPath, { force: true })
 
-// Read the configuration of the very run that earns the receipt, not a second
-// config load that could resolve differently. Preserve the native run verdict.
+// Root owns the operation: an App config may configure the run, but cannot turn
+// it into report replay, tag listing, cache clearing, or standalone mode.
 const { filter, options } = parseCLI(['vitest', 'run', '--coverage', ...args])
-const vitest = await startVitest(filter, options)
+const replay: string | undefined = options.mergeReports
+options.watch = false
+// Match native Vitest CLI startup before resolving the App's config.
+process.env.TEST = 'true'
+process.env.VITEST = 'true'
+process.env.NODE_ENV ??= 'test'
+const vitest = await createVitest(options)
 try {
+  if (replay) await vitest.mergeReports(replay)
+  else await vitest.start(filter)
   if (!process.exitCode) {
     const failure = coverageFailure()
     if (failure) {

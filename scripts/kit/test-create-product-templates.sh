@@ -16,6 +16,14 @@ set -euo pipefail
 if [[ "$1 $2" == '--no-env-file -e' ]]; then
   exec "$REAL_BUN" "$@"
 fi
+if [[ "$*" == *' wrangler deploy '* ]]; then
+  outdir="${@: -1}"
+  if [[ "$outdir" == "$PWD"/.wrangler-dry-run-*/* &&
+    -d "${outdir%/*}" && ! -e "$outdir" ]]; then
+    printf '%s %s .fresh/%s\n' "${PWD##*/}" "${*:1:$(($# - 1))}" "${outdir##*/}" >> "$TRACE"
+    exit
+  fi
+fi
 printf '%s %s\n' "${PWD##*/}" "$*" >> "$TRACE"
 EOF
 chmod +x "$tmp/bin/bun"
@@ -67,12 +75,13 @@ EOF
     printf '%s\n' 'product-root schema --app apps/fixture-api --check'
     if ((web)); then
       printf '%s\n' 'fixture-web x --no-install vite build'
-      printf '%s\n' 'fixture-api x --no-install wrangler deploy --dry-run --config wrangler.toml --env=preview/edge --outdir dist/env-1'
-      printf '%s\n' 'fixture-api x --no-install wrangler deploy --dry-run --config wrangler.toml --env=production --outdir dist/env-2'
+      printf '%s\n' 'fixture-api x --no-install wrangler deploy --dry-run --config wrangler.toml --env=preview/edge --outdir .fresh/env-1'
+      printf '%s\n' 'fixture-api x --no-install wrangler deploy --dry-run --config wrangler.toml --env=production --outdir .fresh/env-2'
     else
-      printf '%s\n' 'fixture-api x --no-install wrangler deploy --dry-run --config wrangler.toml --outdir dist'
+      printf '%s\n' 'fixture-api x --no-install wrangler deploy --dry-run --config wrangler.toml --outdir .fresh/default'
     fi
   } | diff -u - "$TRACE"
+  [[ -z "$(find "$fixture/apps/fixture-api" -maxdepth 1 -name '.wrangler-dry-run-*' -print -quit)" ]]
   grep -Fqx '        run: bash scripts/product/validate.sh' "$fixture/.github/workflows/product-ci.yml"
   if ((mcp)); then
     grep -Fqx 'lower apps/fixture-mcp' "$fixture/config/product/coverage-order.txt"

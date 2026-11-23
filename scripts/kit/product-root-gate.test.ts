@@ -356,7 +356,7 @@ test('second fixture value', () => expect(value).toBe(2))
     [1, 1, 1],
     `${listedTags.stdout}\n${ordinaryVacuous.stdout}\n${mergedVacuous.stdout}`,
   )
-  failed(listedTags, /apps\/product-fixture.*no completed tests/)
+  failed(listedTags, /AssertionError: expected 1 to be 2/)
   assert.equal(tagsReceipt.complete, false)
   failed(ordinaryVacuous, /apps\/product-fixture.*coverage floor.*measured/)
   assert.equal(ordinaryReceipt.complete, false)
@@ -376,6 +376,33 @@ test('second fixture value', () => expect(value).toBe(2))
     /apps\/product-fixture.*did not produce a native coverage summary/,
   )
   assert.equal(existsSync(coverageReceipt), false)
+
+  // Blob replay may prove a declared partition merge, never an ordinary current-head run.
+  put('config/product/coverage-partitions.txt', '')
+  configureCoverage(', { lines: 100 }')
+  const replay = join(root, 'receipts/prior-blob')
+  mkdirSync(replay)
+  checked(
+    spawnSync(
+      'bunx',
+      ['vitest', 'run', '--coverage', '--reporter=blob', `--outputFile.blob=${replay}/passed.json`],
+      { cwd: join(root, app), env, encoding: 'utf8' },
+    ),
+  )
+  source(app, 'export const value: number = 1\n')
+  put(
+    `${app}/vitest.config.mts`,
+    `import { makeCoverage } from '../../packages/config/vitest-coverage.mts'
+export default { test: {
+  maxWorkers: 1,
+  mergeReports: ${JSON.stringify(replay)},
+  coverage: makeCoverage('product-fixture', { lines: 100 }),
+} }
+`,
+  )
+  commit('Product tries to replay successful tests instead of running current tests')
+  failed(shard(), /AssertionError: expected 1 to be 2/)
+  assert.equal(JSON.parse(readFileSync(coverageReceipt, 'utf8')).complete, false)
   console.log('product-root-gate: Kit and Product App coverage and enrollment fixtures passed')
 } finally {
   rmSync(root, { recursive: true, force: true })
