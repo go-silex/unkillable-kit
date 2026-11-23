@@ -3,9 +3,9 @@ import { insertApiKey } from '@kit/auth/repos/keys'
 import { insertMember, insertOrganization } from '@kit/auth/repos/orgs'
 import { createDb } from '@kit/db'
 import { expect, it } from 'vitest'
-import { createApp } from './app'
-import { schema } from './platform/types'
-import { createRouteFixture } from './test/d1-route-fixture'
+import { createApp } from '../../app'
+import { schema } from '../../platform/types'
+import { createRouteFixture } from '../d1-route-fixture'
 
 const orgId = 'org-route-budget'
 const budgets = [

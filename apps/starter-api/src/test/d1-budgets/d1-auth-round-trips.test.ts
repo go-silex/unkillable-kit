@@ -2,14 +2,14 @@ import { expect } from 'vitest'
 import {
   type SessionRoundTripCeilings,
   sessionRoundTripTests,
-} from '../../../packages/auth/src/test/session-round-trips'
-import { createApp } from './app'
+} from '../../../../../packages/auth/src/test/session-round-trips'
+import { createApp } from '../../app'
 import {
   createRouteFixture,
   createStarterHttpFixture,
   routeFixtureCredentials,
   starterTestOrigin,
-} from './test/d1-route-fixture'
+} from '../d1-route-fixture'
 
 const ceilings: SessionRoundTripCeilings = {
   getSession: 3,
