@@ -61,12 +61,14 @@ function TabsTrigger({ className, ...props }: TabsPrimitive.Tab.Props) {
   )
 }
 
-function TabsContent({ className, ...props }: TabsPrimitive.Panel.Props) {
+function TabsContent(props: Omit<TabsPrimitive.Panel.Props, 'id'>) {
+  // Base UI 1.9 registers a generated ID even if it renders a custom ID; allow custom IDs once those match.
+  const { className, id: _id, ...panelProps } = props as TabsPrimitive.Panel.Props
   return (
     <TabsPrimitive.Panel
       data-slot="tabs-content"
       className={cn('flex-1 text-sm focus-visible:outline-2 focus-visible:outline-ring', className)}
-      {...props}
+      {...panelProps}
     />
   )
 }

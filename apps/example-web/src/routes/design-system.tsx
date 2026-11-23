@@ -14,7 +14,7 @@ export function DesignSystemPage() {
     { id: 'foundations', label: m.dsFoundations },
     { id: 'buttons', label: 'Button' },
     { id: 'forms', label: m.dsForms },
-    { id: 'tabs', label: 'Tabs' },
+    { id: 'tabs', label: m.dsTabs },
     { id: 'feedback', label: m.dsFeedback },
     { id: 'overlays', label: m.dsOverlays },
     { id: 'data', label: m.dsData },

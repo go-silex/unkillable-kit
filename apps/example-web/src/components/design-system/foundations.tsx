@@ -144,10 +144,10 @@ export function Foundations() {
         </DemoBox>
       </Section>
 
-      <Section id="tabs" title="Tabs" description={m.dsTabsDesc}>
+      <Section id="tabs" title={m.dsTabs} description={m.dsTabsDesc}>
         <DemoBox>
           <Tabs defaultValue="first">
-            <TabsList aria-label="Tabs">
+            <TabsList aria-label={m.dsTabs}>
               <TabsTrigger value="first">{m.dsTabsFirst}</TabsTrigger>
               <TabsTrigger value="second">{m.dsTabsSecond}</TabsTrigger>
             </TabsList>

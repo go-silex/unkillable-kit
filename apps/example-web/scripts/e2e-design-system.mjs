@@ -163,13 +163,14 @@ try {
     .waitFor({ state: 'visible', timeout: 15_000 })
   assertClean('design-system load')
 
-  const tabs = page.getByRole('tablist', { name: 'Tabs' })
+  const tabsSection = page.locator('#tabs')
+  const tabs = tabsSection.getByRole('tablist')
   const firstTab = tabs.getByRole('tab').first()
   const secondTab = tabs.getByRole('tab').nth(1)
   await firstTab.waitFor({ state: 'visible' })
   await firstTab.press('ArrowRight')
   await secondTab.and(page.locator(':focus[aria-selected="true"]')).waitFor({ state: 'visible' })
-  await page
+  await tabsSection
     .getByRole('tabpanel', { name: await secondTab.textContent(), exact: true })
     .waitFor({ state: 'visible' })
   assertClean('tabs keyboard navigation')

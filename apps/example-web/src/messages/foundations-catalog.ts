@@ -2,6 +2,7 @@ export type FoundationsMessages = {
   dsFoundations: string
   dsFoundationsDesc: string
   dsForms: string
+  dsTabs: string
   dsTabsDesc: string
   dsTabsFirst: string
   dsTabsSecond: string
@@ -13,6 +14,7 @@ export const foundationsEn: FoundationsMessages = {
   dsFoundations: 'Foundations',
   dsFoundationsDesc: 'Color tokens, type, radius (shadcn CSS variables)',
   dsForms: 'Forms',
+  dsTabs: 'Tabs',
   dsTabsDesc: 'Switch between panels with the arrow keys.',
   dsTabsFirst: 'First',
   dsTabsSecond: 'Second',
@@ -24,6 +26,7 @@ export const foundationsFr: FoundationsMessages = {
   dsFoundations: 'Fondations',
   dsFoundationsDesc: 'Tokens couleur, typo, radius (CSS variables shadcn)',
   dsForms: 'Formulaires',
+  dsTabs: 'Onglets',
   dsTabsDesc: 'Changez de panneau avec les touches fléchées.',
   dsTabsFirst: 'Premier',
   dsTabsSecond: 'Second',

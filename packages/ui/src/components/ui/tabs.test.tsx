@@ -67,3 +67,32 @@ it('requests a controlled selection change without switching panels until value 
     expect(screen.queryByRole('tabpanel', { name: 'Second' })).not.toBeInTheDocument()
   })
 })
+
+it('preserves ARIA links when a caller spreads IDs onto mounted panels', () => {
+  const firstPanelProps = { id: 'caller-first', keepMounted: true }
+  const secondPanelProps = { id: 'caller-second', keepMounted: true }
+  render(
+    <Tabs defaultValue="first">
+      <TabsList aria-label="Example tabs">
+        <TabsTrigger value="first">First</TabsTrigger>
+        <TabsTrigger value="second">Second</TabsTrigger>
+      </TabsList>
+      <TabsContent value="first" {...firstPanelProps}>
+        First panel
+      </TabsContent>
+      <TabsContent value="second" {...secondPanelProps}>
+        Second panel
+      </TabsContent>
+    </Tabs>,
+  )
+
+  for (const [name, selected] of [
+    ['First', true],
+    ['Second', false],
+  ] as const) {
+    const tab = screen.getByRole('tab', { name, selected })
+    const panel = screen.getByText(`${name} panel`)
+    expect(document.getElementById(tab.getAttribute('aria-controls') ?? '')).toBe(panel)
+    expect(panel).toHaveAttribute('aria-labelledby', tab.id)
+  }
+})
