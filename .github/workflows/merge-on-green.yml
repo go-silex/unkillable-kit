@@ -181,7 +181,7 @@ jobs:
           !cancelled() && needs.preflight.outputs.enabled == 'true' &&
           (github.event_name == 'workflow_dispatch' ||
            (steps.evaluate.outputs.to_merge != '' && steps.evaluate.outputs.to_merge != '[]'))
-        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
         with:
           # client-id accepts the numeric App ID; this is the documented kit-ci setup path.
           client-id: ${{ vars.CI_APP_ID }}
@@ -290,7 +290,7 @@ jobs:
       - name: Mint repository-scoped app token
         id: app
         if: needs.preflight.outputs.enabled == 'true'
-        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
         with:
           client-id: ${{ vars.CI_APP_ID }}
           private-key: ${{ secrets.CI_APP_PRIVATE_KEY }}
