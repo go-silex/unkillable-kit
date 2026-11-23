@@ -12,9 +12,11 @@ The factory requests propagation and converts non-API handler exceptions to an e
 
 This protects only this factory's Better Auth logger and HTTP handler paths. It does not sanitize direct `auth.api` callers, other App or library sinks, HTTP response bodies, Cloudflare serialization or independently constructed Better Auth instances; each remains its owner's responsibility.
 
-`[observability]` is not inherited: `example-api` repeats it under `[env.production.observability]`; `mcp-example` has no `[env.*]`; static `example-web` has none. Products may lower `head_sampling_rate` (0–1).
+Wrangler inherits `[observability]` as a whole object. An environment that omits the block uses the top-level block unchanged. An environment that declares `[env.<name>.observability]` replaces it entirely: nested fields such as `logs`, `traces` and `redact_query_string` are never merged, so restate every field that environment needs.
 
-Set `redact_query_string = true` there before enabling traces: it strips queries, not paths, from logs and traces. Kit emails carry one-time tokens only in queries; Kit KV keys hold digests, not cookie values.
+`example-api` declares the same block under `[env.production.observability]`; `mcp-example` has no `[env.*]`; static `example-web` has none. Products may lower `head_sampling_rate` (0–1).
+
+Before enabling traces, set `redact_query_string = true` explicitly in every deployed observability block that carries traces, top-level or `[env.<name>.observability]`: a declared environment block does not inherit the top-level value. It strips queries, not paths, from logs and traces. Kit emails carry one-time tokens only in queries; Kit KV keys hold digests, not cookie values.
 Reset links emailed before upgrading to this Kit still carry a path token: enable traces once they expire (one reset-token lifetime, one hour by default).
 
 ## Product options (env-guarded — not shipped by the kit)

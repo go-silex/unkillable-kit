@@ -44,7 +44,8 @@ max_batch_timeout = 5
 [triggers]
 crons = ["0 * * * *", "*/5 * * * *"]
 
-# Workers Logs (docs/kit/observability.md). Non-inheritable: repeated in [env.production].
+# Workers Logs (docs/kit/observability.md). An [env.<name>.observability] block replaces this one whole,
+# without merging nested fields; an env that omits it inherits it. Repeated in [env.production].
 [observability]
 enabled = true
 head_sampling_rate = 1

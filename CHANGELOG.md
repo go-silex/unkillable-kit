@@ -4,6 +4,18 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ## Unreleased
 
+## unkillable-kit/v0.4.1 — 2026-11-23
+
+### Observability guide
+
+- Correct the Wrangler `[observability]` inheritance rule: an environment that
+  omits the block inherits the whole top-level block, and a declared environment
+  block replaces it without merging nested fields. Set `redact_query_string`
+  explicitly in every deployed block that carries traces
+  (go-silex/unkillable-kit#78).
+
+## unkillable-kit/v0.4.0 — 2026-11-23
+
 ### OpenID provider
 
 - Enforce `prompt=login` and `max_age` at authorization code issuance using
@@ -17,6 +29,15 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
   authorizations from the relying party, even without freshness constraints.
   When the App receives `OIDC_RESTART_REQUIRED`, start a new authorization rather
   than retrying with the same signed query.
+
+### CI App token pin
+
+- **Product action:** Kit workflows move `actions/create-github-app-token`
+  from 3.3.0 to 3.4.0 (go-silex/unkillable-kit#128), so `kit-upgrade` stops at the CI
+  App token-pin preflight. Establish the effective `CI_APP_ID` mode with the
+  Kit's [CI App setup](docs/kit/ci-app-setup.md#trust-and-setup), then complete
+  the [manual Kit sync](docs/kit/product-consumer-contract.md#pulling-kit-upgrades)
+  (“For a new token pin…”).
 
 ## unkillable-kit/v0.3.0 — 2026-11-22
 
