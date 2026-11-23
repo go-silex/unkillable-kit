@@ -4,6 +4,8 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ## Unreleased
 
+## unkillable-kit/v0.5.0 — 2026-11-23
+
 ### Merge on green
 
 - Workflow completions now use at most one runner in the shared repository merge
