@@ -4,6 +4,12 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ## Unreleased
 
+### Merge on green
+
+- Workflow completions now use at most one runner in the shared repository merge
+  queue. The gate still scans all eligible PRs using trusted default-branch code
+  and fresh authorization and check evidence (go-silex/unkillable-kit#147).
+
 ### OpenID provider
 
 - Use the Web Crypto input type for retained-key verification so the OIDC provider
@@ -15,6 +21,26 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
   in light and dark modes without changing the defaults (go-silex/unkillable-kit#138).
 - Add `@kit/ui/base.css` for shared styles without Geist, using the system font
   stack unless the App overrides it (go-silex/unkillable-kit#139).
+
+### UI tabs
+
+- Add accessible Tabs to `@kit/ui` and demonstrate them in the Example App
+  design-system catalogue (go-silex/unkillable-kit#136).
+
+### Password input
+
+- Add `PasswordInput` to `@kit/ui` with an accessible visibility toggle, and use
+  it in the Kit password forms and Example App
+  (go-silex/unkillable-kit#137).
+- **Product action:** Supply `showPasswordLabel` and `hidePasswordLabel` in the
+  copy passed to `ResetPasswordForm` and `ChangePasswordForm`
+  (go-silex/unkillable-kit#137).
+
+### Auth
+
+- Let Products render magic-link and password-reset e-mails after locale and
+  token-link validation, with Kit templates unchanged by default
+  (go-silex/unkillable-kit#135).
 
 ## unkillable-kit/v0.4.1 — 2026-11-23
 

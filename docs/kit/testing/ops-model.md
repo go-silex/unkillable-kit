@@ -116,9 +116,27 @@ A wakeup is an eligibility hint, never admission or evidence that a check passed
 | Combined status changes or an external check finishes        | A status event wakes a fresh read. GitHub suppresses `check_run`/`check_suite` events for Actions-associated heads, so an external check finishing last without another wakeup requires authorized default-ref dispatch.                                                                                                                                              |
 | Delivery is missed or recovery is requested                  | Default-ref dispatch scans all eligible PRs and can merge them; it requires separate operational authorization. It retains the configured-App mint diagnostic even with an empty queue.                                                                                                                                                                               |
 
-The pre-runner filter avoids ordinary or non-PR comments, unprivileged PR no-ops, irrelevant labels, title/body-only edits, off-default dispatch and Dependabot synchronize/reopen already handled by capture. Draft-to-ready relies on subsequent CI completion, not an early target-event scan. Other wakeups may race new check registration; fresh reads are not an atomic title-bound validation.
+Pre-runner filters skip ordinary or non-PR comments, unprivileged PR wakeups,
+irrelevant labels, title/body-only edits, off-default dispatch and Dependabot
+synchronize/reopen (handled by capture). Draft-to-ready relies on CI completion.
+Fresh reads can race new check registration; title validation is not atomic.
 
-GitHub documents [workflow names and OR matching](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#onworkflow_runworkflows); that documentation alone does not establish this exact ordered negative pattern. [Event suppression and workflow-chain limits](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows), including events created by `GITHUB_TOKEN`, mean delivery is not universal. Do not rely on a wakeup from a producer already two `workflow_run` levels deep: when GitHub suppresses it, recovery requires a separately authorized trusted default-ref dispatch. Concurrency retains at most one pending job; later wakeups can replace it even with `cancel-in-progress: false`. The running job is not canceled, and the surviving scan reads current state: this is not a durable FIFO queue.
+Completion skips preflight. One runner checks out the receiver's default branch
+by its full branch ref, never the source run's head. Policy, evaluation and
+landing use that single revision. Other evaluation wakeups require successful,
+eligible preflight and reuse its checkout SHA.
+
+GitHub's [workflow name matching docs][workflow-names] do not establish the
+ordered exclusion. [Event suppression and chain limits][workflow-events]
+(including suppression for `GITHUB_TOKEN`) make delivery non-universal. Do not
+rely on a producer already two `workflow_run` levels deep; recover via separately
+authorized default-ref dispatch. One repository-wide concurrency group allows
+one running and at most one pending evaluation. Later wakeups may replace the
+pending job without canceling the running job; the survivor reads current state.
+This is not durable FIFO.
+
+[workflow-names]: https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#onworkflow_runworkflows
+[workflow-events]: https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows
 
 **Bounded hosted filter observation.** The exact pattern was exercised in the public [qualification repository](https://github.com/go-silex/actions-wakeup-qualification) at head `3aaca282966ee2a3cf363d2096b8ca2f17412412`. Two dispatched producers and their observed descendants yielded ten successful runs/jobs, all on attempt 1. For each producer, the literal witness observed the first receiver completion W(R1), and the wildcard receiver observed the first witness completion R(W1); no receiver was observed with `Merge on Green` as parent during the 15-minute observation.
 
@@ -131,11 +149,39 @@ No depth-three chain children were created; this is consistent with a chain cuto
 
 Avoided runner allocations and added read-only evaluations are separate costs. Each full assessment uses two complete head-run listings and job pages for latest runs and observed older suites; when at least two candidate PR runs need provenance, it also reads one REST source-head listing and one GraphQL timeline. Landing assesses afresh without a shared cache. No net savings is established without measurement.
 
-In one single-page replay with six workflow runs and an empty authorization scaffold, one full scan used 25 calls: 24 REST and one GraphQL. The open-PR listing accounted for one REST call, leaving 23 REST and one GraphQL for the PR. Admission-first rejection used about six REST calls plus protocol-comment proof and pages. The admitted full path retains the full quality cost; an admitted early quality failure also pays the preceding authorization reads. As a rough REST-only model for that fixture, use scan listing + `6U + 23A + 23L`, where `U` is unadmitted assessments, `A` admitted full assessments and `L` landing reassessments. Comment history, Product declarations, pagination and consumer histories vary; this is not a capacity guarantee or a claim that all PRs are admitted. GraphQL queries add separately costed points, not a fixed request-count equivalent.
+One single-page replay with six runs and an empty authorization scaffold used
+25 calls: one REST open-PR listing plus 23 REST and one GraphQL for the PR.
+Admission-first rejection used about six REST calls plus comment proof and pages.
+An admitted PR pays for quality reads on top of admission even if quality fails
+early. Rough REST model for this fixture: listing + `6U + 23A + 23L` (unadmitted
+assessments, admitted full assessments, landing reassessments). History, Product
+declarations and pagination vary; this is not a capacity guarantee. GraphQL
+costs points, not a fixed request equivalent.
 
-GitHub documents a primary [`GITHUB_TOKEN` REST limit](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api) of 1,000 requests per hour per repository, shared with other workflows using that token; Enterprise Cloud resource limits differ. GraphQL has a separate points budget. A primary 403 with zero remaining or an API rate-limit error, and a secondary 429, can make the gate unreadable/red and hold merges while affecting other workflows. Assess capacity per repository before admission or rollout. On the first such error or budget overrun, hold new admissions and seek an operator-approved safe containment or rollback decision; do not silently create a policy exception. Any rollback must preserve admission, revocation and required-check success: a full revert to older skipped-permissive semantics is not automatically safe. Disabling automation or limiting wakeups is a **mitigation** requiring separate authorization and manual recovery for lost automatic wakeups, not a correction.
+The primary [`GITHUB_TOKEN` REST limit][rest-limit] is 1,000 requests/hour per
+repository across workflows; Enterprise Cloud limits differ. GraphQL uses a
+separate points budget. A rate-limit error (e.g. 403 with zero remaining or
+secondary 429) can hold merges and affect other workflows. Assess capacity
+before admissions or rollout. On the first such error or budget overrun, hold
+new admissions and seek approved containment or rollback. Rollback must retain
+admission, revocation and required-check success; older skipped-permissive
+behavior is unsafe. Disabling automation or limiting wakeups is a separately
+authorized **mitigation**; lost wakeups require manual recovery.
 
-Behavioral tests and event replays do not prove hosted delivery or configuration. The hosted filter observation above is bounded to that lab configuration. Other live completion, rerun, admission-last, withdrawal, status and external-check recovery, dispatch minting and concurrent-wakeup observations remain post-install qualification. A previous same-head draft-to-ready observation with a skipped old CI run and a successful new CI run from a different suite motivates the freshness requirement; it is not qualification of this revision.
+[rest-limit]: https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api
+
+Local replays show decisions from a surviving wakeup, not hosted delivery,
+concurrency or configuration. The lab observation does not qualify this revision.
+Live withdrawal, status/external-check recovery and dispatch minting remain
+post-install checks. A prior same-head draft-to-ready transition with a skipped
+old suite and a green new suite motivates freshness, not qualification.
+
+Pilot single-branch first, then staging/main. Require two to three ordinary
+successful merge-and-promotion cycles per pilot. Exercise admission or the final
+required check arriving last, coalesced completions, reruns and holds for red
+or missing checks. `Deploy gate` still requires exact push SHA proofs. Stop on an
+attributable missed wakeup or promotion without required proofs. Record runner
+minutes and latency; this sample does not establish a p95.
 
 **Secret scan: why it runs TruffleHog twice (do not collapse it back)**
 

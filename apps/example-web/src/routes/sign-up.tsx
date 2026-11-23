@@ -7,6 +7,7 @@ import {
   FieldLabel,
   Input,
   LocaleSwitcher,
+  PasswordInput,
 } from '@kit/ui'
 import { useForm } from '@tanstack/react-form'
 import { useQueryClient } from '@tanstack/react-query'
@@ -198,9 +199,11 @@ export function SignupPage() {
                 return (
                   <Field>
                     <FieldLabel htmlFor={field.name}>{m.password}</FieldLabel>
-                    <Input
+                    <PasswordInput
                       id={field.name}
-                      type="password"
+                      name={field.name}
+                      showPasswordLabel={m.showPasswordLabel}
+                      hidePasswordLabel={m.hidePasswordLabel}
                       autoComplete="new-password"
                       value={field.state.value}
                       onBlur={field.handleBlur}
@@ -221,9 +224,11 @@ export function SignupPage() {
                 return (
                   <Field>
                     <FieldLabel htmlFor={field.name}>{m.resetPasswordConfirm}</FieldLabel>
-                    <Input
+                    <PasswordInput
                       id={field.name}
-                      type="password"
+                      name={field.name}
+                      showPasswordLabel={m.showPasswordLabel}
+                      hidePasswordLabel={m.hidePasswordLabel}
                       autoComplete="new-password"
                       value={field.state.value}
                       onBlur={field.handleBlur}
