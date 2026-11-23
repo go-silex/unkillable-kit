@@ -659,8 +659,8 @@ async function assessQuality(github, repo, gate, number, core, sha, pr) {
   const tag = `PR #${number}`
   const checkResult = await currentChecksResult(github, repo, sha, pr)
   if (!checkResult.checks) return { sha: null, reason: checkResult.reason }
-  // Keep revocation in the required set: otherwise a workflow_run could merge a pushed head
-  // while a stale reviewed label has not yet been removed.
+  // Keep the revocation check: a head can return to a previously authorized SHA.
+  // The event's own merge wakeup waits for this check rather than bypassing it.
   const others = checkResult.checks.filter((check) => check.name !== SELF_JOB)
   if (!others.length) return { sha: null, reason: 'no check runs on head (fail-closed)' }
   /** @param {RegExp} pattern */

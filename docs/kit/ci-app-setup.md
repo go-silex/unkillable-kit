@@ -149,13 +149,37 @@ An existing accepted installation needs no new App merely to use the same merge 
 
 ## Reviewed-head authorization
 
-The maintained gate uses authenticated PR comments as a grant/withdraw protocol, not labels as authority. An admitted grant binds the immutable repository ID, PR database ID and number, exact head SHA and base branch. The existing native admission owner issues a native grant after its own review, integrity and budget rules; the manual path requires an explicit reviewed SHA and opaque evidence reference from a configured human operator, and still respects native ownership and admission. No new review, allowance or budget owner is introduced. Dependabot's separate automatic lane binds the evaluated base SHA as well as head; reviewed grants record base SHA as evidence but do not universally invalidate merely because the base advances.
+Authenticated PR comments—not labels—authorize the immutable repository and PR IDs,
+PR number, exact head SHA and base branch. Native admission retains its review, integrity
+and budget rules. Manual issuance requires a configured operator, reviewed SHA and evidence,
+and honors native ownership. Only Dependabot requires the evaluated base SHA to remain current.
 
-Each attempt captures the newest authenticated predecessor before admission. It rechecks the scope and predecessor before publishing, then reads back the exact active receipt. A withdrawal denies all lanes; publish and confirm it before stopping, starting a review or a protected push. After withdrawal or conflict, a fresh explicit admission and issuance is required: never silently rebase an in-flight attempt. An ambiguous write is reconciled only by the same operation ID and exact payload, not a blind retry.
+Publication rechecks the captured scope and physical predecessor, then reads back the receipt.
+Confirm an explicit withdrawal before stopping, reviewing or making a protected push. After
+withdrawal or conflict, require fresh admission; never silently rebase. Reconcile ambiguous writes
+only by exact operation ID and payload.
 
-Readers paginate the entire authenticated protocol stream and select its newest numeric record across heads and lanes, not the newest matching desired head. Human issuer identity is checked against the numeric allowlist; machine identity must match both the numeric App and bot IDs, with the real Dependabot PR author for the machine lane. GitHub GraphQL proves the selected comment's identity, repository/PR association and `lastEditedAt` is null. Malformed, wrong-scope or edited newest records, duplicate selected operation IDs, missing predecessors, failed pages, partial GraphQL results and API errors hold rather than falling back to an older grant. Ordinary comments and untrusted copied markers are not issuers.
+On human synchronize or reopen, withdraw the selected grant only if its GitHub comment
+`created_at` is at or before the original run's GitHub `created_at`, not the runner start,
+rerun or PR update time. This cutoff is run creation, not the push itself. Ties do not
+prove freshness; invalid timestamps fail the job. The rule also covers a revisited head.
 
-The gate queues the exact receipt during evaluation and requires that same receipt after fresh checks immediately before the SHA-pinned merge. A replacement receipt, even for the same head, requires a new evaluation. Labels are at most wakeup hints; neither a surviving label nor a successful token mint proves admission. Trusted `issue_comment` events, workflow completion and default-ref dispatch can wake evaluation. A dispatch scans eligible open PRs, not only its optional priority input. Privileged jobs use trusted workflow code and do not execute PR-head code with credentials.
+A proven CI App event withdrawal applies only to its named receipt. If superseded before
+publication, the newer receipt survives. Explicit, legacy and Dependabot withdrawals keep
+their original semantics. Remove `reviewed` only after confirming the event withdrawal
+took effect; readback and label deletion are not atomic.
+
+Readers paginate all authenticated records, across heads and lanes. Match numeric operator
+IDs or both App and bot IDs; the machine grant lane also requires the Dependabot PR author.
+GraphQL proves identity, repository and PR association, and no edit for the selected record
+and each skipped event withdrawal. Invalid scope, malformed or edited records, duplicate
+operations, missing predecessors and incomplete reads hold. Ordinary comments and untrusted
+copies are not receipts.
+
+After fresh checks, landing rechecks the exact queued receipt just before the SHA-pinned merge.
+A replacement on the same head needs a fresh evaluation. Trusted comments, workflow completion
+and default-ref dispatch can wake evaluation; dispatch scans all eligible PRs. Privileged jobs
+execute trusted code, never PR-head code with credentials.
 
 Initial evaluation checks admission before quality: an unadmitted PR is reported with its authorization reason, not a green quality verdict. Admitted PRs receive the complete quality assessment. At landing, fresh quality precedes the final fresh authorization read and exact-receipt comparison.
 

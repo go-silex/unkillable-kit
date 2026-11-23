@@ -83,6 +83,7 @@ type Comment = {
   id: number
   node_id: string
   body: string
+  created_at: string
   user: { id: number; type: string }
   performed_via_github_app: { id: number } | null
 }
@@ -166,12 +167,14 @@ class Fake {
   edited = new Set<number>()
   nextComment = 1
   writerIdentity: 'operator' | 'machine' = 'operator'
+  commentTime = '2026-01-01T00:00:00Z'
   addComment(number: number, body: string, identity = this.writerIdentity) {
     const id = this.nextComment++
     const comment: Comment = {
       id,
       node_id: `node${id}`,
       body,
+      created_at: this.commentTime,
       user: identity === 'operator' ? { id: 10, type: 'User' } : { id: 21, type: 'Bot' },
       performed_via_github_app: identity === 'operator' ? null : { id: 20 },
     }
@@ -2269,6 +2272,219 @@ async function runShipped(
   )
   return { outputs }
 }
+
+const firstTransition = '2026-01-01T00:01:00Z'
+const secondTransition = '2026-01-01T00:02:00Z'
+const afterTransitions = '2026-01-01T00:03:00Z'
+
+async function runPrRevocation(
+  fake: Fake,
+  {
+    runId = 99,
+    action = 'synchronize',
+    before = HEAD,
+    after = OTHER,
+    at = firstTransition,
+    beforeWrite,
+  }: {
+    runId?: number
+    action?: 'synchronize' | 'reopened'
+    before?: string
+    after?: string
+    at?: string
+    beforeWrite?: () => Promise<unknown>
+  } = {},
+) {
+  const script = workflowJobs(WORKFLOW)['revoke-reviewed-on-push'].steps.find(
+    (step) => step.with?.script,
+  )?.with?.script
+  assert.ok(script)
+  const execute = new AsyncFunction(
+    'github',
+    'context',
+    'core',
+    'require',
+    'getOctokit',
+    'process',
+    script,
+  )
+  await execute(
+    {
+      ...fake.github,
+      rest: {
+        ...fake.github.rest,
+        actions: {
+          getWorkflowRun: async ({ run_id }: { run_id: number }) => {
+            assert.equal(run_id, runId)
+            return { data: { id: runId, event: 'pull_request_target', created_at: at } }
+          },
+        },
+      },
+    },
+    {
+      eventName: 'pull_request_target',
+      repo,
+      runId,
+      payload: {
+        action,
+        ...(action === 'synchronize' ? { before, after } : {}),
+        pull_request: { number: 7, head: { sha: after }, updated_at: afterTransitions },
+      },
+    },
+    core(),
+    (id: string) => require(join(ROOT, id)),
+    () => ({
+      rest: {
+        issues: {
+          createComment: async ({ issue_number, body }: { issue_number: number; body: string }) => {
+            await beforeWrite?.()
+            return { data: fake.addComment(issue_number, body, 'machine') }
+          },
+          removeLabel: async () => {
+            fake.prs[7].labels = fake.prs[7].labels.filter(({ name }) => name !== 'reviewed')
+          },
+        },
+      },
+    }),
+    { env: VALID_POLICY },
+  )
+}
+
+const prAuthorization = (fake: Fake) => ({ github: fake.github, repo, prNumber: 7, policy })
+
+async function grantAfterTransitions(fake: Fake) {
+  fake.commentTime = afterTransitions
+  const input = prAuthorization(fake)
+  return issueAuthorization({
+    ...input,
+    writer: fake.writer,
+    snapshot: await captureAuthorization(input),
+    lane: 'reviewed',
+    source: 'manual',
+    evidence: 'fresh review',
+    operationId: 'fresh-review',
+  })
+}
+
+test('a delayed synchronize withdraws an old receipt, not one issued for the pushed head', async () => {
+  for (const fresh of [true, false]) {
+    const fake = new Fake()
+    fake.prs[7].head.sha = OTHER
+    const grant = fresh ? await grantAfterTransitions(fake) : null
+    await runPrRevocation(fake)
+    const state = await readAuthorization(prAuthorization(fake))
+    assert.equal(state.allowed, fresh)
+    assert.deepEqual(fake.prs[7].labels, fresh ? [{ name: 'reviewed' }] : [])
+    if (grant) {
+      assert.equal(state.receipt?.id, grant.id)
+      assert.equal(fake.comments[7].length, 2)
+    } else {
+      assert.equal(state.reason, 'withdrawn')
+      assert.equal(state.receipt?.record?.previous, fake.comments[7][0].id)
+    }
+  }
+})
+
+test('out-of-order synchronize runs fence earlier grants even when a head is revisited', async () => {
+  for (const current of [HEAD, 'c'.repeat(40)]) {
+    const fake = new Fake()
+    fake.prs[7].head.sha = current
+    const grant = await grantAfterTransitions(fake)
+    await runPrRevocation(fake, { runId: 100, before: OTHER, after: current, at: secondTransition })
+    await runPrRevocation(fake, { runId: 99 })
+    const state = await readAuthorization(prAuthorization(fake))
+    assert.equal(state.allowed, true)
+    assert.equal(state.receipt?.id, grant.id)
+    assert.deepEqual(fake.prs[7].labels, [{ name: 'reviewed' }])
+  }
+  const revisited = new Fake()
+  await runPrRevocation(revisited, { runId: 100, before: OTHER, after: HEAD, at: secondTransition })
+  assert.equal((await readAuthorization(prAuthorization(revisited))).reason, 'withdrawn')
+  await runPrRevocation(revisited, { runId: 99 })
+  assert.equal((await readAuthorization(prAuthorization(revisited))).allowed, false)
+  assert.deepEqual(revisited.prs[7].labels, [])
+})
+
+test('reopen withdraws a pre-reopen grant on the same head and preserves a later grant', async () => {
+  for (const fresh of [true, false]) {
+    const fake = new Fake()
+    if (fresh) await grantAfterTransitions(fake)
+    await runPrRevocation(fake, { action: 'reopened', after: HEAD })
+    assert.equal((await readAuthorization(prAuthorization(fake))).allowed, fresh)
+    assert.deepEqual(fake.prs[7].labels, fresh ? [{ name: 'reviewed' }] : [])
+  }
+})
+
+test('a fresh grant published during the withdrawal write survives with its reviewed hint', async () => {
+  const fake = new Fake()
+  fake.prs[7].head.sha = OTHER
+  await runPrRevocation(fake, { beforeWrite: () => grantAfterTransitions(fake) })
+  assert.equal(fake.comments[7].length, 3)
+  const state = await readAuthorization(prAuthorization(fake))
+  assert.equal(state.allowed, true)
+  assert.equal(state.receipt?.id, fake.comments[7][1].id)
+  assert.deepEqual(fake.prs[7].labels, [{ name: 'reviewed' }])
+  fake.edited.add(fake.comments[7][2].id)
+  const edited = await readAuthorization(prAuthorization(fake))
+  assert.equal(edited.allowed, false)
+  assert.equal(edited.reason, 'unproven authorization association or edit')
+})
+
+test('event withdrawal requires a valid run cutoff and does not count a tie as fresh', async () => {
+  const invalid = new Fake()
+  await assert.rejects(runPrRevocation(invalid, { at: '' }), /workflow run creation timestamp/)
+  assert.deepEqual(invalid.prs[7].labels, [{ name: 'reviewed' }])
+  assert.equal((await readAuthorization(prAuthorization(invalid))).allowed, true)
+
+  const tied = new Fake()
+  tied.comments[7][0].created_at = firstTransition
+  await runPrRevocation(tied, { action: 'reopened', after: HEAD })
+  assert.equal((await readAuthorization(prAuthorization(tied))).reason, 'withdrawn')
+  assert.deepEqual(tied.prs[7].labels, [])
+})
+
+test('a later event still targets a grant behind consecutive superseded withdrawals', async () => {
+  const fake = new Fake()
+  fake.prs[7].head.sha = OTHER
+  await runPrRevocation(fake, {
+    beforeWrite: () =>
+      runPrRevocation(fake, {
+        runId: 100,
+        at: secondTransition,
+        beforeWrite: () => grantAfterTransitions(fake),
+      }),
+  })
+  const input = prAuthorization(fake)
+  const grant = fake.comments[7][1]
+  const active = await readAuthorization(input)
+  assert.equal(active.receipt?.id, grant.id)
+  assert.equal(active.allowed, true)
+  assert.equal((await captureAuthorization(input)).previous, fake.comments[7].at(-1)?.id)
+  await runPrRevocation(fake, { runId: 101, action: 'reopened', at: '2026-01-01T00:04:00Z' })
+  const state = await readAuthorization(input)
+  assert.equal(state.reason, 'withdrawn')
+  assert.equal(state.receipt?.record?.previous, grant.id)
+  assert.deepEqual(fake.prs[7].labels, [])
+})
+
+test('human PR event wakes merge evaluation only after its revocation check succeeds', async () => {
+  const gate = workflowJobs(WORKFLOW)['merge-on-green']
+  for (const action of ['synchronize', 'reopened']) {
+    for (const result of ['success', 'failure', 'skipped']) {
+      const event = {
+        github: { event_name: 'pull_request_target', event: { action } },
+        needs: {
+          preflight: {
+            result: 'success',
+            outputs: { eligible: 'true', trusted_sha: BASE_A, enabled: 'true' },
+          },
+          'revoke-reviewed-on-push': { result },
+        },
+      }
+      assert.equal(guardOpen(gate.if, event), result === 'success', `${action}: ${result}`)
+    }
+  }
+})
 
 test('unprivileged pull_request preflight does not require the default-branch adapter', async () => {
   const source = workflowJobs(WORKFLOW).preflight.steps.find((step) => step.id === 'validate')?.with

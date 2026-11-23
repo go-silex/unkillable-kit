@@ -1,5 +1,12 @@
 'use strict'
-const { PREFIX, render, decode, classifyIssuer, project } = require('./head-authorization-core.cjs')
+const {
+  PREFIX,
+  render,
+  decode,
+  classifyIssuer,
+  authorizationProofTargets,
+  project,
+} = require('./head-authorization-core.cjs')
 /** @typedef {import('./head-authorization-core.cjs').Policy} Policy */
 /** @typedef {import('./head-authorization-core.cjs').Scope} Scope */
 /** @typedef {import('./head-authorization-core.cjs').AuthorizationRecord} AuthorizationRecord */
@@ -127,19 +134,21 @@ async function observe({ github, repo, prNumber, policy }) {
   const stream = comments.filter(
     (c) => classifyIssuer(c, policy) && typeof c.body === 'string' && c.body.startsWith(PREFIX),
   )
-  const targets = stream.slice(-2)
+  const targets = authorizationProofTargets(comments, policy)
   /** @type {Record<number,Proof>} */
   const proofs = {}
-  if (targets.length) {
+  // A raced withdrawal can leave the active grant farther back than the last two comments.
+  for (let offset = 0; offset < targets.length; offset += 100) {
+    const batch = targets.slice(offset, offset + 100)
     const result = await github.graphql(
       `query($ids: [ID!]!) { nodes(ids: $ids) { __typename ... on IssueComment { id fullDatabaseId lastEditedAt repository { fullDatabaseId } pullRequest { fullDatabaseId number } } } }`,
-      { ids: targets.map((c) => c.node_id) },
+      { ids: batch.map((c) => c.node_id) },
     )
-    if (!Array.isArray(result?.nodes) || result.nodes.length !== targets.length)
+    if (!Array.isArray(result?.nodes) || result.nodes.length !== batch.length)
       throw new Error('incomplete authorization proof')
-    for (let i = 0; i < targets.length; i++) {
+    for (let i = 0; i < batch.length; i++) {
       const n = result.nodes[i],
-        c = targets[i]
+        c = batch[i]
       if (
         n?.__typename !== 'IssueComment' ||
         n.id !== c.node_id ||
@@ -180,10 +189,34 @@ const sameScope = (a, b, lane) =>
   a.baseRef === b.baseRef &&
   a.authorId === b.authorId &&
   (lane !== 'dependabot' || a.baseSha === b.baseSha)
-/** @param {{github:Reader,writer:Writer,repo:Repo,policy:Policy,snapshot:Snapshot,record:AuthorizationRecord,requirePrevious:boolean}} input @returns {Promise<import('./head-authorization-core.cjs').Receipt>} */
-async function publish({ github, writer, repo, policy, snapshot, record, requirePrevious }) {
+/** @param {Awaited<ReturnType<typeof observe>>} after @param {AuthorizationRecord} record @param {string} body @param {boolean|undefined} conditional */
+function confirmPublication(after, record, body, conditional) {
+  const matches = after.comments.filter((c) => decode(c.body)?.operationId === record.operationId)
+  if (matches.length !== 1 || matches[0].body !== body || !after.receipt) return
+  if (after.receipt.id !== matches[0].id) {
+    // No comment CAS: our write did not become the selected withdrawal.
+    // In particular, do not remove a surviving grant's hint.
+    return conditional ? null : undefined
+  }
+  if (record.kind === 'grant' ? after.allowed : after.reason === 'withdrawn') return after.receipt
+}
+/** @typedef {{github:Reader,writer:Writer,repo:Repo,policy:Policy,snapshot:Snapshot,record:AuthorizationRecord,requirePrevious:boolean}} Publication */
+/** @overload @param {Publication & {conditional:true}} input @returns {Promise<import('./head-authorization-core.cjs').Receipt|null>} */
+/** @overload @param {Publication & {conditional?:false}} input @returns {Promise<import('./head-authorization-core.cjs').Receipt>} */
+/** @param {Publication & {conditional?:boolean}} input */
+async function publish({
+  github,
+  writer,
+  repo,
+  policy,
+  snapshot,
+  record,
+  requirePrevious,
+  conditional,
+}) {
   const input = { github, repo, prNumber: snapshot.pullRequest, policy }
   const before = await observe(input)
+  if (conditional && before.receipt?.id !== record.previous) return null
   if (
     !sameScope(before.scope, snapshot, record.lane) ||
     (requirePrevious && before.previous !== snapshot.previous)
@@ -208,18 +241,10 @@ async function publish({ github, writer, repo, policy, snapshot, record, require
       throw error
     writeError = error
   }
-  const after = await observe(input)
-  const matches = after.comments.filter((c) => decode(c.body)?.operationId === record.operationId)
-  if (
-    !after.receipt ||
-    matches.length !== 1 ||
-    matches[0].body !== body ||
-    after.receipt?.id !== matches[0].id ||
-    (record.kind === 'grant' && !after.allowed) ||
-    (record.kind === 'withdraw' && after.reason !== 'withdrawn')
-  )
+  const receipt = confirmPublication(await observe(input), record, body, conditional)
+  if (receipt === undefined)
     throw new Error(writeError ? 'ambiguous authorization write' : 'authorization write not active')
-  return after.receipt
+  return receipt
 }
 /** @param {{github:Reader,writer:Writer,repo:Repo,snapshot:Snapshot,policy:Policy,lane:string,source:string,evidence:string,operationId:string}} input @returns {Promise<import('./head-authorization-core.cjs').Receipt>} */
 async function issueAuthorization({
@@ -250,18 +275,9 @@ async function issueAuthorization({
   }
   return publish({ github, writer, repo, snapshot, policy, record, requirePrevious: true })
 }
-/** @param {Input & {writer:Writer,operationId:string,reason:string}} input @returns {Promise<import('./head-authorization-core.cjs').Receipt>} */
-async function withdrawAuthorization({
-  github,
-  writer,
-  repo,
-  prNumber,
-  policy,
-  operationId,
-  reason,
-}) {
-  const snapshot = await captureAuthorization({ github, repo, prNumber, policy })
-  const record = {
+/** @param {Snapshot} snapshot @param {string} operationId @param {string} reason @returns {AuthorizationRecord} */
+function withdrawal(snapshot, operationId, reason) {
+  return {
     version: 1,
     kind: 'withdraw',
     operationId,
@@ -276,7 +292,67 @@ async function withdrawAuthorization({
     previous: snapshot.previous,
     evidence: reason,
   }
-  return publish({ github, writer, repo, snapshot, policy, record, requirePrevious: false })
+}
+/** @param {Input & {writer:Writer,operationId:string,reason:string}} input */
+async function withdrawAuthorization({
+  github,
+  writer,
+  repo,
+  prNumber,
+  policy,
+  operationId,
+  reason,
+}) {
+  const snapshot = await captureAuthorization({ github, repo, prNumber, policy })
+  return publish({
+    github,
+    writer,
+    repo,
+    snapshot,
+    policy,
+    record: withdrawal(snapshot, operationId, reason),
+    requirePrevious: false,
+  })
+}
+/** @param {unknown} value @param {string} field */
+function timestamp(value, field) {
+  if (typeof value === 'string' && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/.test(value)) {
+    const time = Date.parse(value)
+    if (Number.isFinite(time) && new Date(time).toISOString() === `${value.slice(0, -1)}.000Z`)
+      return time
+  }
+  throw new Error(`invalid ${field} timestamp for event withdrawal`)
+}
+/** @param {Input & {writer:Writer,runId:number,action:'synchronize'|'reopened',runCreatedAt:unknown}} input */
+async function withdrawAuthorizationForPrEvent({
+  github,
+  writer,
+  repo,
+  prNumber,
+  policy,
+  runId,
+  action,
+  runCreatedAt,
+}) {
+  if (!positive(runId) || (action !== 'synchronize' && action !== 'reopened'))
+    throw new Error('invalid PR event for withdrawal')
+  const cutoff = timestamp(runCreatedAt, 'workflow run creation')
+  const state = await observe({ github, repo, prNumber, policy })
+  if (state.receipt?.record?.kind !== 'grant') return null
+  const target = state.comments.find(({ id }) => id === state.receipt?.id)
+  if (timestamp(target?.created_at, 'comment creation') > cutoff) return null
+  const snapshot = { ...state.scope, previous: state.receipt.id }
+  const record = withdrawal(snapshot, `merge-revoke:event:${runId}`, `pull_request_${action}`)
+  return publish({
+    github,
+    writer,
+    repo,
+    snapshot,
+    policy,
+    record,
+    requirePrevious: false,
+    conditional: true,
+  })
 }
 module.exports = {
   policyFromEnv,
@@ -284,4 +360,5 @@ module.exports = {
   readAuthorization,
   issueAuthorization,
   withdrawAuthorization,
+  withdrawAuthorizationForPrEvent,
 }
