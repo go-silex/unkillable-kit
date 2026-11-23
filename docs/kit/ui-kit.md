@@ -41,7 +41,8 @@ Package. Promote a shared implementation only after at least two Products need i
 
 ## Exports
 
-See `packages/ui/src/index.ts` for the current export map (Button, Dialog, Sheet, Sidebar, AlertDialog, Select, Empty, …). Prefer the living design-system page over duplicating a long inventory here.
+See the export map in `packages/ui/src/index.ts` and the living design-system page.
+`PasswordInput` is a Kit composition of `InputGroup`; pass `showPasswordLabel` and `hidePasswordLabel` from App i18n.
 
 ### Tasks-related primitives (shadcn, 2026-08)
 

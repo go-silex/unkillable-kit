@@ -20,6 +20,8 @@ const forgotCopy = {
 
 const resetCopy = {
   errValidation: 'invalid',
+  showPasswordLabel: 'Show password',
+  hidePasswordLabel: 'Hide password',
   resetPasswordNew: 'New',
   resetPasswordConfirm: 'Confirm',
   resetPasswordSubmit: 'Reset',
@@ -32,6 +34,8 @@ const resetCopy = {
 
 const changeCopy = {
   errValidation: 'invalid',
+  showPasswordLabel: 'Show password',
+  hidePasswordLabel: 'Hide password',
   changePasswordCurrent: 'Current',
   changePasswordNew: 'New',
   changePasswordConfirm: 'Confirm',

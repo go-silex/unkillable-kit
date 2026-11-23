@@ -2,7 +2,6 @@ import { flowsEn } from './flows-catalog'
 import type { Messages } from './fr'
 import { impersonationEn } from './impersonation-catalog'
 import { keysEn } from './keys-catalog'
-
 export const en: Messages = {
   ...impersonationEn,
   ...keysEn,
@@ -51,6 +50,8 @@ export const en: Messages = {
   magicHint: 'Generic response (no account enumeration). Link valid about 5 minutes.',
   email: 'Email',
   password: 'Password',
+  showPasswordLabel: 'Show password',
+  hidePasswordLabel: 'Hide password',
   submit: 'Sign in',
   logout: 'Sign out',
   notes: 'Notes',

@@ -7,6 +7,7 @@ import {
   FieldLabel,
   Input,
   LocaleSwitcher,
+  PasswordInput,
 } from '@kit/ui'
 import { useForm } from '@tanstack/react-form'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -199,9 +200,11 @@ export function LoginPage() {
                           {m.forgotPassword}
                         </Link>
                       </div>
-                      <Input
+                      <PasswordInput
                         id={field.name}
-                        type="password"
+                        name={field.name}
+                        showPasswordLabel={m.showPasswordLabel}
+                        hidePasswordLabel={m.hidePasswordLabel}
                         autoComplete="current-password"
                         value={field.state.value}
                         onBlur={field.handleBlur}

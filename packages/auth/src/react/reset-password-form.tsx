@@ -1,4 +1,4 @@
-import { Button, Field, FieldError, FieldGroup, FieldLabel, Input } from '@kit/ui'
+import { Button, Field, FieldError, FieldGroup, FieldLabel, PasswordInput } from '@kit/ui'
 import { useForm } from '@tanstack/react-form'
 import type { ReactNode } from 'react'
 import { AUTH_RESET_PASSWORD_PATH, resetPasswordSchema } from '../password-schemas'
@@ -6,6 +6,8 @@ import { type AuthFormFetch, type AuthFormNotify, silentNotify } from './notify'
 
 export type ResetPasswordCopy = {
   errValidation: string
+  showPasswordLabel: string
+  hidePasswordLabel: string
   resetPasswordNew: string
   resetPasswordConfirm: string
   resetPasswordSubmit: string
@@ -85,9 +87,11 @@ export function ResetPasswordForm({
             return (
               <Field>
                 <FieldLabel htmlFor={field.name}>{copy.resetPasswordNew}</FieldLabel>
-                <Input
+                <PasswordInput
                   id={field.name}
-                  type="password"
+                  name={field.name}
+                  showPasswordLabel={copy.showPasswordLabel}
+                  hidePasswordLabel={copy.hidePasswordLabel}
                   autoComplete="new-password"
                   value={field.state.value}
                   onBlur={field.handleBlur}
@@ -108,9 +112,11 @@ export function ResetPasswordForm({
             return (
               <Field>
                 <FieldLabel htmlFor={field.name}>{copy.resetPasswordConfirm}</FieldLabel>
-                <Input
+                <PasswordInput
                   id={field.name}
-                  type="password"
+                  name={field.name}
+                  showPasswordLabel={copy.showPasswordLabel}
+                  hidePasswordLabel={copy.hidePasswordLabel}
                   autoComplete="new-password"
                   value={field.state.value}
                   onBlur={field.handleBlur}
