@@ -69,6 +69,7 @@ increase in the spec or pull request. A spec that changes authentication or
 authorization must state its D1 round-trip cost on the affected request paths.
 
 Products can reuse [`countD1RoundTrips` from `@kit/db/testing`](../../packages/db/README.md#measuring-http-requests).
+The generated Product App does not inherit the Starter's ceilings; it records its own.
 Each `first`, `all`, `run`, `raw`, `exec` or `batch` call counts once, regardless
 of the number of SQL statements in it. `prepare` and `bind` do not count. Measure
 after seeding and signing in, with a fresh counter for each request. These are
