@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url'
 import Database from 'better-sqlite3'
 import { Miniflare } from 'miniflare'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { createSqliteD1 } from './test/sqlite-d1'
+import { countD1RoundTrips, createSqliteD1 } from './test/sqlite-d1'
 
 const MODULES_ROOT = dirname(fileURLToPath(import.meta.url))
 // Fixed at the repository Worker baseline; this local binding contract does not assert deploy config.
@@ -27,6 +27,7 @@ type D1 = {
   prepare(sql: string): Statement
   batch(statements: Statement[]): Promise<D1Result[]>
   exec(query: string): Promise<{ count: number; duration: number }>
+  withSession?(constraint: 'first-primary'): Pick<D1, 'prepare' | 'batch'>
 }
 
 type Fixture = {
@@ -115,6 +116,41 @@ for (const backend of backends) {
       cleanup = undefined
       if (current) await current.dispose()
     })
+
+    it('counts executions, not statement construction or the statements inside a batch', async () => {
+      const measured = countD1RoundTrips(fixture.d1)
+      const insert = measured.db.prepare('INSERT INTO entries (value) VALUES (?)')
+      const insertions = [insert.bind('first'), insert.bind('second')]
+      expect(measured.count).toBe(0)
+      await measured.db.batch(insertions)
+      expect(measured.count).toBe(1)
+
+      const select = measured.db.prepare('SELECT value FROM entries ORDER BY id')
+      expect(await select.first()).toEqual({ value: 'first' })
+      expect(measured.count).toBe(2)
+      await select.all()
+      expect(measured.count).toBe(3)
+      expect(await select.raw()).toEqual([['first'], ['second']])
+      expect(measured.count).toBe(4)
+      await insert.bind('third').run()
+      expect(measured.count).toBe(5)
+      await measured.db.exec("INSERT INTO entries (value) VALUES ('fourth')")
+      expect(measured.count).toBe(6)
+    })
+
+    if (backend.name === 'local workerd D1') {
+      it('includes D1 Session calls in the same request count', async () => {
+        const measured = countD1RoundTrips(fixture.d1)
+        const session = measured.db.withSession!('first-primary')
+        const query = session.prepare('SELECT 1 AS value')
+        expect(measured.count).toBe(0)
+        await session.batch([query, query])
+        expect(await query.first()).toEqual({ value: 1 })
+        expect(measured.count).toBe(2)
+        await fixture.d1.prepare('SELECT 1').first()
+        expect(measured.count).toBe(2)
+      })
+    }
 
     it('keeps each bound statement value independent in a batch', async () => {
       const insert = fixture.d1.prepare('INSERT INTO entries (value) VALUES (?)')

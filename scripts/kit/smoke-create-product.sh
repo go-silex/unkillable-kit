@@ -67,6 +67,7 @@ run_case() {
   git -C "$tree" show "$first:.dev/stack.yml" | grep -x '  component: sample' >/dev/null ||
     fail "$label inheritance commit did not set the Product release component"
   [[ -f "$tree/apps/sample-api/package.json" ]] || fail "$label missing API"
+  [[ ! -e "$tree/apps/sample-api/src/test/d1-budgets" ]] || fail "$label copied Kit-only D1 route budgets"
   if [[ " $* " == *' --web '* ]]; then [[ -f "$tree/apps/sample-web/package.json" ]] || fail "$label missing web"; else [[ ! -e "$tree/apps/sample-web" ]] || fail "$label unexpected web"; fi
   if [[ " $* " == *' --mcp '* ]]; then [[ -f "$tree/apps/sample-mcp/package.json" ]] || fail "$label missing MCP"; else [[ ! -e "$tree/apps/sample-mcp" ]] || fail "$label unexpected MCP"; fi
   for kind in api web; do
