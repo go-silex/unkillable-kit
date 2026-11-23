@@ -21,7 +21,7 @@
 # - better-auth + @better-auth/* — leave the group: one PR of their own, any update type, so the packages move
 #   together. The opt-in OIDC provider requires them at the exact version tested by the Kit (`kit-oidc-version` in
 #   packages/auth/src/oidc/oidc-provider.ts), so a bump fails the OIDC suite until that pin and the README are updated.
-#   Updating it changes the head, so the bump lands only through normal independent review.
+#   Never auto-authorized: a human reviews session cookie signing and getSession changes before landing.
 #
 # Supply-chain layers around these PRs (docs/kit/security-dependabot.md § Install-time layers, § Auto-merge guard):
 # - cooldown below = bunfig.toml `minimumReleaseAge` (259200 s = 3 d). Keep both equal: check-deps-guard.ts reads the
