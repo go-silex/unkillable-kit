@@ -310,6 +310,15 @@ describe('createBetterAuth', () => {
     expect(() => factory({ emailPort: undefined })).toThrow(/emailPort is required/)
   })
 
+  it.each([null, false, 'template'])(
+    'rejects a non-function email renderer (%s) at startup',
+    (render) => {
+      expect(() => factory({ emailConfig: { ...emailConfig, render: render as never } })).toThrow(
+        'emailConfig.render must be a function when configured',
+      )
+    },
+  )
+
   it('requires the email port and configuration together in the options type', () => {
     const base = {
       database: stubD1(),
@@ -366,6 +375,60 @@ describe('createBetterAuth', () => {
       subject: expect.stringMatching(/sign in/i),
     })
   })
+
+  it('passes the configured lifetimes and validated links to the renderer in both handlers', async () => {
+    const message = { subject: 'Custom subject', text: 'Custom text', html: '<p>Custom HTML</p>' }
+    const render = vi.fn(async () => message)
+    const send = vi.fn(async () => ({ ok: true, transport: 'log' }))
+    const auth = factory({
+      emailPort: { send },
+      emailConfig: {
+        ...emailConfig,
+        resolveRecipientLocale: async (email) => (email === 'fr@example.com' ? 'fr' : 'de'),
+        render,
+      },
+      magicLinkExpiresIn: 120,
+      resetPasswordTokenExpiresIn: 900,
+    })
+    await auth.options.emailAndPassword?.sendResetPassword?.({
+      user: { email: 'fr@example.com' },
+      url: 'http://localhost:8787/api/auth/reset-password/tok?callbackURL=http%3A%2F%2Flocalhost%3A5173%2Freset-password',
+      token: 'tok',
+    })
+    const magic = auth.options.plugins?.find((plugin) => plugin.id === 'magic-link') as {
+      options?: { sendMagicLink?: (input: { email: string; url: string }) => Promise<void> }
+    }
+    const magicUrl = 'http://localhost:8787/api/auth/magic-link/verify?token=x'
+    await magic?.options?.sendMagicLink?.({ email: 'en@example.com', url: magicUrl })
+
+    expect(render.mock.calls).toEqual([
+      [
+        {
+          kind: 'reset-password',
+          to: 'fr@example.com',
+          url: 'http://localhost:5173/reset-password?token=tok',
+          locale: 'fr',
+          productName: 'Acme',
+          expiresInSec: 900,
+        },
+      ],
+      [
+        {
+          kind: 'magic-link',
+          to: 'en@example.com',
+          url: magicUrl,
+          locale: 'en',
+          productName: 'Acme',
+          expiresInSec: 120,
+        },
+      ],
+    ])
+    expect(send.mock.calls).toEqual([
+      [{ to: 'fr@example.com', ...message }],
+      [{ to: 'en@example.com', ...message }],
+    ])
+  })
+
   it('does not allowlist a request-derived baseURL host', async () => {
     const send = vi.fn(async () => ({ ok: true, transport: 'log' }))
     const auth = factory({

@@ -4,6 +4,12 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ## Unreleased
 
+### Auth
+
+- Let Products render magic-link and password-reset e-mails after locale and
+  token-link validation, with Kit templates unchanged by default
+  (go-silex/unkillable-kit#135).
+
 ## unkillable-kit/v0.4.1 — 2026-11-23
 
 ### Observability guide

@@ -10,8 +10,8 @@ import { magicLink } from 'better-auth/plugins'
 import { eq } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/d1'
 import {
-  type AuthEmailConfig,
-  type AuthEmailPort,
+  type AuthEmailOptions,
+  assertEmailConfig,
   MAGIC_LINK_EXPIRES_IN_SEC,
   RESET_PASSWORD_TOKEN_EXPIRES_IN_SEC,
   sendMagicLinkMail,
@@ -81,17 +81,7 @@ export type CreateBetterAuthOpts = {
   allowKitPlaceholderSecret?: boolean
   /** Opt-in provider composition, created by the separate @kit/auth/oidc-provider entry. */
   oidcProvider?: OidcProviderConfig
-} & (
-  | { emailPort: AuthEmailPort; emailConfig: AuthEmailConfig }
-  | { emailPort?: never; emailConfig?: never }
-)
-
-function assertEmailConfig(emailPort?: AuthEmailPort, emailConfig?: AuthEmailConfig): void {
-  if (emailPort && !emailConfig)
-    throw new Error('emailConfig is required when emailPort is configured')
-  if (emailConfig && !emailPort)
-    throw new Error('emailPort is required when emailConfig is configured')
-}
+} & AuthEmailOptions
 
 function createSafeHandler(handler: (request: Request) => Response | Promise<Response>) {
   return async (request: Request): Promise<Response> => {
@@ -149,6 +139,9 @@ export function createBetterAuth(opts: CreateBetterAuthOpts): KitBetterAuth {
   const publicSignup = opts.allowPublicSignup ?? false
   const { emailPort, emailConfig } = opts
   assertEmailConfig(emailPort, emailConfig)
+  const magicLinkExpiresIn = opts.magicLinkExpiresIn ?? MAGIC_LINK_EXPIRES_IN_SEC
+  const resetPasswordTokenExpiresIn =
+    opts.resetPasswordTokenExpiresIn ?? RESET_PASSWORD_TOKEN_EXPIRES_IN_SEC
   const linkOrigins = new Set<string>(trustedOrigins)
   let base: URL
   try {
@@ -222,8 +215,7 @@ export function createBetterAuth(opts: CreateBetterAuthOpts): KitBetterAuth {
       enabled: true,
       disableSignUp: !publicSignup,
       revokeSessionsOnPasswordReset: true,
-      resetPasswordTokenExpiresIn:
-        opts.resetPasswordTokenExpiresIn ?? RESET_PASSWORD_TOKEN_EXPIRES_IN_SEC,
+      resetPasswordTokenExpiresIn,
       ...(emailPort && emailConfig
         ? {
             sendResetPassword: async ({ user, url, token }) => {
@@ -243,6 +235,7 @@ export function createBetterAuth(opts: CreateBetterAuthOpts): KitBetterAuth {
                 email: user.email,
                 url: resetUrl.href,
                 emailConfig,
+                expiresInSec: resetPasswordTokenExpiresIn,
                 ...tokenHref,
               })
             },
@@ -256,10 +249,16 @@ export function createBetterAuth(opts: CreateBetterAuthOpts): KitBetterAuth {
       ...(emailPort && emailConfig
         ? [
             magicLink({
-              expiresIn: opts.magicLinkExpiresIn ?? MAGIC_LINK_EXPIRES_IN_SEC,
+              expiresIn: magicLinkExpiresIn,
               disableSignUp: !publicSignup,
               sendMagicLink: async ({ email, url }) => {
-                await sendMagicLinkMail(emailPort, { email, url, emailConfig, ...tokenHref })
+                await sendMagicLinkMail(emailPort, {
+                  email,
+                  url,
+                  emailConfig,
+                  expiresInSec: magicLinkExpiresIn,
+                  ...tokenHref,
+                })
               },
             }),
           ]

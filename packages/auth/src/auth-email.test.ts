@@ -1,6 +1,11 @@
 import type { EmailPort } from '@kit/email'
 import { describe, expect, expectTypeOf, it, vi } from 'vitest'
-import { type AuthEmailPort, sendMagicLinkMail, sendResetPasswordMail } from './auth-email'
+import {
+  type AuthEmailConfig,
+  type AuthEmailPort,
+  sendMagicLinkMail,
+  sendResetPasswordMail,
+} from './auth-email'
 
 const LOOPBACK = 'http://localhost:8787/api/auth/magic-link/verify?token=abc'
 const RESET = 'http://localhost:8787/reset-password?token=token'
@@ -218,4 +223,95 @@ describe('auth email wiring', () => {
     ).rejects.toThrow('locale lookup failed')
     expect(send).not.toHaveBeenCalled()
   })
+})
+
+describe('custom auth email rendering', () => {
+  const cases = [
+    { kind: 'magic-link', sendMail: sendMagicLinkMail, url: LOOPBACK, expiresInSec: 300 },
+    { kind: 'reset-password', sendMail: sendResetPasswordMail, url: RESET, expiresInSec: 3600 },
+  ] as const
+
+  it.each(cases)(
+    'sends the synchronous $kind result unchanged to the original recipient',
+    async ({ kind, sendMail, url, expiresInSec }) => {
+      const { port, sent } = recordingPort()
+      const to = 'recipient@example.com'
+      const message = {
+        subject: ' Subject ',
+        text: `See ${url}\n`,
+        html: '<p>Custom &amp; HTML</p>',
+      }
+      const render = vi.fn(() => ({ ...message, to: 'other@example.com' }))
+
+      await sendMail(port, {
+        email: to,
+        url,
+        allowedOrigins: ['http://localhost:8787'],
+        emailConfig: { ...emailConfig, render },
+      })
+
+      expect(render.mock.calls).toEqual([
+        [{ kind, to, url, locale: 'en', productName: 'Acme', expiresInSec }],
+      ])
+      expect(sent).toEqual([{ to, ...message }])
+    },
+  )
+
+  it.each(cases)(
+    'does not render or send $kind when token-href policy rejects the URL',
+    async ({ sendMail, url }) => {
+      const { port, sent } = recordingPort()
+      const render = vi.fn(() => ({ subject: 'Custom', text: '', html: '' }))
+      const input = {
+        email: 'recipient@example.com',
+        emailConfig: { ...emailConfig, render },
+        allowedOrigins: ['https://app.example.com'],
+      }
+
+      await expect(sendMail(port, { ...input, url })).rejects.toThrow('EMAIL_TOKEN_HREF_INVALID')
+      await expect(
+        sendMail(port, {
+          ...input,
+          url: 'https://other.example.com/token',
+          allowLoopbackHttp: true,
+        }),
+      ).rejects.toThrow('EMAIL_TOKEN_HREF_INVALID')
+
+      expect(render).not.toHaveBeenCalled()
+      expect(sent).toEqual([])
+    },
+  )
+
+  it.each([
+    {
+      ...cases[0],
+      failure: 'throws',
+      render: ({ url }) => {
+        throw new Error(url)
+      },
+    },
+    {
+      ...cases[1],
+      failure: 'rejects',
+      render: ({ url }) => Promise.reject(new Error(url)),
+    },
+  ] satisfies ((typeof cases)[number] & {
+    failure: string
+    render: NonNullable<AuthEmailConfig['render']>
+  })[])(
+    'fails without sending or leaking the URL when the $kind renderer $failure',
+    async ({ sendMail, url, render }) => {
+      const { port, sent } = recordingPort()
+      const sending = sendMail(port, {
+        email: 'recipient@example.com',
+        url,
+        allowedOrigins: [],
+        allowLoopbackHttp: true,
+        emailConfig: { ...emailConfig, render },
+      })
+      await expect(sending).rejects.toHaveProperty('message', 'AUTH_EMAIL_RENDER_FAILED')
+      await expect(sending).rejects.not.toHaveProperty('cause')
+      expect(sent).toEqual([])
+    },
+  )
 })
