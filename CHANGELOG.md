@@ -26,6 +26,9 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
   removing their old calls. Keep deployment builds and Product-specific guards.
   One Product must pilot the release and prove the hosted 300-second Root budget
   before wider adoption (go-silex/unkillable-kit#156).
+- The Example API D1 round-trip suite measures authenticated route groups in
+  separate cases under the default timeout, with the same ceilings and route
+  coverage (go-silex/unkillable-kit#174).
 
 ## unkillable-kit/v0.6.0 — 2026-11-23
 

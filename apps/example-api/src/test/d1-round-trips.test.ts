@@ -1,4 +1,4 @@
-import { expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { createApp } from '../app'
 import { keyScopeRoutes } from '../middleware/key-scopes'
 import { measureFlowsAndTasks } from './d1-flows-tasks'
@@ -45,17 +45,40 @@ it('classifies the ALL registrations that do not have their own route budget', (
   })
 })
 
-it('caps D1 round trips on authenticated Example API routes', async () => {
-  const measured = new Set<string>()
-  await measureResources(measured)
-  await measureOrganizations(measured)
-  await measureNotificationsAndAdmin(measured)
-  await measureFlowsAndTasks(measured)
+describe('D1 round trips on authenticated Example API routes', {
+  concurrent: false,
+  shuffle: false,
+}, () => {
+  const groups = [
+    ['resources', measureResources],
+    ['Organizations', measureOrganizations],
+    ['Notifications and administration', measureNotificationsAndAdmin],
+    ['Flows and tasks', measureFlowsAndTasks],
+  ] as const
+  const measuredByGroup = new Map<string, Set<string>>()
 
-  const routes = createApp().routes.filter(
-    ({ method, path }) => method !== 'ALL' && !(method === 'GET' && path === '/health'),
-  )
-  const expected = new Set(routes.map(({ method, path }) => `${method} ${path}`))
-  const keyRoutes = keyScopeRoutes.map(({ method, path }) => `${method} ${path} (api-key)`)
-  expect([...measured].sort()).toEqual([...expected, ...keyRoutes].sort())
+  it.each(groups)('caps %s', async (group, measure) => {
+    const measured = new Set<string>()
+    await measure(measured)
+    measuredByGroup.set(group, measured)
+  })
+
+  it('covers every authenticated route and API-key variant', () => {
+    // This case consumes the completed cases above; it cannot pass on partial data.
+    const missingGroups = groups
+      .map(([group]) => group)
+      .filter((group) => !measuredByGroup.has(group))
+    expect(
+      missingGroups,
+      'Route coverage requires every measurement case to pass; run the full file',
+    ).toEqual([])
+
+    const measured = new Set([...measuredByGroup.values()].flatMap((routes) => [...routes]))
+    const routes = createApp().routes.filter(
+      ({ method, path }) => method !== 'ALL' && !(method === 'GET' && path === '/health'),
+    )
+    const expected = new Set(routes.map(({ method, path }) => `${method} ${path}`))
+    const keyRoutes = keyScopeRoutes.map(({ method, path }) => `${method} ${path} (api-key)`)
+    expect([...measured].sort()).toEqual([...expected, ...keyRoutes].sort())
+  })
 })
