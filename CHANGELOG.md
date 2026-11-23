@@ -17,6 +17,12 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
   original workflow run was created. Successful revocation checks wake merge
   evaluation again (go-silex/unkillable-kit#158).
 
+### Testing
+
+- The Example and Starter APIs now test D1 round-trip ceilings for authenticated
+  routes. Products can use `countD1RoundTrips` from `@kit/db/testing` to set their
+  own ceilings (go-silex/unkillable-kit#160).
+
 ## unkillable-kit/v0.5.1 — 2026-11-23
 
 ### Tooling
