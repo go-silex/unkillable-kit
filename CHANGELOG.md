@@ -7,8 +7,8 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 ### Tooling
 
 - The `test:lock-ranges` memory self-test detects its full-buffer mutant from
-  queued bytes instead of timed samples, so the inherited tooling lane no longer
-  fails intermittently on hosted runners (go-silex/unkillable-kit#149).
+  queued bytes instead of timed samples. This removes a timer-dependent failure of
+  the inherited tooling lane on hosted runners (go-silex/unkillable-kit#149).
 
 ## unkillable-kit/v0.5.0 — 2026-11-23
 
