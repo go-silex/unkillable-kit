@@ -19,6 +19,39 @@ Authentication primitives and integration surfaces; it does not own product-spec
 - Known consumers: `apps/example-api`, `apps/example-web`, `packages/mcp`, `packages/notifications`.
 - Caller rules: [architecture decision](../../docs/kit/architecture/adr/0003-multi-tenant-rbac-modules.md).
 
+## Auth e-mail rendering
+
+Products can set `emailConfig.render` on `createBetterAuth` from
+`@kit/auth/factory` to customize magic-link and password-reset e-mails. The
+optional function receives `{ kind, to, url, locale, productName, expiresInSec }`:
+
+- `kind` is `'magic-link'` or `'reset-password'`, and `to` is the recipient.
+- `url` is the token link, `locale` is the resolved `'en'` or `'fr'` (including
+  the configured fallback), and `productName` is the configured display name.
+- `expiresInSec` is the effective token lifetime in seconds. The defaults are
+  300 for magic links and 3600 for password resets. A zero override uses the
+  default, matching Better Auth.
+
+The Kit resolves the recipient's locale and validates the token link against
+the existing `allowedOrigins` / `allowLoopbackHttp` policy before calling
+`render`. If that policy rejects the URL, the send fails without calling it.
+Return `{ subject, text, html }` as strings, or a promise for that object. The
+Kit passes the three strings unchanged to the same `EmailPort`, keeping the
+original recipient. A throw, rejected promise, or invalid result fails the send
+with `AUTH_EMAIL_RENDER_FAILED`. The Kit does not send a fallback message or
+expose the original renderer error.
+
+Escape values for the output context. Never log the token URL or put it in
+`subject`: the development and test log port logs subjects verbatim. Include
+the link only in `text` and `html`.
+
+Keep the renderer fast and free of I/O; use it only for template work. It runs
+in the existing send path. Slow rendering can widen the existing response
+timing difference between reset requests for known and unknown accounts.
+
+Omit `render` to keep the Kit's default templates unchanged. App-sent e-mails
+such as invitations and welcome e-mails do not use this hook.
+
 ## API key scopes
 
 New keys must explicitly store a comma-separated selection of `read`, `write` and `admin` in `scopes`. The scopes are independent: `admin` does not imply `read` or `write`. The migration backfills existing keys with all three scopes. Malformed stored scope strings grant no scopes.
