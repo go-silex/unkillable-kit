@@ -4,6 +4,11 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ## Unreleased
 
+### Merge on green
+
+- Delayed push and reopen jobs no longer withdraw a newer reviewed-head
+  authorization or remove its `reviewed` hint (go-silex/unkillable-kit#158).
+
 ## unkillable-kit/v0.5.1 — 2026-11-23
 
 ### Tooling
