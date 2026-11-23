@@ -57,7 +57,7 @@
   "docs/kit/deploy-cloudflare.md": {
     "overLimitLines": 60,
     "maxLineBytes": 3643,
-    "fileBytes": 109974
+    "fileBytes": 109951
   },
   "docs/kit/environments.md": {
     "overLimitLines": 2,
@@ -75,9 +75,9 @@
     "fileBytes": 5068
   },
   "docs/kit/playbooks/start-product.md": {
-    "overLimitLines": 21,
+    "overLimitLines": 20,
     "maxLineBytes": 1323,
-    "fileBytes": 24394
+    "fileBytes": 24137
   },
   "docs/kit/processes/dev-process.md": {
     "overLimitLines": 11,
@@ -92,7 +92,7 @@
   "docs/kit/security-dependabot.md": {
     "overLimitLines": 28,
     "maxLineBytes": 732,
-    "fileBytes": 28762
+    "fileBytes": 28728
   },
   "docs/kit/standards/stack.md": {
     "overLimitLines": 51,

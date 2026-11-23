@@ -16,6 +16,14 @@ function inferredUpdate(message: string): string | undefined {
   return undefined
 }
 
+export const BETTER_AUTH_REVIEW_DETAIL =
+  'Better Auth requires human review of session cookie signing and getSession before merging'
+
+export function isBetterAuthPackage(name: string): boolean {
+  const normalized = name.toLowerCase()
+  return normalized === 'better-auth' || normalized.startsWith('@better-auth/')
+}
+
 function entryEligibility(entry: unknown, message: string, single: boolean): string | undefined {
   if (!entry || typeof entry !== 'object' || Array.isArray(entry))
     return 'malformed dependency entry'
@@ -24,6 +32,7 @@ function entryEligibility(entry: unknown, message: string, single: boolean): str
   if (typeof name !== 'string' || !name.trim() || name !== name.trim())
     return 'unknown dependency name'
   if (name.toLowerCase() === 'wrangler') return 'wrangler requires independent review'
+  if (isBetterAuthPackage(name)) return BETTER_AUTH_REVIEW_DETAIL
   let update = item['update-type']
   // Single-dependency commits sometimes omit update-type but contain exact versions in the bump sentence.
   if (update === undefined && single) update = inferredUpdate(message)

@@ -4,6 +4,13 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ## Unreleased
 
+- New Product API starters enable Workers logs and traces with query strings
+  redacted. Production onboarding now includes Worker placement near the D1
+  primary and verification with D1 spans (go-silex/unkillable-kit#161).
+- **Product action:** Refresh the generated Dependabot configuration when
+  inheriting this Kit version. Better Auth version updates are grouped separately
+  and require human review before landing (go-silex/unkillable-kit#161).
+
 ### CI
 
 - Root is the single quality gate for Kit and Product workspaces. Root
