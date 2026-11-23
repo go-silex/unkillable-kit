@@ -175,6 +175,37 @@ describe('ResetPasswordForm', () => {
       expect(input).toHaveAttribute('type', 'password')
     }
   })
+
+  it('keeps submission locked while the success callback is pending', async () => {
+    const user = userEvent.setup()
+    const authFetch = vi.fn().mockResolvedValue({})
+    let resolve!: () => void
+    const promise = new Promise<void>((done) => {
+      resolve = done
+    })
+    const onSuccess = vi.fn(() => promise)
+    render(
+      <ResetPasswordForm fetch={authFetch} copy={resetCopy} token="tok_1" onSuccess={onSuccess} />,
+    )
+    const password = screen.getByLabelText('New')
+    const confirm = screen.getByLabelText('Confirm')
+    const submit = screen.getByRole('button', { name: 'Reset' })
+    await user.type(password, '12345678')
+    await user.type(confirm, '12345678')
+    await user.click(submit)
+    await waitFor(() => expect(onSuccess).toHaveBeenCalledOnce())
+
+    try {
+      expect(submit).toBeDisabled()
+      await user.type(password, 'nextpass')
+      await user.type(confirm, 'nextpass')
+      await user.click(submit)
+      expect(authFetch).toHaveBeenCalledOnce()
+    } finally {
+      resolve()
+      await waitFor(() => expect(submit).toBeEnabled())
+    }
+  })
 })
 
 describe('ChangePasswordForm', () => {

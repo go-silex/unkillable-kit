@@ -61,7 +61,8 @@ export function ResetPasswordForm({
           method: 'POST',
           body: JSON.stringify({ newPassword: value.password, token }),
         })
-        formApi.reset()
+        formApi.resetField('password')
+        formApi.resetField('confirm')
         notify.success(copy.resetPasswordSuccess)
         await onSuccess?.()
       } catch (e) {

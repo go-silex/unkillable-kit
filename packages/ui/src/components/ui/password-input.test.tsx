@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { PasswordInput } from './password-input'
@@ -59,6 +59,35 @@ describe('PasswordInput', () => {
     expect(input).toHaveAttribute('type', 'text')
     await user.clear(input)
     expect(input).toHaveAttribute('type', 'password')
+    await user.type(input, 'next-password')
+    expect(input).toHaveAttribute('type', 'password')
+    expect(input).toHaveValue('next-password')
+  })
+
+  it('masks a revealed field after its owning form resets, even outside the form', async () => {
+    const user = userEvent.setup()
+    render(
+      <>
+        <form id="credentials">
+          <button type="reset">Reset</button>
+        </form>
+        <PasswordInput
+          form="credentials"
+          aria-label="Password"
+          showPasswordLabel="Show password"
+          hidePasswordLabel="Hide password"
+        />
+      </>,
+    )
+    const input = screen.getByLabelText('Password')
+    fireEvent.input(input, { target: { value: 'my-password' } })
+    await user.click(screen.getByRole('button', { name: 'Show password' }))
+    expect(input).toHaveAttribute('type', 'text')
+
+    await user.click(screen.getByRole('button', { name: 'Reset' }))
+
+    expect(input).toHaveValue('')
+    expect(screen.getByRole('button', { name: 'Show password', pressed: false })).toBeVisible()
     await user.type(input, 'next-password')
     expect(input).toHaveAttribute('type', 'password')
     expect(input).toHaveValue('next-password')
