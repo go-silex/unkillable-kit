@@ -11,6 +11,12 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
   inheriting this Kit version. Better Auth version updates are grouped separately
   and require human review before landing (go-silex/unkillable-kit#161).
 
+### Merge on green
+
+- Delayed push and reopen jobs preserve authorizations issued after the
+  original workflow run was created. Successful revocation checks wake merge
+  evaluation again (go-silex/unkillable-kit#158).
+
 ### CI
 
 - Root is the single quality gate for Kit and Product workspaces. Root

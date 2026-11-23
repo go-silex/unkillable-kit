@@ -110,7 +110,7 @@ jobs:
             core.setOutput('eligible', 'true');
   merge-on-green:
     name: merge-on-green
-    needs: preflight
+    needs: [preflight, revoke-reviewed-on-push]
     concurrency:
       group: merge-on-green-repository
       cancel-in-progress: false
@@ -132,7 +132,10 @@ jobs:
             (!github.event.pull_request.head.repo.full_name ||
              github.event.pull_request.head.repo.full_name == github.repository) &&
             github.actor != 'dependabot[bot]') ||
-           (github.event.action == 'edited' && !!github.event.changes.base))) ||
+           (github.event.action == 'edited' && !!github.event.changes.base) ||
+           ((github.event.action == 'synchronize' || github.event.action == 'reopened') &&
+            needs.preflight.outputs.enabled == 'true' &&
+            needs.revoke-reviewed-on-push.result == 'success'))) ||
          (github.event_name == 'issue_comment' && github.event.issue.pull_request))))
     runs-on: ubuntu-latest
     # Full retained-event scans and GitHub mergeability reads need recovery time; this is not a capacity claim.
@@ -319,14 +322,17 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const { policyFromEnv, withdrawAuthorization } = require('./scripts/kit/lib/head-authorization.cjs');
+            const { policyFromEnv, withdrawAuthorizationForPrEvent } = require('./scripts/kit/lib/head-authorization.cjs');
             const writer = getOctokit(process.env.WRITE_TOKEN);
             const prNumber = context.payload.pull_request.number;
-            await withdrawAuthorization({
+            // Use the original run's server timestamp, not runner pickup or rerun time.
+            const { data: run } = await github.rest.actions.getWorkflowRun({ ...context.repo, run_id: context.runId });
+            if (run.id !== context.runId || run.event !== 'pull_request_target') throw new Error('Wrong workflow run for withdrawal');
+            const withdrawal = await withdrawAuthorizationForPrEvent({
               github, writer, repo: context.repo, prNumber, policy: policyFromEnv(process.env),
-              operationId: `merge-revoke:${context.runId}`,
-              reason: `pull_request_${context.payload.action}`,
+              runId: context.runId, action: context.payload.action, runCreatedAt: run.created_at,
             });
+            if (!withdrawal) return;
             try {
               await writer.rest.issues.removeLabel({ ...context.repo, issue_number: prNumber, name: 'reviewed' });
             } catch (error) {
