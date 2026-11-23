@@ -64,28 +64,54 @@ describe('PasswordInput', () => {
     expect(input).toHaveValue('next-password')
   })
 
-  it('masks a revealed field after its owning form resets, even outside the form', async () => {
+  it.each([
+    { when: 'already mounted', mounted: true },
+    { when: 'mounted later', mounted: false },
+  ])('masks a revealed field when its external owner ($when) resets', async ({ mounted }) => {
     const user = userEvent.setup()
-    render(
+    const field = (
+      <PasswordInput
+        form="credentials"
+        aria-label="Password"
+        showPasswordLabel="Show password"
+        hidePasswordLabel="Hide password"
+      />
+    )
+    const owner = (
+      <form id="credentials">
+        <button type="reset">Reset credentials</button>
+      </form>
+    )
+    const unrelated = (
+      <form>
+        <button type="reset">Reset unrelated</button>
+      </form>
+    )
+    const { rerender } = render(
       <>
-        <form id="credentials">
-          <button type="reset">Reset</button>
-        </form>
-        <PasswordInput
-          form="credentials"
-          aria-label="Password"
-          showPasswordLabel="Show password"
-          hidePasswordLabel="Hide password"
-        />
+        {field}
+        {mounted && owner}
+        {unrelated}
       </>,
     )
     const input = screen.getByLabelText('Password')
     fireEvent.input(input, { target: { value: 'my-password' } })
     await user.click(screen.getByRole('button', { name: 'Show password' }))
+
+    if (!mounted) {
+      rerender(
+        <>
+          {field}
+          {owner}
+          {unrelated}
+        </>,
+      )
+    }
+
+    await user.click(screen.getByRole('button', { name: 'Reset unrelated' }))
     expect(input).toHaveAttribute('type', 'text')
 
-    await user.click(screen.getByRole('button', { name: 'Reset' }))
-
+    await user.click(screen.getByRole('button', { name: 'Reset credentials' }))
     expect(input).toHaveValue('')
     expect(screen.getByRole('button', { name: 'Show password', pressed: false })).toBeVisible()
     await user.type(input, 'next-password')

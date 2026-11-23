@@ -15,7 +15,6 @@ export function PasswordInput({
   className,
   value,
   onChange,
-  form,
   ref,
   ...props
 }: PasswordInputProps) {
@@ -42,16 +41,17 @@ export function PasswordInput({
         }
       }
 
-      const owner = input.form
-      const handleReset = () => setVisible(false)
-      owner?.addEventListener('reset', handleReset)
+      const root = input.getRootNode()
+      const handleReset = (event: Event) => {
+        if (event.target === input.form) setVisible(false)
+      }
+      root.addEventListener('reset', handleReset, true)
       return () => {
-        owner?.removeEventListener('reset', handleReset)
+        root.removeEventListener('reset', handleReset, true)
         cleanupRef?.()
       }
     },
-    // Rebind when the input is explicitly associated with a different form.
-    [ref, form],
+    [ref],
   )
 
   const Icon = visible ? EyeOffIcon : EyeIcon
@@ -60,7 +60,6 @@ export function PasswordInput({
     <InputGroup>
       <InputGroupInput
         {...props}
-        form={form}
         ref={inputRef}
         type={visible ? 'text' : 'password'}
         disabled={disabled}
