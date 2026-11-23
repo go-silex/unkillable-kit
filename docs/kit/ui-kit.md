@@ -4,29 +4,23 @@ Shared **shadcn Base UI** primitives for Chemin A apps. Product branding does **
 
 ## What it is
 
-- Package: `packages/ui` → import `@kit/ui`
-- Styles: `@import "@kit/ui/styles.css"` (see `apps/example-web/src/index.css`)
-- Living catalog: local route **`/admin/design-system`** (platform session required)
+- Package: `packages/ui` → import `@kit/ui`.
+- Styles: `@kit/ui/styles.css` (`@kit/ui/globals.css` alias) includes Geist.
+- Catalog: `/admin/design-system` (platform session required).
 
 ## Theme
 
-Import `ThemeProvider`, `useTheme`, and the `Theme` type from `@kit/ui`. Wrap the App with `<ThemeProvider storageKey="kit.theme">` (choose an App-owned key). `useTheme()` exposes `theme` (`light`, `dark`, or `system`), `setTheme`, and the resolved `light` or `dark` value. The provider toggles `.dark` on the document root and follows system preference changes while `system` is selected. Invalid or inaccessible storage falls back to `system`; an unavailable system preference resolves to `light`.
+Import `ThemeProvider`, `useTheme`, and `Theme` from `@kit/ui`. Wrap the App in `<ThemeProvider storageKey="kit.theme">` with an App-owned key. `useTheme()` returns `theme` (`light`, `dark`, or `system`), `setTheme`, and the resolved theme. The provider toggles `.dark` on the document root and tracks system changes in `system` mode. Invalid or inaccessible storage falls back to `system`; without a system preference, it resolves to `light`.
 
-The Example App keeps `kit.theme` and its existing `public/theme-boot.js` to apply the same selection before React mounts. Apps using a boot script must use the same storage key and theme rules as their provider.
+The Example App uses `kit.theme` in `public/theme-boot.js` before React mounts. Boot scripts must match the provider's storage key and theme rules.
 
 ## Zero-edit / product brand
 
-Do **not** patch `packages/ui` for product colors or copy.
+Custom font: import `@kit/ui/base.css` → App fonts → [App tokens](product-consumer-contract.md#design-overrides-accepted--no-exception-needed). Set `--font-sans` on `:root`; headings follow. Base alone uses system fonts.
 
-1. Import kit styles in the app.
-2. Override CSS variables in an **app-owned** file (tokens).
-3. Compose shells/pages in `apps/<product>-web` wrapping `@kit/ui`.
+Modal backdrops: set `--overlay` on `:root` and `.dark` (default 10% black). On `ui:add`, keep `bg-overlay` in `dialog.tsx`, `alert-dialog.tsx`, and `sheet.tsx`.
 
-SSoT: [`docs/kit/product-consumer-contract.md`](product-consumer-contract.md) (design_overrides).
-
-Client-facing release notes belong in the Product App, not shared Kit paths.
-The Example App demonstrates an in-app changelog; it is not a shared patchlog
-Package. Promote a shared implementation only after at least two Products need it.
+Keep branding, shells, and release notes in the App. Share changelog code only when two Products need it.
 
 ## Conventions for example-web
 
@@ -41,7 +35,10 @@ Package. Promote a shared implementation only after at least two Products need i
 
 ## Exports
 
-See `packages/ui/src/index.ts` for the current export map (Button, Dialog, Sheet, Sidebar, AlertDialog, Select, Empty, …). Prefer the living design-system page over duplicating a long inventory here.
+See `packages/ui/src/index.ts` and the catalogue for exports.
+`Tabs` + `TabsList` + `TabsTrigger` + `TabsContent` switch local panels.
+Set `activateOnFocus={false}` on `TabsList` for manual activation.
+`PasswordInput` is a Kit composition of `InputGroup`; pass `showPasswordLabel` and `hidePasswordLabel` from App i18n.
 
 ### Tasks-related primitives (shadcn, 2026-08)
 

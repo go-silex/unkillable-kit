@@ -1,5 +1,6 @@
 import type { FlowsMessages } from './flows-catalog'
 import { flowsFr } from './flows-catalog'
+import { type FoundationsMessages, foundationsFr } from './foundations-catalog'
 import { type ImpersonationMessages, impersonationFr } from './impersonation-catalog'
 import { type KeysMessages, keysFr } from './keys-catalog'
 
@@ -49,6 +50,8 @@ export type Messages = {
   magicHint: string
   email: string
   password: string
+  showPasswordLabel: string
+  hidePasswordLabel: string
   submit: string
   logout: string
   notes: string
@@ -213,9 +216,6 @@ export type Messages = {
   designSystem: string
   designSystemDesc: string
   designSystemFooter: string
-  dsFoundations: string
-  dsFoundationsDesc: string
-  dsForms: string
   dsFeedback: string
   dsOverlays: string
   dsData: string
@@ -295,10 +295,12 @@ export type Messages = {
   membersEmpty: string
   inviteExpires: string
 } & FlowsMessages &
+  FoundationsMessages &
   ImpersonationMessages &
   KeysMessages
 
 export const fr: Messages = {
+  ...foundationsFr,
   ...impersonationFr,
   ...keysFr,
   appTitle: 'Kit Kit',
@@ -346,6 +348,8 @@ export const fr: Messages = {
   magicHint: 'Réponse générique (pas d’énumération). Lien valable environ 5 minutes.',
   email: 'E-mail',
   password: 'Mot de passe',
+  showPasswordLabel: 'Afficher le mot de passe',
+  hidePasswordLabel: 'Masquer le mot de passe',
   submit: 'Se connecter',
   logout: 'Déconnexion',
   notes: 'Notes',
@@ -512,9 +516,6 @@ export const fr: Messages = {
   designSystemDesc:
     'Catalogue shadcn Base (base-nova) · réservé plateforme · templates de page de référence',
   designSystemFooter: '100 % composants @kit/ui (registry shadcn + @base-ui/react)',
-  dsFoundations: 'Fondations',
-  dsFoundationsDesc: 'Tokens couleur, typo, radius (CSS variables shadcn)',
-  dsForms: 'Formulaires',
   dsFeedback: 'Feedback',
   dsOverlays: 'Overlays',
   dsData: 'Data display',

@@ -1,9 +1,10 @@
 import { flowsEn } from './flows-catalog'
+import { foundationsEn } from './foundations-catalog'
 import type { Messages } from './fr'
 import { impersonationEn } from './impersonation-catalog'
 import { keysEn } from './keys-catalog'
-
 export const en: Messages = {
+  ...foundationsEn,
   ...impersonationEn,
   ...keysEn,
   appTitle: 'Kit Kit',
@@ -51,6 +52,8 @@ export const en: Messages = {
   magicHint: 'Generic response (no account enumeration). Link valid about 5 minutes.',
   email: 'Email',
   password: 'Password',
+  showPasswordLabel: 'Show password',
+  hidePasswordLabel: 'Hide password',
   submit: 'Sign in',
   logout: 'Sign out',
   notes: 'Notes',
@@ -216,9 +219,6 @@ export const en: Messages = {
   designSystem: 'Design system',
   designSystemDesc: 'shadcn Base catalog (base-nova) · platform only · reference page templates',
   designSystemFooter: '100% @kit/ui components (shadcn registry + @base-ui/react)',
-  dsFoundations: 'Foundations',
-  dsFoundationsDesc: 'Color tokens, type, radius (shadcn CSS variables)',
-  dsForms: 'Forms',
   dsFeedback: 'Feedback',
   dsOverlays: 'Overlays',
   dsData: 'Data display',

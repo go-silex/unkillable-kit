@@ -5,8 +5,9 @@ Reusable React components and styling; it does not own application-specific scre
 ## Entry points
 
 - `@kit/ui`: React components, hooks and theme helpers.
-- `@kit/ui/styles.css`: shared global stylesheet.
-- `@kit/ui/globals.css`: the same shared global stylesheet.
+- `@kit/ui/styles.css`: shared global styles with Geist.
+- `@kit/ui/globals.css`: alias for `@kit/ui/styles.css`.
+- `@kit/ui/base.css`: the same shared styles without Geist; defaults to the system font stack.
 
 ## Composition
 
