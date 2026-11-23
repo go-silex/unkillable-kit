@@ -81,6 +81,7 @@ Any other path selects the full bar: the lockfile, root manifests, root configur
 Every Product workspace stays selected on every pull request.
 Root validates the full bar and every declaration before it selects.
 The selection uses the trusted pull-request base and head that `scripts/kit/select-tooling.ts` already binds.
+Only a non-empty diff proven to contain Product-owned paths exclusively narrows the bar: an empty diff selects the full bar, and an unprovable context fails the plan.
 
 Push plans, Kit `main` included, always hold the complete Coverage bar, so every promoted push SHA carries the full proof.
 The tests of a Kit-owned workspace read only Kit-owned paths; a check that must read Product paths belongs to Root core or tooling.
