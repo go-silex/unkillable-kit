@@ -314,4 +314,47 @@ describe('custom auth email rendering', () => {
       expect(sent).toEqual([])
     },
   )
+
+  it.each(['subject', 'text', 'html'] as const)(
+    'masks a throwing renderer %s getter and does not send',
+    async (field) => {
+      const { port, sent } = recordingPort()
+      const render: NonNullable<AuthEmailConfig['render']> = ({ url }) =>
+        Object.defineProperty({ subject: 'Subject', text: 'Text', html: '' }, field, {
+          get() {
+            throw new Error(url)
+          },
+        })
+      const sending = sendMagicLinkMail(port, {
+        email: 'recipient@example.com',
+        url: LOOPBACK,
+        allowedOrigins: [],
+        allowLoopbackHttp: true,
+        emailConfig: { ...emailConfig, render },
+      })
+
+      await expect(sending).rejects.toHaveProperty('message', 'AUTH_EMAIL_RENDER_FAILED')
+      await expect(sending).rejects.not.toHaveProperty('cause')
+      expect(sent).toEqual([])
+    },
+  )
+
+  it.each(['subject', 'text', 'html'] as const)(
+    'rejects a non-string renderer %s without sending',
+    async (field) => {
+      const { port, sent } = recordingPort()
+      const render = () => ({ subject: 'Subject', text: 'Text', html: '', [field]: 42 })
+
+      await expect(
+        sendMagicLinkMail(port, {
+          email: 'recipient@example.com',
+          url: LOOPBACK,
+          allowedOrigins: [],
+          allowLoopbackHttp: true,
+          emailConfig: { ...emailConfig, render },
+        }),
+      ).rejects.toThrow('AUTH_EMAIL_RENDER_FAILED')
+      expect(sent).toEqual([])
+    },
+  )
 })

@@ -139,9 +139,10 @@ export function createBetterAuth(opts: CreateBetterAuthOpts): KitBetterAuth {
   const publicSignup = opts.allowPublicSignup ?? false
   const { emailPort, emailConfig } = opts
   assertEmailConfig(emailPort, emailConfig)
-  const magicLinkExpiresIn = opts.magicLinkExpiresIn ?? MAGIC_LINK_EXPIRES_IN_SEC
+  // Better Auth treats falsy overrides as unset when issuing tokens.
+  const magicLinkExpiresIn = opts.magicLinkExpiresIn || MAGIC_LINK_EXPIRES_IN_SEC
   const resetPasswordTokenExpiresIn =
-    opts.resetPasswordTokenExpiresIn ?? RESET_PASSWORD_TOKEN_EXPIRES_IN_SEC
+    opts.resetPasswordTokenExpiresIn || RESET_PASSWORD_TOKEN_EXPIRES_IN_SEC
   const linkOrigins = new Set<string>(trustedOrigins)
   let base: URL
   try {

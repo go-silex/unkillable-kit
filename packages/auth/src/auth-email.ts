@@ -74,11 +74,11 @@ async function sendAuthEmail(
   const { email, emailConfig } = input
   const locale = await resolveRecipientEmailLocale(emailConfig, email)
   const { productName, render } = emailConfig
-  let content: AuthEmailContent
+  let message: AuthEmailContent & { to: string }
   if (render !== undefined) {
     const url = assertSafeTokenHref(input.url, input)
     try {
-      content = await render({
+      const { subject, text, html } = await render({
         kind,
         to: email,
         url,
@@ -86,6 +86,9 @@ async function sendAuthEmail(
         productName,
         expiresInSec: input.expiresInSec ?? defaultExpiresInSec,
       })
+      if (typeof subject !== 'string' || typeof text !== 'string' || typeof html !== 'string')
+        throw new TypeError('Expected string fields from renderer')
+      message = { to: email, subject, text, html }
     } catch {
       // Renderer errors may contain the token URL. Do not forward the error or its cause.
       throw new Error('AUTH_EMAIL_RENDER_FAILED')
@@ -100,15 +103,10 @@ async function sendAuthEmail(
       allowedOrigins: input.allowedOrigins,
       allowLoopbackHttp: input.allowLoopbackHttp,
     }
-    content =
+    message =
       kind === 'magic-link' ? buildMagicLinkEmailText(params) : buildResetPasswordEmailText(params)
   }
-  const sent = await emailPort.send({
-    to: email,
-    subject: content.subject,
-    text: content.text,
-    html: content.html,
-  })
+  const sent = await emailPort.send(message)
   if (!sent.ok) throw new Error('email send returned not ok')
 }
 

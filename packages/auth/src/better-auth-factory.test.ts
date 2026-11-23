@@ -429,6 +429,37 @@ describe('createBetterAuth', () => {
     ])
   })
 
+  it('uses default token lifetimes for zero overrides in both renderer calls', async () => {
+    const render = vi.fn(() => ({ subject: 'Subject', text: 'Text', html: '' }))
+    const auth = factory({
+      emailConfig: { ...emailConfig, render },
+      magicLinkExpiresIn: 0,
+      resetPasswordTokenExpiresIn: 0,
+    })
+    await auth.options.emailAndPassword?.sendResetPassword?.({
+      user: { email: 'recipient@example.com' },
+      url: 'http://localhost:8787/api/auth/reset-password/tok?callbackURL=http%3A%2F%2Flocalhost%3A5173%2Freset-password',
+      token: 'tok',
+    })
+    const magic = auth.options.plugins?.find((plugin) => plugin.id === 'magic-link') as {
+      options?: {
+        expiresIn?: number
+        sendMagicLink?: (input: { email: string; url: string }) => Promise<void>
+      }
+    }
+    await magic?.options?.sendMagicLink?.({
+      email: 'recipient@example.com',
+      url: 'http://localhost:8787/api/auth/magic-link/verify?token=x',
+    })
+
+    expect(render.mock.calls).toEqual([
+      [expect.objectContaining({ kind: 'reset-password', expiresInSec: 3600 })],
+      [expect.objectContaining({ kind: 'magic-link', expiresInSec: 300 })],
+    ])
+    expect(auth.options.emailAndPassword?.resetPasswordTokenExpiresIn).toBe(3600)
+    expect(magic.options?.expiresIn).toBe(300)
+  })
+
   it('does not allowlist a request-derived baseURL host', async () => {
     const send = vi.fn(async () => ({ ok: true, transport: 'log' }))
     const auth = factory({
