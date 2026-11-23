@@ -123,7 +123,7 @@ export function createOidcProvenance() {
     retained: SecretConfig,
     secret: string,
     signature: Uint8Array<ArrayBuffer>,
-    message: Uint8Array<ArrayBuffer>,
+    message: BufferSource,
   ) {
     for (const candidate of retained.keys.values()) {
       if (candidate === secret) continue
