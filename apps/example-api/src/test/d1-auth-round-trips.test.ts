@@ -2,10 +2,10 @@ import { expect } from 'vitest'
 import {
   type SessionRoundTripCeilings,
   sessionRoundTripTests,
-} from '../../../packages/auth/src/test/session-round-trips'
-import { DEMO_EMAIL, DEMO_PASSWORD } from './services/auth'
-import { createApiTestContext, TEST_ORIGIN } from './test/api-fixture'
-import { createRouteFixture } from './test/d1-route-fixture'
+} from '../../../../packages/auth/src/test/session-round-trips'
+import { DEMO_EMAIL, DEMO_PASSWORD } from '../services/auth'
+import { createApiTestContext, TEST_ORIGIN } from './api-fixture'
+import { createRouteFixture } from './d1-route-fixture'
 
 const ceilings: SessionRoundTripCeilings = {
   getSession: 8,
