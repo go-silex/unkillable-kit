@@ -1,10 +1,10 @@
 #!/usr/bin/env bun
 /**
  * Bound unread cat-file payload as chunks enter the reader queue. This catches
- * full-blob queuing even if the event loop never samples the live buffers.
- * Also bound sampled post-GC external memory; this is not a bound on the JS
- * heap or on allocations released between samples. RSS is diagnostic only,
- * since it includes allocator pages retained after Buffers are reclaimed.
+ * the historical full-blob queue regression regardless of timer scheduling.
+ * Outside the queue, only the sampled post-GC external bound applies; timer
+ * samples can miss transient allocations and do not measure the JS heap.
+ * RSS is diagnostic only: it includes allocator pages kept after reclamation.
  *
  * Usage: bun scripts/kit/lib/materialize-memory-selftest.ts [MiB=128]
  */
@@ -21,7 +21,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import type { materializeTree } from './materialize-tree.ts'
 
 const MIB = 1024 * 1024
@@ -31,7 +31,7 @@ if (!Number.isFinite(mib) || mib < 1) {
   process.exit(2)
 }
 const bytes = Math.floor(mib * MIB)
-const root = mkdtempSync(join(tmpdir(), 'mat-mem-'))
+const root = mkdtempSync(resolve(tmpdir(), 'mat-mem-'))
 const snap = join(root, 'out')
 
 function git(args: string[], cwd = root) {
@@ -50,7 +50,7 @@ function git(args: string[], cwd = root) {
   return r.stdout
 }
 
-/** Instrument both writers in a scratch copy; leave the shipped reader untouched. */
+/** Instrument a test-only copy; leave the shipped reader untouched. */
 async function loadMaterializer() {
   const source = readFileSync(new URL('./materialize-tree.ts', import.meta.url), 'utf8')
   const anchor = '    buffered += chunk.length\n'
@@ -58,15 +58,14 @@ async function loadMaterializer() {
   if (after === undefined || extra.length > 0) {
     throw new Error('cannot attach memory probe to the cat-file queue')
   }
-  const path = join(root, 'materialize-tree.ts')
-  writeFileSync(
-    path,
-    `${before}${anchor}    onQueued?.(buffered)\n${after}
+  const instrumented = `${before}${anchor}    onQueued?.(buffered)\n${after}
 let onQueued: ((bytes: number) => void) | undefined
 export function observeQueue(observer: (bytes: number) => void) { onQueued = observer }
-`,
-  )
-  return (await import(path)) as {
+`
+  // The reader imports only Node built-ins. Load its instrumented source
+  // directly so Bun cannot treat literal ? or # in TMPDIR as URL syntax.
+  const encoded = Buffer.from(instrumented).toString('base64')
+  return (await import(`data:application/typescript;base64,${encoded}`)) as {
     materializeTree: typeof materializeTree
     observeQueue: (observer: (bytes: number) => void) => void
   }
