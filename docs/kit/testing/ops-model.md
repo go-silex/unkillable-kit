@@ -70,11 +70,12 @@ PR diff omits Kit-owned workspaces. Product workspaces always run; pushes and
 local runs retain the full bar ([ADR-0024](../architecture/adr/0024-root-single-quality-gate.md)).
 
 Each unpartitioned App gets one job. Packages are grouped round-robin, in
-relative order, up to four per VM. Each runs separately and sequentially through
-Root's `bunx vitest run --coverage`, with unchanged isolation, floors and App
-worker settings. Each selected partitioned App gets a reusable workflow call:
-native Vitest parts, then its own merge and receipt. The local monolithic run is
-the reference ([ADR-0023](../architecture/adr/0023-ci-coverage-partitions.md)).
+relative order, up to four per VM. Each runs sequentially through native Vitest
+coverage with its own isolation, floors and worker settings. A Product verdict
+requires a positive floor on a metric actually measured by the run. Each
+selected partitioned App gets a reusable workflow call: native Vitest parts,
+then its own merge and receipt. The local monolithic run is the reference
+([ADR-0023](../architecture/adr/0023-ci-coverage-partitions.md)).
 
 Each workspace produces a receipt; failure keeps the group red without stopping later members. Before the next invocation clears `coverage/`, its available report tree, even after failure, moves to a workspace-qualified directory; receipts and reports stay separate.
 

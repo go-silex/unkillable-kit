@@ -44,17 +44,24 @@ env -u KIT_SCHEMA_CATALOG bash scripts/kit/kit-schema-sync.sh --app apps/<produc
 # also deploys the unnamed configuration, add its dry-run explicitly.
 (
   cd "apps/<product>-api"
-  worker_envs=$(bun --no-env-file -e '
+  bun --no-env-file -e '
     const config = Bun.TOML.parse(await Bun.file("wrangler.toml").text())
-    console.log(Object.keys(config.env ?? {}).sort().join("\n"))
-  ')
-  if [[ -z "$worker_envs" ]]; then
-    bun x --no-install wrangler deploy --dry-run --config wrangler.toml --outdir dist
-  else
-    while IFS= read -r worker_env; do
-      bun x --no-install wrangler deploy --dry-run --config wrangler.toml --env "$worker_env" --outdir "dist/$worker_env"
-    done <<< "$worker_envs"
-  fi
+    const environments = Object.keys(config.env ?? {}).sort()
+    const command = [
+      "bun", "x", "--no-install", "wrangler", "deploy", "--dry-run", "--config", "wrangler.toml",
+    ]
+    function build(args) {
+      const result = Bun.spawnSync([...command, ...args], {
+        stdin: "inherit", stdout: "inherit", stderr: "inherit",
+      })
+      if (!result.success) process.exit(result.exitCode || 1)
+    }
+    if (!environments.length) build(["--outdir", "dist"])
+    // A Wrangler environment name is an argument, never a path component.
+    for (const [index, env] of environments.entries()) {
+      build([`--env=${env}`, "--outdir", `dist/env-${index + 1}`])
+    }
+  '
 )
 
 echo "✓ product-validate OK"

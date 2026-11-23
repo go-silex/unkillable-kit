@@ -41,7 +41,7 @@ EOF
   if ((web)); then
     mkdir -p "$fixture/apps/fixture-web"
     cat >> "$fixture/apps/fixture-api/wrangler.toml" <<'EOF'
-[env.preview.vars]
+[env."preview/edge".vars]
 NAME = "unused"
 [env.production]
 name = "fixture-prod"
@@ -67,8 +67,8 @@ EOF
     printf '%s\n' 'product-root schema --app apps/fixture-api --check'
     if ((web)); then
       printf '%s\n' 'fixture-web x --no-install vite build'
-      printf '%s\n' 'fixture-api x --no-install wrangler deploy --dry-run --config wrangler.toml --env preview --outdir dist/preview'
-      printf '%s\n' 'fixture-api x --no-install wrangler deploy --dry-run --config wrangler.toml --env production --outdir dist/production'
+      printf '%s\n' 'fixture-api x --no-install wrangler deploy --dry-run --config wrangler.toml --env=preview/edge --outdir dist/env-1'
+      printf '%s\n' 'fixture-api x --no-install wrangler deploy --dry-run --config wrangler.toml --env=production --outdir dist/env-2'
     else
       printf '%s\n' 'fixture-api x --no-install wrangler deploy --dry-run --config wrangler.toml --outdir dist'
     fi

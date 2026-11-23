@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { type SpawnSyncReturns, spawnSync } from 'node:child_process'
 import {
   copyFileSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -171,6 +172,18 @@ try {
     json('event.json', { pull_request: { base: { sha: base }, head: { sha: head } } })
   }
 
+  function configureCoverage(floor: string, options = '') {
+    put(
+      `${app}/vitest.config.mts`,
+      `import { makeCoverage } from '../../packages/config/vitest-coverage.mts'
+export default { test: {
+  maxWorkers: 1,
+  coverage: { ...makeCoverage('product-fixture'${floor}), ${options} },
+} }
+`,
+    )
+  }
+
   // Bare Kit core succeeds with only protected App manifests.
   checked(bun('install', '--lockfile-only', '--offline'))
   commit('Bare Kit')
@@ -271,20 +284,42 @@ test('fixture value', () => expect(value).toBe(2))
   rmSync(coverageReceipt)
   rmSync(join(root, app, 'src/uncovered.ts'))
 
+  // listTags reports success without running this deliberately failing test.
+  put(
+    `${app}/vitest.config.mts`,
+    `import { makeCoverage } from '../../packages/config/vitest-coverage.mts'
+export default { test: {
+  listTags: true,
+  tags: [{ name: 'fixture' }],
+  coverage: makeCoverage('product-fixture', { lines: 100 }),
+} }
+`,
+  )
+  source(app, 'export const value: number = 1\n')
+  commit('Product config lists tags instead of running suites')
+  const listedTags = shard()
+  const tagsReceipt = JSON.parse(readFileSync(coverageReceipt, 'utf8'))
+  rmSync(coverageReceipt)
+  source(app, 'export const value: number = 2\n')
+
+  // A branch floor with zero branches does not measure this straight-line App.
+  configureCoverage(', { branches: 100 }')
+  commit('Product floor measures no branches')
+  const ordinaryVacuous = shard()
+  const ordinaryReceipt = JSON.parse(readFileSync(coverageReceipt, 'utf8'))
+  rmSync(coverageReceipt)
+
   // A passing suite cannot earn a complete receipt with absent or zero floors.
   for (const floor of ['', ', { lines: 0, branches: 0, functions: 0, statements: 0 }']) {
-    put(
-      `${app}/vitest.config.mts`,
-      `import { makeCoverage } from '../../packages/config/vitest-coverage.mts'
-export default { test: { maxWorkers: 1, coverage: makeCoverage('product-fixture'${floor}) } }
-`,
-    )
+    configureCoverage(floor)
     commit('Product lacks a positive floor')
     failed(shard(), /apps\/product-fixture.*coverage floor/)
     const receipt = JSON.parse(readFileSync(coverageReceipt, 'utf8'))
     assert.equal(receipt.complete, false)
     rmSync(coverageReceipt)
   }
+
+  configureCoverage(', { branches: 100 }')
 
   // Short parts still produce native blobs; the final merge enforces the floor.
   delete env.GITHUB_EVENT_NAME
@@ -297,17 +332,50 @@ import { value } from './value'
 test('second fixture value', () => expect(value).toBe(2))
 `,
   )
-  commit('Partition Product without a positive floor')
-  const raw = join(root, 'raw')
-  mkdirSync(raw)
-  for (const index of [1, 2]) {
-    const part = join(raw, `coverage-raw-12345-1-apps__product-fixture-${index}-of-2`)
-    checked(gate('--ci-coverage-part', app, `${index}/2`, '--raw', part))
+  const summaryFile = 'coverage/product-fixture/coverage-summary.json'
+  function partitionedCoverage(message: string, priorSummary?: string) {
+    commit(message)
+    const raw = join(root, 'raw')
+    mkdirSync(raw)
+    try {
+      for (const index of [1, 2]) {
+        const part = join(raw, `coverage-raw-12345-1-apps__product-fixture-${index}-of-2`)
+        checked(gate('--ci-coverage-part', app, `${index}/2`, '--raw', part))
+      }
+      if (priorSummary) put(summaryFile, priorSummary)
+      return gate('--ci-coverage-merge', app, '--raw', raw, '--receipt', coverageReceipt)
+    } finally {
+      rmSync(raw, { recursive: true, force: true })
+    }
   }
-  failed(
-    gate('--ci-coverage-merge', app, '--raw', raw, '--receipt', coverageReceipt),
-    /apps\/product-fixture.*coverage floor/,
+  const mergedVacuous = partitionedCoverage(
+    'Partition Product with a floor that measures no branches',
   )
+  assert.deepEqual(
+    [listedTags.status, ordinaryVacuous.status, mergedVacuous.status],
+    [1, 1, 1],
+    `${listedTags.stdout}\n${ordinaryVacuous.stdout}\n${mergedVacuous.stdout}`,
+  )
+  failed(listedTags, /apps\/product-fixture.*no completed tests/)
+  assert.equal(tagsReceipt.complete, false)
+  failed(ordinaryVacuous, /apps\/product-fixture.*coverage floor.*measured/)
+  assert.equal(ordinaryReceipt.complete, false)
+  failed(mergedVacuous, /apps\/product-fixture.*coverage floor.*measured/)
+  assert.equal(existsSync(coverageReceipt), false)
+
+  configureCoverage(', { lines: 100 }')
+  checked(partitionedCoverage('Partition Product under a measured line floor'))
+  assert.equal(JSON.parse(readFileSync(coverageReceipt, 'utf8')).complete, true)
+  rmSync(coverageReceipt)
+
+  // Seed the native summary from the previous successful merge, not a fresh report.
+  const priorSummary = readFileSync(join(root, summaryFile), 'utf8')
+  configureCoverage(', { lines: 100 }', "clean: false, reporter: ['text']")
+  failed(
+    partitionedCoverage('Partition Product without a fresh json summary', priorSummary),
+    /apps\/product-fixture.*did not produce a native coverage summary/,
+  )
+  assert.equal(existsSync(coverageReceipt), false)
   console.log('product-root-gate: Kit and Product App coverage and enrollment fixtures passed')
 } finally {
   rmSync(root, { recursive: true, force: true })
