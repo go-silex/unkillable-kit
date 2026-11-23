@@ -4,6 +4,22 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ## Unreleased
 
+### CI
+
+- Root is the single quality gate for Kit and Product workspaces. Root
+  enforces Product App enrollment and omits Kit-owned coverage only on proven
+  Product-only pull requests; pushes still prove the whole bar
+  (go-silex/unkillable-kit#156).
+- **Product action:** In the same Kit upgrade PR, ensure each Product App
+  declares `typecheck` and `test:coverage`, sets floors through `makeCoverage`,
+  and has a risk tier in `config/product/coverage-order.txt`. Add coverage
+  partitions under ADR-0023 only where needed. Remove duplicate typecheck,
+  tests (including MCP), `zero-edit` and `deploy-gate:check` from copied Product
+  validation. Move standalone App smoke checks into Root coverage before
+  removing their old calls. Keep deployment builds and Product-specific guards.
+  One Product must pilot the release and prove the hosted 300-second Root budget
+  before wider adoption (go-silex/unkillable-kit#156).
+
 ## unkillable-kit/v0.6.0 — 2026-11-23
 
 - New Product API starters enable Workers logs and traces with query strings

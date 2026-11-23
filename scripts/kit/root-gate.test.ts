@@ -29,6 +29,19 @@ function requireSuccess(result: SpawnSyncReturns<string>) {
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`)
 }
 
+function joinArgs(dir: string, producers = 'success', coverage = 'success', parts = 'success') {
+  return [
+    '--ci-join',
+    dir,
+    '--producers-result',
+    producers,
+    '--coverage-result',
+    coverage,
+    '--parts-result',
+    parts,
+  ]
+}
+
 function assertTimings(
   output: string,
   expected: { task: string; status: 'passed' | 'failed'; exitCode: number }[],
@@ -86,6 +99,9 @@ function withFixture(
         copyFileSync(join(kitScripts, name), join(fixtureScripts, name))
       }
     }
+    const zones = 'config/kit/zero-edit-zones.json'
+    mkdirSync(join(fixture, 'config/kit'), { recursive: true })
+    copyFileSync(join(kitScripts, '../..', zones), join(fixture, zones))
     writeFileSync(join(fixtureScripts, 'test-coverage.sh'), '#!/bin/bash\nexit 0\n')
     writeFileSync(
       join(fixture, 'package.json'),
@@ -185,9 +201,9 @@ function sameRunJoin() {
     )
 
     convertFixtureCoverage(receipts)
-    requireSuccess(root('--ci-join', receipts, '--producers-result', 'success'))
+    requireSuccess(root(...joinArgs(receipts)))
     rmSync(join(receipts, 'root-coverage-apps__example-api.json'))
-    const missingCoverage = root('--ci-join', receipts, '--producers-result', 'success')
+    const missingCoverage = root(...joinArgs(receipts))
     assert.ok(
       missingCoverage.status !== null && missingCoverage.status !== 0,
       'missing Coverage must fail',
@@ -357,16 +373,12 @@ function coverageShardJoin(repo: string, env: NodeJS.ProcessEnv) {
         partitions,
       )
     for (const workspace of workspaces) writeShard(workspace)
-    const skippedVerdict = 'success-without-parts'
-    const joinGate = (status = 'success') =>
+    const joinGate = (coverage = 'success', parts = 'success') =>
       command(repo, env, process.execPath, [
         'run',
         'validate:full',
         '--',
-        '--ci-join',
-        dir,
-        '--producers-result',
-        status,
+        ...joinArgs(dir, 'success', coverage, parts),
       ])
     const partitionPath = join(dir, 'root-coverage-apps__example-api.json')
     const partitionReceipt = readFileSync(partitionPath, 'utf8')
@@ -379,9 +391,14 @@ function coverageShardJoin(repo: string, env: NodeJS.ProcessEnv) {
     assert.notEqual(joinGate().status, 0, 'wrong partition count must fail')
     writeFileSync(partitionPath, partitionReceipt)
     requireSuccess(joinGate())
-    const skippedWithValidReceipts = joinGate(skippedVerdict)
-    assert.notEqual(skippedWithValidReceipts.status, 0)
-    assert.match(skippedWithValidReceipts.stderr, /producer matrix did not succeed/)
+    for (const result of ['failure', 'cancelled', 'skipped', 'unknown']) {
+      const noParts = joinGate('success', result)
+      assert.notEqual(noParts.status, 0)
+      assert.match(noParts.stderr, /coverage partitions producer did not succeed/)
+      const noCoverage = joinGate(result, 'success')
+      assert.notEqual(noCoverage.status, 0)
+      assert.match(noCoverage.stderr, /coverage producer did not succeed/)
+    }
     const ordinary = workspaces.find((ws) => !partitions.has(ws))
     assert.ok(ordinary, 'the live bar must include an unpartitioned workspace')
     const ordinaryPath = join(dir, `root-coverage-${ordinary.replace('/', '__')}.json`)
@@ -403,21 +420,15 @@ function coverageShardJoin(repo: string, env: NodeJS.ProcessEnv) {
         'run',
         'validate:full',
         '--',
-        '--ci-join',
-        whole,
-        '--producers-result',
-        skippedVerdict,
+        ...joinArgs(whole, 'success', 'success', 'skipped'),
       ])
       assert.notEqual(skippedWhole.status, 0)
-      assert.match(skippedWhole.stderr, /producer matrix did not succeed/)
+      assert.match(skippedWhole.stderr, /coverage partitions producer did not succeed/)
       const result = command(repo, env, process.execPath, [
         'run',
         'validate:full',
         '--',
-        '--ci-join',
-        whole,
-        '--producers-result',
-        'success',
+        ...joinArgs(whole),
       ])
       assert.notEqual(
         result.status,
@@ -435,7 +446,11 @@ function coverageShardJoin(repo: string, env: NodeJS.ProcessEnv) {
     rmSync(join(dir, `root-coverage-${dropped.replace('/', '__')}.json`))
     const missing = joinGate()
     assert.notEqual(missing.status, 0)
-    assert.match(missing.stderr, /do not match the discovered workspace bar/)
+    assert.ok(
+      missing.stderr.includes(
+        `coverage receipts missing from the selected workspace bar: ${dropped}`,
+      ),
+    )
     writeShard(dropped)
     writeFileSync(join(dir, 'root-coverage.json'), '{}\n')
     const ambiguous = joinGate()
@@ -679,7 +694,7 @@ function coveragePlan() {
       join(fixture, 'scripts/kit/test-coverage.sh'),
       [
         '#!/bin/bash',
-        `if [[ "\${COVERAGE_LIST_PARTS:-}" == 1 ]]; then exit 0;`,
+        `if [[ "\${COVERAGE_LIST_PARTS:-}" == 1 ]]; then echo 'apps/example-api 2';`,
         `elif [[ -n "\${COVERAGE_ONLY:-}" ]]; then printf "%s\\n" "$COVERAGE_ONLY";`,
         `elif [[ -n "\${COVERAGE_CHANGED_BASE:-}" || "\${COVERAGE_LIST_KIT:-}" == 1 ]]; then echo apps/truncated;`,
         'else cat listing.txt; fi',
@@ -689,7 +704,7 @@ function coveragePlan() {
     const invoke = () =>
       command(fixture, env, process.execPath, ['run', 'validate:full', '--', '--coverage-plan'])
     const plan = (inventory: string[]) => {
-      writeFileSync(listing, `${inventory.join('\n')}\n`)
+      writeFileSync(listing, `apps/example-api\n${inventory.join('\n')}\n`)
       const result = invoke()
       requireSuccess(result)
       return JSON.parse(result.stdout) as { id: string; workspaces: string[] }[]
@@ -705,7 +720,7 @@ function coveragePlan() {
       'packages/eta',
       'packages/theta',
     ]
-    const apps = ['apps/shared', 'apps/unknown-product', 'apps/example-api']
+    const apps = ['apps/shared', 'apps/unknown-product', 'apps/another']
     const inventory = [apps[0], ...packages.slice(0, 5), apps[1], ...packages.slice(5), apps[2]]
     const expected = [
       { id: 'packages-1', workspaces: [packages[0], packages[3], packages[6]] },
@@ -713,7 +728,7 @@ function coveragePlan() {
       { id: 'packages-3', workspaces: [packages[2], packages[5], packages[8]] },
       { id: 'apps__shared', workspaces: [apps[0]] },
       { id: 'apps__unknown-product', workspaces: [apps[1]] },
-      { id: 'apps__example-api', workspaces: [apps[2]] },
+      { id: 'apps__another', workspaces: [apps[2]] },
     ]
     const actual = plan(inventory)
     assert.deepEqual(actual, expected, 'groups preserve package order and isolate every app')
@@ -804,7 +819,7 @@ function joinAdmission() {
       writeFileSync(corePath, originalCore)
       writeFileSync(coveragePath, originalCoverage)
     }
-    const joinResult = (status = 'success') => root('--ci-join', dir, '--producers-result', status)
+    const joinResult = (status = 'success') => root(...joinArgs(dir, status))
     const refused = (label: string, status = 'success') => {
       const result = joinResult(status)
       assert.ok(
@@ -935,9 +950,9 @@ function emptyPartitionJoin() {
         join(dir, 'root-coverage-packages__core.json'),
       ),
     )
-    for (const status of ['success', 'success-without-parts']) {
+    for (const status of ['success', 'skipped']) {
       rmSync(join(fixture, 'partition-calls'), { force: true })
-      assert.notEqual(invoke('--ci-join', dir, '--producers-result', status).status, 0)
+      assert.notEqual(invoke(...joinArgs(dir, 'success', 'success', status)).status, 0)
       assert.equal(readFileSync(join(fixture, 'partition-calls'), 'utf8'), 'x')
     }
     rmSync(join(fixture, 'partition-calls'), { force: true })
@@ -980,7 +995,7 @@ function requiredKitPartition() {
       { id: 'apps__example-api', workspace: 'apps/example-api', count: 2, indices: [1, 2] },
       { id: 'apps__acme-api', workspace: 'apps/acme-api', count: 2, indices: [1, 2] },
     ])
-    const joinGate = () => invoke('--ci-join', dir, '--producers-result', 'success')
+    const joinGate = () => invoke(...joinArgs(dir))
     requireSuccess(joinGate())
     function assertConsumerPartitions() {
       for (const count of [2, 3, 4]) {
@@ -1074,7 +1089,7 @@ function partitionVitest() {
           [],
           ['--coverage-plan'],
           ['--coverage-parts-plan'],
-          ['--ci-join', fixture, '--producers-result', 'success'],
+          joinArgs(fixture),
         ]) {
           const result = invoke(...options)
           assert.notEqual(result.status, 0, `invalid declaration accepted: ${invalid}`)
@@ -1093,7 +1108,7 @@ function partitionVitest() {
           join(fixture, ws, 'package.json'),
           JSON.stringify({
             name: ws.replace('/', '-'),
-            scripts: { 'test:coverage': 'vitest run --coverage' },
+            scripts: { typecheck: 'tsc', 'test:coverage': 'vitest run --coverage' },
           }),
         )
       }
@@ -1135,7 +1150,7 @@ function partitionVitest() {
       assert.deepEqual([...grouped, ...declared.keys()].sort(), bar.sort())
       assert.equal(new Set(grouped).size, grouped.length)
       assertInvalidDeclarations(partitionFile)
-      rmSync(join(fixture, 'config'), { recursive: true })
+      rmSync(productConfig, { recursive: true })
       for (const ws of productApps) rmSync(join(fixture, ws), { recursive: true })
     }
     assertProductPlans()

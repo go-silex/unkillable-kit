@@ -18,12 +18,12 @@ merge-on-green (current exact-head authorization receipt + checks)
 
 After Biome, pre-commit restages the indexed ACMR paths as literal names using tracked-only updates, including already-indexed files under ignore rules. It does not discover ignored untracked neighbors, and staged deletions remain deletions. `test:lefthook-deletes` exercises these index boundaries.
 
-| Layer                               | Role                                                                                                                                                                                                                                    | Cost expectation                              |
-| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
-| **Lefthook pre-push**               | **Primary kit bar** — `validate:full` plus selected `validate:tooling`                                                                                                                                                                  | Accept wall-clock; fix here                   |
-| **CI** (check `ci`)                 | **Secondary kit bar** — same tree gate and tooling selection if hooks skipped or local env lied                                                                                                                                         | Should almost always be green if pre-push ran |
-| **Product CI** (`product-validate`) | **Product bar** — typecheck/test/build for `apps/<product>-*` via **copied** templates ([`product-validate.example.sh`](.././templates/product-validate.example.sh), [`product-ci.example.yml`](.././templates/product-ci.example.yml)) | Product repos only; not kit CI                |
-| **Secret scan**                     | Orthogonal security                                                                                                                                                                                                                     | Always — **two passes, see below**            |
+| Layer                               | Role                                                                                                    | Cost expectation                             |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| **Lefthook pre-push**               | Local Root gate: `validate:full` and applicable tooling                                                 | Accept wall-clock; fix here                  |
+| **CI** (`ci`)                       | Hosted Root gate: Kit and Product quality with applicable tooling evidence                              | Should be green if pre-push ran              |
+| **Product CI** (`product-validate`) | Deployment builds and Product guards via the [Product script](../templates/product-validate.example.sh) | Product repos only; no duplicate Root checks |
+| **Secret scan**                     | Orthogonal security                                                                                     | Always — two passes, see below               |
 
 `validate:full` retains current-tree checks; `validate:tooling` runs the gate tooling self-tests. Local pre-push queries the actual push remote once, comparing the advertised predecessor and supported PR bases. The push target must match `origin`; `main` is required, and absent `staging` is allowed only after a successful listing. Existing bases must be local ancestors. A local app-only skip also requires network access, authentication and an existing verifiable PR: read-only GitHub context must prove its exact base and head refs. Missing, ambiguous or unauthenticated PR context, missing or new predecessors, unknown remotes, unavailable objects, non-ancestor synthetic merges and other uncertainty select the lane conservatively. A Kit push to `main` always selects it; a non-HEAD source is refused because the current tree cannot attest the pushed commit. CI compares the push event's before SHA or the PR base with the head. The selector owns the input classes and discovery rules. Automatic discovery matches literal, root-relative test references, not dynamically constructed or indirect paths; authors adding tooling dependencies must update the input classes.
 
@@ -53,15 +53,39 @@ See the [shared Vitest worker policy](../testing.md) for CI defaults and Product
 Local Root runs each ordered recipe sequentially, fail-fast. `COVERAGE_CHANGED_BASE` is local
 and cannot execute Root.
 
-The Coverage plan checks inheritance and zero-edit with Node and full Git history before Bun setup, installation or matrix expansion. All other producers depend on it; final `ci` runs after plan failure and requires its success and all required receipts. Missing, skipped or failed prerequisites never pass; valid tooling selection may skip tooling steps. Product CI and Secret scan remain independent and blocking.
+The Node Coverage plan uses full Git history to check inheritance and zero-edit
+before installation or matrix expansion. Every producer depends on the plan.
+The final `ci` requires plan success and applicable receipts, even after plan
+failure. Product CI and Secret scan remain independent and blocking.
 
 `test:dogfood-zero-edit` exercises canonical Product Dependabot configuration and Node-only inheritance preflight. Ownership fixtures reject protected Product manifest edits and noncanonical/disabled configurations; dependency-admission fixtures evaluate immutable Product identity and protected manifest paths while retaining whole-lock supply-chain checks. These local fixtures do not prove hosted Bun updater diffs, App-only shared-lock regeneration or GitHub runner savings.
 
-CI runs its ordered Core complement on one hosted VM. The read-only `--coverage-plan` and `--coverage-parts-plan` modes together partition the discovered Coverage bar. Each undeclared App gets its own job; Packages go round-robin, in relative order, into groups of up to four sharing a VM and filesystem, yet each workspace runs sequentially in its own canonical Root process through the same `bunx vitest run --coverage`, with unchanged per-file isolation and floors and no runner-level worker override of Product configurations. A declared App instead runs a reusable workflow call: native Vitest parts, then a merge that needs only them and writes the only receipt; capacity, not a budget guarantee. Local Root runs it monolithically: the reference ([ADR-0023](../architecture/adr/0023-ci-coverage-partitions.md)).
+Root alone owns lint, typecheck, Knip, license, file-length, folder-size and
+import-boundary checks and tests under coverage floors. CI runs Core on one VM.
+Core checks Product App discovery and enrollment scripts; the [consumer contract](../product-consumer-contract.md#root-and-product-ci) defines risk tiers and floors.
+
+`--coverage-plan` and `--coverage-parts-plan` validate the full Coverage bar,
+then cover the selected bar exactly once. Only a trusted, non-empty Product-only
+PR diff omits Kit-owned workspaces. Product workspaces always run. Pushes, local
+runs and PR checkouts whose base has advanced past the event retain the full bar
+([ADR-0024](../architecture/adr/0024-root-single-quality-gate.md)).
+
+Each unpartitioned App gets one job. Packages are grouped round-robin, in
+relative order, up to four per VM. Each runs sequentially through native Vitest
+coverage with its own isolation, floors and worker settings. A Product verdict
+requires a positive floor on a metric actually measured by the run. Each
+selected partitioned App gets a reusable workflow call: native Vitest parts,
+then its own merge and receipt. The local monolithic run is the reference
+([ADR-0023](../architecture/adr/0023-ci-coverage-partitions.md)).
 
 Each workspace produces a receipt; failure keeps the group red without stopping later members. Before the next invocation clears `coverage/`, its available report tree, even after failure, moves to a workspace-qualified directory; receipts and reports stay separate.
 
-The final `ci` check requires every producer and a current-run receipt join bound to checkout, run, attempt, recipe and runner: one receipt per workspace, however many share a runner; monolithic Coverage receipts are refused. Fewer jobs prove neither shorter workflows nor lower billed usage; only real CI measurements can.
+The `ci` join recomputes both coverage lists from trusted context. It accepts a
+skipped producer only on a PR with an empty corresponding list; otherwise the
+producer must succeed. Core, applicable tooling evidence and one complete
+receipt per selected workspace are required, bound to checkout, run, attempt,
+recipe and runner. Monolithic coverage receipts are refused. Only hosted
+measurements prove latency or billed usage.
 
 Receipt binding detects accidental stale, foreign or incomplete execution, not malicious changes to trusted workflow code. The pinned official artifact downloader fails on a digest mismatch by default; digest validation does not replace the receipt join.
 
@@ -230,34 +254,20 @@ The existing publishers remain the owners. Direct `gh` and browser writes are no
 
 **Independent-lineage continuity.** The existing `test:dogfood-zero-edit` integration also exercises direct and legacy-mediated Products joining an independent public Kit root, then receiving an ordinary next upgrade. It checks actual identity/zero-edit/stack behavior, refusal of a fetched-but-unmerged pin, preservation of Product/exception/applied-migration records and absence of private ancestry in the public parent. These synthetic fixtures do not prove a final exported candidate, a real Product migration or hosted settings.
 
-**Kit bar vs product bar**
-
-| Gate                          | Scope                                                                                                                    | Who runs it                                                                           |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------- |
-| `bun run validate`            | short kit loop — steps = root `package.json` `scripts.validate`                                                          | kit + product clones (kit zones)                                                      |
-| `bun run validate:full`       | current-tree kit bar (pre-push + kit CI); root `package.json` owns its steps. **Does not** prove product apps are tested | pre-push + kit CI                                                                     |
-| `bun run validate:tooling`    | gate tooling self-tests, selected as described above; root `package.json` owns its steps                                 | pre-push + kit CI when selected; manual full run                                      |
-| product-validate / product-ci | product packages under `apps/<product>-*`                                                                                | product repo only (copy templates; never dual-edit kit `ci.yml` / `test-coverage.sh`) |
-
-False green: product with real apps and only kit `validate:full` green is **not** product-tested.
-
 ### Commands
 
 ```bash
 bun install                    # prepare → lefthook install if hooksPath unset (no dependency postinstall runs: trustedDependencies = [])
 
-bun run validate               # short kit loop (package.json scripts.validate)
+bun run validate               # short local loop (not an admission gate)
 bun run zero-edit              # product must not diverge kit paths without exception (kit = config only)
 bun run env:check              # schema ↔ .dev.vars.example (DX only)
 bun run i18n:check             # messages contract (also in turbo test)
 bun run license:check          # dependency SPDX allowlist: live scan + --self-test (UNKNOWN = warn)
 bun run test:coverage          # floors + HTML under coverage/<pkg>/
-bun run validate:full          # kit bar SSoT (package.json scripts["validate:full"]) — not product apps
+bun run validate:full          # Root quality gate for Kit and Product workspaces
 
-# Before opening a PR on the kit (explicit habit even if hooks installed):
-bun run validate:full
-
-# Product bar (product repos only — after copying templates):
+# Product artifacts and Product-only guards (after copying the templates):
 # bash scripts/product/validate.sh
 # See docs/kit/templates/product-validate.example.sh + product-ci.example.yml
 ```

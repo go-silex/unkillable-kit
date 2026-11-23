@@ -5,21 +5,20 @@
 #   scripts/product/validate.sh
 #   apps/<product>-api/scripts/kit/product-validate.sh
 #
-# Then replace <product> placeholders with your package names and adjust filters.
-# Kit `validate:full` / `scripts/kit/test-coverage.sh` stay kit-only — do not dual-edit them
-# to add product packages.
+# Replace <product> with the Product's App prefix. For an API-only Product,
+# remove the Vite command. Root already owns typecheck, tests and other shared checks.
 #
 # See: docs/kit/product-consumer-contract.md · docs/kit/playbooks/start-product.md#day-0-checklist (item 9)
 set -euo pipefail
 
 # Resolve monorepo root from this script location.
 # If you copy to scripts/product/validate.sh → two levels up.
-# If you copy to apps/<product>-api/scripts/kit/product-validate.sh → three levels up.
+# If you copy to apps/<product>-api/scripts/kit/product-validate.sh → four levels up.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [[ -f "${SCRIPT_DIR}/../../package.json" ]]; then
+if [[ -f "${SCRIPT_DIR}/../../scripts/kit/kit-schema-sync.sh" ]]; then
   ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-elif [[ -f "${SCRIPT_DIR}/../../../package.json" ]]; then
-  ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
+elif [[ -f "${SCRIPT_DIR}/../../../../scripts/kit/kit-schema-sync.sh" ]]; then
+  ROOT="$(cd "${SCRIPT_DIR}/../../../.." && pwd)"
 else
   echo "product-validate: cannot find monorepo root from ${SCRIPT_DIR}" >&2
   exit 1
@@ -28,17 +27,7 @@ cd "$ROOT"
 
 echo "→ product-validate (ROOT=$ROOT)"
 
-# Deploy-gate declaration (Roxabi/roxabi-boilerplate-cf#317): the inherited kit script runs promote-deploy.ts --check for main,
-# and for staging when origin/deploy/staging exists (the CI checkout, fetch-depth: 0, carries every
-# origin/deploy/* ref). Call it, never re-type it: this file is product-owned and would freeze a copy.
-# Early local signal only: this script runs inside Product CI, the workflow under check, so a PR
-# that stops Product CI from running never reaches it. Kit `validate:full` runs the same script in
-# the required `ci` job; that is the enforcing path.
-bun run deploy-gate:check
-
-# Product mode: kit zones clean vs upstream (or inheritance.json in CI).
-bun run zero-edit
-
+# Keep Product-specific guards here; do not rerun zero-edit or deploy-gate:check.
 # Products may opt in to release notes without editing the inherited root CHANGELOG.
 bun --no-env-file scripts/kit/release-prepare.ts --check-changelog --product
 
@@ -47,12 +36,43 @@ bun --no-env-file scripts/kit/release-prepare.ts --check-changelog --product
 # not prove remote migrations were applied. Drop it only if the Product has no API.
 env -u KIT_SCHEMA_CATALOG bash scripts/kit/kit-schema-sync.sh --app apps/<product>-api --check
 
-# --- replace <product> with your app package names ---
-bun run --filter "@kit/<product>-api" typecheck
-bun run --filter "@kit/<product>-api" test
-bun run --filter "@kit/<product>-web" typecheck
-bun run --filter "@kit/<product>-web" test
-# Optional: wrangler dry-run / turbo build for the product API
-# bun run --filter "@kit/<product>-api" build
+# Bundle the SPA without the starter's `tsc -b` (Root already typechecks it).
+(cd "apps/<product>-web" && bun x --no-install vite build)
+
+# Bundle the Worker for each named environment in wrangler.toml. The starter uses
+# the unnamed configuration until named environments are added. If the Product
+# also deploys the unnamed configuration, add its dry-run explicitly.
+(
+  cd "apps/<product>-api"
+  bun --no-env-file -e '
+    import { mkdtempSync, rmSync } from "node:fs"
+    import { join } from "node:path"
+
+    const config = Bun.TOML.parse(await Bun.file("wrangler.toml").text())
+    const environments = Object.keys(config.env ?? {}).sort()
+    const command = [
+      "bun", "x", "--no-install", "wrangler", "deploy", "--dry-run", "--config", "wrangler.toml",
+    ]
+    // Never write Wrangler output to a pre-existing checkout path.
+    const output = mkdtempSync(join(process.cwd(), ".wrangler-dry-run-"))
+    function build(name, args) {
+      const result = Bun.spawnSync(
+        [...command, ...args, "--outdir", join(output, name)],
+        { stdin: "inherit", stdout: "inherit", stderr: "inherit" },
+      )
+      if (!result.success) process.exitCode = result.exitCode || 1
+      return result.success
+    }
+    try {
+      if (!environments.length) build("default", [])
+      // The Wrangler environment name is an argument, never a path component.
+      for (const [index, env] of environments.entries()) {
+        if (!build(`env-${index + 1}`, [`--env=${env}`])) break
+      }
+    } finally {
+      rmSync(output, { recursive: true, force: true })
+    }
+  '
+)
 
 echo "✓ product-validate OK"

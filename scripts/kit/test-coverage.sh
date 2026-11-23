@@ -337,6 +337,15 @@ if [[ "${COVERAGE_LIST_ONLY:-0}" == "1" ]]; then
   exit 0
 fi
 
+# Ownership is independent of the risk tiers. Short parts defer floors to merge.
+kit_apps=""
+if [[ -z "${COVERAGE_PART:-}" ]]; then
+  kit_apps="$(bun -e '
+    import { kitAppPrefixes } from "./scripts/kit/root-gate-enrollment.ts"
+    console.log([...kitAppPrefixes(process.cwd())].join("\n"))
+  ')"
+fi
+
 echo "→ Cleaning coverage/"
 rm -rf coverage
 mkdir -p coverage
@@ -354,15 +363,17 @@ run_pkg() {
   echo "════════════════════════════════════════"
   echo " coverage: $name ($dir)"
   echo "════════════════════════════════════════"
-  local -a extra=()
+  local -a command=(bunx vitest run --coverage)
   if [[ -n "${COVERAGE_PART:-}" ]]; then
     [[ -n "${COVERAGE_BLOB:-}" ]] || { echo "missing blob path" >&2; exit 1; }
-    extra=(--shard="$COVERAGE_PART" --reporter=default --reporter=blob
+    command+=(--shard="$COVERAGE_PART" --reporter=default --reporter=blob
       --outputFile.blob="$COVERAGE_BLOB" --coverage.thresholds.lines=0
       --coverage.thresholds.functions=0 --coverage.thresholds.branches=0
       --coverage.thresholds.statements=0)
+  elif [[ "$dir" == apps/* && $'\n'"$kit_apps"$'\n' != *$'\n'"$dir/"$'\n'* ]]; then
+    command=(node "$ROOT/scripts/kit/root-gate-coverage-floors.ts" "$dir")
   fi
-  if ! (cd "$dir" && bunx vitest run --coverage ${extra[@]+"${extra[@]}"} 2>&1 | tee "$log"); then
+  if ! (cd "$dir" && "${command[@]}" 2>&1 | tee "$log"); then
     pkg_failed=1
   fi
   if grep -Fq "Excluding it from coverage." "$log"; then

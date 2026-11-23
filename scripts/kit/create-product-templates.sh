@@ -10,16 +10,11 @@ mcp="${3:?mcp flag required}"
 
 mkdir -p scripts/product config/product docs/product .github/workflows
 # The maintained consumer templates are the CI and validation source of truth.
-sed "s/<product>/$name/g" docs/kit/templates/product-ci.example.yml > .github/workflows/product-ci.yml
+cp docs/kit/templates/product-ci.example.yml .github/workflows/product-ci.yml
 awk -v name="$name" -v web="$web" '
-  /bun run --filter "@kit\/<product>-web"/ && web == "0" { next }
+  /apps\/<product>-web/ && web == "0" { next }
   { gsub(/<product>/, name); print }
 ' docs/kit/templates/product-validate.example.sh > scripts/product/validate.sh
-if [[ "$mcp" == 1 ]]; then
-  # Add MCP checks before the final success message.
-  awk -v name="$name" '/^echo "✓ product-validate OK"/ { print "bun run --filter \"@kit/" name "-mcp\" typecheck"; print "bun run --filter \"@kit/" name "-mcp\" test" } { print }' scripts/product/validate.sh > scripts/product/validate.sh.tmp
-  mv scripts/product/validate.sh.tmp scripts/product/validate.sh
-fi
 chmod +x scripts/product/validate.sh
 printf '{"workflows":[".github/workflows/product-ci.yml"]}\n' > config/product/deploy-gate.json
 {
@@ -31,8 +26,9 @@ cat > docs/product/AGENTS.md <<'EOF'
 # Product agent instructions
 
 Product-owned applications live under `apps/`. Preserve kit-owned zones and the
-inheritance pin; follow `docs/kit/product-consumer-contract.md`. Run both the kit
-and product validation bars when verifying product changes.
+inheritance pin; follow `docs/kit/product-consumer-contract.md`. Run Root for
+workspace quality and `scripts/product/validate.sh` for deployment builds and
+Product-specific guards.
 EOF
 
 if [[ "$mcp" == 1 ]]; then
@@ -43,7 +39,44 @@ if [[ "$mcp" == 1 ]]; then
   sed -e "s/mcp-example/$name-mcp/g" -e 's/createExampleCatalogue/createProductCatalogue/g' -e 's/Hosted: Worker MCP token props.//g' apps/mcp-example/src/catalogue.ts > "$app/src/catalogue.ts"
   sed -e "s/kit-mcp-example/$name-mcp/g" -e 's/MCP example/Product MCP/g' -e 's/createExampleCatalogue/createProductCatalogue/g' apps/mcp-example/src/index.ts > "$app/src/index.ts"
   sed "s/mcp-example/$name-mcp/g" apps/mcp-example/src/index.test.ts > "$app/src/index.test.ts"
-  sed "s/mcp-example/$name-mcp/g" apps/mcp-example/scripts/stdio-smoke.mjs > "$app/scripts/stdio-smoke.mjs"
+  # Use a hard bound and no dotenv or Product API configuration, even in the local alias.
+  sed -e "s/mcp-example/$name-mcp/g" \
+    -e "s/'bun', \['run', entry\]/'bun', ['--no-env-file', 'run', entry]/" \
+    -e "/stdio: \['pipe', 'pipe', 'pipe'\],/a\\  timeout: 8000,\\n  killSignal: 'SIGKILL'," \
+    -e "/    API_KEY:/c\\    API_KEY: '',\\n    AUTHORIZATION: '',\\n    API_BASE_URL: '',\\n    MCP_ALLOWED_HOSTS: '',\\n    MCP_ALLOW_NONLOCAL_HOSTS: ''," \
+    apps/mcp-example/scripts/stdio-smoke.mjs > "$app/scripts/stdio-smoke.mjs"
+  cat > "$app/src/stdio.test.ts" <<'EOF'
+import { spawnSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
+import { expect, it } from 'vitest'
+
+it('serves ping and an unverified identity over stdio JSON-RPC', () => {
+  const smoke = fileURLToPath(new URL('../scripts/stdio-smoke.mjs', import.meta.url))
+  const child = spawnSync('bun', ['--no-env-file', 'run', smoke], {
+    encoding: 'utf8',
+    timeout: 12_000,
+    killSignal: 'SIGKILL',
+  })
+  if (child.status !== 0) {
+    throw new Error(
+      `MCP stdio smoke failed: ${child.error ?? child.signal ?? child.status}\n${child.stderr}`,
+    )
+  }
+  const report = JSON.parse(child.stdout)
+  expect(report.ok).toBe(true)
+  expect(report.tools).toEqual(['ping', 'whoami'])
+  expect(report.ping.isError).not.toBe(true)
+  const ping = report.ping.content.find((item: { type: string }) => item.type === 'text')
+  expect(JSON.parse(ping.text)).toEqual({ ok: true })
+  expect(report.whoami.isError).not.toBe(true)
+  expect(report.whoamiParsed).toEqual({
+    keyPresent: false,
+    verified: false,
+    subject: null,
+    status: 'missing_key',
+  })
+}, 15_000)
+EOF
   cp apps/mcp-example/tsconfig.json "$app/tsconfig.json"
   cat > "$app/package.json" <<EOF
 {
@@ -56,9 +89,9 @@ if [[ "$mcp" == 1 ]]; then
     "dev": "bun run src/index.ts",
     "start": "bun run src/index.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run && bun run scripts/stdio-smoke.mjs",
+    "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "smoke:stdio": "bun run scripts/stdio-smoke.mjs"
+    "smoke:stdio": "bun --no-env-file run scripts/stdio-smoke.mjs"
   },
   "dependencies": {
     "@kit/mcp": "workspace:*",

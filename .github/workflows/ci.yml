@@ -115,7 +115,7 @@ jobs:
           retention-days: 7
 
   coverage:
-    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    if: github.event_name != 'pull_request' || (!github.event.pull_request.draft && needs.coverage-plan.outputs.groups != '[]')
     name: Root coverage ${{ matrix.group.id }}
     needs: coverage-plan
     strategy:
@@ -202,7 +202,7 @@ jobs:
           if-no-files-found: ignore
 
   coverage-partitions:
-    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    if: github.event_name != 'pull_request' || (!github.event.pull_request.draft && needs.coverage-plan.outputs.parts != '[]')
     name: Root coverage partition ${{ matrix.partition.id }}
     needs: coverage-plan
     strategy:
@@ -291,8 +291,47 @@ jobs:
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: root-coverage-${{ github.run_id }}-${{ github.run_attempt }}-*
-          path: ${{ runner.temp }}/root-receipts
-          merge-multiple: true
+          path: ${{ runner.temp }}/coverage-receipts
+      - name: Stage Coverage receipts
+        if: always()
+        run: |
+          set -euo pipefail
+          shopt -s nullglob dotglob
+          source="$RUNNER_TEMP/coverage-receipts"
+          target="$RUNNER_TEMP/root-receipts"
+          entries=("$source"/*)
+          # Pattern downloads succeed with zero matches. One match is extracted flat;
+          # multiple matches have separate directories so duplicate files cannot overwrite.
+          if (( ${#entries[@]} == 0 )); then exit 0; fi
+          mkdir -p "$target"
+          stage() {
+            local receipt name
+            for receipt; do
+              name="${receipt##*/}"
+              if [[ ! -f "$receipt" || -L "$receipt" || "$name" != root-coverage-*.json ]]; then
+                echo "Unexpected coverage receipt: $receipt" >&2
+                exit 1
+              fi
+              ln -T -- "$receipt" "$target/$name"
+            done
+          }
+          if [[ -d "${entries[0]}" ]] && (( ${#entries[@]} > 1 )); then
+            for artifact in "${entries[@]}"; do
+              if [[ ! -d "$artifact" || -L "$artifact" ||
+                "${artifact##*/}" != root-coverage-"$GITHUB_RUN_ID"-"$GITHUB_RUN_ATTEMPT"-* ]]; then
+                echo "Unexpected coverage artifact: $artifact" >&2
+                exit 1
+              fi
+              receipts=("$artifact"/*)
+              if (( ${#receipts[@]} == 0 )); then
+                echo "Missing receipts in coverage artifact: $artifact" >&2
+                exit 1
+              fi
+              stage "${receipts[@]}"
+            done
+          else
+            stage "${entries[@]}"
+          fi
       - name: Download Tooling receipts
         if: always() && needs.coverage-plan.outputs.tooling == 'true'
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -307,8 +346,10 @@ jobs:
       - name: Join Root receipts
         if: always()
         env:
-          PRODUCERS_RESULT: ${{ (needs.coverage-plan.result == 'success' && needs.quality.result == 'success' && needs.coverage.result == 'success' && needs.coverage-partitions.result == 'success' && needs.tooling.result == 'success' && (needs.coverage-plan.outputs.tooling == 'true' || needs.coverage-plan.outputs.tooling == 'false')) && 'success' || 'failure' }}
-        run: bun run validate:full -- --ci-join "$RUNNER_TEMP/root-receipts" --producers-result "$PRODUCERS_RESULT"
+          PRODUCERS_RESULT: ${{ (needs.coverage-plan.result == 'success' && needs.quality.result == 'success' && needs.tooling.result == 'success' && (needs.coverage-plan.outputs.tooling == 'true' || needs.coverage-plan.outputs.tooling == 'false')) && 'success' || 'failure' }}
+          COVERAGE_RESULT: ${{ needs.coverage.result }}
+          PARTS_RESULT: ${{ needs.coverage-partitions.result }}
+        run: bun run validate:full -- --ci-join "$RUNNER_TEMP/root-receipts" --producers-result "$PRODUCERS_RESULT" --coverage-result "$COVERAGE_RESULT" --parts-result "$PARTS_RESULT"
 
   # Showcase CD = Cloudflare Builds (git pull), not GH deploy. See docs/kit/deploy-cloudflare.md.
   # Browser e2e is local-only (Free CI minutes + flake risk).

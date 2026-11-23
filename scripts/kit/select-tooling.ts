@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { committedPaths, pullRequestCheckout } from './root-gate-ci-context'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const prefixes = [
@@ -119,10 +120,19 @@ function parseArgs(args: string[]) {
   return { base, head, mainPush }
 }
 
+function pullRequestNeedsTooling(base: string, head: string): boolean {
+  const pr = pullRequestCheckout(root)
+  if (!pr) return false
+  if (base !== pr.base || head !== pr.checkout)
+    throw new Error('tooling revisions do not match pull-request checkout')
+  return pr.baseAdvanced
+}
+
 function select(args: string[]): boolean {
   const parsed = parseArgs(args)
   let { base, head } = parsed
   const { mainPush } = parsed
+  if (pullRequestNeedsTooling(base, head)) return true
   git(['rev-parse', '--git-dir'])
   const identity = execFileSync(
     process.execPath,
@@ -152,7 +162,7 @@ function select(args: string[]): boolean {
   const mergeBase = git(['merge-base', baseSha, headSha]).trim()
   if (!mergeBase) throw new Error('missing merge base')
   const paths = [
-    ...git(['diff', '--no-renames', '--name-only', '-z', mergeBase, headSha, '--']).split('\0'),
+    ...committedPaths(root, mergeBase, headSha),
     ...git(['diff', '--no-renames', '--name-only', '-z', 'HEAD', '--']).split('\0'),
     ...git(['ls-files', '--others', '--exclude-standard', '-z']).split('\0'),
   ].filter(Boolean)

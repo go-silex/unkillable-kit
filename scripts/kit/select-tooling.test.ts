@@ -17,7 +17,7 @@ const source = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const root = mkdtempSync(join(tmpdir(), 'tooling-selector-'))
 const bin = mkdtempSync(join(tmpdir(), 'tooling-selector-bin-'))
 const env: NodeJS.ProcessEnv = {
-  ...process.env,
+  ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GITHUB_'))),
   GITHUB_REPOSITORY: 'kit',
   GIT_CONFIG_NOSYSTEM: '1',
   GIT_CONFIG_GLOBAL: '/dev/null',
@@ -129,7 +129,7 @@ try {
   chmodSync(join(bin, 'git'), 0o755)
   chmodSync(join(bin, 'gh'), 0o755)
   mkdirSync(join(root, 'scripts/kit'), { recursive: true })
-  for (const name of ['select-tooling.ts', 'resolve-tree-identity.mjs'])
+  for (const name of ['select-tooling.ts', 'resolve-tree-identity.mjs', 'root-gate-ci-context.ts'])
     cpSync(join(source, 'scripts/kit', name), join(root, 'scripts/kit', name))
   put(
     'config/kit/zero-edit-zones.json',

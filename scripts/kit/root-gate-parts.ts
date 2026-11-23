@@ -16,6 +16,7 @@ import {
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { basename, join, resolve, sep } from 'node:path'
+import { kitAppPrefixes } from './root-gate-enrollment'
 
 const digest = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex')
 const fail = (message: string): never => {
@@ -140,12 +141,12 @@ function stageParts(
   return hashes
 }
 
-function runVitest(cwd: string, stage: string, args: string[]) {
+function runVitest(cwd: string, stage: string, [executable, ...args]: string[]) {
   const log = join(stage, 'vitest.log')
   const fd = openSync(log, 'w')
   const child = (() => {
     try {
-      return spawnSync('bunx', ['vitest', ...args], { cwd, stdio: ['inherit', fd, fd] })
+      return spawnSync(executable, args, { cwd, stdio: ['inherit', fd, fd] })
     } finally {
       closeSync(fd)
     }
@@ -161,16 +162,18 @@ function replayParts(root: string, workspace: string, stage: string) {
   const cwd = join(root, workspace)
   const listing = join(stage, 'listing.json')
   const report = join(stage, 'report.json')
-  runVitest(cwd, stage, ['list', '--filesOnly', `--json=${listing}`])
-  runVitest(cwd, stage, [
-    'run',
+  runVitest(cwd, stage, ['bunx', 'vitest', 'list', '--filesOnly', `--json=${listing}`])
+  const merge = [
     '--merge-reports',
     join(stage, 'blobs'),
-    '--coverage',
     '--reporter=default',
     '--reporter=json',
     `--outputFile.json=${report}`,
-  ])
+  ]
+  const command = kitAppPrefixes(root).has(`${workspace}/`)
+    ? ['bunx', 'vitest', 'run', '--coverage']
+    : ['node', join(root, 'scripts/kit/root-gate-coverage-floors.ts'), workspace]
+  runVitest(cwd, stage, [...command, ...merge])
   const listed = json(listing).map((item: { file: string }) => item.file)
   const replayed = json(report).testResults.map((item: { name: string }) => item.name)
   if (

@@ -12,6 +12,7 @@ related:
   - docs/kit/testing/coverage.md
   - docs/kit/testing/critical-path.md
   - docs/kit/product-consumer-contract.md
+  - docs/kit/architecture/adr/0024-root-single-quality-gate.md
 summary: 'CI coverage partitions for heavy Apps; full floors apply at merge'
 ---
 
@@ -40,7 +41,7 @@ Product declarations live in the Product-owned `config/product/coverage-partitio
 The coverage runner validates them whenever it resolves the discovered Coverage bar, including in local `validate:full`.
 A malformed line, a workspace outside `apps/*`, a count outside 2 to 4, a duplicate (also across Kit and Product) or a workspace outside the discovered Coverage bar fails.
 
-The Kit permanently declares `apps/example-api 2` (D10), so every Kit run, and every Product run that inherits it, exercises the path.
+The Kit permanently declares `apps/example-api 2` (D10). Every run validates that declaration; every local run and push exercises it. Pull requests exercise it only when Kit-owned workspaces are selected ([ADR-0024](./0024-root-single-quality-gate.md)).
 This declaration is the Kit self-proof, not a capacity claim about that App.
 
 ### D2 — Two execution topologies, one bar
@@ -51,8 +52,8 @@ When a run includes `test:coverage`, Root validates the declarations once, befor
 Declarations never change local execution.
 
 CI is the second topology for the same bar.
-`--coverage-plan` omits declared Apps, and `--coverage-parts-plan` emits one descriptor per declared App: `id` equal to `apps__<name>`, `workspace`, `count` and `indices`, the part indices 1 to `count`.
-Together the two plans cover the discovered bar exactly once.
+`--coverage-plan` emits selected workspaces without partition declarations; `--coverage-parts-plan` emits one descriptor per selected partitioned App: `id` equal to `apps__<name>`, `workspace`, `count` and `indices`, the part indices 1 to `count`.
+The plans validate the full bar before selection and together cover the selected bar exactly once. A proven, non-empty Product-only pull-request diff selects only Product workspaces; pushes always select the full bar ([ADR-0024](./0024-root-single-quality-gate.md)).
 When the topologies disagree, the local monolithic run is the reference.
 
 ### D3 — Parts produce RAW evidence, never a receipt
@@ -97,9 +98,9 @@ Glob-pattern thresholds and object-form `perFile` thresholds are not deferred, s
 
 ### D6 — Join
 
-`--ci-join` in `scripts/kit/root-gate.ts` recomputes the declarations and refuses them without the Kit `apps/example-api 2` one (D10).
-It accepts only the `success` producer result (D8) and requires the Core receipt plus exactly one complete current-run coverage receipt per discovered workspace, as before.
-A declared App's receipt must carry its declared count and that many blob digests; an undeclared workspace's receipt must carry no `partition`.
+`--ci-join` in `scripts/kit/root-gate.ts` recomputes the declarations and both selected lists from trusted context and refuses declarations without the Kit `apps/example-api 2` one (D10).
+It requires the producer results in D8, Core, applicable tooling evidence and exactly one complete current-run coverage receipt per selected workspace.
+A selected partitioned App's receipt must carry its declared count and that many blob digests; an unpartitioned workspace's receipt must carry no `partition`.
 A mode or count mismatch fails closed.
 The legacy monolithic `root-coverage.json` receipt is always refused, since a partition is always declared.
 The `ci` check name, merge-on-green and deploy-gate inputs are unchanged.
@@ -107,7 +108,7 @@ The `ci` check name, merge-on-green and deploy-gate inputs are unchanged.
 ### D7 — Workflow topology
 
 In `.github/workflows/ci.yml`, the plan job also emits `parts` (D2).
-The `coverage-partitions` job runs a matrix over those descriptors and calls the reusable `.github/workflows/coverage-app.yml` once per declared App with its `workspace`, `count` and `indices`.
+The `coverage-partitions` job runs a matrix over those descriptors and calls the reusable `.github/workflows/coverage-app.yml` once per selected partitioned App with its `workspace`, `count` and `indices`.
 Each call runs its parts as a matrix over `indices`, then its merge, which needs only that call's parts.
 A slow or failing App therefore delays or fails only its own merge; no other App's merge needs its parts.
 Parts and merges live neither in the existing `coverage` matrix nor in the final `ci` job: `needs` waits for every leg of a matrix, so either placement would put the slowest unrelated leg on each declared App's path.
@@ -115,10 +116,9 @@ The callee is a Kit workflow listed in `protected_files`, as [ADR-0009](./0009-k
 
 ### D8 — Producer result
 
-The partition plan is never empty: `--coverage-parts-plan` refuses declarations without the Kit `apps/example-api 2` one (D10).
-The `coverage-partitions` caller carries only the draft pull request guard that the other producers use, and no partition job has a plan-dependent `if`, so the [deploy runbook](../../deploy-cloudflare.md) push rules apply to them unchanged.
-The final `ci` job passes `--ci-join --producers-result` `success` only when every producer, `coverage-partitions` included, succeeds with a valid tooling selection, and `failure` otherwise; the join accepts only `success`.
-The skip doctrine is unchanged: missing, skipped or failed required evidence never yields a successful join, and no sentinel or no-op job stands in for a partition.
+On a non-draft pull request, each coverage producer is skipped before matrix expansion only when its own selected list is empty. The join accepts `skipped` only for an empty recomputed list on a pull request, and otherwise requires the producer to succeed.
+The partition plan is never empty on push: the Kit declaration remains mandatory. Producer job conditions must be provably true on push to the [deploy-gate loader](../../deploy-cloudflare.md), for example through a `github.event_name != 'pull_request'` disjunct.
+Missing or unsuccessful required evidence never passes, and no sentinel or no-op job stands in for a skipped producer.
 
 ### D9 — Runner identity
 
@@ -132,7 +132,7 @@ A Product declares only in its `config/product/` namespace ([ADR-0009](./0009-ki
 The App stays the coverage unit ([ADR-0001](./0001-primary-axis-packages-compose-apps.md)); Packages cannot be declared.
 
 Deleting a Product declaration returns that App to one dedicated coverage job with no other change; remove it when the App no longer needs the capacity.
-The Kit declaration `apps/example-api 2` is required: the parts plan and the join refuse declarations without it and cite this decision, so removing it requires amending this decision.
+The Kit declaration `apps/example-api 2` is required even on pull requests that do not select Kit-owned workspaces: the parts plan and the join refuse declarations without it, so removing it requires amending this decision.
 
 ## Adoption proof
 
@@ -159,7 +159,7 @@ Fixture evidence in `scripts/kit/test-coverage-order.sh`, `scripts/kit/root-gate
   All jobs count against the account's concurrent-job limit (20 standard jobs on GitHub Free), and queued time counts against the same 300 seconds.
 - **Minutes:** [GitHub bills](https://docs.github.com/en/billing/concepts/product-billing/github-actions) no compute for standard GitHub-hosted runners in public repositories, so in the public Kit the extra jobs cost queue time and concurrency, not billed minutes.
   In a private repository each extra job draws its runtime, rounded up per job to a whole minute, from the plan's included Actions usage.
-  Products inherit the Kit declaration, so every private Product pays for the `example-api` parts and merge as well as for its own declarations.
+  Products inherit the Kit declaration. A private Product pays for the `example-api` parts and merge on pushes and pull requests that select Kit-owned workspaces, as well as for its own declarations.
 - **Storage:** RAW blobs carry coverage maps and test results, and their size grows with the suite.
   One-day retention bounds their lifetime; in private repositories they still accrue against the artifact storage allowance shared with Packages (500 MB on GitHub Free), and an exhausted allowance can block uploads and so fail CI.
 - **Second topology:** merged and monolithic coverage are different computations of one bar.
@@ -173,7 +173,7 @@ Fixture evidence in `scripts/kit/test-coverage-order.sh`, `scripts/kit/root-gate
 - Product-declared file lists or globs per part, which could exclude tests arbitrarily.
 - A duration-balanced custom sequencer, which would tie test membership to timing data.
 - Parts inside the existing `coverage` matrix, or the merge inside the `ci` join: both wait for the slowest unrelated leg.
-- A skip rule for an empty plan, or a sentinel job standing in for it: the plan is never empty, and a plan-dependent `if` conflicts with the deploy-gate push rules.
+- Sentinel jobs, or skipping a nonempty producer: neither proves coverage. [ADR-0024](./0024-root-single-quality-gate.md) D5 admits an empty-plan skip on pull requests only, with a trusted recomputation at the join and push rules unchanged.
 - One parts matrix and one merge matrix shared by all Apps: every merge would wait for every App's parts.
 - Static per-App jobs in `ci.yml`: a Product would have to edit a Kit workflow.
 - A merge that polls for its parts, or a last part that merges: a second scheduler beside `needs`.

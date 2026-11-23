@@ -2,6 +2,8 @@ import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { lstatSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
+import { committedPaths, hasAppManifestAt, pullRequestCheckout } from './root-gate-ci-context'
+import { kitAppPrefixes, productAppWorkspaces } from './root-gate-enrollment'
 import { mergeParts, runPart } from './root-gate-parts'
 import { joinTooling, runToolingShard, toolingPlan } from './root-gate-tooling'
 
@@ -195,7 +197,10 @@ function listedCoverage(): string[] {
     env,
     encoding: 'utf8',
   })
-  if (listed.status !== 0) fail('cannot list coverage workspaces')
+  if (listed.status !== 0) {
+    if (listed.stderr) process.stderr.write(listed.stderr)
+    fail('cannot list coverage workspaces')
+  }
   const output = listed.stdout ?? ''
   const workspaces = (output.endsWith('\n') ? output.slice(0, -1) : output).split('\n')
   for (const workspace of workspaces) coverageReceiptName(workspace)
@@ -234,13 +239,70 @@ function coveragePartitions(): Map<string, number> {
   return partitionSnapshot
 }
 
-function partsPlan() {
+function enforceCoverageEnrollment(productApps: string[], bar: string[]) {
+  for (const workspace of productApps) {
+    if (!bar.includes(workspace)) fail(`${workspace} is missing from the Coverage bar`)
+  }
+}
+
+function productPathsOnly(paths: string[], apps: Set<string>, base: string): boolean {
+  if (paths.length === 0) return false
+  const kitApps = kitAppPrefixes(root)
+  const priorApps = new Map<string, boolean>()
+  return paths.every((path) => {
+    const app = /^(apps\/[^/]+)\//.exec(path)
+    if (app) {
+      if (kitApps.has(app[0])) return false
+      const workspace = app[1]
+      if (apps.has(workspace)) return true
+      // A deleted App still owned its paths at the base. A random apps/ directory did not.
+      const owned = priorApps.get(workspace) ?? hasAppManifestAt(root, base, workspace)
+      priorApps.set(workspace, owned)
+      return owned
+    }
+    return (
+      /^(?:config|docs|scripts)\/product\//.test(path) ||
+      /^\.github\/workflows\/product-[^/]*$/.test(path)
+    )
+  })
+}
+
+type CoverageSelection = {
+  workspaces: string[]
+  partitions: Map<string, number>
+  pr: boolean
+}
+
+function coverageSelection(productApps: string[]): CoverageSelection {
   const bar = listedCoverage()
+  enforceCoverageEnrollment(productApps, bar)
   const partitions = coveragePartitions()
   if (partitions.get('apps/example-api') !== 2)
     fail('ADR-0023 D10 requires apps/example-api partitioned into 2 parts')
-  return [...partitions].map(([workspace, count]) => {
-    if (!bar.includes(workspace)) fail('partition outside coverage bar')
+  for (const workspace of partitions.keys()) {
+    if (!bar.includes(workspace)) fail(`partition outside coverage bar: ${workspace}`)
+  }
+
+  const pr = pullRequestCheckout(root)
+  if (pr && !pr.baseAdvanced) {
+    const paths = committedPaths(root, pr.base, pr.checkout)
+    const enrolled = new Set(productApps)
+    if (productPathsOnly(paths, enrolled, pr.base)) {
+      return {
+        workspaces: bar.filter((workspace) => enrolled.has(workspace)),
+        partitions,
+        pr: true,
+      }
+    }
+  }
+  return { workspaces: bar, partitions, pr: !!pr }
+}
+
+function partsPlan(productApps: string[]) {
+  const { workspaces, partitions } = coverageSelection(productApps)
+  return workspaces.flatMap((workspace) => {
+    const count = partitions.get(workspace)
+    if (count === undefined) return []
     return {
       id: workspace.replace('/', '__'),
       workspace,
@@ -250,9 +312,9 @@ function partsPlan() {
   })
 }
 
-function coveragePlan() {
-  const partitions = coveragePartitions()
-  const workspaces = listedCoverage().filter((workspace) => !partitions.has(workspace))
+function coveragePlan(productApps: string[]) {
+  const { workspaces: bar, partitions } = coverageSelection(productApps)
+  const workspaces = bar.filter((workspace) => !partitions.has(workspace))
   const packages = workspaces.filter((workspace) => workspace.startsWith('packages/'))
   const count = Math.ceil(packages.length / 4)
   const groups = Array.from({ length: count }, (_, index) => ({
@@ -282,28 +344,23 @@ function shardWorkspace(dir: string, file: string): string {
   return fail('malformed coverage shard')
 }
 
-function sameShards(left: string[], right: string[]) {
-  return JSON.stringify([...left].sort()) === JSON.stringify([...right].sort())
-}
-
 function joinShards(
   dir: string,
   entries: string[],
   shards: string[],
   tasks: string[],
   expected: Identity,
+  { workspaces, partitions }: CoverageSelection,
 ) {
-  if (
-    !entries.includes('root-core.json') ||
-    entries.length !== shards.length + 1 ||
-    shards.length === 0
-  ) {
-    fail('expected Core plus one receipt per coverage workspace')
+  if (!entries.includes('root-core.json') || entries.length !== shards.length + 1) {
+    fail('expected Core plus one receipt per selected coverage workspace')
   }
   validateReceiptFile(join(dir, 'root-core.json'), 'core', tasks, expected)
-  const partitions = coveragePartitions()
-  const seen = shards.map((file) => {
+  const missing = new Set(workspaces)
+  for (const file of shards) {
     const workspace = shardWorkspace(dir, file)
+    if (!missing.delete(workspace))
+      fail(`coverage receipt does not match the selected workspace bar: ${workspace}`)
     const receipt = JSON.parse(readFileSync(join(dir, file), 'utf8'))
     const count = partitions.get(workspace)
     if (
@@ -319,22 +376,37 @@ function joinShards(
       fail('coverage receipt partition mode mismatch')
     }
     validateReceiptFile(join(dir, file), 'coverage', tasks, expected)
-    return workspace
-  })
-  if (!sameShards(seen, listedCoverage())) {
-    fail('coverage shards do not match the discovered workspace bar')
+  }
+  if (missing.size) {
+    fail(`coverage receipts missing from the selected workspace bar: ${[...missing].join(', ')}`)
   }
 }
 
-function joinReceipts(dir: string, status: string, tasks: string[], expected: Identity) {
-  if (coveragePartitions().get('apps/example-api') !== 2)
-    fail('ADR-0023 D10 requires apps/example-api partitioned into 2 parts')
+function joinReceipts(
+  dir: string,
+  status: string,
+  coverageResult: string,
+  partsResult: string,
+  tasks: string[],
+  expected: Identity,
+  productApps: string[],
+) {
   if (status !== 'success') fail('producer matrix did not succeed')
+  const selected = coverageSelection(productApps)
+  const { workspaces, partitions, pr } = selected
+  for (const [label, result, partitioned] of [
+    ['coverage', coverageResult, false],
+    ['coverage partitions', partsResult, true],
+  ] as const) {
+    if (result === 'success') continue
+    const empty = !workspaces.some((workspace) => partitions.has(workspace) === partitioned)
+    if (!(result === 'skipped' && pr && empty)) fail(`${label} producer did not succeed: ${result}`)
+  }
   const entries = readdirSync(dir).filter((entry) => !entry.startsWith('.'))
   const shards = entries.filter((entry) => /^root-coverage-.+\.json$/.test(entry))
   if (entries.includes('root-coverage.json'))
     fail('monolithic coverage receipt cannot authorize declared partitions')
-  joinShards(dir, entries, shards, tasks, expected)
+  joinShards(dir, entries, shards, tasks, expected, selected)
 }
 
 try {
@@ -346,7 +418,17 @@ try {
   const options = args
     .slice(current.tasks.length)
     .filter((arg, index) => !(arg === '--' && index === 0))
+  const validatesCore =
+    options.length === 0 || (options[0] === '--ci-group' && options[1] === 'core')
+  const plansCoverage = ['--coverage-plan', '--coverage-parts-plan', '--ci-join'].includes(
+    options[0],
+  )
+  const productApps =
+    current.name === 'validate:full' && (validatesCore || plansCoverage)
+      ? productAppWorkspaces(root)
+      : []
   if (current.tasks.includes('test:coverage')) coveragePartitions()
+  if (validatesCore && productApps.length) enforceCoverageEnrollment(productApps, listedCoverage())
   if (options.length === 1 && options[0] === '--plan') {
     console.log(
       JSON.stringify({
@@ -361,9 +443,9 @@ try {
       }),
     )
   } else if (options.length === 1 && options[0] === '--coverage-plan') {
-    console.log(JSON.stringify(coveragePlan()))
+    console.log(JSON.stringify(coveragePlan(productApps)))
   } else if (options.length === 1 && options[0] === '--coverage-parts-plan') {
-    console.log(JSON.stringify(partsPlan()))
+    console.log(JSON.stringify(partsPlan(productApps)))
   } else if (options.length === 0) {
     const outcome = run(current.tasks)
     if (outcome.code === 0) console.log('root-gate: full Root passed')
@@ -491,17 +573,21 @@ try {
       identity(current.recipeHash, current.runnerHash),
     )
   } else if (
-    options.length === 4 &&
+    options.length === 8 &&
     options[0] === '--ci-join' &&
     options[1] &&
     options[2] === '--producers-result' &&
-    options[3]
+    options[4] === '--coverage-result' &&
+    options[6] === '--parts-result'
   ) {
     joinReceipts(
       options[1],
       options[3],
+      options[5],
+      options[7],
       current.tasks,
       identity(current.recipeHash, current.runnerHash),
+      productApps,
     )
     console.log('root-gate: full Root passed by current-run join')
   } else fail('invalid or ambiguous options')
