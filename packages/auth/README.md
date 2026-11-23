@@ -56,11 +56,15 @@ The pinned Better Auth 1.7.27 uses `redirect: 'manual'` for back-channel
 logout delivery on Workers. Delivery remains best effort; see the limitations
 below.
 
-Install matching versions of `better-auth` and `@better-auth/oauth-provider`,
-both at least 1.7.27, in the Worker. Sync the `oidc_provider` schema set in
-addition to the sets required by the Better Auth mount. The normal factory
-import does not require the provider peer; import `@kit/auth/oidc-provider` only
-in a Worker enabling it.
+The OIDC provider requires `better-auth`, `@better-auth/core`, and
+`@better-auth/oauth-provider` at exactly `1.7.27`, enforced at startup when OIDC
+is enabled. Do not override Better Auth's exact `better-call` dependency.
+Sync and apply the opt-in `oidc_provider` schema set (including
+`better_auth_oidc_fresh_login`) before deploying, in addition to the sets
+required by the Better Auth mount. Use the canonical physical D1 `session`
+table on the same binding as Better Auth; a renamed session table is not
+supported by the OIDC provider. The normal factory import does not require the
+provider peer; import `@kit/auth/oidc-provider` only in a Worker enabling it.
 
 ### OIDC private JWK encryption
 
@@ -157,25 +161,51 @@ according to their expiry; logout is not an atomic global revocation guarantee.
 
 ### Login method guidance
 
-When the pending request carries `prompt=login` or `max_age`, Apps should offer
-password sign-in and use the Better Auth provider client plugin to send the
-signed `oauth_query`. For a verified query with either parameter, the Kit
-returns HTTP 400 `OIDC_PASSWORD_REQUIRED` on magic-link send or social sign-in
-before sending mail or starting a redirect. This gives Apps a clear error
-instead of a login loop; it is not a freshness check.
+When the provider receives `prompt=login` or `max_age`, it issues an
+authorization code only with qualifying evidence for the selected session.
+`prompt=login` and `max_age=0` require a password sign-in at or after the
+authorization attempt started. Positive `max_age` limits the age of that sign-in.
+If both constraints apply, both must pass. Age is measured from the password
+session's `createdAt` (not the instant credentials were verified or the cookie
+was refreshed), at the final successful proof read before code persistence.
+That read is not atomic with code persistence. Magic link, social sign-in and
+sign-up do not qualify. Existing sessions are not backfilled. Requests without
+a freshness constraint do not require password evidence.
+Keep clocks synchronized across all hosts serving the issuer. Clock skew can
+make a continuation look expired or make password evidence look future-dated;
+the provider denies in either case.
 
-Better Auth 1.7.27 does not guarantee reauthentication for `prompt=login` or
-`max_age`:
+Offer password sign-in and use the Better Auth provider client plugin to pass the
+signed `oauth_query` unchanged. Magic-link send and social sign-in return
+HTTP 400 `OIDC_PASSWORD_REQUIRED` for a verified constrained request; they do
+not start those flows. Accepting consent for a constrained request does not
+write new consent before its session passes the eligibility check. A later
+failure at code issuance can still leave consent written after that check;
+existing consent may let an eligible session skip the consent screen.
+Re-entering `/oauth2/authorize` with a capsule authenticated by the current
+or a retained key starts a new attempt and keeps the original freshness
+constraints, even after expiry. Any stricter `prompt` or `max_age` on the new
+request also applies. Only the current key can authorize a continuation.
 
-- Reissuing a session cookie (for example, on `/update-user` or during
-  authorization) can clear `prompt=login` without a new authentication.
-- The consent flow can clear both parameters based on session age alone.
-- Positive `max_age` is measured from local session creation.
-- Google sign-in neither forces upstream reauthentication nor checks Google's
-  `auth_time`.
+Ineligible sessions normally return to login. With `prompt=none`, the relying
+party receives `error=login_required` instead. A denial at code issuance returns
+`invalid_request` without a code.
 
-Relying parties that need proof of fresh authentication must not rely on these
-parameters from this provider.
+On HTTP 409 `OIDC_RESTART_REQUIRED`, start a new authorization at the relying
+party, not another sign-in retry with the same `oauth_query`. During
+an upgrade, serve both authorization and continuation traffic on one Kit version,
+and restart **all** pending pre-upgrade authorizations, including those without
+freshness constraints.
+
+Relying parties must generate fresh `state`, `nonce`, and PKCE verifier and
+S256 challenge for each attempt, including restarts, and validate the
+authorization response and ID token against that attempt. Continuations are not
+single-use. The provider enforces only constraints it receives; a browser-carried
+request can change before it reaches the provider. If the relying party requires
+freshness, it must check `auth_time` against its own timing policy. The provider
+emits `auth_time` as session `createdAt` rounded down to seconds, `acr` as `"0"`,
+and no `amr`. These claims do not prove which authentication method was used;
+checking `auth_time` cannot recover a missing password requirement.
 
 ## Google sign-in (opt-in)
 

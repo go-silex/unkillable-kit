@@ -10,7 +10,7 @@ const ORIGIN = 'https://auth.example.test'
 const ISSUER = `${ORIGIN}/api/auth`
 const SECRET = 'test-better-auth-secret-xxxxxxxx32c!!'
 
-function setup(enabled: boolean, accountStateFailure?: () => boolean) {
+function setup(enabled: boolean, accountStateFailure?: () => boolean, jwtVersion?: string) {
   const sqlite = new Database(':memory:')
   const pending: Promise<unknown>[] = []
   onTestFinished(() => {
@@ -21,7 +21,9 @@ function setup(enabled: boolean, accountStateFailure?: () => boolean) {
     '0006_better_auth_organization.sql',
     '0014_better_auth_1_7_additive.sql',
     '0025_account_state.sql',
-    ...(enabled ? ['0027_better_auth_oidc_provider.sql'] : []),
+    ...(enabled
+      ? ['0027_better_auth_oidc_provider.sql', '0028_better_auth_oidc_fresh_login.sql']
+      : []),
   ]) {
     sqlite.exec(
       readFileSync(
@@ -64,11 +66,18 @@ function setup(enabled: boolean, accountStateFailure?: () => boolean) {
             })
             return {
               ...provider,
-              plugins: (isActive: (userId: string) => Promise<boolean>) =>
-                provider.plugins(async (userId) => {
+              compose: (...[isActive, database]: Parameters<typeof provider.compose>) => {
+                const composed = provider.compose(async (userId) => {
                   if (accountStateFailure?.()) throw new Error('account state unavailable')
                   return isActive(userId)
-                }),
+                }, database)
+                return {
+                  ...composed,
+                  plugins: composed.plugins.map((plugin) =>
+                    plugin.id === 'jwt' && jwtVersion ? { ...plugin, version: jwtVersion } : plugin,
+                  ),
+                }
+              },
             }
           })(),
         }
@@ -82,6 +91,13 @@ function setup(enabled: boolean, accountStateFailure?: () => boolean) {
 function request(auth: KitBetterAuth, path: string, init?: RequestInit) {
   return auth.handler(new Request(`${ORIGIN}${path}`, init))
 }
+
+it('rejects an unsupported Better Auth package even with supported core and provider', async () => {
+  const supported = setup(true).auth
+  expect((await request(supported, '/api/auth/get-session')).status).toBe(200)
+  const unsupported = setup(true, undefined, '1.7.28').auth
+  expect((await request(unsupported, '/api/auth/get-session')).status).toBe(500)
+})
 
 const REDIRECT = 'https://client.example.test/callback'
 const VERIFIER = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~'

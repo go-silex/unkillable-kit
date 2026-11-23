@@ -87,12 +87,10 @@ export type CreateBetterAuthOpts = {
 )
 
 function assertEmailConfig(emailPort?: AuthEmailPort, emailConfig?: AuthEmailConfig): void {
-  if (emailPort && !emailConfig) {
+  if (emailPort && !emailConfig)
     throw new Error('emailConfig is required when emailPort is configured')
-  }
-  if (emailConfig && !emailPort) {
+  if (emailConfig && !emailPort)
     throw new Error('emailPort is required when emailConfig is configured')
-  }
 }
 
 function createSafeHandler(handler: (request: Request) => Response | Promise<Response>) {
@@ -141,14 +139,15 @@ export function createBetterAuth(opts: CreateBetterAuthOpts): KitBetterAuth {
   const schema = withOptionalOidcSchema(baseSchema, opts.oidcProvider !== undefined)
   // drizzle-orm/d1 names the workers `D1Database` type; the public contract is `@kit/db` `KitD1Database`.
   const db = drizzle(opts.database as never, { schema })
-  const provider = providerComposition(opts.oidcProvider, (userId) =>
-    isAccountActive(db, userId, schema.user),
+  const provider = providerComposition(
+    opts.oidcProvider,
+    (id) => isAccountActive(db, id, schema.user),
+    opts.database,
   )
   const cookieName = sessionCookieName({ name: opts.cookieName })
   const secure = opts.useSecureCookies ?? true
   const publicSignup = opts.allowPublicSignup ?? false
-  const emailPort = opts.emailPort
-  const emailConfig = opts.emailConfig
+  const { emailPort, emailConfig } = opts
   assertEmailConfig(emailPort, emailConfig)
   const linkOrigins = new Set<string>(trustedOrigins)
   let base: URL
@@ -168,7 +167,6 @@ export function createBetterAuth(opts: CreateBetterAuthOpts): KitBetterAuth {
     allowLoopbackHttp: opts.allowLoopbackOrigins === true,
   }
   const google = opts.google !== undefined
-
   const auth = betterAuth({
     baseURL: opts.baseURL,
     basePath: BA_BASE_PATH,
@@ -281,7 +279,9 @@ export function createBetterAuth(opts: CreateBetterAuthOpts): KitBetterAuth {
     },
     trustedOrigins,
   })
-  auth.fetch = auth.handler = createSafeHandler(auth.handler)
+  const handle = createSafeHandler(auth.handler)
+  auth.fetch = auth.handler = (request) =>
+    provider.protectResponse?.(request, handle) ?? handle(request)
   auth.api.getSession = new Proxy(auth.api.getSession, {
     async apply(target, thisArg, args) {
       try {

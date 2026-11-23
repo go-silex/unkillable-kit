@@ -1,5 +1,5 @@
 import type { BetterAuthPlugin } from 'better-auth'
-import { createAuthMiddleware, NO_STORE_HEADERS } from 'better-auth/api'
+import { createAuthMiddleware } from 'better-auth/api'
 
 const authorizePath = '/oauth2/authorize'
 const unsupportedPrompt = 'create'
@@ -25,71 +25,42 @@ export const rejectOidcSignupPrompt = {
   }),
 }
 
-async function rejectDuplicateFormPrompt(
-  request: Request,
-  baseURL: string,
-  skipTrailingSlashes: boolean | undefined,
-) {
-  if (request.method !== 'POST' || !request.body) return
-  const contentType = request.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase()
-  if (contentType !== 'application/x-www-form-urlencoded') return
-  const basePath = new URL(baseURL).pathname.replace(/\/+$/, '')
-  const pathname = new URL(request.url).pathname
-  const path = skipTrailingSlashes ? pathname.replace(/\/$/, '') : pathname
-  if (path !== `${basePath}${authorizePath}`) return
-
-  // Better Call keeps only the last form field. Reject ambiguity before routing,
-  // leaving malformed bodies to the normal parser.
-  const form = await request
-    .clone()
-    .formData()
-    .catch(() => undefined)
-  if (form?.getAll('prompt')[1] === undefined) return
-  return {
-    response: Response.json(
-      { error: 'invalid_request', error_description: 'prompt must not be repeated' },
-      { status: 400, headers: NO_STORE_HEADERS },
-    ),
+async function rewriteSuccessfulMetadataResponse(response: Response, method: string) {
+  const headers = new Headers(response.headers)
+  headers.delete('content-length')
+  if (method === 'HEAD') {
+    return new Response(null, { status: response.status, headers })
   }
+  const metadata = (await response.clone().json()) as Record<string, unknown>
+  if (!('claims_parameter_supported' in metadata)) return
+  metadata.claims_parameter_supported = false
+  const prompts = metadata.prompt_values_supported
+  if (Array.isArray(prompts)) {
+    metadata.prompt_values_supported = prompts.filter((prompt) => prompt !== unsupportedPrompt)
+  }
+  return new Response(JSON.stringify(metadata), {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  })
 }
 
-export function withOidcPromptPolicy(provider: BetterAuthPlugin): BetterAuthPlugin {
+export function withOidcPromptPolicy(
+  provider: BetterAuthPlugin,
+  capture: (request: Request, baseURL: string) => Promise<{ response: Response } | undefined>,
+): BetterAuthPlugin {
   const onRequest = provider.onRequest
   return {
     ...provider,
     onRequest: async (request, ctx) => {
       const result = await onRequest?.(request, ctx)
       if (!(result && 'response' in result)) {
-        return (
-          (await rejectDuplicateFormPrompt(
-            request,
-            ctx.baseURL,
-            ctx.options.advanced?.skipTrailingSlashes,
-          )) ?? result
-        )
+        const current = result && 'request' in result ? result.request : request
+        return (await capture(current, ctx.baseURL)) ?? result
       }
-      const response = result.response
-      if (!response.ok) return result
-      const headers = new Headers(response.headers)
-      headers.delete('content-length')
-      if (request.method === 'HEAD') {
-        return { ...result, response: new Response(null, { status: response.status, headers }) }
-      }
-      const metadata = (await response.clone().json()) as Record<string, unknown>
-      if (!('claims_parameter_supported' in metadata)) return result
-      metadata.claims_parameter_supported = false
-      const prompts = metadata.prompt_values_supported
-      if (Array.isArray(prompts)) {
-        metadata.prompt_values_supported = prompts.filter((prompt) => prompt !== unsupportedPrompt)
-      }
-      return {
-        ...result,
-        response: new Response(JSON.stringify(metadata), {
-          status: response.status,
-          statusText: response.statusText,
-          headers,
-        }),
-      }
+      if (!result.response.ok) return result
+      const response = await rewriteSuccessfulMetadataResponse(result.response, request.method)
+      return response ? { ...result, response } : result
     },
   }
 }

@@ -1,16 +1,33 @@
+import type { KitD1Database } from '@kit/db'
 import type { BetterAuthPlugin } from 'better-auth'
 
 /** Factory-facing composition contract; it never imports the optional provider peer. */
 export type OidcProviderConfig = {
   waitUntil: (promise: Promise<unknown>) => void
-  plugins: (isActive: (userId: string) => Promise<boolean>) => BetterAuthPlugin[]
+  compose: (
+    isActive: (userId: string) => Promise<boolean>,
+    database: KitD1Database,
+  ) => {
+    plugins: BetterAuthPlugin[]
+    protectResponse?: (
+      request: Request,
+      next: (request: Request) => Promise<Response>,
+    ) => Promise<Response>
+  }
 }
 
 export function providerComposition(
   provider: OidcProviderConfig | undefined,
   isActive: (userId: string) => Promise<boolean>,
+  database: KitD1Database,
 ) {
-  if (!provider) return { plugins: [] }
+  if (!provider)
+    return {
+      plugins: [],
+      disabledPaths: undefined,
+      backgroundTasks: undefined,
+      protectResponse: undefined,
+    }
   return {
     disabledPaths: [
       '/token',
@@ -20,6 +37,6 @@ export function providerComposition(
       '/oauth2/client/rotate-secret',
     ],
     backgroundTasks: { handler: provider.waitUntil },
-    plugins: provider.plugins(isActive),
+    ...provider.compose(isActive, database),
   }
 }

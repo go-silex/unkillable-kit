@@ -381,6 +381,25 @@ else
   fail_case "2 core-only selection resync" "exit=${RUN_EC} out=${RUN_OUT}"
 fi
 
+# Real OIDC opt-in adds the provider tables before the password-evidence table.
+A2O="${TMP}/case2-oidc"
+cp -a "${A2D}" "${A2O}"
+if ! manifest_field "${A2O}/kit-schema-manifest.json" better_auth_oidc_fresh_login productFile >/dev/null 2>&1; then
+  pass "2o OIDC password evidence omitted by default"
+else
+  fail_case "2o OIDC password evidence omitted by default" "unexpected module in default manifest"
+fi
+run_sync --app "${A2O}" --modules core,audit,oidc_provider
+oidc_provider_file="$(manifest_field "${A2O}/kit-schema-manifest.json" better_auth_oidc_provider productFile || true)"
+oidc_fresh_login_file="$(manifest_field "${A2O}/kit-schema-manifest.json" better_auth_oidc_fresh_login productFile || true)"
+if [[ "${RUN_EC}" -eq 0 && -n "${oidc_provider_file}" && -n "${oidc_fresh_login_file}" \
+  && "${oidc_provider_file}" < "${oidc_fresh_login_file}" ]] \
+  && inventory_matches_manifest "${A2O}" "${TMP}/case2d-seed" core,audit,oidc_provider; then
+  pass "2o OIDC opt-in appends provider and password evidence in order"
+else
+  fail_case "2o OIDC opt-in appends provider and password evidence in order" "exit=${RUN_EC} out=${RUN_OUT}"
+fi
+
 # The previous default wrote an empty sets array, not ["core"].
 A2OLD="${TMP}/case2-old-default"
 cp -a "${A2}" "${A2OLD}"
