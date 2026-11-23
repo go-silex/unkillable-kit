@@ -75,14 +75,10 @@ fi
 `,
     )
     for (const name of readdirSync(import.meta.dirname)) {
-      if (/^root-gate(?:-.+)?\.ts$/.test(name) && !name.endsWith('.test.ts')) {
+      if (/^(?:root-gate(?:-.+)?|select-tooling)\.ts$/.test(name) && !name.endsWith('.test.ts')) {
         copyFileSync(join(import.meta.dirname, name), join(repo, 'scripts/kit', name))
       }
     }
-    copyFileSync(
-      join(import.meta.dirname, 'select-tooling.ts'),
-      join(repo, 'scripts/kit/select-tooling.ts'),
-    )
     git('add', '--all')
     git('commit', '-qm', 'base')
     const base = git('rev-parse', 'HEAD')
@@ -195,7 +191,7 @@ fixture((repo, env, change) => {
   const tooling = spawnSync(
     'bun',
     [
-      'scripts/kit/select-tooling.ts',
+      join(repo, 'scripts/kit', 'select-tooling.ts'),
       '--base',
       delivered.pull_request.base.sha,
       '--head',
