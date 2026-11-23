@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 
 function git(root: string, ...args: string[]): string {
@@ -25,14 +25,26 @@ export function pullRequestCheckout(root: string) {
     throw new Error('malformed pull-request revisions')
 
   // GitHub evaluates quality on its merge commit, not on the PR branch in isolation.
-  // Bind both parents to the delivered event rather than consulting mutable refs.
+  // Bind the checkout and its ordered parents without consulting mutable refs.
   if (git(root, 'rev-parse', '--is-shallow-repository').trim() !== 'false')
     throw new Error('shallow pull-request checkout')
+  const parents = git(root, 'rev-list', '--parents', '-n', '1', 'HEAD').trim()
+  const [actual, baseParent, headParent, extra] = parents.split(' ')
+  const mismatch = 'pull-request payload does not match checkout and merge parents'
+  if (actual !== checkout || headParent !== head || !isSha(baseParent) || extra)
+    throw new Error(mismatch)
+  const baseAdvanced = baseParent !== base
   if (
-    git(root, 'rev-list', '--parents', '-n', '1', 'HEAD').trim() !== `${checkout} ${base} ${head}`
+    baseAdvanced &&
+    spawnSync('git', ['merge-base', '--is-ancestor', base, baseParent], {
+      cwd: root,
+      stdio: 'ignore',
+    }).status !== 0
   )
-    throw new Error('pull-request payload does not match checkout and merge parents')
-  return { base, checkout }
+    throw new Error(mismatch)
+  // GitHub can build the exact merge checkout after its event's base advanced.
+  // This proves the checkout, but both consumers retain full coverage of that change.
+  return { base, checkout, baseAdvanced }
 }
 
 export function committedPaths(root: string, base: string, head: string): string[] {

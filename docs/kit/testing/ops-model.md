@@ -66,8 +66,9 @@ Core checks Product App discovery and enrollment scripts; the [consumer contract
 
 `--coverage-plan` and `--coverage-parts-plan` validate the full Coverage bar,
 then cover the selected bar exactly once. Only a trusted, non-empty Product-only
-PR diff omits Kit-owned workspaces. Product workspaces always run; pushes and
-local runs retain the full bar ([ADR-0024](../architecture/adr/0024-root-single-quality-gate.md)).
+PR diff omits Kit-owned workspaces. Product workspaces always run. Pushes, local
+runs and PR checkouts whose base has advanced past the event retain the full bar
+([ADR-0024](../architecture/adr/0024-root-single-quality-gate.md)).
 
 Each unpartitioned App gets one job. Packages are grouped round-robin, in
 relative order, up to four per VM. Each runs sequentially through native Vitest

@@ -120,13 +120,19 @@ function parseArgs(args: string[]) {
   return { base, head, mainPush }
 }
 
+function pullRequestNeedsTooling(base: string, head: string): boolean {
+  const pr = pullRequestCheckout(root)
+  if (!pr) return false
+  if (base !== pr.base || head !== pr.checkout)
+    throw new Error('tooling revisions do not match pull-request checkout')
+  return pr.baseAdvanced
+}
+
 function select(args: string[]): boolean {
   const parsed = parseArgs(args)
   let { base, head } = parsed
   const { mainPush } = parsed
-  const pullRequest = pullRequestCheckout(root)
-  if (pullRequest && (base !== pullRequest.base || head !== pullRequest.checkout))
-    throw new Error('tooling revisions do not match pull-request checkout')
+  if (pullRequestNeedsTooling(base, head)) return true
   git(['rev-parse', '--git-dir'])
   const identity = execFileSync(
     process.execPath,

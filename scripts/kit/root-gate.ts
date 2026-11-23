@@ -284,7 +284,7 @@ function coverageSelection(productApps: string[]): CoverageSelection {
   }
 
   const pr = pullRequestCheckout(root)
-  if (pr) {
+  if (pr && !pr.baseAdvanced) {
     const paths = committedPaths(root, pr.base, pr.checkout)
     const enrolled = new Set(productApps)
     if (productPathsOnly(paths, enrolled, pr.base)) {

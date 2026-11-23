@@ -12,7 +12,8 @@ import {
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
-type Change = (paths: string[], removals?: string[]) => void
+type BaseMove = 'none' | 'advanced' | 'unrelated'
+type Change = (paths: string[], removals?: string[], baseMove?: BaseMove) => void
 
 function fixture(exercise: (repo: string, env: NodeJS.ProcessEnv, change: Change) => void) {
   const repo = mkdtempSync(join(tmpdir(), 'root-coverage-context-'))
@@ -78,18 +79,32 @@ fi
         copyFileSync(join(import.meta.dirname, name), join(repo, 'scripts/kit', name))
       }
     }
+    copyFileSync(
+      join(import.meta.dirname, 'select-tooling.ts'),
+      join(repo, 'scripts/kit/select-tooling.ts'),
+    )
     git('add', '--all')
     git('commit', '-qm', 'base')
     const base = git('rev-parse', 'HEAD')
     const event = join(repo, '.git/event.json')
-    function change(paths: string[], removals: string[] = []) {
+    function change(paths: string[], removals: string[] = [], baseMove: BaseMove = 'none') {
       git('checkout', '-q', '--detach', base)
       for (const path of paths) write(path, 'change\n')
       for (const path of removals) rmSync(join(repo, path))
       git('add', '--all')
       git('commit', '-qm', 'head', '--allow-empty')
       const head = git('rev-parse', 'HEAD')
-      const merge = git('commit-tree', `${head}^{tree}`, '-p', base, '-p', head, '-m', 'merge')
+      const parent =
+        baseMove === 'none'
+          ? base
+          : git(
+              'commit-tree',
+              `${base}^{tree}`,
+              ...(baseMove === 'advanced' ? ['-p', base] : []),
+              '-m',
+              'new main',
+            )
+      const merge = git('commit-tree', `${head}^{tree}`, '-p', parent, '-p', head, '-m', 'merge')
       git('checkout', '-q', '--detach', merge)
       writeFileSync(
         event,
@@ -172,6 +187,31 @@ fixture((repo, env, change) => {
   env.GITHUB_EVENT_NAME = 'push'
   assert.deepEqual(plan(repo, env, '--coverage-plan'), fullGroups)
   assert.deepEqual(plan(repo, env, '--coverage-parts-plan'), fullParts)
+
+  change(['apps/fixture-web/src/main.ts'], [], 'advanced')
+  assert.deepEqual(plan(repo, env, '--coverage-plan'), fullGroups)
+  assert.deepEqual(plan(repo, env, '--coverage-parts-plan'), fullParts)
+  const delivered = JSON.parse(readFileSync(env.GITHUB_EVENT_PATH ?? '', 'utf8'))
+  const tooling = spawnSync(
+    'bun',
+    [
+      'scripts/kit/select-tooling.ts',
+      '--base',
+      delivered.pull_request.base.sha,
+      '--head',
+      env.GITHUB_SHA ?? '',
+    ],
+    { cwd: repo, env, encoding: 'utf8' },
+  )
+  assert.equal(tooling.status, 0, tooling.stderr)
+  assert.equal(tooling.stderr, '', 'base advancement selects tooling without fallback')
+
+  change(['apps/fixture-web/src/main.ts'], [], 'unrelated')
+  const unrelated = list(repo, env, '--coverage-plan')
+  assert.notEqual(unrelated.status, 0)
+  assert.match(unrelated.stderr, /pull-request payload does not match checkout and merge parents/)
+
+  change(['apps/fixture-web/src/main.ts'])
 
   env.GITHUB_EVENT_NAME = 'pull_request'
   const eventPath = env.GITHUB_EVENT_PATH
