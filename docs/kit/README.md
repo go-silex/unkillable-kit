@@ -66,6 +66,7 @@ This index locates the authoritative home for each rule and the operational guid
 - [ADR-0021 — Slack installations and notification Channel](./architecture/adr/0021-slack-installations-and-notification-channel.md).
 - [ADR-0022 — minimal starter Apps](./architecture/adr/0022-minimal-starter-apps.md).
 - [ADR-0023 — CI coverage partitions for heavy Apps](./architecture/adr/0023-ci-coverage-partitions.md).
+- [ADR-0024 — Root is the single quality gate for Product Apps](./architecture/adr/0024-root-single-quality-gate.md).
 - Non-normative design note: [ADR-0021 Slack](./architecture/design-notes/0021-slack.md).
 
 ## Processes, operations and security

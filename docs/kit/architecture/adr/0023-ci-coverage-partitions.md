@@ -3,6 +3,7 @@ title: 'ADR-0023 — CI coverage partitions for heavy Apps'
 status: accepted
 normative: true
 date: 2026-11-14
+amended: 2026-11-23
 axial: false
 related:
   - docs/kit/architecture/adr/0001-primary-axis-packages-compose-apps.md
@@ -19,6 +20,7 @@ summary: 'CI coverage partitions for heavy Apps; full floors apply at merge'
 The operator accepted this capacity choice on 2026-11-14; go-silex/unkillable-kit#54 tracks the Kit change.
 The acceptance covers the decisions below only.
 On 2026-11-15 the operator amended D2, D4, D6, D7, D8 and D10: one reusable workflow call per declared App, and a partition plan that is never empty.
+On 2026-11-23 [ADR-0024](./0024-root-single-quality-gate.md) D5 amended D6, D8 and D10 for pull-request plans.
 It grants no merge, deployment or Product adoption admission; each keeps its own review, proof and authorization.
 
 ## Context
