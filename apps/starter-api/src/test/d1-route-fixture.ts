@@ -3,8 +3,8 @@ import { fileURLToPath, URL } from 'node:url'
 import { countD1RoundTrips, createSqliteD1 } from '@kit/db/testing'
 import Database from 'better-sqlite3'
 import { expect, onTestFinished } from 'vitest'
-import worker from './index'
-import type { Env } from './platform/types'
+import worker from '../index'
+import type { Env } from '../platform/types'
 
 export const starterTestOrigin = 'http://localhost:8787'
 export const routeFixtureCredentials = {
@@ -24,7 +24,7 @@ export function createStarterHttpFixture(bindings: Pick<SiteEnv, 'ASSETS'> = {})
     sqlite.close()
   })
   sqlite.pragma('foreign_keys = ON')
-  const directory = fileURLToPath(new URL('../migrations/', import.meta.url))
+  const directory = fileURLToPath(new URL('../../migrations/', import.meta.url))
   for (const file of readdirSync(directory)
     .filter((name) => name.endsWith('.sql'))
     .sort()) {

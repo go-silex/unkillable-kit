@@ -9,7 +9,7 @@ import {
   createStarterHttpFixture,
   routeFixtureCredentials,
   starterTestOrigin,
-} from './d1-route-fixture'
+} from './test/d1-route-fixture'
 
 const ceilings: SessionRoundTripCeilings = {
   getSession: 3,

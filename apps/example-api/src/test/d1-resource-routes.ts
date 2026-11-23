@@ -9,7 +9,16 @@ async function responseJson<T>(response: Response): Promise<T> {
 
 export async function measureResources(record: Set<string>) {
   const { db, env, probe } = await createRouteFixture(record)
-  Object.assign(env, { EMAIL_TRANSPORT: 'log', PRESIGN_MODE: 'mock' })
+  const jobs: unknown[] = []
+  Object.assign(env, {
+    EMAIL_TRANSPORT: 'log',
+    PRESIGN_MODE: 'mock',
+    DEMO_QUEUE: {
+      async send(message: unknown) {
+        jobs.push(message)
+      },
+    },
+  })
   const orgId = 'org_team'
   await db.insert(baMember).values({
     id: 'budget-member',
@@ -31,6 +40,10 @@ export async function measureResources(record: Set<string>) {
       headers: { authorization: `Bearer ${key}`, 'X-Org-Id': orgId },
     })
   await measureDualResources(keyProbe, 'api-key')
+  expect(jobs).toMatchObject([
+    { type: 'demo.ping', subject: 'user_demo' },
+    { type: 'demo.ping', subject: 'user_demo' },
+  ])
   await probe('DELETE /api/keys/:id', 11, { path: `/api/keys/${id}` })
 
   onTestFinished(resetIdentityTickets)
@@ -50,7 +63,11 @@ export async function measureResources(record: Set<string>) {
 
 async function measureDualResources(probe: Probe, credential: 'session' | 'api-key') {
   const cap = (session: number, key: number) => (credential === 'session' ? session : key)
-  await probe('GET /api/me', cap(13, 11))
+  const profile = await probe('GET /api/me', cap(13, 11))
+  expect(await profile.json()).toMatchObject({
+    subject: 'user_demo',
+    authMethod: credential === 'session' ? 'session' : 'api_key',
+  })
   await probe('GET /api/keys', cap(14, 13))
   await probe('GET /api/notes', cap(14, 13))
   const { note } = await responseJson<{ note: { id: string } }>(
@@ -82,6 +99,7 @@ async function measureDualResources(probe: Probe, credential: 'session' | 'api-k
     path: `/api/uploads/${upload.uploadId}/complete`,
     body: { key: upload.key },
   })
-  await probe('POST /api/jobs/ping', cap(9, 8))
+  const job = await probe('POST /api/jobs/ping', cap(9, 8), { status: 202 })
+  expect(await job.json()).toMatchObject({ enqueued: true })
   await probe('POST /api/demo/email', cap(11, 10))
 }

@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest'
-import { createStarterHttpFixture, starterTestOrigin as origin } from './d1-route-fixture'
+import { createStarterHttpFixture, starterTestOrigin as origin } from './test/d1-route-fixture'
 
 function fixture(withAssets: boolean) {
   const assetUrls: string[] = []

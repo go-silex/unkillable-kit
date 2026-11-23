@@ -4,8 +4,8 @@ import { insertMember, insertOrganization } from '@kit/auth/repos/orgs'
 import { createDb } from '@kit/db'
 import { expect, it } from 'vitest'
 import { createApp } from './app'
-import { createRouteFixture } from './d1-route-fixture'
 import { schema } from './platform/types'
+import { createRouteFixture } from './test/d1-route-fixture'
 
 const orgId = 'org-route-budget'
 const budgets = [
@@ -20,12 +20,17 @@ const budgets = [
 
 it('budgets every protected Starter Hono registration', () => {
   // Multiple handlers for a method/path (for example, guards) are one HTTP route.
-  const registered = new Set(createApp().routes.map(({ method, path }) => `${method} ${path}`))
+  const routes = createApp().routes
+  expect(routes.filter(({ method }) => method === 'ALL').map(({ path }) => path)).toEqual([
+    ...Array<string>(6).fill('/*'), // global middleware
+    '/api/auth/*', // separately budgeted Better Auth mount
+  ])
+  const registered = new Set(
+    routes.filter(({ method }) => method !== 'ALL').map(({ method, path }) => `${method} ${path}`),
+  )
   expect([...registered].sort()).toEqual(
     [
-      'ALL /*', // global middleware
       'GET /health', // public health check
-      'ALL /api/auth/*', // separately budgeted Better Auth mount
       ...budgets.map(({ route }) => route),
     ].sort(),
   )
