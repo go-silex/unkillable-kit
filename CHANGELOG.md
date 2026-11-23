@@ -4,6 +4,11 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ## Unreleased
 
+### UI
+
+- Add `@kit/ui/base.css` for shared styles without Geist, using the system font
+  stack unless the App overrides it (go-silex/unkillable-kit#139).
+
 ## unkillable-kit/v0.4.1 — 2026-11-23
 
 ### Observability guide

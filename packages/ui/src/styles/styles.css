@@ -1,0 +1,7 @@
+@import "./globals.css";
+@import "@fontsource-variable/geist";
+
+/* Keep this token non-inline so App styles can override it. */
+@theme {
+  --font-sans: "Geist Variable", sans-serif;
+}

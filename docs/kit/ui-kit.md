@@ -4,9 +4,9 @@ Shared **shadcn Base UI** primitives for Chemin A apps. Product branding does **
 
 ## What it is
 
-- Package: `packages/ui` → import `@kit/ui`
-- Styles: `@import "@kit/ui/styles.css"` (see `apps/example-web/src/index.css`)
-- Living catalog: local route **`/admin/design-system`** (platform session required)
+- Package: `packages/ui` → import `@kit/ui`.
+- Styles: `@kit/ui/styles.css` (`@kit/ui/globals.css` alias) includes Geist.
+- Catalog: `/admin/design-system` (platform session required).
 
 ## Theme
 
@@ -16,17 +16,11 @@ The Example App keeps `kit.theme` and its existing `public/theme-boot.js` to app
 
 ## Zero-edit / product brand
 
-Do **not** patch `packages/ui` for product colors or copy.
+Keep branding in the App. For a custom font, import `@kit/ui/base.css` instead of the Geist entry, then the App fonts, then the App tokens. Set `--font-sans` on `:root`; `font-heading` follows it. Without an override, `base.css` uses the system stack.
 
-1. Import kit styles in the app.
-2. Override CSS variables in an **app-owned** file (tokens).
-3. Compose shells/pages in `apps/<product>-web` wrapping `@kit/ui`.
+Wrap Kit components in App-owned shells; see [design overrides](product-consumer-contract.md#design-overrides-accepted--no-exception-needed).
 
-SSoT: [`docs/kit/product-consumer-contract.md`](product-consumer-contract.md) (design_overrides).
-
-Client-facing release notes belong in the Product App, not shared Kit paths.
-The Example App demonstrates an in-app changelog; it is not a shared patchlog
-Package. Promote a shared implementation only after at least two Products need it.
+Release notes live in the App. Share changelog code only when two Products need it.
 
 ## Conventions for example-web
 
