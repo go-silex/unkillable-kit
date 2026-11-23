@@ -5,7 +5,7 @@
 1. **Names the bug** — failure mode in the title (`… without auth returns UNAUTHORIZED`).
 2. **Asserts the public contract** — status, `error.code`, cookie flags, a11y/DOM, not private helpers.
 3. **Includes the negative path** for T0 (reject, 401, IDOR, bad sig).
-4. **Stable** — no real network flake, no order-dependent FS.
+4. **Stable** — no real network flake, no order-dependent FS. Do not assert on values that depend on scheduling, such as elapsed time, sampled memory or queue depth. Prove the property with a controlled input instead (go-silex/unkillable-kit#149).
 5. **Fast enough** for pre-push — integration via `createApp` + memory env OK; full browser only for few paths.
 6. **Owned by the right layer** — package unit vs app composition (see ownership).
 
