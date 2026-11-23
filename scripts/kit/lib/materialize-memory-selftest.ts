@@ -1,10 +1,9 @@
 #!/usr/bin/env bun
 /**
- * Bound unread cat-file payload as chunks enter the reader queue. This catches
- * the historical full-blob queue regression regardless of timer scheduling.
- * Outside the queue, only the sampled post-GC external bound applies; timer
- * samples can miss transient allocations and do not measure the JS heap.
- * RSS is diagnostic only: it includes allocator pages kept after reclamation.
+ * Verify writeExact writes each chunk before a paced source sends the next.
+ * The source and writer alternate by event-loop turn, not by elapsed time.
+ * Separately verify the large materialized Git blob byte for byte. Neither
+ * check bounds process memory or the queue under a real cat-file producer.
  *
  * Usage: bun scripts/kit/lib/materialize-memory-selftest.ts [MiB=128]
  */
@@ -15,14 +14,15 @@ import {
   fstatSync,
   mkdtempSync,
   openSync,
-  readFileSync,
   readSync,
   rmSync,
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import type { materializeTree } from './materialize-tree.ts'
+import { Readable } from 'node:stream'
+import { setImmediate } from 'node:timers/promises'
+import { createByteReader, materializeTree } from './materialize-tree.ts'
 
 const MIB = 1024 * 1024
 const mib = Number(process.argv[2] ?? 128)
@@ -50,28 +50,78 @@ function git(args: string[], cwd = root) {
   return r.stdout
 }
 
-/** Instrument a test-only copy; leave the shipped reader untouched. */
-async function loadMaterializer() {
-  const source = readFileSync(new URL('./materialize-tree.ts', import.meta.url), 'utf8')
-  const anchor = '    buffered += chunk.length\n'
-  const [before, after, ...extra] = source.split(anchor)
-  if (after === undefined || extra.length > 0) {
-    throw new Error('cannot attach memory probe to the cat-file queue')
+async function checkPacedWriter(): Promise<boolean> {
+  const stream = new Readable({ read() {} })
+  const reader = createByteReader(stream)
+  const chunk = Buffer.alloc(64 * 1024, 0x5a)
+  const total = 4 * chunk.length
+  const fd = openSync(join(root, 'paced.bin'), 'w')
+  let firstMiss: { written: number; expected: number } | undefined
+  async function feed() {
+    // Let the stream enter flowing mode before delivering the first chunk.
+    await setImmediate()
+    for (let expected = chunk.length; expected <= total; expected += chunk.length) {
+      stream.push(chunk)
+      // The data listener wakes need(); its promise continuations drain and
+      // write synchronously before the next event-loop turn starts.
+      await setImmediate()
+      if (expected < total) {
+        const written = fstatSync(fd).size
+        if (written !== expected) firstMiss ??= { written, expected }
+      }
+    }
+    stream.push(null)
   }
-  const instrumented = `${before}${anchor}    onQueued?.(buffered)\n${after}
-let onQueued: ((bytes: number) => void) | undefined
-export function observeQueue(observer: (bytes: number) => void) { onQueued = observer }
-`
-  // The reader imports only Node built-ins. Load its instrumented source
-  // directly so Bun cannot treat literal ? or # in TMPDIR as URL syntax.
-  const encoded = Buffer.from(instrumented).toString('base64')
-  return (await import(`data:application/typescript;base64,${encoded}`)) as {
-    materializeTree: typeof materializeTree
-    observeQueue: (observer: (bytes: number) => void) => void
+  try {
+    await Promise.all([reader.writeExact(fd, total), feed()])
+    if (fstatSync(fd).size !== total) throw new Error('FAIL: paced writer size mismatch')
+  } finally {
+    closeSync(fd)
+  }
+  if (firstMiss) {
+    console.error(
+      `FAIL: writeExact did not stream before next chunk (wrote ${firstMiss.written}, expected ${firstMiss.expected})`,
+    )
+    return false
+  }
+  return true
+}
+
+function checkBlob(expected: Buffer) {
+  const fd = openSync(join(snap, 'data.bin'), 'r')
+  try {
+    const size = fstatSync(fd).size
+    if (size !== bytes) throw new Error(`FAIL: bytes mismatch len=${size} want=${bytes}`)
+    const actual = Buffer.allocUnsafe(expected.length)
+    for (let offset = 0; offset < bytes; offset += actual.length) {
+      const length = Math.min(actual.length, bytes - offset)
+      let read = 0
+      while (read < length) {
+        const count = readSync(fd, actual, read, length - read, offset + read)
+        if (count === 0) throw new Error(`FAIL: unexpected EOF at byte ${offset + read}`)
+        read += count
+      }
+      if (!actual.subarray(0, length).equals(expected.subarray(0, length))) {
+        throw new Error(`FAIL: bytes mismatch in chunk at offset ${offset}`)
+      }
+    }
+  } finally {
+    closeSync(fd)
   }
 }
 
 try {
+  if (await checkPacedWriter()) {
+    await checkMaterializedBlob()
+    console.log('PASS: writeExact streams paced chunks and materialize preserves blob bytes')
+  } else {
+    process.exitCode = 1
+  }
+} finally {
+  rmSync(root, { recursive: true, force: true })
+}
+
+async function checkMaterializedBlob() {
   git(['init', '-q'])
   writeFileSync(
     join(root, 'package.json'),
@@ -84,95 +134,16 @@ try {
   // Generate deterministic content without allocating the whole blob.
   const bin = join(root, 'data.bin')
   const out = createWriteStream(bin)
-  const chunk = Buffer.alloc(MIB, 0x5a)
-  for (let i = 0; i < mib; i += 1) {
-    if (!out.write(chunk)) await new Promise((r) => out.once('drain', r))
+  const chunk = Buffer.allocUnsafe(MIB)
+  for (let i = 0; i < chunk.length; i += 1) chunk[i] = i % 251
+  for (let offset = 0; offset < bytes; offset += chunk.length) {
+    const length = Math.min(chunk.length, bytes - offset)
+    if (!out.write(chunk.subarray(0, length))) await new Promise((r) => out.once('drain', r))
   }
   await new Promise((r) => out.end(r))
   git(['add', '.'])
   git(['commit', '-qm', 'mem'])
 
-  const { materializeTree, observeQueue } = await loadMaterializer()
-
-  function sampleMemory() {
-    // Bun updates its external-memory accounting on GC. Sample RSS first so
-    // the diagnostic also sees pages that the collection is about to release.
-    const rss = process.memoryUsage.rss()
-    Bun.gc(true)
-    return { rss, external: process.memoryUsage().external }
-  }
-  const baseline = sampleMemory()
-  let peakRss = baseline.rss
-  let peakExternal = baseline.external
-  const sample = () => {
-    const { rss, external } = sampleMemory()
-    peakRss = Math.max(peakRss, rss)
-    peakExternal = Math.max(peakExternal, external)
-  }
-  let peakBuffered = 0
-  observeQueue((buffered) => {
-    // Take one synchronous external sample with the whole fixture still live,
-    // if it ever fits in the queue. Timer samples alone can miss that window.
-    if (peakBuffered < bytes && buffered >= bytes) sample()
-    peakBuffered = Math.max(peakBuffered, buffered)
-  })
-  const timer = setInterval(sample, 5)
-  const t0 = performance.now()
-  try {
-    await materializeTree(root, 'HEAD', snap)
-    sample()
-  } finally {
-    clearInterval(timer)
-  }
-  const ms = performance.now() - t0
-  const growth = peakExternal - baseline.external
-
-  const fd = openSync(join(snap, 'data.bin'), 'r')
-  try {
-    const size = fstatSync(fd).size
-    const ends = Buffer.alloc(2)
-    if (
-      size !== bytes ||
-      readSync(fd, ends, 0, 1, 0) !== 1 ||
-      readSync(fd, ends, 1, 1, bytes - 1) !== 1 ||
-      ends[0] !== 0x5a ||
-      ends[1] !== 0x5a
-    ) {
-      throw new Error(`FAIL: bytes mismatch len=${size} want=${bytes}`)
-    }
-  } finally {
-    closeSync(fd)
-  }
-
-  // With a 128 MiB blob on Bun 1.4.4 (including one busy core), the streaming
-  // writer queued at most 7.2 MiB and grew sampled external memory by at most
-  // 0.7 MiB. The mutant reached 128 MiB queued and about 128 MiB external
-  // growth. Keep the same 32 MiB ceiling for each independent measurement.
-  const limit = Math.max(16 * MIB, Math.floor(bytes / 4))
-  console.log(
-    JSON.stringify({
-      mib,
-      ms: Math.round(ms),
-      baseline_rss: baseline.rss,
-      peak_rss: peakRss,
-      growth_rss: peakRss - baseline.rss,
-      baseline_external: baseline.external,
-      peak_external: peakExternal,
-      growth_external: growth,
-      limit_external: limit,
-      peak_buffered: peakBuffered,
-      limit_buffered: limit,
-    }),
-  )
-  if (peakBuffered > limit) {
-    console.error(`FAIL: queued blob bytes ${peakBuffered} exceed ${limit} for ${mib} MiB blob`)
-    process.exitCode = 1
-  } else if (growth > limit) {
-    console.error(`FAIL: live external growth ${growth} exceeds ${limit} for ${mib} MiB blob`)
-    process.exitCode = 1
-  } else {
-    console.log('PASS: materialize memory bound')
-  }
-} finally {
-  rmSync(root, { recursive: true, force: true })
+  await materializeTree(root, 'HEAD', snap)
+  checkBlob(chunk)
 }

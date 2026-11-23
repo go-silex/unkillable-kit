@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-/** Restore a full-buffer writeExact for memory-mutant testing. */
+/** Restore a full-buffer writeExact for the paced writer self-test. */
 import { readFileSync, writeFileSync } from 'node:fs'
 
 const path = process.argv[2]
