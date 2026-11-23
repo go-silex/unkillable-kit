@@ -68,7 +68,10 @@ describe('D1 round trips on authenticated Example API routes', {
     const missingGroups = groups
       .map(([group]) => group)
       .filter((group) => !measuredByGroup.has(group))
-    expect(missingGroups, 'Run the full file to check route coverage').toEqual([])
+    expect(
+      missingGroups,
+      'Route coverage requires every measurement case to pass; run the full file',
+    ).toEqual([])
 
     const measured = new Set([...measuredByGroup.values()].flatMap((routes) => [...routes]))
     const routes = createApp().routes.filter(
