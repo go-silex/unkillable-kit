@@ -4,6 +4,8 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ## Unreleased
 
+## unkillable-kit/v0.5.1 — 2026-11-23
+
 ### Tooling
 
 - `test:lock-ranges` now checks that `writeExact` writes each paced chunk before
