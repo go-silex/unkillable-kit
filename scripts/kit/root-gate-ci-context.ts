@@ -41,3 +41,9 @@ export function committedPaths(root: string, base: string, head: string): string
     .split('\0')
     .filter(Boolean)
 }
+
+export function hasAppManifestAt(root: string, revision: string, workspace: string): boolean {
+  const manifest = `:(literal)${workspace}/package.json`
+  const entry = git(root, 'ls-tree', '-rz', '--full-tree', revision, '--', manifest)
+  return /^100(?:644|755) blob [0-9a-f]{40}\t/.test(entry)
+}

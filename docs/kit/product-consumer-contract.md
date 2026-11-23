@@ -523,9 +523,10 @@ lint, typecheck, Knip, license, file-length, folder-size and import-boundary che
 and tests under coverage floors. Inherit Root files unchanged.
 
 Each Product App (an `apps/<name>` workspace outside the protected Kit prefixes)
-must be discovered by Root and declare `typecheck` and `test:coverage`. Set floors
-through `makeCoverage` and a risk tier in `config/product/coverage-order.txt`.
-For heavy Apps, declare partitions in `config/product/coverage-partitions.txt`
+must be discovered by Root and declare `typecheck` and `test:coverage`. Set at least
+one positive global percentage floor through `makeCoverage` and a risk tier in
+`config/product/coverage-order.txt`. For heavy Apps, declare partitions
+in `config/product/coverage-partitions.txt`
 as needed ([ADR-0023](./architecture/adr/0023-ci-coverage-partitions.md)).
 
 Root validates the full Coverage bar before selection. Only a trusted, non-empty

@@ -23,6 +23,7 @@ const config: KnipConfig = {
         'scripts/kit/extract-residency.ts',
         'scripts/kit/print-coverage-summary.mjs',
         'scripts/kit/resolve-tree-identity.mjs',
+        'scripts/kit/root-gate-coverage-floors.ts',
         'scripts/kit/lib/merge-gate.cjs',
         'scripts/kit/lib/head-authorization.cjs',
         'scripts/kit/lib/inject-lock-duplicate.mjs',

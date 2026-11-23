@@ -3,7 +3,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 root=$PWD
-tmp=$(mktemp -d)
+mkdir -p "$root/.tmp"
+tmp=$(mktemp -d "$root/.tmp/product-templates.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 export REAL_BUN
 REAL_BUN=$(command -v bun)
@@ -18,6 +19,7 @@ fi
 printf '%s %s\n' "${PWD##*/}" "$*" >> "$TRACE"
 EOF
 chmod +x "$tmp/bin/bun"
+original_path=$PATH
 export PATH="$tmp/bin:$PATH"
 
 for flags in '0 0' '0 1' '1 0' '1 1'; do
@@ -79,3 +81,24 @@ EOF
     test ! -e "$fixture/apps/fixture-mcp"
   fi
 done
+
+# Root uses Vitest directly, not an App's test or coverage script bodies.
+export PATH="$original_path"
+mkdir -p "$fixture/packages/config"
+cp packages/config/{vitest-coverage.mts,vitest-workers.mts,tsconfig.base.json} "$fixture/packages/config/"
+ln -s "$root/node_modules" "$fixture/node_modules"
+app="$fixture/apps/fixture-mcp"
+ln -s "$root/apps/mcp-example/node_modules" "$app/node_modules"
+(cd "$app" && bunx --no-install vitest run --coverage)
+
+# Break only the actual CLI launch, not the imports exercised by unit tests.
+{
+  printf 'if (import.meta.main) process.exit(99)\n'
+  tail -n +2 "$app/src/index.ts"
+} > "$app/src/index.ts.broken"
+mv "$app/src/index.ts.broken" "$app/src/index.ts"
+if (cd "$app" && bunx --no-install vitest run --coverage) > "$tmp/broken.log" 2>&1; then
+  echo 'Expected Root coverage to fail when generated MCP CLI startup is broken' >&2
+  exit 1
+fi
+grep -F 'MCP stdio smoke failed' "$tmp/broken.log" || { cat "$tmp/broken.log" >&2; exit 1; }

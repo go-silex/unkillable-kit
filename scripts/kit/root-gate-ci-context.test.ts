@@ -1,10 +1,18 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
-type Change = (path?: string) => void
+type Change = (paths: string[], removals?: string[]) => void
 
 function fixture(exercise: (repo: string, env: NodeJS.ProcessEnv, change: Change) => void) {
   const repo = mkdtempSync(join(tmpdir(), 'root-coverage-context-'))
@@ -60,7 +68,8 @@ function fixture(exercise: (repo: string, env: NodeJS.ProcessEnv, change: Change
 if [[ "\${COVERAGE_LIST_PARTS:-}" == 1 ]]; then
   printf '%s\\n' 'apps/example-api 2' 'apps/fixture-api 3'
 else
-  printf '%s\\n' apps/example-api packages/core apps/example-web apps/fixture-api apps/fixture-web
+  printf '%s\\n' apps/example-api packages/core apps/example-web apps/fixture-api
+  if [[ -f apps/fixture-web/package.json ]]; then echo apps/fixture-web; fi
 fi
 `,
     )
@@ -73,9 +82,10 @@ fi
     git('commit', '-qm', 'base')
     const base = git('rev-parse', 'HEAD')
     const event = join(repo, '.git/event.json')
-    function change(path?: string) {
+    function change(paths: string[], removals: string[] = []) {
       git('checkout', '-q', '--detach', base)
-      if (path) write(path, 'change\n')
+      for (const path of paths) write(path, 'change\n')
+      for (const path of removals) rmSync(join(repo, path))
       git('add', '--all')
       git('commit', '-qm', 'head', '--allow-empty')
       const head = git('rev-parse', 'HEAD')
@@ -135,24 +145,45 @@ fixture((repo, env, change) => {
     'scripts/product/check.sh',
     '.github/workflows/product-check.yaml',
   ]) {
-    change(path)
+    change([path])
     assert.deepEqual(plan(repo, env, '--coverage-plan'), productGroups, path)
     assert.deepEqual(plan(repo, env, '--coverage-parts-plan'), [productPart], path)
   }
 
-  for (const path of [undefined, 'apps/example-web/src/main.ts', 'bun.lock', '.dev/stack.yml']) {
-    change(path)
-    const description = path ?? 'empty diff'
+  for (const paths of [
+    [],
+    ['apps/example-web/src/main.ts'],
+    ['apps/notes/README.md'],
+    ['bun.lock'],
+    ['.dev/stack.yml'],
+    ['apps/fixture-web/src/main.ts', 'bun.lock'],
+  ]) {
+    change(paths)
+    const description = paths.join(', ') || 'empty diff'
     assert.deepEqual(plan(repo, env, '--coverage-plan'), fullGroups, description)
     assert.deepEqual(plan(repo, env, '--coverage-parts-plan'), fullParts, description)
   }
 
-  change('apps/fixture-web/src/main.ts')
+  change([], ['apps/fixture-web/package.json'])
+  assert.deepEqual(plan(repo, env, '--coverage-plan'), [])
+  assert.deepEqual(plan(repo, env, '--coverage-parts-plan'), [productPart])
+
+  change(['apps/fixture-web/src/main.ts'])
   env.GITHUB_EVENT_NAME = 'push'
   assert.deepEqual(plan(repo, env, '--coverage-plan'), fullGroups)
   assert.deepEqual(plan(repo, env, '--coverage-parts-plan'), fullParts)
 
   env.GITHUB_EVENT_NAME = 'pull_request'
+  const eventPath = env.GITHUB_EVENT_PATH
+  assert.ok(eventPath)
+  const originalEvent = readFileSync(eventPath, 'utf8')
+  const { base, head } = JSON.parse(originalEvent).pull_request
+  writeFileSync(eventPath, JSON.stringify({ pull_request: { base: head, head: base } }))
+  const swapped = list(repo, env, '--coverage-plan')
+  assert.notEqual(swapped.status, 0)
+  assert.match(swapped.stderr, /pull-request payload does not match checkout and merge parents/)
+  writeFileSync(eventPath, originalEvent)
+
   env.GITHUB_SHA = 'a'.repeat(40)
   const mismatched = list(repo, env, '--coverage-plan')
   assert.notEqual(mismatched.status, 0)

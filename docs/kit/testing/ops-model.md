@@ -248,34 +248,20 @@ The existing publishers remain the owners. Direct `gh` and browser writes are no
 
 **Independent-lineage continuity.** The existing `test:dogfood-zero-edit` integration also exercises direct and legacy-mediated Products joining an independent public Kit root, then receiving an ordinary next upgrade. It checks actual identity/zero-edit/stack behavior, refusal of a fetched-but-unmerged pin, preservation of Product/exception/applied-migration records and absence of private ancestry in the public parent. These synthetic fixtures do not prove a final exported candidate, a real Product migration or hosted settings.
 
-**Kit bar vs product bar**
-
-| Gate                          | Scope                                                                                                                    | Who runs it                                                                           |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------- |
-| `bun run validate`            | short kit loop — steps = root `package.json` `scripts.validate`                                                          | kit + product clones (kit zones)                                                      |
-| `bun run validate:full`       | current-tree kit bar (pre-push + kit CI); root `package.json` owns its steps. **Does not** prove product apps are tested | pre-push + kit CI                                                                     |
-| `bun run validate:tooling`    | gate tooling self-tests, selected as described above; root `package.json` owns its steps                                 | pre-push + kit CI when selected; manual full run                                      |
-| product-validate / product-ci | product packages under `apps/<product>-*`                                                                                | product repo only (copy templates; never dual-edit kit `ci.yml` / `test-coverage.sh`) |
-
-False green: product with real apps and only kit `validate:full` green is **not** product-tested.
-
 ### Commands
 
 ```bash
 bun install                    # prepare → lefthook install if hooksPath unset (no dependency postinstall runs: trustedDependencies = [])
 
-bun run validate               # short kit loop (package.json scripts.validate)
+bun run validate               # short local loop (not an admission gate)
 bun run zero-edit              # product must not diverge kit paths without exception (kit = config only)
 bun run env:check              # schema ↔ .dev.vars.example (DX only)
 bun run i18n:check             # messages contract (also in turbo test)
 bun run license:check          # dependency SPDX allowlist: live scan + --self-test (UNKNOWN = warn)
 bun run test:coverage          # floors + HTML under coverage/<pkg>/
-bun run validate:full          # kit bar SSoT (package.json scripts["validate:full"]) — not product apps
+bun run validate:full          # Root quality gate for Kit and Product workspaces
 
-# Before opening a PR on the kit (explicit habit even if hooks installed):
-bun run validate:full
-
-# Product bar (product repos only — after copying templates):
+# Product artifacts and Product-only guards (after copying the templates):
 # bash scripts/product/validate.sh
 # See docs/kit/templates/product-validate.example.sh + product-ci.example.yml
 ```

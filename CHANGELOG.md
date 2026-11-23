@@ -15,9 +15,9 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
   and has a risk tier in `config/product/coverage-order.txt`. Add coverage
   partitions under ADR-0023 only where needed. Remove duplicate typecheck,
   tests (including MCP), `zero-edit` and `deploy-gate:check` from copied Product
-  validation. Keep deployment builds (SPA if present and Worker dry-runs for
-  each deployed environment) and Product-specific guards. One Product must
-  pilot the release on hosted runs and prove the 300-second Root budget
+  validation. Move standalone App smoke checks into Root coverage before
+  removing their old calls. Keep deployment builds and Product-specific guards.
+  One Product must pilot the release and prove the hosted 300-second Root budget
   before wider adoption (go-silex/unkillable-kit#156).
 
 ## unkillable-kit/v0.5.1 — 2026-11-23

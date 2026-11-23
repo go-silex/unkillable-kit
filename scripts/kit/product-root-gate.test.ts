@@ -146,23 +146,50 @@ try {
   const coverageReceipt = join(root, 'receipts/root-coverage-apps__product-fixture.json')
   const core = () => gate('--ci-group', 'core', '--receipt', coreReceipt)
   const shard = () => gate('--ci-coverage-shard', app, '--receipt', coverageReceipt)
-  const joinReceipts = () =>
+  const joinReceipts = (coverageResult = 'success', partsResult = 'skipped') =>
     gate(
       '--ci-join',
       join(root, 'receipts'),
       '--producers-result',
       'success',
       '--coverage-result',
-      'success',
+      coverageResult,
       '--parts-result',
-      'skipped',
+      partsResult,
     )
+
+  function mergePullRequest(branch: string, change: () => void) {
+    const base = git('rev-parse', 'HEAD')
+    git('switch', '-qc', branch)
+    change()
+    const head = commit(`PR head: ${branch}`)
+    git('switch', '-q', 'main')
+    git('merge', '-q', '--no-ff', '-m', `Synthetic PR merge: ${branch}`, head)
+    env.GITHUB_SHA = git('rev-parse', 'HEAD')
+    env.GITHUB_EVENT_NAME = 'pull_request'
+    env.GITHUB_EVENT_PATH = join(root, 'event.json')
+    json('event.json', { pull_request: { base: { sha: base }, head: { sha: head } } })
+  }
 
   // Bare Kit core succeeds with only protected App manifests.
   checked(bun('install', '--lockfile-only', '--offline'))
   commit('Bare Kit')
   assert.match(checked(core()), /apps-example-api:typecheck/)
   rmSync(coreReceipt)
+
+  // With no Product Apps, a Product-docs-only PR selects neither Coverage producer.
+  mergePullRequest('product-docs', () => put('docs/product/notes.txt', 'Product notes.\n'))
+  assert.deepEqual(JSON.parse(checked(gate('--coverage-plan'))), [])
+  assert.deepEqual(JSON.parse(checked(gate('--coverage-parts-plan'))), [])
+  assert.match(checked(core()), /apps-example-api:typecheck/)
+  assert.match(checked(joinReceipts('skipped', 'skipped')), /full Root passed by current-run join/)
+  for (const result of ['failure', 'cancelled']) {
+    failed(joinReceipts(result, 'skipped'), /coverage producer did not succeed/)
+    failed(joinReceipts('skipped', result), /coverage partitions producer did not succeed/)
+  }
+  rmSync(coreReceipt)
+  delete env.GITHUB_EVENT_NAME
+  delete env.GITHUB_EVENT_PATH
 
   // Enrollment is independent of script-driven task and coverage discovery.
   put('apps/notes/README.txt', 'A directory without a manifest is not an App.\n')
@@ -215,16 +242,9 @@ test('fixture value', () => expect(value).toBe(2))
   rmSync(coverageReceipt)
 
   // The PR checkout is a merge with trusted base/head as parents, changing only the App.
-  const base = env.GITHUB_SHA
-  git('switch', '-qc', 'product-change')
-  put(`${app}/src/value.ts`, 'export const value: number = 2\n')
-  const head = commit('Fix Product suite')
-  git('switch', '-q', 'main')
-  git('merge', '-q', '--no-ff', '-m', 'Synthetic PR merge', head)
-  env.GITHUB_SHA = git('rev-parse', 'HEAD')
-  env.GITHUB_EVENT_NAME = 'pull_request'
-  env.GITHUB_EVENT_PATH = join(root, 'event.json')
-  json('event.json', { pull_request: { base: { sha: base }, head: { sha: head } } })
+  mergePullRequest('product-change', () => {
+    put(`${app}/src/value.ts`, 'export const value: number = 2\n')
+  })
 
   assert.deepEqual(JSON.parse(checked(gate('--coverage-plan'))), [
     { id: 'apps__product-fixture', workspaces: [app] },
@@ -240,8 +260,54 @@ test('fixture value', () => expect(value).toBe(2))
   )
   assert.equal(summary.total.lines.pct, 100)
   assert.match(checked(joinReceipts()), /full Root passed by current-run join/)
+  failed(joinReceipts('skipped'), /coverage producer did not succeed: skipped/)
   rmSync(coverageReceipt)
   failed(joinReceipts(), /coverage receipts missing.*apps\/product-fixture/)
+
+  // A configured floor is still enforced by native Vitest, not just discovered by Root.
+  put(`${app}/src/uncovered.ts`, 'export const uncovered = 1\n')
+  commit('Product misses the configured floor')
+  failed(shard(), /Coverage for lines .* does not meet global threshold \(100%\)/)
+  rmSync(coverageReceipt)
+  rmSync(join(root, app, 'src/uncovered.ts'))
+
+  // A passing suite cannot earn a complete receipt with absent or zero floors.
+  for (const floor of ['', ', { lines: 0, branches: 0, functions: 0, statements: 0 }']) {
+    put(
+      `${app}/vitest.config.mts`,
+      `import { makeCoverage } from '../../packages/config/vitest-coverage.mts'
+export default { test: { maxWorkers: 1, coverage: makeCoverage('product-fixture'${floor}) } }
+`,
+    )
+    commit('Product lacks a positive floor')
+    failed(shard(), /apps\/product-fixture.*coverage floor/)
+    const receipt = JSON.parse(readFileSync(coverageReceipt, 'utf8'))
+    assert.equal(receipt.complete, false)
+    rmSync(coverageReceipt)
+  }
+
+  // Short parts still produce native blobs; the final merge enforces the floor.
+  delete env.GITHUB_EVENT_NAME
+  delete env.GITHUB_EVENT_PATH
+  put('config/product/coverage-partitions.txt', `${app} 2\n`)
+  put(
+    `${app}/src/another.test.ts`,
+    `import { expect, test } from 'vitest'
+import { value } from './value'
+test('second fixture value', () => expect(value).toBe(2))
+`,
+  )
+  commit('Partition Product without a positive floor')
+  const raw = join(root, 'raw')
+  mkdirSync(raw)
+  for (const index of [1, 2]) {
+    const part = join(raw, `coverage-raw-12345-1-apps__product-fixture-${index}-of-2`)
+    checked(gate('--ci-coverage-part', app, `${index}/2`, '--raw', part))
+  }
+  failed(
+    gate('--ci-coverage-merge', app, '--raw', raw, '--receipt', coverageReceipt),
+    /apps\/product-fixture.*coverage floor/,
+  )
   console.log('product-root-gate: Kit and Product App coverage and enrollment fixtures passed')
 } finally {
   rmSync(root, { recursive: true, force: true })

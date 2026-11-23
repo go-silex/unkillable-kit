@@ -39,7 +39,44 @@ if [[ "$mcp" == 1 ]]; then
   sed -e "s/mcp-example/$name-mcp/g" -e 's/createExampleCatalogue/createProductCatalogue/g' -e 's/Hosted: Worker MCP token props.//g' apps/mcp-example/src/catalogue.ts > "$app/src/catalogue.ts"
   sed -e "s/kit-mcp-example/$name-mcp/g" -e 's/MCP example/Product MCP/g' -e 's/createExampleCatalogue/createProductCatalogue/g' apps/mcp-example/src/index.ts > "$app/src/index.ts"
   sed "s/mcp-example/$name-mcp/g" apps/mcp-example/src/index.test.ts > "$app/src/index.test.ts"
-  sed "s/mcp-example/$name-mcp/g" apps/mcp-example/scripts/stdio-smoke.mjs > "$app/scripts/stdio-smoke.mjs"
+  # Use a hard bound and no dotenv or Product API configuration, even in the local alias.
+  sed -e "s/mcp-example/$name-mcp/g" \
+    -e "s/'bun', \['run', entry\]/'bun', ['--no-env-file', 'run', entry]/" \
+    -e "/stdio: \['pipe', 'pipe', 'pipe'\],/a\\  timeout: 8000,\\n  killSignal: 'SIGKILL'," \
+    -e "/    API_KEY:/c\\    API_KEY: '',\\n    AUTHORIZATION: '',\\n    API_BASE_URL: '',\\n    MCP_ALLOWED_HOSTS: '',\\n    MCP_ALLOW_NONLOCAL_HOSTS: ''," \
+    apps/mcp-example/scripts/stdio-smoke.mjs > "$app/scripts/stdio-smoke.mjs"
+  cat > "$app/src/stdio.test.ts" <<'EOF'
+import { spawnSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
+import { expect, it } from 'vitest'
+
+it('serves ping and an unverified identity over stdio JSON-RPC', () => {
+  const smoke = fileURLToPath(new URL('../scripts/stdio-smoke.mjs', import.meta.url))
+  const child = spawnSync('bun', ['--no-env-file', 'run', smoke], {
+    encoding: 'utf8',
+    timeout: 12_000,
+    killSignal: 'SIGKILL',
+  })
+  if (child.status !== 0) {
+    throw new Error(
+      `MCP stdio smoke failed: ${child.error ?? child.signal ?? child.status}\n${child.stderr}`,
+    )
+  }
+  const report = JSON.parse(child.stdout)
+  expect(report.ok).toBe(true)
+  expect(report.tools).toEqual(['ping', 'whoami'])
+  expect(report.ping.isError).not.toBe(true)
+  const ping = report.ping.content.find((item: { type: string }) => item.type === 'text')
+  expect(JSON.parse(ping.text)).toEqual({ ok: true })
+  expect(report.whoami.isError).not.toBe(true)
+  expect(report.whoamiParsed).toEqual({
+    keyPresent: false,
+    verified: false,
+    subject: null,
+    status: 'missing_key',
+  })
+}, 15_000)
+EOF
   cp apps/mcp-example/tsconfig.json "$app/tsconfig.json"
   cat > "$app/package.json" <<EOF
 {
@@ -52,9 +89,9 @@ if [[ "$mcp" == 1 ]]; then
     "dev": "bun run src/index.ts",
     "start": "bun run src/index.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run && bun run scripts/stdio-smoke.mjs",
+    "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "smoke:stdio": "bun run scripts/stdio-smoke.mjs"
+    "smoke:stdio": "bun --no-env-file run scripts/stdio-smoke.mjs"
   },
   "dependencies": {
     "@kit/mcp": "workspace:*",

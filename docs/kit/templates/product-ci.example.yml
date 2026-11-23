@@ -6,6 +6,7 @@
 # kit has no product apps.
 #
 # Pair with scripts/product/validate.sh, copied from product-validate.example.sh.
+# If you put the script inside an App, point the Product validate command below at it.
 # Root already owns workspace quality. This workflow builds deployment artifacts
 # and runs only Product-specific guards, through that one script.
 #

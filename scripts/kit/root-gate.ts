@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { lstatSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
-import { committedPaths, pullRequestCheckout } from './root-gate-ci-context'
+import { committedPaths, hasAppManifestAt, pullRequestCheckout } from './root-gate-ci-context'
 import { kitAppPrefixes, productAppWorkspaces } from './root-gate-enrollment'
 import { mergeParts, runPart } from './root-gate-parts'
 import { joinTooling, runToolingShard, toolingPlan } from './root-gate-tooling'
@@ -245,13 +245,26 @@ function enforceCoverageEnrollment(productApps: string[], bar: string[]) {
   }
 }
 
-function isProductPath(path: string, kitApps: Set<string>): boolean {
-  const app = /^apps\/[^/]+\//.exec(path)
-  if (app) return !kitApps.has(app[0])
-  return (
-    /^(?:config|docs|scripts)\/product\//.test(path) ||
-    /^\.github\/workflows\/product-[^/]*$/.test(path)
-  )
+function productPathsOnly(paths: string[], apps: Set<string>, base: string): boolean {
+  if (paths.length === 0) return false
+  const kitApps = kitAppPrefixes(root)
+  const priorApps = new Map<string, boolean>()
+  return paths.every((path) => {
+    const app = /^(apps\/[^/]+)\//.exec(path)
+    if (app) {
+      if (kitApps.has(app[0])) return false
+      const workspace = app[1]
+      if (apps.has(workspace)) return true
+      // A deleted App still owned its paths at the base. A random apps/ directory did not.
+      const owned = priorApps.get(workspace) ?? hasAppManifestAt(root, base, workspace)
+      priorApps.set(workspace, owned)
+      return owned
+    }
+    return (
+      /^(?:config|docs|scripts)\/product\//.test(path) ||
+      /^\.github\/workflows\/product-[^/]*$/.test(path)
+    )
+  })
 }
 
 type CoverageSelection = {
@@ -273,9 +286,8 @@ function coverageSelection(productApps: string[]): CoverageSelection {
   const pr = pullRequestCheckout(root)
   if (pr) {
     const paths = committedPaths(root, pr.base, pr.checkout)
-    const kitApps = kitAppPrefixes(root)
-    if (paths.length > 0 && paths.every((path) => isProductPath(path, kitApps))) {
-      const enrolled = new Set(productApps)
+    const enrolled = new Set(productApps)
+    if (productPathsOnly(paths, enrolled, pr.base)) {
       return {
         workspaces: bar.filter((workspace) => enrolled.has(workspace)),
         partitions,
