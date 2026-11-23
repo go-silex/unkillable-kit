@@ -21,6 +21,15 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 - Add accessible Tabs to `@kit/ui` and demonstrate them in the Example App
   design-system catalogue (go-silex/unkillable-kit#136).
 
+### Password input
+
+- Add `PasswordInput` to `@kit/ui` with an accessible visibility toggle, and use
+  it in the Kit password forms and Example App
+  (go-silex/unkillable-kit#137).
+- **Product action:** Supply `showPasswordLabel` and `hidePasswordLabel` in the
+  copy passed to `ResetPasswordForm` and `ChangePasswordForm`
+  (go-silex/unkillable-kit#137).
+
 ## unkillable-kit/v0.4.1 — 2026-11-23
 
 ### Observability guide

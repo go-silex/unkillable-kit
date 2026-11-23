@@ -1,4 +1,4 @@
-import { Button, Field, FieldError, FieldGroup, FieldLabel, Input } from '@kit/ui'
+import { Button, Field, FieldError, FieldGroup, FieldLabel, PasswordInput } from '@kit/ui'
 import { useForm } from '@tanstack/react-form'
 import { useState } from 'react'
 import { AUTH_CHANGE_PASSWORD_PATH, changePasswordSchema } from '../password-schemas'
@@ -7,6 +7,8 @@ import { type AuthFormFetch, type AuthFormNotify, silentNotify } from './notify'
 
 export type ChangePasswordCopy = {
   errValidation: string
+  showPasswordLabel: string
+  hidePasswordLabel: string
   changePasswordCurrent: string
   changePasswordNew: string
   changePasswordConfirm: string
@@ -93,10 +95,11 @@ export function ChangePasswordForm({
             return (
               <Field data-invalid={invalid || undefined}>
                 <FieldLabel htmlFor={field.name}>{copy.changePasswordCurrent}</FieldLabel>
-                <Input
+                <PasswordInput
                   id={field.name}
                   name={field.name}
-                  type="password"
+                  showPasswordLabel={copy.showPasswordLabel}
+                  hidePasswordLabel={copy.hidePasswordLabel}
                   autoComplete="current-password"
                   value={field.state.value}
                   onBlur={field.handleBlur}
@@ -117,10 +120,11 @@ export function ChangePasswordForm({
             return (
               <Field data-invalid={invalid || undefined}>
                 <FieldLabel htmlFor={field.name}>{copy.changePasswordNew}</FieldLabel>
-                <Input
+                <PasswordInput
                   id={field.name}
                   name={field.name}
-                  type="password"
+                  showPasswordLabel={copy.showPasswordLabel}
+                  hidePasswordLabel={copy.hidePasswordLabel}
                   autoComplete="new-password"
                   value={field.state.value}
                   onBlur={field.handleBlur}
@@ -141,10 +145,11 @@ export function ChangePasswordForm({
             return (
               <Field data-invalid={invalid || undefined}>
                 <FieldLabel htmlFor={field.name}>{copy.changePasswordConfirm}</FieldLabel>
-                <Input
+                <PasswordInput
                   id={field.name}
                   name={field.name}
-                  type="password"
+                  showPasswordLabel={copy.showPasswordLabel}
+                  hidePasswordLabel={copy.hidePasswordLabel}
                   autoComplete="new-password"
                   value={field.state.value}
                   onBlur={field.handleBlur}

@@ -10,9 +10,9 @@ Shared **shadcn Base UI** primitives for Chemin A apps. Product branding does **
 
 ## Theme
 
-Import `ThemeProvider`, `useTheme`, and the `Theme` type from `@kit/ui`. Wrap the App with `<ThemeProvider storageKey="kit.theme">` (choose an App-owned key). `useTheme()` exposes `theme` (`light`, `dark`, or `system`), `setTheme`, and the resolved `light` or `dark` value. The provider toggles `.dark` on the document root and follows system preference changes while `system` is selected. Invalid or inaccessible storage falls back to `system`; an unavailable system preference resolves to `light`.
+Import `ThemeProvider`, `useTheme`, and `Theme` from `@kit/ui`. Wrap the App in `<ThemeProvider storageKey="kit.theme">` with an App-owned key. `useTheme()` returns `theme` (`light`, `dark`, or `system`), `setTheme`, and the resolved theme. The provider toggles `.dark` on the document root and tracks system changes in `system` mode. Invalid or inaccessible storage falls back to `system`; without a system preference, it resolves to `light`.
 
-The Example App keeps `kit.theme` and its existing `public/theme-boot.js` to apply the same selection before React mounts. Apps using a boot script must use the same storage key and theme rules as their provider.
+The Example App uses `kit.theme` in `public/theme-boot.js` before React mounts. Boot scripts must match the provider's storage key and theme rules.
 
 ## Zero-edit / product brand
 
@@ -38,6 +38,7 @@ Keep branding, shells, and release notes in the App. Share changelog code only w
 See `packages/ui/src/index.ts` and the catalogue for exports.
 `Tabs` + `TabsList` + `TabsTrigger` + `TabsContent` switch local panels.
 Set `activateOnFocus={false}` on `TabsList` for manual activation.
+`PasswordInput` is a Kit composition of `InputGroup`; pass `showPasswordLabel` and `hidePasswordLabel` from App i18n.
 
 ### Tasks-related primitives (shadcn, 2026-08)
 

@@ -50,6 +50,8 @@ export type Messages = {
   magicHint: string
   email: string
   password: string
+  showPasswordLabel: string
+  hidePasswordLabel: string
   submit: string
   logout: string
   notes: string
@@ -346,6 +348,8 @@ export const fr: Messages = {
   magicHint: 'Réponse générique (pas d’énumération). Lien valable environ 5 minutes.',
   email: 'E-mail',
   password: 'Mot de passe',
+  showPasswordLabel: 'Afficher le mot de passe',
+  hidePasswordLabel: 'Masquer le mot de passe',
   submit: 'Se connecter',
   logout: 'Déconnexion',
   notes: 'Notes',
