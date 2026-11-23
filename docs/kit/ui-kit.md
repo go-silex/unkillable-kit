@@ -16,17 +16,11 @@ The Example App keeps `kit.theme` and its existing `public/theme-boot.js` to app
 
 ## Zero-edit / product brand
 
-Do **not** patch `packages/ui` for product colors or copy.
+Import Kit styles, then [override tokens](product-consumer-contract.md#design-overrides-accepted--no-exception-needed) in App-owned CSS. Compose shells in `apps/<product>-web`; don't patch `@kit/ui` for colors or copy.
 
-1. Import kit styles in the app.
-2. Override CSS variables in an **app-owned** file (tokens).
-3. Compose shells/pages in `apps/<product>-web` wrapping `@kit/ui`.
+Set `--overlay` on `:root` and `.dark` for modal backdrops (default: 10% black). Preserve `bg-overlay` in vendored `dialog.tsx`, `alert-dialog.tsx`, and `sheet.tsx` on `ui:add` re-sync.
 
-SSoT: [`docs/kit/product-consumer-contract.md`](product-consumer-contract.md) (design_overrides).
-
-Client-facing release notes belong in the Product App, not shared Kit paths.
-The Example App demonstrates an in-app changelog; it is not a shared patchlog
-Package. Promote a shared implementation only after at least two Products need it.
+Client-facing release notes belong in Apps. The Example App demonstrates an in-app changelog. Promote a shared changelog only when two Products need it.
 
 ## Conventions for example-web
 

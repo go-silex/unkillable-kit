@@ -9,6 +9,11 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 - Use the Web Crypto input type for retained-key verification so the OIDC provider
   typechecks with Cloudflare Worker declarations as well as DOM declarations.
 
+### UI
+
+- Let Apps set the Dialog, AlertDialog, and Sheet backdrop color via `--overlay`
+  in light and dark modes without changing the defaults (go-silex/unkillable-kit#138).
+
 ## unkillable-kit/v0.4.1 — 2026-11-23
 
 ### Observability guide

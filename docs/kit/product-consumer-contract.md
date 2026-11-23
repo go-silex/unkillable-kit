@@ -289,7 +289,7 @@ Customize look & feel **without** forking `@kit/ui`. Machine-readable list: `con
 
 | Pattern                    | Where                                  | How                                                                                                                               |
 | -------------------------- | -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| **CSS token override**     | `apps/<product>-web/src/**/*.css`      | Keep `@import "@kit/ui/styles.css"`, then redeclare tokens on `:root` / `.dark` (`--primary`, `--radius`, fonts, sidebar, charts) |
+| **CSS token override**     | `apps/<product>-web/src/**/*.css`      | `@import "@kit/ui/styles.css"`, then declare `--primary`, `--radius`, `--overlay`, fonts, sidebar, or charts on `:root` / `.dark` |
 | **Compose / wrap**         | `apps/<product>-web/src/components/**` | Import primitives from `@kit/ui`; build product shells (`LoadingButton`, `BrandHeader`)                                           |
 | **App Tailwind `@source`** | product CSS                            | `@source` kit UI + product app only                                                                                               |
 | **Assets**                 | `apps/<product>-web/public/**`         | Favicon, OG, logo — not in `packages/ui`                                                                                          |
