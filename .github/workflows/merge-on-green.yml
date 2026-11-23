@@ -41,6 +41,7 @@ jobs:
     # Payload hints avoid provable no-ops; authorization is always read afresh.
     if: >-
       github.event_name != 'pull_request' &&
+      github.event_name != 'workflow_run' &&
       (github.event_name != 'workflow_dispatch' ||
        github.ref == format('refs/heads/{0}', github.event.repository.default_branch)) &&
       (github.event_name != 'issue_comment' ||
@@ -113,42 +114,50 @@ jobs:
     concurrency:
       group: merge-on-green-repository
       cancel-in-progress: false
+    # Completion is the only event that deliberately skips preflight and still evaluates.
     if: >-
-      needs.preflight.outputs.eligible == 'true' &&
-      ((github.event_name == 'workflow_run' || github.event_name == 'status' ||
-        github.event_name == 'push' ||
-        (github.event_name == 'workflow_dispatch' &&
-         github.ref == format('refs/heads/{0}', github.event.repository.default_branch))) ||
-       (github.event_name == 'pull_request_target' &&
-        ((github.event.action == 'labeled' &&
-          (!github.event.label.name || github.event.label.name == 'reviewed' ||
-           github.event.label.name == 'deps-automerge') &&
-          (!github.event.pull_request.head.repo.full_name ||
-           github.event.pull_request.head.repo.full_name == github.repository) &&
-          github.actor != 'dependabot[bot]') ||
-         (github.event.action == 'edited' && !!github.event.changes.base))) ||
-       (github.event_name == 'issue_comment' && github.event.issue.pull_request))
+      !cancelled() &&
+      ((github.event_name == 'workflow_run' && needs.preflight.result == 'skipped' &&
+        github.event.repository.default_branch != '' &&
+        github.ref == format('refs/heads/{0}', github.event.repository.default_branch)) ||
+       (needs.preflight.result == 'success' && needs.preflight.outputs.eligible == 'true' &&
+        needs.preflight.outputs.trusted_sha != '' &&
+        (github.event_name == 'status' || github.event_name == 'push' ||
+         (github.event_name == 'workflow_dispatch' &&
+          github.ref == format('refs/heads/{0}', github.event.repository.default_branch)) ||
+         (github.event_name == 'pull_request_target' &&
+          ((github.event.action == 'labeled' &&
+            (!github.event.label.name || github.event.label.name == 'reviewed' ||
+             github.event.label.name == 'deps-automerge') &&
+            (!github.event.pull_request.head.repo.full_name ||
+             github.event.pull_request.head.repo.full_name == github.repository) &&
+            github.actor != 'dependabot[bot]') ||
+           (github.event.action == 'edited' && !!github.event.changes.base))) ||
+         (github.event_name == 'issue_comment' && github.event.issue.pull_request))))
     runs-on: ubuntu-latest
     # Full retained-event scans and GitHub mergeability reads need recovery time; this is not a capacity claim.
     timeout-minutes: 15
     env:
+      CI_APP_ENABLED: >-
+        ${{ ((github.event_name == 'workflow_run' && vars.CI_APP_ID != '') ||
+             needs.preflight.outputs.enabled == 'true') && 'true' || 'false' }}
       HEAD_AUTH_REPOSITORY_ID: ${{ vars.HEAD_AUTH_REPOSITORY_ID }}
       HEAD_AUTH_OPERATOR_IDS: ${{ vars.HEAD_AUTH_OPERATOR_IDS }}
       HEAD_AUTH_APP_ID: ${{ vars.HEAD_AUTH_APP_ID }}
       HEAD_AUTH_BOT_USER_ID: ${{ vars.HEAD_AUTH_BOT_USER_ID }}
     steps:
       - name: Report inactive kit-ci
-        if: needs.preflight.outputs.enabled != 'true'
+        if: env.CI_APP_ENABLED != 'true'
         run: |
           echo "::notice title=kit-ci not configured::Auto-merge OFF. Evaluation requires a complete head-authorization policy and does not run when that policy is absent. Operator-authorized merge after normal current-head review admission and quality CI still works. Install App + set repo-level CI_APP_ID and CI_APP_PRIVATE_KEY (required on Free private; org values do not reach private repos on Free) — docs/kit/ci-app-setup.md"
           echo "::warning title=Manual merge required::Normal current-head review admission remains required; label reviewed will NOT auto-merge until kit-ci is set up."
 
-      # Dispatch is reserved for trusted operators on the default ref. An older workflow
-      # revision can omit this guard; the preflight checkout fixes the trusted code revision.
+      # Completion resolves the receiver's default branch at checkout, never the source run's SHA.
+      # The explicit branch ref also avoids checkout's fork-SHA equality guard.
       - name: Checkout merge gate module
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.preflight.outputs.trusted_sha }}
+          ref: ${{ github.event_name == 'workflow_run' && github.ref || needs.preflight.outputs.trusted_sha }}
           persist-credentials: false
           sparse-checkout: |
             /scripts/kit/lib/merge-gate.cjs
@@ -160,7 +169,13 @@ jobs:
 
       - name: Evaluate green PRs
         id: evaluate
-        if: needs.preflight.outputs.policy_ready == 'true'
+        # Like preflight, validate strictly if the App is on or any policy field is set.
+        if: >-
+          needs.preflight.outputs.policy_ready == 'true' ||
+          (github.event_name == 'workflow_run' &&
+           (env.CI_APP_ENABLED == 'true' || env.HEAD_AUTH_REPOSITORY_ID != '' ||
+            env.HEAD_AUTH_OPERATOR_IDS != '' || env.HEAD_AUTH_APP_ID != '' ||
+            env.HEAD_AUTH_BOT_USER_ID != ''))
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -178,7 +193,7 @@ jobs:
       - name: Mint app token (kit-ci)
         id: app
         if: >-
-          !cancelled() && needs.preflight.outputs.enabled == 'true' &&
+          !cancelled() && env.CI_APP_ENABLED == 'true' &&
           (github.event_name == 'workflow_dispatch' ||
            (steps.evaluate.outputs.to_merge != '' && steps.evaluate.outputs.to_merge != '[]'))
         uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
@@ -194,7 +209,7 @@ jobs:
       - name: Merge green PRs
         id: merge
         if: >-
-          needs.preflight.outputs.enabled == 'true' &&
+          env.CI_APP_ENABLED == 'true' &&
           steps.app.outcome == 'success' &&
           steps.evaluate.outputs.to_merge != '' &&
           steps.evaluate.outputs.to_merge != '[]'
@@ -233,7 +248,6 @@ jobs:
       - name: Summary
         if: always()
         env:
-          ENABLED: ${{ needs.preflight.outputs.enabled }}
           TO_MERGE: ${{ steps.evaluate.outputs.to_merge }}
           EVALUATE_OUTCOME: ${{ steps.evaluate.outcome }}
           EVALUATE_UNREADABLE: ${{ steps.evaluate.outputs.unreadable }}
@@ -242,8 +256,8 @@ jobs:
           {
             echo "## Merge on Green"
             echo ""
-            if [ "$ENABLED" = "true" ]; then
-              echo "- **kit-ci:** configured (auto-merge ON)"
+            if [ "$CI_APP_ENABLED" = "true" ]; then
+              echo "- **kit-ci:** App ID configured"
             else
               echo "- **kit-ci:** **not configured** (auto-merge OFF — operator-authorized merge after normal admission)"
               echo "- Setup: \`docs/kit/ci-app-setup.md\`"
