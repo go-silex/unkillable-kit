@@ -18,6 +18,15 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
   When the App receives `OIDC_RESTART_REQUIRED`, start a new authorization rather
   than retrying with the same signed query.
 
+### CI App token pin
+
+- **Product action:** Kit workflows move `actions/create-github-app-token`
+  from 3.3.0 to 3.4.0 (go-silex/unkillable-kit#128), so `kit-upgrade` stops at the CI
+  App token-pin preflight. Establish the effective `CI_APP_ID` mode with the
+  Kit's [CI App setup](docs/kit/ci-app-setup.md#trust-and-setup), then complete
+  the [manual Kit sync](docs/kit/product-consumer-contract.md#pulling-kit-upgrades)
+  (“For a new token pin…”).
+
 ## unkillable-kit/v0.3.0 — 2026-11-22
 
 ### OIDC logout
