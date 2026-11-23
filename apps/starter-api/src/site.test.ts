@@ -1,26 +1,7 @@
-import { readdirSync, readFileSync } from 'node:fs'
-import { fileURLToPath, URL } from 'node:url'
-import { createSqliteD1 } from '@kit/db/testing'
-import Database from 'better-sqlite3'
-import { expect, it, onTestFinished } from 'vitest'
-import worker from './index'
-import type { Env } from './platform/types'
-
-const origin = 'http://localhost:8787'
-const ctx = { waitUntil() {}, passThroughOnException() {} } as unknown as ExecutionContext
+import { expect, it } from 'vitest'
+import { createStarterHttpFixture, starterTestOrigin as origin } from './d1-route-fixture'
 
 function fixture(withAssets: boolean) {
-  const sqlite = new Database(':memory:')
-  sqlite.pragma('foreign_keys = ON')
-  const directory = fileURLToPath(new URL('../migrations/', import.meta.url))
-  for (const file of readdirSync(directory)
-    .filter((name) => name.endsWith('.sql'))
-    .sort()) {
-    sqlite.exec(readFileSync(`${directory}/${file}`, 'utf8'))
-  }
-  onTestFinished(() => {
-    sqlite.close()
-  })
   const assetUrls: string[] = []
   const assets = {
     async fetch(request: Request) {
@@ -30,18 +11,7 @@ function fixture(withAssets: boolean) {
         : new Response('missing', { status: 404 })
     },
   } as Fetcher
-  const env: Env & { ASSETS?: Fetcher } = {
-    DB: createSqliteD1(sqlite) as unknown as D1Database,
-    ENVIRONMENT: 'test',
-    BETTER_AUTH_SECRET: crypto.randomUUID() + crypto.randomUUID(),
-    BETTER_AUTH_URL: origin,
-    // originGuard checks every mutation's Origin, same-origin included.
-    CORS_ORIGINS: origin,
-    ALLOW_PUBLIC_SIGNUP: 'true',
-    ...(withAssets ? { ASSETS: assets } : {}),
-  }
-  const request = (path: string, init?: RequestInit) =>
-    worker.fetch(new Request(`${origin}${path}`, init), env, ctx)
+  const { request } = createStarterHttpFixture(withAssets ? { ASSETS: assets } : {})
   return { request, assetUrls }
 }
 

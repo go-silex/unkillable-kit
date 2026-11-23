@@ -1,5 +1,5 @@
 {
   "extends": "../../packages/config/tsconfig.base.json",
-  "compilerOptions": { "rootDir": "src", "noEmit": true, "types": [], "lib": ["ES2022"] },
+  "compilerOptions": { "noEmit": true, "types": [], "lib": ["ES2022"] },
   "include": ["src"]
 }

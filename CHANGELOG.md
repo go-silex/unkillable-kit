@@ -4,6 +4,11 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ## Unreleased
 
+### Testing
+
+- Test D1 round-trip ceilings through authenticated Example and Starter API
+  requests. Products can reuse the counter from `@kit/db/testing`.
+
 ## unkillable-kit/v0.5.1 — 2026-11-23
 
 ### Tooling

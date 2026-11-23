@@ -58,3 +58,19 @@ Keep any Product-specific worker limit if its suite needs it; the warning is adv
 | When optional tooling applies                          | [Phased tooling](./testing/phased-tooling.md)                    |
 | Which testing anti-patterns to avoid                   | [Anti-patterns (ban)](./testing/anti-patterns.md)                |
 | Where to find related documentation                    | [Quick links](./testing/quick-links.md)                          |
+
+## D1 round-trip ceilings
+
+Give every authenticated route in the Example and Starter APIs a tested D1
+round-trip ceiling. Record the observed count for a representative authenticated
+request through the real HTTP App, with a known fixture and an asserted response.
+When a change removes D1 calls, lower its ceiling in the same change. Justify any
+increase in the spec or pull request. A spec that changes authentication or
+authorization must state its D1 round-trip cost on the affected request paths.
+
+Products can reuse [`countD1RoundTrips` from `@kit/db/testing`](../../packages/db/README.md#measuring-http-requests).
+Each `first`, `all`, `run`, `raw`, `exec` or `batch` call counts once, regardless
+of the number of SQL statements in it. `prepare` and `bind` do not count. Measure
+after seeding and signing in, with a fresh counter for each request. These are
+binding call counts on the tested paths, not elapsed latency, SQL statement
+counts, or a guarantee about untested branches.
