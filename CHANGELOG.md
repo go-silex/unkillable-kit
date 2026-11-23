@@ -4,6 +4,14 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ## Unreleased
 
+### Observability guide
+
+- Correct the Wrangler `[observability]` inheritance rule: an environment that
+  omits the block inherits the whole top-level block, and a declared environment
+  block replaces it without merging nested fields. Set `redact_query_string`
+  explicitly in every deployed block that carries traces
+  (go-silex/unkillable-kit#78).
+
 ## unkillable-kit/v0.4.0 — 2026-11-23
 
 ### OpenID provider
