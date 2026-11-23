@@ -4,6 +4,8 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ## Unreleased
 
+## unkillable-kit/v0.6.0 — 2026-11-23
+
 - New Product API starters enable Workers logs and traces with query strings
   redacted. Production onboarding now includes Worker placement near the D1
   primary and verification with D1 spans (go-silex/unkillable-kit#161).
