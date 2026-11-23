@@ -3051,7 +3051,11 @@ test('green checks still need admission, and a validated comment can wake the ga
   assert.deepEqual(comment.reads, ['getComment', 'pulls.get'])
   const admitted = {
     ...completed,
-    github: { ...completed.github, event_name: 'issue_comment', event: comment.payload },
+    github: {
+      ...completed.github,
+      event_name: 'issue_comment',
+      event: { issue: { pull_request: comment.payload.issue.pull_request } },
+    },
     needs: {
       preflight: { result: 'success', outputs: { ...admission.outputs, trusted_sha: BASE_A } },
     },
