@@ -1,8 +1,38 @@
 import type { BetterAuthPlugin } from 'better-auth'
 import { createAuthMiddleware } from 'better-auth/api'
+import type { Authorization } from './oidc-fresh-login-provenance'
 
 const authorizePath = '/oauth2/authorize'
 const unsupportedPrompt = 'create'
+
+export function supportedPrompts(query: Record<string, unknown>) {
+  const prompt =
+    typeof query.prompt === 'string'
+      ? query.prompt
+          .split(' ')
+          .map((token) => token.trim())
+          .filter(Boolean)
+      : []
+  if (
+    (query.prompt !== undefined && prompt.length === 0) ||
+    prompt.includes(unsupportedPrompt) ||
+    (prompt.includes('none') && new Set(prompt).size !== 1)
+  )
+    return
+  return prompt
+}
+
+export function requiresPasswordSignIn(
+  query: Record<string, unknown>,
+  authorization: Authorization,
+) {
+  return (
+    authorization.freshness !== null ||
+    query.max_age !== undefined ||
+    (typeof query.prompt === 'string' &&
+      query.prompt.split(' ').some((prompt) => prompt.trim() === 'login'))
+  )
+}
 
 function rejectSignupPrompt(params: Record<string, unknown> | undefined) {
   const prompt = params?.prompt
