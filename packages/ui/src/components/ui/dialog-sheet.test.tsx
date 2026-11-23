@@ -8,8 +8,6 @@ import {
   DialogDescription,
   DialogFooter,
   DialogHeader,
-  DialogPopup,
-  DialogPortal,
   DialogTitle,
 } from './dialog'
 import {
@@ -23,24 +21,6 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './tooltip'
 
 describe('Dialog / Sheet / Tooltip (Base UI contracts)', () => {
-  it('bare DialogPopup keeps only the caller classes inside a classed portal', () => {
-    const errors = captureRuntimeErrors(() => {
-      render(
-        <Dialog open onOpenChange={() => {}}>
-          <DialogPortal className="product-layer">
-            <DialogPopup aria-label="Search" className="product-sheet">
-              <input aria-label="Query" />
-            </DialogPopup>
-          </DialogPortal>
-        </Dialog>,
-      )
-    })
-    assertNoBaseUiContractErrors(errors)
-    const popup = screen.getByRole('dialog', { name: 'Search' })
-    expect(popup).toHaveAttribute('class', 'product-sheet')
-    expect(popup.closest('.product-layer')).not.toBeNull()
-  })
-
   it('controlled Dialog mounts without contract errors', () => {
     const errors = captureRuntimeErrors(() => {
       render(

@@ -4,6 +4,13 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ## Unreleased
 
+### UI
+
+- `@kit/ui` exports `DialogPopup`, an unstyled dialog popup. Compose it with
+  `Dialog`, `DialogPortal` and a `DialogOverlay` rendered as the Product's own
+  veil to bring Product dialog markup while keeping the kit's focus trap,
+  focus return and dismissal (go-silex/unkillable-ui#2).
+
 ### CI
 
 - Root is the single quality gate for Kit and Product workspaces. Root
