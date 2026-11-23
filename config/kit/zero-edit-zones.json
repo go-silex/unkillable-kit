@@ -80,7 +80,7 @@
       {
         "id": "css-token-override",
         "where": "apps/<product>-web/src/**/*.css (typically index.css + theme/*.css)",
-        "how": "Keep @import \"@kit/ui/styles.css\" then redeclare CSS variables on :root / .dark (primary, radius, fonts, sidebar, charts). Tokens are the kit extension surface."
+        "how": "Import @kit/ui/styles.css for Geist or @kit/ui/base.css for a custom font. With the base, import App fonts before App tokens. Redeclare CSS tokens on :root / .dark."
       },
       {
         "id": "compose-wrap-components",
