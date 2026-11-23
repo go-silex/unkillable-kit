@@ -285,22 +285,23 @@ An active App-only `main` ruleset blocks manual landing, including inactive-App 
 
 ## Design overrides (accepted — no exception needed)
 
-Customize look & feel **without** forking `@kit/ui`. Machine-readable list: `config/kit/zero-edit-zones.json` → `design_overrides`.
+Customize look and feel without forking `@kit/ui`. Machine-readable list: `config/kit/zero-edit-zones.json` → `design_overrides`.
 
-| Pattern                    | Where                                  | How                                                                                                                               |
-| -------------------------- | -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| **CSS token override**     | `apps/<product>-web/src/**/*.css`      | `@import "@kit/ui/styles.css"`, then declare `--primary`, `--radius`, `--overlay`, fonts, sidebar, or charts on `:root` / `.dark` |
-| **Compose / wrap**         | `apps/<product>-web/src/components/**` | Import primitives from `@kit/ui`; build product shells (`LoadingButton`, `BrandHeader`)                                           |
-| **App Tailwind `@source`** | product CSS                            | `@source` kit UI + product app only                                                                                               |
-| **Assets**                 | `apps/<product>-web/public/**`         | Favicon, OG, logo — not in `packages/ui`                                                                                          |
+| Pattern          | Where                                  | How                                                                                 |
+| ---------------- | -------------------------------------- | ----------------------------------------------------------------------------------- |
+| Tokens           | `apps/<product>-web/src/**/*.css`      | On `:root` / `.dark`: `--primary`, `--radius`, `--overlay`, fonts, sidebar, charts. |
+| Composition      | `apps/<product>-web/src/components/**` | Wrap `@kit/ui` primitives in App shells.                                            |
+| Tailwind sources | App CSS                                | `@source` Kit UI + App only.                                                        |
+| Assets           | `apps/<product>-web/public/**`         | Keep favicons, OG and logos out of the Kit.                                         |
 
-Use `ThemeProvider` from `@kit/ui` with an App-owned storage key, for example `<ThemeProvider storageKey="ua.theme">`. Use `useTheme()` for the selection and resolved color scheme; keep any pre-React boot script aligned with that key. See [`@kit/ui` theme](./ui-kit.md#theme).
+Give `ThemeProvider` an App-owned storage key such as `ua.theme` and keep any pre-React boot script aligned with it. Use `useTheme()` for the selection and resolved color scheme; see the [theme guide](./ui-kit.md#theme).
 
-Example product entry CSS:
+Use `@kit/ui/styles.css` (alias `@kit/ui/globals.css`) for Geist. For a custom typeface, use `@kit/ui/base.css` instead, then import App fonts, then App tokens. Base alone uses the system stack.
 
 ```css
-@import "@kit/ui/styles.css";
-@import "./theme/product-tokens.css"; /* overrides only */
+@import "@kit/ui/base.css";
+@import "./theme/product-fonts.css";
+@import "./theme/product-tokens.css";
 
 @source "../../../packages/ui/src/**/*.{ts,tsx}";
 @source "./**/*.{ts,tsx}";
@@ -309,6 +310,7 @@ Example product entry CSS:
 ```css
 /* theme/product-tokens.css */
 :root {
+  --font-sans: "App Sans", sans-serif;
   --primary: oklch(0.45 0.18 265);
   --radius: 0.75rem;
 }

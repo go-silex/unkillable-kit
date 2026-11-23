@@ -1,0 +1,6 @@
+@import "./globals.css";
+@import "@fontsource-variable/geist";
+
+@theme inline {
+  --font-sans: "Geist Variable", sans-serif;
+}

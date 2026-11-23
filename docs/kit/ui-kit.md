@@ -4,9 +4,9 @@ Shared **shadcn Base UI** primitives for Chemin A apps. Product branding does **
 
 ## What it is
 
-- Package: `packages/ui` → import `@kit/ui`
-- Styles: `@import "@kit/ui/styles.css"` (see `apps/example-web/src/index.css`)
-- Living catalog: local route **`/admin/design-system`** (platform session required)
+- Package: `packages/ui` → import `@kit/ui`.
+- Styles: `@kit/ui/styles.css` (`@kit/ui/globals.css` alias) includes Geist.
+- Catalog: `/admin/design-system` (platform session required).
 
 ## Theme
 
@@ -16,11 +16,11 @@ The Example App keeps `kit.theme` and its existing `public/theme-boot.js` to app
 
 ## Zero-edit / product brand
 
-Import Kit styles, then [override tokens](product-consumer-contract.md#design-overrides-accepted--no-exception-needed) in App-owned CSS. Compose shells in `apps/<product>-web`; don't patch `@kit/ui` for colors or copy.
+Custom font: import `@kit/ui/base.css` → App fonts → [App tokens](product-consumer-contract.md#design-overrides-accepted--no-exception-needed). Set `--font-sans` on `:root`; headings follow. Base alone uses system fonts.
 
-Set `--overlay` on `:root` and `.dark` for modal backdrops (default: 10% black). Preserve `bg-overlay` in vendored `dialog.tsx`, `alert-dialog.tsx`, and `sheet.tsx` on `ui:add` re-sync.
+Modal backdrops: set `--overlay` on `:root` and `.dark` (default 10% black). On `ui:add`, keep `bg-overlay` in `dialog.tsx`, `alert-dialog.tsx`, and `sheet.tsx`.
 
-Client-facing release notes belong in Apps. The Example App demonstrates an in-app changelog. Promote a shared changelog only when two Products need it.
+Keep branding, shells, and release notes in the App. Share changelog code only when two Products need it.
 
 ## Conventions for example-web
 

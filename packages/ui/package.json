@@ -10,8 +10,9 @@
       "import": "./src/index.ts",
       "default": "./src/index.ts"
     },
-    "./styles.css": "./src/styles/globals.css",
-    "./globals.css": "./src/styles/globals.css"
+    "./styles.css": "./src/styles/styles.css",
+    "./globals.css": "./src/styles/styles.css",
+    "./base.css": "./src/styles/globals.css"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
