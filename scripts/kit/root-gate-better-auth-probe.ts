@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict'
-import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { isAbsolute, join, parse, relative, resolve, sep } from 'node:path'
 import type { BetterAuthApp } from './root-gate-better-auth-apps'
+import { type BundleInputs, bundleWorker } from './root-gate-better-auth-build.ts'
 import type { WorkerTarget } from './root-gate-better-auth-worker'
 
 export type CredentialWrites = [sql: string, values: (string | number)[]][]
@@ -145,11 +145,6 @@ requireFromWrangler.cache[path].exports = {
   return hook
 }
 
-type BundleInputs = Record<
-  string,
-  { imports: { original?: string; path: string; external?: boolean }[] }
->
-
 function isBelow(root: string, file: string) {
   const path = relative(root, file)
   return path !== '' && path !== '..' && !path.startsWith(`..${sep}`) && !isAbsolute(path)
@@ -181,9 +176,8 @@ function verifyBetterAuthResolution(probe: MountedProbe, inputs: BundleInputs, e
   )
 }
 
-function verifyFactoryResolution(probe: MountedProbe, metafile: string) {
-  const meta: { inputs: BundleInputs } = JSON.parse(readFileSync(metafile, 'utf8'))
-  const enrolled = meta.inputs[relative(probe.dir, probe.composition)]
+function verifyFactoryResolution(probe: MountedProbe, inputs: BundleInputs) {
+  const enrolled = inputs[relative(probe.dir, probe.composition)]
   const factory = enrolled?.imports.find((entry) => entry.original === probe.kitFactory)
   assert.ok(
     factory &&
@@ -192,46 +186,7 @@ function verifyFactoryResolution(probe: MountedProbe, metafile: string) {
         realpathSync(probe.installation.factoryPath),
     'Wrangler build did not resolve the enrolled composition to the installed Kit factory',
   )
-  verifyBetterAuthResolution(probe, meta.inputs, factory.path)
-}
-
-function bundleWorker(probe: MountedProbe, challenge: string) {
-  const build = join(probe.scratch, 'build')
-  const metafile = join(probe.scratch, 'bundle.json')
-  const emptyEnv = join(probe.scratch, 'empty.env')
-  const hook = installBuildHook(probe, challenge)
-  mkdirSync(build)
-  writeFileSync(emptyEnv, '')
-  const { target } = probe
-  const bundled = spawnSync(
-    process.execPath,
-    [
-      '--require',
-      hook,
-      probe.wrangler,
-      'deploy',
-      '--dry-run',
-      '--no-autoconfig',
-      '--config',
-      target.config,
-      '--env-file',
-      emptyEnv,
-      ...(target.env ? ['--env', target.env] : []),
-      '--outdir',
-      build,
-      '--metafile',
-      metafile,
-    ],
-    { cwd: probe.dir, encoding: 'utf8', timeout: 60_000 },
-  )
-  if (bundled.error) throw bundled.error
-  assert.equal(
-    bundled.status,
-    0,
-    `Wrangler could not build the release entrypoint:\n${bundled.stdout}${bundled.stderr}`,
-  )
-  verifyFactoryResolution(probe, metafile)
-  return { build, emptyEnv }
+  verifyBetterAuthResolution(probe, inputs, factory.path)
 }
 
 async function migrateDatabase(
@@ -250,10 +205,18 @@ async function migrateDatabase(
 
 async function run(probe: MountedProbe) {
   const challenge = crypto.randomUUID()
-  const { build, emptyEnv } = bundleWorker(probe, challenge)
+  const { target } = probe
+  const { build, emptyEnv, inputs } = bundleWorker(
+    process.execPath,
+    probe.wrangler,
+    probe.dir,
+    target,
+    probe.scratch,
+    installBuildHook(probe, challenge),
+  )
+  verifyFactoryResolution(probe, inputs)
   const requireFromWrangler = createRequire(probe.wrangler)
   const wrangler: Wrangler = requireFromWrangler(probe.wrangler)
-  const { target } = probe
   const config = wrangler.unstable_readConfig({ config: target.config, env: target.env })
   const d1 = config.d1_databases.find(({ binding }) => binding === 'DB')
   assert.ok(d1, 'Release config does not declare the DB binding')

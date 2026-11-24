@@ -239,7 +239,7 @@ export function alternateIssuer(options) { return createBetterAuth(options) }
   )
   json('packages/alternate-issuer/package.json', {
     name: '@fixture/alternate-issuer',
-    exports: './issuer.ts',
+    exports: { '.': './issuer.ts', './ordinary': './ordinary.ts' },
     dependencies: { '@kit/auth': 'workspace:*' },
   })
   symlinkSync(
@@ -301,6 +301,30 @@ export default { fetch: () => Response.json(typeof createAuthClient) }
   )
   assert.doesNotMatch(runCore(), /apps\/product-fixture differential fixtures passed/)
 
+  // Only the named release entrypoint imports this key. Default package
+  // resolution selects an inert module; Wrangler's configured alias selects the issuer.
+  put(
+    'packages/alternate-issuer/ordinary.ts',
+    'export function alternateIssuer() { return { handler: () => new Response(null) } }\n',
+  )
+  put(
+    `${app}/src/release.ts`,
+    `import { alternateIssuer } from '@fixture/alternate-issuer/ordinary'
+export default { fetch: (request, env) => alternateIssuer(env).handler(request) }
+`,
+  )
+  const distinctRelease = `${workerConfig}\n[env.release]\nmain = "src/release.ts"\n[[env.release.d1_databases]]\n${database}`
+  put(`${app}/wrangler.toml`, distinctRelease)
+  assert.doesNotMatch(runCore(), /apps\/product-fixture differential fixtures passed/)
+  put(
+    `${app}/wrangler.toml`,
+    `${distinctRelease}\n[alias]\n"@fixture/alternate-issuer/ordinary" = "../../packages/alternate-issuer/issuer.ts"\n`,
+  )
+  const missingDependency =
+    /apps\/product-fixture: shipping Better Auth composition must declare better-auth directly/
+  runCore(missingDependency)
+  put(`${app}/wrangler.toml`, workerConfig)
+
   // A runtime import of the same declared workspace cannot bypass enrollment.
   put(
     `${app}/src/worker.ts`,
@@ -308,9 +332,7 @@ export default { fetch: () => Response.json(typeof createAuthClient) }
 export default { fetch: (request, env) => alternateIssuer(env).handler(request) }
 `,
   )
-  runCore(
-    /apps\/product-fixture: shipping Better Auth composition must declare better-auth directly/,
-  )
+  runCore(missingDependency)
   json(`${app}/package.json`, {
     ...unenrolled,
     dependencies: { ...unenrolled.dependencies, 'better-auth': '*' },

@@ -1,4 +1,5 @@
-import { readFileSync, realpathSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 import {
   type BindingPattern,
@@ -10,6 +11,7 @@ import {
   Visitor,
 } from 'oxc-parser'
 import { wranglerConfigs } from './lib/wrangler-d1'
+import { bundleWorker } from './root-gate-better-auth-build.ts'
 
 export const adapterName = 'createBetterAuth'
 export const kitFactory = '@kit/auth/factory'
@@ -111,38 +113,29 @@ export function workerUsesServerFactory(
   workspaceRoots: readonly string[],
   importsFactory: (program: Program) => boolean,
 ) {
-  const sources = new Set(workerEntrypoints(app, false).map(({ entry }) => entry))
-  for (const file of sources) {
-    const program = parseProgram(file)
-    if (importsFactory(program)) return true
-    function follow(specifier: string) {
-      const imported = resolveImport(file, specifier)
-      if (imported && workspaceRoots.some((root) => isLocalSource(root, imported))) {
-        sources.add(imported)
-      }
+  const targets = workerEntrypoints(app, false)
+  if (!targets.length) return false
+  const node = Bun.which('node')
+  if (!node) throw new Error('Node is required to inspect Wrangler’s release input graph')
+  const wrangler = Bun.resolveSync('wrangler', app)
+  const inspected = new Set<string>()
+  function isServerInput(input: string) {
+    const path = resolve(app, input)
+    if (!existsSync(path)) return false // Wrangler also reports virtual inputs.
+    const file = realpathSync(path)
+    if (inspected.has(file) || !workspaceRoots.some((root) => isLocalSource(root, file)))
+      return false
+    inspected.add(file)
+    return importsFactory(parseProgram(file))
+  }
+  for (const target of targets) {
+    const scratch = mkdtempSync(resolve(tmpdir(), 'root-better-auth-inputs-'))
+    try {
+      const { inputs } = bundleWorker(node, wrangler, app, target, scratch)
+      if (Object.keys(inputs).some(isServerInput)) return true
+    } finally {
+      rmSync(scratch, { recursive: true, force: true })
     }
-    for (const node of program.body) {
-      const specifier = staticRuntimeSource(node)
-      if (specifier) follow(specifier)
-    }
-    new Visitor({
-      ImportExpression(node) {
-        if (node.source.type === 'Literal' && typeof node.source.value === 'string') {
-          follow(node.source.value)
-        }
-      },
-      CallExpression(node) {
-        const arg = node.arguments[0]
-        if (
-          node.callee.type === 'Identifier' &&
-          node.callee.name === 'require' &&
-          arg?.type === 'Literal' &&
-          typeof arg.value === 'string'
-        ) {
-          follow(arg.value)
-        }
-      },
-    }).visit(program)
   }
   return false
 }
