@@ -25,6 +25,7 @@ import {
   betterAuthDrizzleSchema,
   withBetterAuthRelations,
 } from './better-auth-schema'
+import { apiErrorOptions, authenticationLinkOrigins } from './better-auth-urls'
 import { sessionCookieName } from './cookie-name'
 import { createFirstSessionAfterHook, type FirstSessionHandler } from './first-session-hook'
 import {
@@ -40,6 +41,7 @@ import { withOptionalOidcSchema } from './oidc/oidc-provider-schema'
 import { createKitOrganizationPlugin } from './org-plugin'
 import { createSessionAccountGuard, InactiveSessionError } from './policy/better-auth-session-guard'
 import { isAccountActive } from './repos/account-state'
+import { recordSessionCookie } from './request/effective-session-cookie'
 import { hashVerificationIdentifier } from './verification-identifier'
 
 /**
@@ -97,24 +99,6 @@ function createSafeHandler(handler: (request: Request) => Response | Promise<Res
   }
 }
 
-function apiErrorOptions(google: boolean, origins: string[], configuredURL?: string) {
-  let errorURL = new URL('/login', origins[0]).toString()
-  if (configuredURL !== undefined) {
-    let parsed: URL
-    try {
-      parsed = new URL(configuredURL)
-    } catch {
-      throw new Error('googleErrorURL must be an absolute URL on a trusted origin')
-    }
-    const httpScheme = parsed.protocol === 'https:' || parsed.protocol === 'http:'
-    if (!httpScheme || parsed.username || parsed.password || !origins.includes(parsed.origin)) {
-      throw new Error('googleErrorURL must be an absolute URL on a trusted origin')
-    }
-    errorURL = parsed.toString()
-  }
-  return { throw: true, ...(google ? { errorURL } : {}) }
-}
-
 export function createBetterAuth(opts: CreateBetterAuthOpts): KitBetterAuth {
   assertAuthSecret('BETTER_AUTH_SECRET', opts.secret, {
     allowKitPlaceholder: opts.allowKitPlaceholderSecret,
@@ -143,21 +127,8 @@ export function createBetterAuth(opts: CreateBetterAuthOpts): KitBetterAuth {
   const magicLinkExpiresIn = opts.magicLinkExpiresIn || MAGIC_LINK_EXPIRES_IN_SEC
   const resetPasswordTokenExpiresIn =
     opts.resetPasswordTokenExpiresIn || RESET_PASSWORD_TOKEN_EXPIRES_IN_SEC
-  const linkOrigins = new Set<string>(trustedOrigins)
-  let base: URL
-  try {
-    base = new URL(opts.baseURL)
-  } catch {
-    throw new Error('BETTER_AUTH_URL must be an absolute origin')
-  }
-  if (!opts.requestDerivedBaseURL) linkOrigins.add(base.origin)
-  // Better Auth routes on a baseURL path when there is one; the kit throttle matches BA_BASE_PATH.
-  const mount = base.pathname.replace(/\/+$/, '')
-  if (mount !== '' && mount !== BA_BASE_PATH) {
-    throw new Error(`BETTER_AUTH_URL path must be / or ${BA_BASE_PATH}`)
-  }
   const tokenHref = {
-    allowedOrigins: [...linkOrigins],
+    allowedOrigins: authenticationLinkOrigins(opts, trustedOrigins),
     allowLoopbackHttp: opts.allowLoopbackOrigins === true,
   }
   const google = opts.google !== undefined
@@ -173,6 +144,7 @@ export function createBetterAuth(opts: CreateBetterAuthOpts): KitBetterAuth {
     // is memory per isolate, keyed `ip|path`, and on only when NODE_ENV is 'production': pinned off.
     rateLimit: { enabled: false },
     secret: opts.secret,
+    session: { cookieCache: { enabled: false } },
     database: ((options) =>
       registerLogoutD1(
         drizzleAdapter(db, { provider: 'sqlite', schema })(options),
@@ -296,5 +268,6 @@ export function createBetterAuth(opts: CreateBetterAuthOpts): KitBetterAuth {
       }
     },
   })
+  recordSessionCookie(auth, secure ? `__Secure-${cookieName}` : cookieName, opts.secret)
   return auth
 }

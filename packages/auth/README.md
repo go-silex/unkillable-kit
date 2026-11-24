@@ -10,6 +10,7 @@ Authentication primitives and integration surfaces; it does not own product-spec
 - `@kit/auth/oidc-provider`: optional OpenID provider composition and administration helpers.
 - `@kit/auth/react`: React authentication forms and helpers.
 - `@kit/auth/hono`: Hono authentication middleware.
+- `@kit/auth/snapshot`: declarative authorization facts, hosted admission, and a read-only session probe.
 - `@kit/auth/repos/*`: individual repository modules under `src/repos/`.
 - `@kit/auth/repos/memory-d1`: explicitly unavailable as a public export.
 
@@ -56,7 +57,14 @@ such as invitations and welcome e-mails do not use this hook.
 
 New keys must explicitly store a comma-separated selection of `read`, `write` and `admin` in `scopes`. The scopes are independent: `admin` does not imply `read` or `write`. The migration backfills existing keys with all three scopes. Malformed stored scope strings grant no scopes.
 
-`resolveDualAuth` authenticates keys and returns `scopes: ApiKeyScope[]`; `createRequireAuth` exposes them as `keyScopes` in the request context. Neither enforces route scopes. Each App must install a default-deny policy for API keys, explicitly declare the required scope for each allowed method and route, and enforce it alongside Organization and Role checks. The Example and Starter Apps each implement a central gate; other Apps do not inherit them. `allowsApiKeyScope(identity, requiredScope)` is an optional predicate: it permits sessions and checks exact membership for keys, but does not replace tenant or RBAC authorization.
+Use `createRequestAuthorization` from `@kit/auth/hono`. For a parsed Bearer, the App's key
+gate calls `authenticateKey`, checks its default-deny route scope allowlist, then calls
+`admitKeyScope`. The regular guards project `keyScopes` only after admission. A key scope
+never substitutes for Organization or role checks. See the [Product migration](../../docs/kit/product-consumer-contract.md#authentication-reads-and-organization-context-migration).
+
+For guarded routes registered with Hono `app.all`, attach the authorization instance's
+`allEndpoint` middleware to that endpoint before its guards. Do not attach it with `app.use`:
+Hono labels both registrations `ALL`, but only the endpoint may supply the path `orgId`.
 
 ## Account state
 
@@ -73,11 +81,10 @@ The latter deletes sessions directly and cannot trigger provider logout hooks.
 Apply the same ordering before any other direct session deletion. Do not continue
 to direct deletion if the Kit logout call fails.
 
-Each request must use the live `isAccountActive` check when configuring session
-and API-key authentication. An Organization-bound key is governed by its
-subject (the User who owns the key), not by an Organization-wide status.
-Missing Users, disabled Users and state-read failures are refused. Products
-must sync and apply the account-state schema migration before deploying.
+The request snapshot owns the live active-account check for sessions and API keys.
+An Organization-bound key is governed by its owning User and membership in its bound Organization.
+Missing or disabled Users are refused; an unreadable snapshot fails closed. Better Auth keeps the
+separate account guard on its native endpoints. Apply the account-state schema migration before deploying.
 
 ## OpenID provider (opt-in)
 

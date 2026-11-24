@@ -1,5 +1,4 @@
 import type { ImpersonationInfo } from '@kit/api-client/me'
-import { setImpersonationPermissions } from '@kit/auth/repos/impersonation'
 import { createDb } from '@kit/db'
 import { describe, expect, it } from 'vitest'
 import { schema } from '../db/schema'
@@ -21,6 +20,7 @@ describe('getMeProfile (D11 api_key org filter)', () => {
     // staff has org_acme + org_beta memberships under session; unbound key must not leak them
     const profile = await getMeProfile(db, 'user_staff', {
       authMethod: 'api_key',
+      platformRole: 'staff',
     })
     expect(profile.orgs).toEqual([])
     expect(profile.email).toBe('staff@kit.local')
@@ -30,6 +30,7 @@ describe('getMeProfile (D11 api_key org filter)', () => {
     const db = await seededDb()
     const profile = await getMeProfile(db, 'user_staff', {
       authMethod: 'api_key',
+      platformRole: 'staff',
       keyOrganizationId: null,
     })
     expect(profile.orgs).toEqual([])
@@ -39,6 +40,7 @@ describe('getMeProfile (D11 api_key org filter)', () => {
     const db = await seededDb()
     const profile = await getMeProfile(db, 'user_staff', {
       authMethod: 'api_key',
+      platformRole: 'staff',
       keyOrganizationId: 'org_acme',
     })
     expect(profile.orgs).toHaveLength(1)
@@ -49,6 +51,7 @@ describe('getMeProfile (D11 api_key org filter)', () => {
     const db = await seededDb()
     const profile = await getMeProfile(db, 'user_staff', {
       authMethod: 'session',
+      platformRole: 'staff',
     })
     const ids = profile.orgs.map((o) => o.id).sort()
     expect(ids).toEqual(['org_acme', 'org_beta'])
@@ -73,17 +76,13 @@ describe('getMeProfile impersonation', () => {
     return db
   }
 
-  it('returns the pinned target profile and real actor permissions', async () => {
+  it('returns the pinned target profile and admitted actor permissions', async () => {
     const db = await seededDb()
-    await setImpersonationPermissions(
-      db,
-      { role: 'staff', read: true, write: false },
-      { actorUserId: 'user_super' },
-    )
     const profile = await getMeProfile(db, info.subject.id, {
       authMethod: 'session',
-      actorUserId: info.actor.id,
+      platformRole: null,
       impersonation: info,
+      impersonationPermissions: { read: true, write: false },
     })
     expect(profile.platformRole).toBeNull()
     expect(profile.orgs.map((org) => org.id)).toEqual(['org_acme'])
@@ -95,7 +94,7 @@ describe('getMeProfile impersonation', () => {
     const db = await seededDb()
     const profile = await getMeProfile(db, info.subject.id, {
       authMethod: 'session',
-      actorUserId: info.actor.id,
+      platformRole: null,
       impersonation: { ...info, active: false },
     })
     expect(profile.platformRole).toBeNull()
@@ -108,12 +107,11 @@ describe('getMeProfile impersonation', () => {
 
   it('does not expose session-only capabilities to an API key', async () => {
     const db = await seededDb()
-    await setImpersonationPermissions(
-      db,
-      { role: 'staff', read: true, write: true },
-      { actorUserId: 'user_super' },
-    )
-    const profile = await getMeProfile(db, 'user_staff', { authMethod: 'api_key' })
+    const profile = await getMeProfile(db, 'user_staff', {
+      authMethod: 'api_key',
+      platformRole: 'staff',
+      impersonationPermissions: { read: true, write: true },
+    })
     expect(profile.impersonation).toBeNull()
     expect(profile.impersonationPermissions).toEqual({ read: false, write: false })
   })

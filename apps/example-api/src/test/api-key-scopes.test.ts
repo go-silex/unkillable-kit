@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { apiKeyPrefix, generateApiKey, hashApiKey } from '@kit/auth'
 import { baMember } from '@kit/auth/schema'
+import { countD1RoundTrips } from '@kit/db/testing'
 import { describe, expect, it } from 'vitest'
 import { keyScopeRoutes } from '../middleware/key-scopes'
 import { TENANCY_PASSWORD } from '../seed/tenancy-data'
@@ -32,6 +33,16 @@ function undeclaredRoutes(app: ApiApp): Set<string> {
 }
 
 describe('API key scopes over HTTP', () => {
+  it('rejects a malformed Bearer without a D1 call even when a session cookie exists', async () => {
+    const { app, env } = await createSeededDemoApi({ seed: { notes: false, environment: 'test' } })
+    const cookie = await loginCookie(app, env, 'staff@kit.local', TENANCY_PASSWORD)
+    const measured = countD1RoundTrips(env.DB)
+    const headers = { ...sessionHeaders(cookie), authorization: 'Bearer invalid' }
+    const response = await app.request('/api/me', { headers }, { ...env, DB: measured.db })
+    expect(response.status).toBe(401)
+    expect(measured.count).toBe(0)
+  })
+
   it('requires explicit valid scopes when creating a key', async () => {
     const { app, env } = await createSeededDemoApi({ seed: { notes: true, environment: 'test' } })
     const cookie = await loginCookie(app, env, 'staff@kit.local', TENANCY_PASSWORD)

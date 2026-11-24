@@ -62,7 +62,6 @@ async function eligibleUsers(db: KitDb, orgId: string): Promise<string[]> {
         roleKey: member.role,
         moduleId: 'flows',
         op: 'write',
-        orgBypass: false,
       })
       permissions.set(member.role, allowed)
     }

@@ -103,18 +103,16 @@ Organization mutations use submitted Organization and values for requests and ca
 
 ### D. Auth + **cookies**
 
-| Élément                       | Choix                                                                                         | Quand | Statut | Paquets                 |
-| ----------------------------- | --------------------------------------------------------------------------------------------- | ----- | ------ | ----------------------- |
-| Sessions UI (**aujourd’hui**) | **Better Auth** — [ADR-0002](../architecture/adr/0002-session-hmac-interim-vs-better-auth.md) | kit   | livré  | `@kit/auth` SessionPort |
-| API keys machine              | `sk_…` hash en D1, **per-user**                                                               | kit   | livré  | `@kit/auth`             |
-| Guards (kit)                  | Hono middleware dual-path `requireAuth` (Bearer **ou** cookie) dans `example-api`             | kit   | livré  |                         |
+| Élément                       | Choix                                                                                         | Quand | Statut | Paquets     |
+| ----------------------------- | --------------------------------------------------------------------------------------------- | ----- | ------ | ----------- |
+| Sessions UI (**aujourd’hui**) | **Better Auth** — [ADR-0002](../architecture/adr/0002-session-hmac-interim-vs-better-auth.md) | kit   | livré  | `@kit/auth` |
+| API keys machine              | `sk_…` hash en D1, **per-user**                                                               | kit   | livré  | `@kit/auth` |
+| Guards (kit)                  | Hono : instantané d’autorisation par requête (Bearer **ou** cookie)                           | kit   | livré  | `@kit/auth` |
 
 OpenID Provider opt-in : [`@kit/auth`](../../../packages/auth/README.md).
 
-Le statut actif du User est vérifié à chaque résolution de session ou de clé :
-une clé est régie par son User propriétaire, pas par un état global de l'Organization.
-La désactivation révoque les sessions existantes ; une réactivation exige une nouvelle connexion.
-Le Product décide qui peut modifier cet état et applique la migration de schéma correspondante.
+Session et clé vérifient le User actif à chaque requête. Une désactivation révoque les sessions ;
+une réactivation exige une nouvelle connexion. Le Product possède la politique et la migration.
 
 #### Cookies (obligatoire — sessions UI)
 
@@ -131,7 +129,8 @@ Le Product décide qui peut modifier cet état et applique la migration de sché
 
 **Non-default :** Clerk.
 
-**[ADR-0002](../architecture/adr/0002-session-hmac-interim-vs-better-auth.md) (2026-07-30) :** session navigateur = **Better Auth only** (HMAC retiré). Dual-path restant = cookie session **\|** Bearer `sk_`. Pattern : **1 instance auth / request** (bindings) + `SessionPort`.
+[ADR-0025](../architecture/adr/0025-request-authorization-snapshot.md) : Better Auth possède les
+sessions. Les gardes lisent un instantané D1 par requête. Root compare les App sur une version résolue.
 
 #### Auth matrix (kit dogfood)
 
@@ -165,7 +164,9 @@ Le Product décide qui peut modifier cet état et applique la migration de sché
 
 La présentation ne change ni identité, scopes, PKCE, CSRF, politique de consentement, TTL ou minting. Elle ne fournit ni renderer, callbacks, URL externes, CSS, attributs de formulaire ou overrides de labels de sécurité. Contrat exhaustif et garde des seams : [ADR-0015 D5/D8](../architecture/adr/0015-mcp-remote-oauth-worker.md#d5--consent-is-a-caller-policy-default-always-show).
 
-**Admission OAuth hosted** — l'option facultative `grantAdmission` ajoute uniquement un refus aux requêtes MCP authentifiées et aux échanges de code ou de refresh token. Son omission conserve le comportement existant ; elle ne remplace ni l'authentification du fournisseur ni les contrôles métier. Contrat des refus, indisponibilités et de l'exception de promotion limitée : [ADR-0015 D2](../architecture/adr/0015-mcp-remote-oauth-worker.md#d2--worker-issued-token-only).
+**Admission OAuth hosted** — compte actif et faits Product en un lot D1 après authentification OAuth.
+`grantAdmission` peut ajouter un refus externe, sans accès aux faits du lot.
+Voir [ADR-0025 D3](../architecture/adr/0025-request-authorization-snapshot.md#d3--credential-selection-and-verification).
 
 Autres étoiles (contexte, pas spine) : mcp-use (~10k), mcp-agent (~8k), openai-mcpkit (scaffold auth), FastMCP Python (autre runtime).
 
@@ -240,7 +241,7 @@ Ref pattern : `kit-boilerplate` (`errorCodes`, `errorUtils`, `ApiError`).
 | `@kit/core`              | `AppError` + `newRequestId` + `toApiErrorBody`, helpers curseur list-page, `createLogger`, `parseOrThrow`/`zodFieldErrors`, `createSiteFetch` pour composer SPA et API sur un Worker; re-exporte `ErrorCode` de `@kit/types`. **Pas** de `Result`, **pas** de fabrique d'IDs, **pas** de schéma env — l'env Worker Zod est app-owned                                                                                                                                            | **P0**            | livré  | `@kit/core`          |
 | `@kit/db`                | Handle D1 : `createDb` + types duck D1 + `D1_IN_ARRAY_CHUNK`/`mapInChunks` + `isUniqueConstraintError` / `toWorkerdD1Error`. Unique conflict = workerd `(extended: SQLITE_CONSTRAINT_UNIQUE\|PRIMARYKEY)` when present, else engine prefix `UNIQUE constraint failed:` at the start of a cause message (PK included). Never bound params, never `.code`. **Aucune** table ([ADR-0012](../architecture/adr/0012-kernel-persistence-request-context.md) D3), **pas** de `migrate` | **P0**            | livré  | `@kit/db`            |
 | `@kit/storage`           | R2 put/get/presign                                                                                                                                                                                                                                                                                                                                                                                                                                                              | **P0**            | livré  | `@kit/storage`       |
-| `@kit/auth`              | SessionPort + `sk_` + org-role helpers; BA factory `@kit/auth/factory`; SPA password forms `@kit/auth/react` (forgot / reset / change — pages stay in the app) ([ADR-0002](../architecture/adr/0002-session-hmac-interim-vs-better-auth.md) · [ADR-0003](../architecture/adr/0003-multi-tenant-rbac-modules.md) · [ADR-0008](../architecture/adr/0008-kit-schema-identity-product-compose.md) D6)                                                                               | **P0**            | livré  | `@kit/auth`          |
+| `@kit/auth`              | Instantané d’autorisation, clés `sk_` et rôles ; Better Auth via `@kit/auth/factory` ; formulaires de mot de passe via `@kit/auth/react` (pages dans l’App). [ADR-0025](../architecture/adr/0025-request-authorization-snapshot.md)                                                                                                                                                                                                                                             | **P0**            | livré  | `@kit/auth`          |
 | `@kit/types`             | Zod schemas + ErrorCode + shared audience/visibility helpers ([ADR-0007](../architecture/adr/0007-tasks-comments-kernel.md) D3)                                                                                                                                                                                                                                                                                                                                                 | **P0**            | livré  | `@kit/types`         |
 | `@kit/api-client`        | Browser `createApiClient` + `HttpError` / `ApiError` + validation field-error helpers · `credentials: 'include'` default · i18n via app catalog in `apiErrorToMessage`                                                                                                                                                                                                                                                                                                          | **P0**            | livré  | `@kit/api-client`    |
 | `@kit/ui`                | shadcn Base UI shell                                                                                                                                                                                                                                                                                                                                                                                                                                                            | **P0**            | livré  | `@kit/ui`            |

@@ -35,6 +35,11 @@
       "import": "./src/hono.ts",
       "default": "./src/hono.ts"
     },
+    "./snapshot": {
+      "types": "./src/snapshot.ts",
+      "import": "./src/snapshot.ts",
+      "default": "./src/snapshot.ts"
+    },
     "./repos/memory-d1": null,
     "./repos/*": {
       "types": "./src/repos/*.ts",
@@ -59,7 +64,7 @@
     "@kit/email": "workspace:*",
     "@kit/ui": "workspace:*",
     "@tanstack/react-form": "^1.12.0",
-    "better-auth": ">=1.2.0",
+    "better-auth": "^1.7.27",
     "drizzle-orm": "^0.45.4",
     "hono": ">=4.0.0",
     "react": "^19.0.0",
@@ -110,7 +115,7 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.3.0",
-    "better-auth": "1.7.27",
+    "better-auth": "^1.7.27",
     "better-sqlite3": "^13.1.1",
     "drizzle-orm": "^0.45.4",
     "esbuild": "^0.28.2",

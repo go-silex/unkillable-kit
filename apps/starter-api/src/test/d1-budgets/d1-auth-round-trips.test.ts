@@ -43,7 +43,14 @@ sessionRoundTripTests({
   magicLinks: false,
   async createFixture() {
     const { env, cookie, request, measure } = await createRouteFixture()
-    return { db: env.DB, cookie, request, measure, credentials: routeFixtureCredentials }
+    return {
+      db: env.DB,
+      cookie,
+      request,
+      credentials: routeFixtureCredentials,
+      measure: (route, ceiling, options) =>
+        measure(route, ceiling, { ...options, exact: route === 'GET /api/auth/get-session' }),
+    }
   },
   async readMountedApi() {
     const { env } = createStarterHttpFixture()

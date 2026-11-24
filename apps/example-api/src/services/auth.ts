@@ -94,12 +94,4 @@ export async function revokeApiKey(db: Db, id: string, subject: string): Promise
   if (!ok) throw AppError.notFound('API key not found')
 }
 
-// `resolveAuth` was removed here: an exported dual-auth resolver with zero call sites that
-// carried its own copy of the org/membership re-check. Two copies of one guard is the drift
-// mechanism that produced the NULL-org hole in the first place — the surviving copy in
-// `middleware/require-auth.ts` was fixed while this one still skipped the check for
-// `organization_id IS NULL`. Deleted rather than patched, so the trap cannot come back.
-// The supported path is `createRequireAuth` (`middleware/require-auth.ts`).
-
-/** Helper for tests that need a BA SessionPort with mock getAuth. */
 export { DEMO_EMAIL, DEMO_EMAIL_B, DEMO_PASSWORD, DEMO_PASSWORD_B }

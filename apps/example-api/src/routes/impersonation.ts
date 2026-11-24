@@ -6,7 +6,6 @@ import {
   startImpersonationSession,
   stopImpersonationSession,
 } from '@kit/auth/repos/impersonation'
-import * as platformRolesRepo from '@kit/auth/repos/platform-roles'
 import { AppError } from '@kit/core'
 import {
   authErrorResponses,
@@ -15,7 +14,8 @@ import {
   sessionOnlySecurity,
   validationErrorResponse,
 } from '../lib/openapi'
-import { getImpersonationEligibility, getImpersonationInfo } from '../services/impersonation'
+import { authorization } from '../middleware/authorization'
+import { findEligibleImpersonation } from '../services/impersonation'
 import type { AppEnv } from '../types'
 
 const rolePermission = z
@@ -125,9 +125,9 @@ function identity(c: {
 }
 
 impersonationRoutes.openapi(permissionsGet, async (c) => {
-  const { actorUserId } = identity(c)
+  identity(c)
   const db = c.get('db')!
-  if ((await platformRolesRepo.getPlatformRole(db, actorUserId)) !== 'super_admin')
+  if ((await authorization.delegation(c))?.actorPlatformRole !== 'super_admin')
     throw AppError.forbidden()
   return c.json({
     permissions: await listImpersonationPermissions(db),
@@ -138,12 +138,10 @@ impersonationRoutes.openapi(permissionsGet, async (c) => {
 impersonationRoutes.openapi(
   permissionsPatch,
   async (c) => {
-    const { actorUserId, sessionId } = identity(c)
+    const { actorUserId } = identity(c)
     const db = c.get('db')!
-    if ((await platformRolesRepo.getPlatformRole(db, actorUserId)) !== 'super_admin')
+    if ((await authorization.delegation(c))?.actorPlatformRole !== 'super_admin')
       throw AppError.forbidden()
-    if (await findImpersonationSession(db, sessionId))
-      throw AppError.forbidden('Cannot configure permissions while impersonating')
     await setImpersonationPermissions(db, c.req.valid('json'), {
       actorUserId,
       requestId: c.get('requestId'),
@@ -165,8 +163,6 @@ impersonationRoutes.openapi(
   async (c) => {
     const { actorUserId, sessionId } = identity(c)
     const db = c.get('db')!
-    if (await findImpersonationSession(db, sessionId))
-      throw AppError.conflict('Already impersonating')
     const row = {
       id: crypto.randomUUID(),
       sessionId,
@@ -174,8 +170,8 @@ impersonationRoutes.openapi(
       ...c.req.valid('json'),
       createdAt: Date.now(),
     }
-    if (!(await getImpersonationEligibility(db, row)))
-      throw AppError.forbidden('Impersonation is not permitted')
+    const impersonation = await findEligibleImpersonation(db, row)
+    if (!impersonation) throw AppError.forbidden('Impersonation is not permitted')
     try {
       await startImpersonationSession(db, row, {
         actorUserId,
@@ -189,7 +185,7 @@ impersonationRoutes.openapi(
     }
     return c.json(
       {
-        impersonation: await getImpersonationInfo(db, row, true),
+        impersonation,
         requestId: c.get('requestId'),
       },
       200,
@@ -204,7 +200,7 @@ impersonationRoutes.openapi(
     const { actorUserId, sessionId } = identity(c)
     const db = c.get('db')!
     const expectedId = c.req.valid('json').impersonationId
-    const current = await findImpersonationSession(db, sessionId)
+    const current = c.get('impersonationRow')
     if (current && (current.id !== expectedId || current.actorUserId !== actorUserId))
       throw AppError.conflict('Impersonation context changed')
     const stopped = await stopImpersonationSession(

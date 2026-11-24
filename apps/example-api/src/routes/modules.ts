@@ -57,9 +57,7 @@ const listModules = createRoute({
 
 modulesRoutes.openapi(listModules, async (c) => {
   const db = c.get('db')!
-  const modules = await modulesService.getModulesState(db, {
-    readOnly: Boolean(c.get('impersonationRow')),
-  })
+  const modules = await modulesService.getModulesState(db)
   return c.json({ modules, requestId: c.get('requestId') })
 })
 
@@ -91,7 +89,6 @@ modulesRoutes.openapi(
   async (c) => {
     const data = c.req.valid('json')
     const db = c.get('db')!
-    await modulesService.ensureKitModules(db)
     await modulesService.setModuleEnabled(db, c.req.valid('param').id, data.enabled)
     const modules = await modulesService.getModulesState(db)
     return c.json({ modules, requestId: c.get('requestId') })

@@ -124,6 +124,53 @@ describe('impersonation security boundaries', () => {
     expect(await db.select().from(kitTasks).where(eq(kitTasks.title, title))).toEqual([])
   })
 
+  it('recovers the browser session even when the Organization detail App fact is unavailable', async () => {
+    const { app, env, actor, request, id } = await setup()
+    const detail = '/api/orgs/org_acme'
+    const other = await loginCookie(app, env, 'staff@kit.local', TENANCY_PASSWORD)
+    expect((await request(other, detail)).status).toBe(200)
+
+    const binding = env.DB
+    let detailReads = 0
+    env.DB = {
+      ...binding,
+      prepare(sql: string) {
+        if (sql.includes('FROM main."organization" AS fact JOIN kit_candidate AS candidate')) {
+          detailReads++
+          return binding.prepare(
+            sql.replace('fact."id" AS "id"', 'fact."missing_test_column" AS "id"'),
+          )
+        }
+        return binding.prepare(sql)
+      },
+    }
+    expect((await request(other, detail)).status).toBe(503)
+    expect(detailReads).toBe(1)
+
+    const me = await request(actor, '/api/me')
+    expect(me.status).toBe(200)
+    expect(meResponseSchema.parse(await me.json())).toMatchObject({
+      subject: 'user_team_owner',
+      impersonation: { id, active: true },
+    })
+    const stop = await request(
+      actor,
+      '/api/impersonation/stop',
+      'POST',
+      { impersonationId: id },
+      id,
+    )
+    expect(stop.status).toBe(200)
+    expect(await stop.json()).toMatchObject({ stopped: true })
+    const recovered = await request(actor, '/api/me', 'GET', undefined, id)
+    expect(recovered.status).toBe(200)
+    expect(meResponseSchema.parse(await recovered.json())).toMatchObject({
+      subject: 'user_staff',
+      impersonation: null,
+    })
+    expect(detailReads).toBe(1)
+  })
+
   it.each([
     'grant',
     'actor membership',

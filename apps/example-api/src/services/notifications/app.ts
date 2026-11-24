@@ -41,7 +41,6 @@ export function createAppNotificationPersistencePorts(db: KitDb): NotificationPe
               roleKey: membership.role,
               moduleId,
               op: 'read',
-              orgBypass: false,
             })
             roles.set(membership.role, result)
           }

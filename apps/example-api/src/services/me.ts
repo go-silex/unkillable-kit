@@ -3,8 +3,6 @@
  */
 import type { ImpersonationInfo, ImpersonationPermissions } from '@kit/api-client/me'
 import type { PlatformRole } from '@kit/auth'
-import { getImpersonationPermissions } from '@kit/auth/repos/impersonation'
-import * as platformRolesRepo from '@kit/auth/repos/platform-roles'
 import type { DrizzleD1Database } from 'drizzle-orm/d1'
 import type { schema } from '../db/schema'
 import * as usersRepo from '../repos/users'
@@ -24,27 +22,17 @@ export type MeProfile = {
 }
 
 type MeOptions = {
-  authMethod?: 'session' | 'api_key' | string
+  authMethod?: 'session' | 'api_key'
   keyOrganizationId?: string | null
-  impersonation?: ImpersonationInfo | null
-  actorUserId?: string
+  platformRole: PlatformRole | null
+  impersonation?: ImpersonationInfo
+  impersonationPermissions?: ImpersonationPermissions
 }
 
-async function getProfileRole(
-  db: Db,
-  subject: string,
-  opts: MeOptions | undefined,
-  actorRole: PlatformRole | null,
-): Promise<PlatformRole | null> {
-  if (opts?.impersonation) return null
-  if ((opts?.actorUserId ?? subject) === subject && opts?.authMethod === 'session') return actorRole
-  return platformRolesRepo.getPlatformRole(db, subject)
-}
-
-async function getProfileOrgs(db: Db, subject: string, opts?: MeOptions): Promise<MeOrg[]> {
+async function getProfileOrgs(db: Db, subject: string, opts: MeOptions): Promise<MeOrg[]> {
   let orgs = await orgsService.listMembershipOrgsForSubject(db, subject)
-  if (opts?.impersonation) {
-    const organizationId = opts.impersonation.organizationId
+  if (opts.impersonation) {
+    const { organizationId } = opts.impersonation
     orgs = orgs.filter((org) => org.id === organizationId)
   }
   // D11 — an unbound API key never receives the full membership catalogue.
@@ -60,14 +48,12 @@ async function getProfileOrgs(db: Db, subject: string, opts?: MeOptions): Promis
  * D11: when `authMethod === 'api_key'`, `orgs` is filtered to `keyOrganizationId`
  * if set, otherwise **empty** (fail-closed — never the full membership catalogue).
  */
-export async function getMeProfile(db: Db, subject: string, opts?: MeOptions): Promise<MeProfile> {
-  const impersonation = opts?.impersonation ?? null
-  const actorId = opts?.actorUserId ?? subject
-  const actorRole =
-    opts?.authMethod === 'session' ? await platformRolesRepo.getPlatformRole(db, actorId) : null
-  const impersonationPermissions = actorRole
-    ? await getImpersonationPermissions(db, actorRole)
-    : { read: false, write: false }
+export async function getMeProfile(db: Db, subject: string, opts: MeOptions): Promise<MeProfile> {
+  const impersonation = opts.impersonation ?? null
+  const platformRole = impersonation ? null : opts.platformRole
+  const sessionPermissions =
+    opts.authMethod === 'session' ? opts.impersonationPermissions : undefined
+  const impersonationPermissions = sessionPermissions ?? { read: false, write: false }
 
   // A revoked delegation remains attached until explicitly stopped. Do not
   // expose the actor or the target's profile through this recovery-only view.
@@ -80,12 +66,11 @@ export async function getMeProfile(db: Db, subject: string, opts?: MeOptions): P
     }
   }
 
-  const platformRole = await getProfileRole(db, subject, opts, actorRole)
   const orgs = await getProfileOrgs(db, subject, opts)
 
-  const baUser = await usersRepo.findBaUserById(db, subject)
-  const email = baUser?.email?.trim() || undefined
-  const name = baUser?.name?.trim() || undefined
+  const user = impersonation ? impersonation.subject : await usersRepo.findBaUserById(db, subject)
+  const email = user?.email?.trim() || undefined
+  const name = user?.name?.trim() || undefined
 
   return {
     platformRole,

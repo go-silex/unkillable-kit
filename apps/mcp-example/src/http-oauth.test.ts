@@ -7,18 +7,23 @@ import type { McpExampleEnv } from './worker-env'
 class MemoryKv {
   private data = new Map<string, { value: string; exp?: number }>()
   accountState: 'active' | 'disabled' | 'missing' | 'unavailable' = 'active'
+  d1Calls = 0
 
   readonly db = {
-    prepare: (_query: string) => ({
-      bind: (userId: string) => ({
-        raw: async () => {
-          if (this.accountState === 'unavailable') throw new Error('D1 unavailable')
-          if (this.accountState === 'missing' || ![DEMO.userId, 'user_b'].includes(userId))
-            return []
-          return [[this.accountState === 'disabled' ? 1 : 0]]
-        },
-      }),
+    prepare: () => ({
+      bind: (...values: unknown[]) => ({ userId: values.at(-1) }),
     }),
+    batch: async (statements: readonly { userId: string }[]) => {
+      this.d1Calls++
+      if (this.accountState === 'unavailable') throw new Error('D1 unavailable')
+      return statements.map(({ userId }) => ({
+        success: true,
+        results:
+          this.accountState === 'active' && [DEMO.userId, 'user_b'].includes(userId)
+            ? [{ subject: userId, platform_role: null }]
+            : [],
+      }))
+    },
   } as unknown as D1Database
 
   async get(key: string, opts?: { type?: string } | string) {
@@ -535,6 +540,7 @@ describe('CP-MCP-HTTP-OAUTH', () => {
     const pingBody = await mcpJson(ping)
     expect(mcpToolText(pingBody)).toContain('"ok":true')
 
+    const beforeWhoami = kv.d1Calls
     const who = await workerFetch(
       worker,
       kv,
@@ -549,6 +555,8 @@ describe('CP-MCP-HTTP-OAUTH', () => {
         }),
       }),
     )
+    expect(who.status).toBe(200)
+    expect(kv.d1Calls - beforeWhoami).toBe(1)
     const whoBody = await mcpJson(who)
     const whoText = mcpToolText(whoBody)
     expect(whoText).toContain('user_demo')

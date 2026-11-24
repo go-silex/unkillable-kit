@@ -2,12 +2,14 @@
  * ADR-0003 Phase B — custom roles + grants + IDOR matrix (CP-IDOR ≥ 8).
  * go-silex/silex-boilerplate#22
  */
+import { deleteGrant, findRoleByKey } from '@kit/auth/repos/org-roles'
 import { createDb } from '@kit/db'
+import { TASKS_MODULE_ID } from '@kit/tasks'
 import { describe, expect, it } from 'vitest'
 import { createApp } from './app'
 import { schema } from './db/schema'
 import { seedTenancyDemo } from './seed/seed-tenancy'
-import { loginCookie } from './test/api-fixture'
+import { loginCookie, sessionHeaders } from './test/api-fixture'
 import { hashFixtureCredential } from './test/fixture-credential'
 import { createMemoryEnv } from './test/memory-env'
 
@@ -394,5 +396,72 @@ describe('org roles Phase B — IDOR + grants', () => {
       env,
     )
     expect(res.status).toBe(403)
+  })
+})
+
+describe('system Role–module grant removal', () => {
+  it('does not restore a removed grant when listing roles between Module requests', async () => {
+    const { app, env, db } = await seedEnv()
+    const orgId = 'org_acme'
+    const cookie = await loginCookie(app, env, 'staff@kit.local', 'demo-password-change-me', ORIGIN)
+    const headers = sessionHeaders(cookie, orgId, ORIGIN)
+    const listRoles = async () => {
+      const response = await app.request(`/api/orgs/${orgId}/roles`, { headers }, env)
+      expect(response.status).toBe(200)
+      return (await response.json()) as {
+        roles: Array<{ id: string; key: string; grants: Array<{ moduleId: string }> }>
+      }
+    }
+    const getStages = () => app.request('/api/tasks/stages?boardKey=main', { headers }, env)
+
+    expect((await getStages()).status).toBe(200)
+    const admin = (await listRoles()).roles.find((role) => role.key === 'admin')
+    expect(admin?.grants).toContainEqual(expect.objectContaining({ moduleId: TASKS_MODULE_ID }))
+    expect(await deleteGrant(db, orgId, admin!.id, TASKS_MODULE_ID)).toBe(true)
+
+    const afterRemoval = (await listRoles()).roles.find((role) => role.key === 'admin')
+    expect(afterRemoval?.id).toBe(admin?.id)
+    expect(afterRemoval?.grants).not.toContainEqual(
+      expect.objectContaining({ moduleId: TASKS_MODULE_ID }),
+    )
+    expect((await getStages()).status).toBe(403)
+  })
+
+  it('denies inviting to a custom role after the inviter loses its Module grant', async () => {
+    const { app, env, db } = await seedEnv()
+    const orgId = 'org_team'
+    const cookie = await loginCookie(
+      app,
+      env,
+      'team-owner@kit.local',
+      'demo-password-change-me',
+      ORIGIN,
+    )
+    const headers = sessionHeaders(cookie, orgId, ORIGIN)
+    const post = (resource: string, body: unknown) =>
+      app.request(
+        `/api/orgs/${orgId}/${resource}`,
+        { method: 'POST', headers, body: JSON.stringify(body) },
+        env,
+      )
+
+    const role = 'demo_viewer'
+    const created = await post('roles', {
+      key: role,
+      name: 'Demo viewer',
+      grants: [{ moduleId: 'demo', access: 'read' }],
+    })
+    expect(created.status).toBe(201)
+    expect((await post('invitations', { email: 'first-viewer@kit.local', role })).status).toBe(201)
+
+    const owner = await findRoleByKey(db, orgId, 'owner')
+    expect(owner).not.toBeNull()
+    expect(await deleteGrant(db, orgId, owner!.id, 'demo')).toBe(true)
+
+    const response = await post('invitations', { email: 'next-viewer@kit.local', role })
+    expect(response.status).toBe(403)
+    expect(await response.json()).toMatchObject({
+      error: { message: 'Cannot assign a role beyond your capabilities' },
+    })
   })
 })

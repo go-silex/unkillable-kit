@@ -117,7 +117,7 @@ describe('disabled accounts over HTTP', () => {
     expect((await getSession(solo)).status).toBe(200)
   })
 
-  it('fails closed with a generic Better Auth response when account state is unreadable', async () => {
+  it('refuses native Better Auth dispatch if the required delegation load fails', async () => {
     const { app, env, owner } = await setup()
     const request = (path: string, init: RequestInit = {}) =>
       app.request(path, { ...init, headers: sessionHeaders(owner) }, env)
@@ -132,7 +132,7 @@ describe('disabled accounts over HTTP', () => {
       ],
     ] as const) {
       const response = await request(path, init)
-      expect(response.status).toBe(401)
+      expect(response.status).toBe(503)
       expect(await response.text()).not.toMatch(/disabled|sqlite|column|database/i)
     }
   })
@@ -154,7 +154,7 @@ describe('disabled accounts over HTTP', () => {
     })
   })
 
-  it('fails closed when the account state column is missing at runtime', async () => {
+  it('fails closed with a generic unavailable response when account facts cannot be read', async () => {
     const { app, env, owner } = await setup()
     const mint = await app.request(
       '/api/keys',
@@ -169,8 +169,11 @@ describe('disabled accounts over HTTP', () => {
     const { key } = (await mint.json()) as { key: string }
     expect((await app.request('/api/me', { headers: bearerHeaders(key) }, env)).status).toBe(200)
     await env.DB.prepare('ALTER TABLE user DROP COLUMN disabled').run()
-    expect((await app.request('/api/me', { headers: bearerHeaders(key) }, env)).status).toBe(401)
-    expect((await app.request('/api/me', { headers: sessionHeaders(owner) }, env)).status).toBe(401)
+    for (const headers of [bearerHeaders(key), sessionHeaders(owner)]) {
+      const response = await app.request('/api/me', { headers }, env)
+      expect(response.status).toBe(503)
+      expect(await response.text()).not.toMatch(/disabled|sqlite|column|database/i)
+    }
   })
 
   it('rejects redemption of an identity ticket minted before disabling its user', async () => {

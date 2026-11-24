@@ -1,7 +1,8 @@
-import { baMember, baOrganization } from '@kit/auth/schema'
+import { getPlatformModule } from '@kit/auth/repos/platform-modules'
+import { baMember, baOrganization, platformModules } from '@kit/auth/schema'
 import { createDb } from '@kit/db'
 import { eq, sql } from 'drizzle-orm'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, onTestFinished } from 'vitest'
 import { createApp } from './app'
 import { apiKeys, schema } from './db/schema'
 import { seedTenancyDemo } from './seed/seed-tenancy'
@@ -344,6 +345,37 @@ describe('org RBAC (ADR-0003 Phase A) — IDOR matrix', () => {
       env,
     )
     expect(st.status).toBe(200)
+  })
+
+  it('returns module catalogue defaults without inserting rows on GET', async () => {
+    const { app, env, db } = await seedEnv()
+    onTestFinished(() => env.close())
+    const staff = await loginCookie(app, env, 'staff@kit.local', 'demo-password-change-me', ORIGIN)
+    const owner = await loginCookie(
+      app,
+      env,
+      'team-owner@kit.local',
+      'demo-password-change-me',
+      ORIGIN,
+    )
+    await db.delete(platformModules).where(eq(platformModules.moduleId, 'demo'))
+    const configured = { configured: true, configPath: '/admin/modules' }
+    const probes = [
+      ['/api/platform/modules', staff, { ...configured, available: false }],
+      ['/api/modules', staff, { ...configured, enabled: false }],
+      [
+        '/api/orgs/org_team/modules',
+        owner,
+        { ...configured, available: false, enabled: true, locked: false, effective: false },
+      ],
+    ] as const
+
+    for (const [path, cookie, demo] of probes) {
+      const response = await app.request(path, { headers: { cookie, Origin: ORIGIN } }, env)
+      expect(response.status, path).toBe(200)
+      expect(await response.json(), path).toMatchObject({ modules: { demo } })
+      expect(await getPlatformModule(db, 'demo'), path).toBeNull()
+    }
   })
 
   it('GET /api/platform/modules rejects an org-bound staff API key', async () => {

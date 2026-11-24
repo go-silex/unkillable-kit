@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * CP-EXTRACT compose proof — temp @kit/* app, migrations, tsc, org-scoped Hono 200/404.
+ * CP-EXTRACT compose proof — temp @kit/* app, migrations, tsc, credential-bound Hono routes.
  *
  * Env: EXTRACT_ROOT — monorepo root.
  * Exit: 0 pass · 1 fail
@@ -36,10 +36,12 @@ function kitPaths(): Record<string, string[]> {
   const nm = resolveDep('hono')
   const drizzle = resolveDep('drizzle-orm')
   return {
+    '@kit/auth': [pkgSrc('auth', 'index.ts')],
+    '@kit/auth/factory': [pkgSrc('auth', 'better-auth-factory.ts')],
     '@kit/auth/hono': [pkgSrc('auth', 'hono.ts')],
-    '@kit/auth/schema': [pkgSrc('auth', 'better-auth-schema.ts')],
+    '@kit/auth/repos/keys': [pkgSrc('auth', 'repos/keys.ts')],
     '@kit/auth/repos/orgs': [pkgSrc('auth', 'repos/orgs.ts')],
-    '@kit/auth/repos/platform-roles': [pkgSrc('auth', 'repos/platform-roles.ts')],
+    '@kit/auth/schema': [pkgSrc('auth', 'better-auth-schema.ts')],
     '@kit/db': [pkgSrc('db', 'index.ts')],
     '@kit/core': [pkgSrc('core', 'index.ts')],
     '@kit/types': [pkgSrc('types', 'index.ts')],
@@ -71,12 +73,18 @@ const PROOF_APP = `import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { Database } from 'bun:sqlite'
 import { Hono } from 'hono'
-import { createOrgMiddleware, type OrgMiddlewareEnv } from '@kit/auth/hono'
+import { apiKeyPrefix, generateApiKey, hashApiKey, parseBearer } from '@kit/auth'
+import { createBetterAuth, type KitBetterAuth } from '@kit/auth/factory'
+import { createRequestAuthorization } from '@kit/auth/hono'
+import { insertApiKey } from '@kit/auth/repos/keys'
 import * as orgsRepo from '@kit/auth/repos/orgs'
-import * as platformRolesRepo from '@kit/auth/repos/platform-roles'
 import { kitAuthSchema } from '@kit/auth/schema'
-import { createDb } from '@kit/db'
+import { AppError } from '@kit/core'
+import { createDb, type KitD1Statement } from '@kit/db'
 
+type AppEnv = {
+  Variables: { subject?: string; authMethod?: 'session' | 'api_key'; orgId?: string }
+}
 
 const MIG_DIR = process.env.KIT_MIG_DIR!
 
@@ -88,15 +96,15 @@ function applyMigrations(sqlite: Database) {
 }
 
 function makeD1(sqlite: Database) {
-  function stmt(sql: string) {
+  function stmt(sql: string): KitD1Statement {
     let binds: unknown[] = []
     const s = {
       bind(...args: unknown[]) {
         binds = args
         return s
       },
-      async first() {
-        return sqlite.prepare(sql).get(...binds) ?? null
+      async first<T>() {
+        return (sqlite.prepare(sql).get(...binds) ?? null) as T | null
       },
       async run() {
         const info = sqlite.prepare(sql).run(...binds)
@@ -105,8 +113,8 @@ function makeD1(sqlite: Database) {
       async all() {
         return { results: sqlite.prepare(sql).all(...binds), success: true }
       },
-      async raw() {
-        return sqlite.prepare(sql).values(...binds) as unknown[][]
+      async raw<T>() {
+        return sqlite.prepare(sql).values(...binds) as T[][]
       },
     }
     return s
@@ -115,11 +123,11 @@ function makeD1(sqlite: Database) {
     prepare(sql: string) {
       return stmt(sql)
     },
-    async batch(stmts: { all?: () => Promise<unknown>; run?: () => Promise<unknown> }[]) {
+    async batch(stmts: unknown[]) {
       const out: unknown[] = []
-      for (const s of stmts) {
-        if (s.all) out.push(await s.all())
-        else if (s.run) out.push(await s.run())
+      for (const item of stmts) {
+        const statement = item as KitD1Statement // Prepared by this adapter.
+        out.push(await statement.all())
       }
       return out
     },
@@ -133,10 +141,54 @@ function makeD1(sqlite: Database) {
 export async function runComposeProof(): Promise<void> {
   const sqlite = new Database(':memory:')
   applyMigrations(sqlite)
-  sqlite.exec(
-    "INSERT INTO user (id, name, email, email_verified, created_at, updated_at) VALUES ('user-1', 'User', 'user@kit.local', 0, 0, 0)",
+  const binding = makeD1(sqlite)
+  const db = createDb(binding, kitAuthSchema)
+  const origin = 'https://compose-proof.kit.test'
+  const auth: KitBetterAuth = createBetterAuth({
+    database: binding,
+    secret: crypto.randomUUID() + crypto.randomUUID(),
+    baseURL: origin,
+    trustedOrigins: [origin],
+    allowPublicSignup: true,
+    cookieName: 'compose-proof-session',
+    useSecureCookies: true,
+  })
+  const app = new Hono<AppEnv>()
+  const authorization = createRequestAuthorization<AppEnv>({
+    db: () => binding,
+    auth: () => auth,
+  })
+  app.all('/api/auth/*', (c) => auth.handler(c.req.raw))
+  app.get(
+    '/orgs/:orgId/ping',
+    async (c, next) => {
+      if (parseBearer(c.req.header('authorization'))) {
+        const { scopes } = await authorization.authenticateKey(c)
+        if (!scopes.includes('read')) throw AppError.forbidden()
+        authorization.admitKeyScope(c)
+      }
+      await next()
+    },
+    authorization.requireAuth,
+    authorization.requireOrgContext(),
+    (c) => c.json({ subject: c.get('subject'), authMethod: c.get('authMethod'), orgId: c.get('orgId') }),
   )
-  const db = createDb(makeD1(sqlite) as never, kitAuthSchema)
+  app.onError((err, c) => {
+    const raw = 'status' in err ? err.status : 500
+    const status = raw === 404 || raw === 401 || raw === 403 || raw === 400 ? raw : 500
+    return c.json({ message: err instanceof Error ? err.message : 'error' }, status)
+  })
+  const request = (path: string, init?: RequestInit) => app.request(origin + path, init)
+  const signup = await request('/api/auth/sign-up/email', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', origin },
+    body: JSON.stringify({ name: 'User', email: 'user@kit.test', password: crypto.randomUUID() }),
+  })
+  if (signup.status !== 200) throw new Error('expected Better Auth signup 200, got ' + signup.status)
+  const { user } = (await signup.json()) as { user: { id: string } }
+  const cookie = signup.headers.getSetCookie()
+    .find((value) => value.startsWith('__Secure-compose-proof-session='))?.split(';', 1)[0]
+  if (!cookie) throw new Error('Better Auth did not issue the configured session cookie')
   const now = new Date(0)
   await orgsRepo.insertOrganization(db, {
     id: 'org-a',
@@ -157,36 +209,45 @@ export async function runComposeProof(): Promise<void> {
   await orgsRepo.insertMember(db, {
     id: 'm1',
     organizationId: 'org-a',
-    userId: 'user-1',
+    userId: user.id,
     role: 'member',
     createdAt: now,
   })
 
-  const orgMw = createOrgMiddleware({
-    findOrgContext: (db, orgId, subject) => orgsRepo.findOrgContext(db as never, orgId, subject),
-    getPlatformRole: platformRolesRepo.getPlatformRole,
-    resolveModuleAccess: async () => true,
-    isModuleEffective: async () => true,
+  const key = generateApiKey()
+  await insertApiKey(db, {
+    id: 'key-1',
+    keyHash: await hashApiKey(key),
+    keyPrefix: apiKeyPrefix(key),
+    subject: user.id,
+    organizationId: 'org-a',
+    scopes: 'read',
+    createdAt: now.getTime(),
   })
 
-  const app = new Hono<OrgMiddlewareEnv>()
-  app.use('*', async (c, next) => {
-    c.set('db', db)
-    c.set('subject', 'user-1')
-    await next()
-  })
-  app.get('/orgs/:orgId/ping', orgMw.requireOrgContext(), (c) => c.json({ orgId: c.get('orgId') }))
-  app.onError((err, c) => {
-    const raw = err && typeof err === 'object' && 'status' in err ? (err as { status: unknown }).status : 500
-    const status = raw === 404 || raw === 401 || raw === 403 || raw === 400 ? raw : 500
-    return c.json({ message: err instanceof Error ? err.message : 'error' }, status)
-  })
-
-  const ok = await app.request('/orgs/org-a/ping')
-  if (ok.status !== 200) throw new Error('expected 200 for org-a, got ' + ok.status)
-
-  const denied = await app.request('/orgs/org-b/ping')
-  if (denied.status !== 404) throw new Error('expected 404 for org-b, got ' + denied.status)
+  const ownPath = '/orgs/org-a/ping'
+  for (const [headers, authMethod] of [
+    [new Headers({ cookie }), 'session'],
+    [new Headers({ cookie, authorization: 'Bearer ' + key }), 'api_key'],
+  ] as const) {
+    const ok = await request(ownPath, { headers })
+    if (ok.status !== 200) throw new Error('expected ' + authMethod + ' 200, got ' + ok.status)
+    const body = (await ok.json()) as { subject: string; authMethod: string; orgId: string }
+    if (body.subject !== user.id || body.authMethod !== authMethod || body.orgId !== 'org-a') {
+      throw new Error('incorrect context for ' + authMethod)
+    }
+  }
+  for (const [path, headers, expected] of [
+    ['/orgs/org-b/ping', { cookie }, 404],
+    ['/orgs/org-b/ping', { cookie, authorization: 'Bearer ' + key }, 403],
+    [ownPath, { cookie, authorization: 'Bearer ' + generateApiKey() }, 401],
+    [ownPath, undefined, 401],
+  ] as const) {
+    const denied = await request(path, { headers: new Headers(headers) })
+    if (denied.status !== expected) {
+      throw new Error('expected ' + expected + ' for ' + path + ', got ' + denied.status)
+    }
+  }
 
   sqlite.close()
 }
@@ -249,7 +310,7 @@ async function main(): Promise<void> {
       process.exit(1)
     }
 
-    console.log('extract-compose-proof: OK (typecheck + org 200/404)')
+    console.log('extract-compose-proof: OK (typecheck + session/key credentials and org scope)')
   } finally {
     rmSync(tmp, { recursive: true, force: true })
   }

@@ -1,5 +1,4 @@
 import { listMembershipsForUser } from '@kit/auth/repos/orgs'
-import { getPlatformRole } from '@kit/auth/repos/platform-roles'
 import { baUser } from '@kit/auth/schema'
 import { eq } from 'drizzle-orm'
 import { Hono } from 'hono'
@@ -28,7 +27,7 @@ me.get('/api/me', requireAuth, async (c) => {
     email: user?.email,
     name: user?.name,
     authMethod: c.get('authMethod'),
-    platformRole: await getPlatformRole(db, subject),
+    platformRole: c.get('platformRole') ?? null,
     orgs,
     impersonation: null,
     impersonationPermissions: { read: false, write: false },

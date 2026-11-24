@@ -1,4 +1,5 @@
 import { apiKeys, baMember, baOrganization, userPlatformRoles } from '@kit/auth/schema'
+import { countD1RoundTrips } from '@kit/db/testing'
 import { eq, sql } from 'drizzle-orm'
 import { describe, expect, it, vi } from 'vitest'
 import { requireOrgContext } from './middleware/org-context'
@@ -117,19 +118,70 @@ describe('organization authorization HTTP regressions', () => {
     expect((await app.request('/api/orgs/org_acme', { headers }, env)).status).toBe(401)
   })
 
-  it('records a super-admin read bypass with actor and organization', async () => {
-    const { app, env } = await setup()
-    const cookie = await loginCookie(app, env, 'super@kit.local', TENANCY_PASSWORD)
+  it('returns the full Organization detail for path-only members, keys, and audited bypass', async () => {
+    const { app, env, db } = await setup()
+    const member = await loginCookie(app, env, 'solo@kit.local', TENANCY_PASSWORD)
+    const superAdmin = await loginCookie(app, env, 'super@kit.local', TENANCY_PASSWORD)
+    await db
+      .update(baOrganization)
+      .set({
+        name: 'Detail wire fixture',
+        slug: 'detail-wire-fixture',
+        logo: 'https://example.test/detail.svg',
+        metadata: '{"source":"fixture"}',
+        createdAt: new Date('2025-07-08T01:02:03.456Z'),
+        updatedAt: new Date('2025-07-09T01:02:03.789Z'),
+      })
+      .where(eq(baOrganization.id, 'org_solo'))
+    const expected = {
+      id: 'org_solo',
+      name: 'Detail wire fixture',
+      slug: 'detail-wire-fixture',
+      logo: 'https://example.test/detail.svg',
+      metadata: '{"source":"fixture"}',
+      createdAt: '2025-07-08T01:02:03.456Z',
+      updatedAt: '2025-07-09T01:02:03.789Z',
+      kind: 'client',
+      status: 'active',
+    }
+    const memberResponse = await app.request(
+      '/api/orgs/org_solo',
+      { headers: sessionHeaders(member) },
+      env,
+    )
+    expect(memberResponse.status).toBe(200)
+    expect(await memberResponse.json()).toEqual({
+      org: { ...expected, role: 'owner', bypass: false },
+      requestId: expect.any(String),
+    })
+    const key = await mintApiKey(db, 'user_solo', {
+      organizationId: 'org_solo',
+      scopes: ['read'],
+    })
+    const keyResponse = await app.request(
+      '/api/orgs/org_solo',
+      { headers: bearerHeaders(key.key) },
+      env,
+    )
+    expect(keyResponse.status).toBe(200)
+    expect(await keyResponse.json()).toEqual({
+      org: { ...expected, role: 'owner', bypass: false },
+      requestId: expect.any(String),
+    })
     const log = vi.spyOn(console, 'info')
     try {
+      const measured = countD1RoundTrips(env.DB)
       const response = await app.request(
         '/api/orgs/org_solo',
-        { headers: { ...sessionHeaders(cookie), 'x-request-id': 'req_auth532_read_bypass' } },
-        env,
+        { headers: { ...sessionHeaders(superAdmin), 'x-request-id': 'req_auth532_read_bypass' } },
+        { ...env, DB: measured.db },
       )
       expect(response.status).toBe(200)
-      const body = (await response.json()) as { requestId: string }
-      expect(body.requestId).toBe('req_auth532_read_bypass')
+      expect(measured.count).toBe(1)
+      expect(await response.json()).toEqual({
+        org: { ...expected, role: null, bypass: true },
+        requestId: 'req_auth532_read_bypass',
+      })
       const records = log.mock.calls.map(([value]) => {
         try {
           return JSON.parse(String(value))

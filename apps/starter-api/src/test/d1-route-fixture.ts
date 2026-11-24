@@ -16,7 +16,13 @@ const ctx = { waitUntil() {}, passThroughOnException() {} } as unknown as Execut
 
 type SiteEnv = Env & { ASSETS?: Fetcher }
 type Route = `${string} /${string}`
-type MeasureOptions = { path?: string; headers?: HeadersInit; body?: unknown; status?: number }
+type MeasureOptions = {
+  path?: string
+  headers?: HeadersInit
+  body?: unknown
+  status?: number
+  exact?: boolean
+}
 
 export function createStarterHttpFixture(bindings: Pick<SiteEnv, 'ASSETS'> = {}) {
   const sqlite = new Database(':memory:')
@@ -78,7 +84,8 @@ export async function createRouteFixture() {
     const response = await dispatch(path, { method, headers, body }, { ...env, DB: counted.db })
     const label = apiKey ? `${route} (api-key)` : route
     expect(response.status, label).toBe(options.status ?? 200)
-    counted.assertAtMost(label, ceiling)
+    if (options.exact) expect(counted.count, `${label}: D1 round trips`).toBe(ceiling)
+    else counted.assertAtMost(label, ceiling)
     return response
   }
   return { env, request, cookie, measure }

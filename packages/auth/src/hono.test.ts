@@ -1,288 +1,198 @@
-import { Hono } from 'hono'
-import type { ContentfulStatusCode } from 'hono/utils/http-status'
-import { describe, expect, it, vi } from 'vitest'
-import {
-  createOrgMiddleware,
-  MODULE_DENIAL,
-  type OrgContextPorts,
-  type OrgMiddlewareEnv,
-} from './hono'
+import { inspect } from 'node:util'
+import { describe, expect, it, onTestFinished, vi } from 'vitest'
+import { fixture, marker, path, projection } from './request/authorization-hono.fixture'
+import { defineAuthorizationFact } from './snapshot'
 
-/**
- * `AppError.status` is a plain number the middleware throws; Hono's `c.json` wants a
- * contentful status. Shared by the two test apps so both answer the same status.
- */
-function errorStatus(err: unknown): ContentfulStatusCode {
-  if (!err || typeof err !== 'object' || !('status' in err) || typeof err.status !== 'number') {
-    return 500
-  }
-  // AppError carries an HTTP status as a plain number; Hono types it as a union.
-  const status = err.status as ContentfulStatusCode
-  return status
-}
+describe('HTTP authorization facts', () => {
+  it.each([
+    ['unverified credential', 401, 'Unauthorized'],
+    ['missing key scope', 403, 'Forbidden'],
+    ['missing Module grant', 403, 'Insufficient module grant'],
+    ['unavailable Module', 404, 'Module not available'],
+    ['partially failed load', 503, 'Authorization unavailable'],
+  ] as const)(
+    'does not expose a returned Product row after %s',
+    async (reason, status, message) => {
+      const { app, batches, cookie, decode, failure, key, prepare, sqlite } = await fixture()
+      const headers = new Headers({ cookie })
+      if (reason === 'unverified credential' || reason === 'missing key scope') {
+        headers.set('authorization', `Bearer ${key}`)
+      }
 
-function ports(overrides: Partial<OrgContextPorts> = {}): OrgContextPorts {
-  return {
-    findOrgContext: vi.fn(async () => ({
-      status: 'active',
-      membershipRole: 'member',
-      platformRole: null,
-    })),
-    getPlatformRole: vi.fn(async () => null),
-    resolveModuleAccess: vi.fn(async () => true),
-    isModuleEffective: vi.fn(async () => true),
-    ...overrides,
-  }
-}
+      const admitted = await app.request(path, { headers })
+      expect(admitted.status).toBe(200)
+      expect(batches).toHaveLength(1)
+      expect(await admitted.json()).toEqual({ label: marker })
+      expect(decode).toHaveBeenCalledExactlyOnceWith([{ label: marker }])
+      decode.mockClear()
+      batches.length = 0
 
-function appWith(
-  mw: ReturnType<typeof createOrgMiddleware>,
-  setup?: (c: { set: (k: string, v: unknown) => void }) => void,
-) {
-  const app = new Hono<OrgMiddlewareEnv>()
-  app.use('/orgs/:orgId/*', async (c, next) => {
-    c.set('db', {})
-    setup?.(c)
-    await next()
-  })
-  app.get('/orgs/:orgId/ping', mw.requireOrgContext(), (c) => c.json({ orgId: c.get('orgId') }))
-  app.post('/orgs/:orgId/ping', mw.requireOrgContext({ allowSuperAdmin: true }), (c) =>
-    c.json({ ok: true }),
-  )
-  app.get('/orgs/:orgId/admin', mw.requireOrgContext(), mw.requireOrgRole('admin'), (c) =>
-    c.json({ ok: true }),
-  )
-  app.delete(
-    '/orgs/:orgId/org',
-    mw.requireOrgContext({ allowSuperAdmin: true, allowSuperAdminWrite: true }),
-    mw.requireOrgCapability('delete_org'),
-    (c) => c.json({ ok: true }),
-  )
-  app.get(
-    '/staff',
-    async (c, next) => {
-      c.set('db', {})
-      setup?.(c)
-      await next()
+      switch (reason) {
+        case 'unverified credential':
+          headers.set('authorization', `Bearer ${key}invalid`)
+          break
+        case 'missing key scope':
+          sqlite.exec("UPDATE api_keys SET scopes = 'write'")
+          break
+        case 'missing Module grant':
+          sqlite.exec('DELETE FROM organization_role_module_grants')
+          break
+        case 'unavailable Module':
+          sqlite.exec('UPDATE platform_modules SET available = 0')
+          break
+        case 'partially failed load':
+          failure.partial = true
+          break
+      }
+      const output = (['info', 'warn', 'error', 'log', 'debug'] as const).map((level) =>
+        vi.spyOn(console, level).mockImplementation(() => {}),
+      )
+      onTestFinished(() => {
+        for (const spy of output) spy.mockRestore()
+      })
+
+      const refused = await app.request(path, { headers })
+      expect(refused.status).toBe(status)
+      expect(await refused.json()).toEqual({ message })
+      expect(batches).toHaveLength(1)
+      expect(batches[0]).toContainEqual({ success: true, results: [{ label: marker }] })
+      for (const [sql] of prepare.mock.calls) expect(sqlite.prepare(sql).readonly).toBe(true)
+      expect(decode).not.toHaveBeenCalled()
+      for (const spy of output)
+        expect(inspect(spy.mock.calls, { depth: null })).not.toContain(marker)
     },
-    mw.requirePlatformRole('staff'),
-    (c) => c.json({ ok: true }),
   )
-  app.get('/orgs/:orgId/mod', mw.requireOrgContext(), mw.requireModule('flows'), (c) =>
-    c.json({ ok: true }),
+
+  it('refuses absent or malformed credentials without a fact read or cookie fallback', async () => {
+    const { app, batches, cookie, decode, prepare } = await fixture()
+    expect((await app.request(path)).status).toBe(401)
+    const malformed = await app.request(path, {
+      headers: { cookie, authorization: 'Bearer short' },
+    })
+    expect(malformed.status).toBe(401)
+    expect(batches).toHaveLength(0)
+    expect(prepare).not.toHaveBeenCalled()
+    expect(decode).not.toHaveBeenCalled()
+  })
+
+  it('does not let an Organization-wide read stand in for the member Role grant', async () => {
+    const { app, batches, cookie, decode } = await fixture(true)
+    const response = await app.request(path, { headers: { cookie } })
+    expect(response.status).toBe(503)
+    expect(batches).toHaveLength(0)
+    expect(decode).not.toHaveBeenCalled()
+  })
+
+  it('does not consult the parameter fallback when an exact endpoint wins dispatch', async () => {
+    const { app, batches, cookie } = await fixture()
+    const response = await app.request('/overlap/chosen', {
+      headers: { cookie, 'X-Org-Id': 'alpha' },
+    })
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ label: marker })
+    expect(batches).toHaveLength(1)
+    expect(batches[0]).not.toContainEqual({ success: true, results: [{ access: 'read' }] })
+  })
+
+  it('refuses ambiguous parameter endpoint matches before loading facts', async () => {
+    const { app, batches, cookie } = await fixture()
+    expect((await app.request('/conflict/start/tail', { headers: { cookie } })).status).toBe(503)
+    expect(batches).toHaveLength(0)
+  })
+
+  it('binds an ALL endpoint to its path Organization', async () => {
+    const { app, batches, cookie } = await fixture()
+    const allowed = await app.request('/all/alpha', { method: 'PATCH', headers: { cookie } })
+    expect(allowed.status).toBe(200)
+    expect(await allowed.json()).toEqual({ label: marker })
+    expect(batches).toHaveLength(1)
+    const conflicted = await app.request('/all/alpha', {
+      method: 'PATCH',
+      headers: { cookie, 'X-Org-Id': 'other' },
+    })
+    expect(conflicted.status).toBe(403)
+  })
+
+  it('uses the endpoint selector rather than parameters on matched middleware', async () => {
+    const { app, cookie } = await fixture()
+    const route = '/middleware/section/status'
+    expect((await app.request(route, { headers: { cookie } })).status).toBe(400)
+    const allowed = await app.request(route, { headers: { cookie, 'X-Org-Id': 'alpha' } })
+    expect(allowed.status).toBe(200)
+    expect(await allowed.json()).toEqual({ admitted: true })
+  })
+
+  it('does not dispatch or decode when an admitted fact has a failed Product sibling', async () => {
+    const { app, batches, cookie, decode, failure, productHandler, rejectedRead } = await fixture()
+    failure.productSibling = true
+    const response = await app.request('/all/alpha', { headers: { cookie } })
+    expect(response.status).toBe(503)
+    expect(await response.json()).toEqual({ message: 'Authorization unavailable' })
+    expect(batches[0]).toContainEqual({ success: false, results: [] })
+    expect(batches[0]).toContainEqual({ success: true, results: [{ label: marker }] })
+    expect(decode).not.toHaveBeenCalled()
+    expect(productHandler).not.toHaveBeenCalled()
+    expect(rejectedRead).toHaveBeenCalledExactlyOnceWith(403)
+  })
+
+  it.each(['availability', 'grant'] as const)(
+    'treats unreadable Module %s as unavailable',
+    async (kind) => {
+      const { app, cookie, decode, failure } = await fixture()
+      failure.malformedPolicy = kind
+      const response = await app.request(path, { headers: { cookie } })
+      expect(response.status).toBe(503)
+      expect(await response.json()).toEqual({ message: 'Authorization unavailable' })
+      expect(decode).not.toHaveBeenCalled()
+    },
   )
-  app.onError((err, c) =>
-    c.json({ message: err instanceof Error ? err.message : 'error' }, errorStatus(err)),
-  )
-  return app
-}
 
-describe('createOrgMiddleware', () => {
-  it('resolves org from path when member', async () => {
-    const app = appWith(createOrgMiddleware(ports()), (c) => {
-      c.set('subject', 'user-1')
+  it('does not disclose an overflowing Product fact to a nonmember', async () => {
+    const { app, batches, cookie, decode, sqlite } = await fixture()
+    const headers = { cookie }
+    const allowed = await app.request(path, { headers })
+    expect(await allowed.json()).toEqual({ label: marker })
+    sqlite.prepare('INSERT INTO product_cards VALUES (?, ?)').run('alpha', 'second label')
+    expect((await app.request(path, { headers })).status).toBe(503)
+    decode.mockClear()
+    sqlite.exec('DELETE FROM member')
+    const refused = await app.request(path, { headers })
+    expect(refused.status).toBe(404)
+    expect(await refused.json()).toEqual({ message: 'Organization not found' })
+    expect(batches.at(-1)).toContainEqual({
+      success: true,
+      results: [{ label: marker }, { label: 'second label' }],
     })
-    const res = await app.request('/orgs/org-a/ping')
-    expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ orgId: 'org-a' })
+    expect(decode).not.toHaveBeenCalled()
   })
 
-  it('rejects missing subject', async () => {
-    const app = appWith(createOrgMiddleware(ports()))
-    expect((await app.request('/orgs/org-a/ping')).status).toBe(401)
+  it('rejects invalid or private fact declarations', () => {
+    const decode = vi.fn()
+    expect(() => defineAuthorizationFact({ ...projection, maxRows: 0, decode })).toThrow(TypeError)
+    expect(() =>
+      defineAuthorizationFact({
+        ...projection,
+        table: { ...projection.table, name: 'session' },
+        decode,
+      }),
+    ).toThrow(TypeError)
+    expect(decode).not.toHaveBeenCalled()
   })
 
-  it('rejects missing org id', async () => {
-    const mw = createOrgMiddleware(ports())
-    const app = new Hono<OrgMiddlewareEnv>()
-    app.use(async (c, next) => {
-      c.set('db', {})
-      c.set('subject', 'user-1')
-      await next()
-    })
-    app.get('/x', mw.requireOrgContext(), (c) => c.json({ ok: true }))
-    app.onError((err, c) =>
-      c.json({ message: err instanceof Error ? err.message : 'error' }, errorStatus(err)),
-    )
-    expect((await app.request('/x')).status).toBe(400)
-  })
+  it('enforces organization and platform roles and limits break-glass actions', async () => {
+    const { app, cookie, sqlite, userId } = await fixture()
+    const headers = { cookie }
+    expect((await app.request('/orgs/alpha/admin', { headers })).status).toBe(403)
+    sqlite.exec("UPDATE member SET role = 'admin'")
+    expect((await app.request('/orgs/alpha/admin', { headers })).status).toBe(200)
+    expect((await app.request('/staff', { headers })).status).toBe(403)
+    sqlite
+      .prepare('INSERT INTO user_platform_roles (user_id, role, updated_at) VALUES (?, ?, ?)')
+      .run(userId, 'staff', 1)
+    expect((await app.request('/staff', { headers })).status).toBe(200)
 
-  it('rejects path/header org mismatch', async () => {
-    const app = appWith(createOrgMiddleware(ports()), (c) => {
-      c.set('subject', 'user-1')
-    })
-    const res = await app.request('/orgs/org-a/ping', { headers: { 'x-org-id': 'org-b' } })
-    expect(res.status).toBe(403)
-  })
-
-  it('rejects unbound API key on tenant route', async () => {
-    const app = appWith(createOrgMiddleware(ports()), (c) => {
-      c.set('subject', 'user-1')
-      c.set('authMethod', 'api_key')
-    })
-    expect((await app.request('/orgs/org-a/ping')).status).toBe(403)
-  })
-
-  it('rejects API key bound to another org', async () => {
-    const app = appWith(createOrgMiddleware(ports()), (c) => {
-      c.set('subject', 'user-1')
-      c.set('authMethod', 'api_key')
-      c.set('keyOrganizationId', 'org-b')
-    })
-    expect((await app.request('/orgs/org-a/ping')).status).toBe(403)
-  })
-
-  it('allows org-bound API key', async () => {
-    const app = appWith(createOrgMiddleware(ports()), (c) => {
-      c.set('subject', 'user-1')
-      c.set('authMethod', 'api_key')
-      c.set('keyOrganizationId', 'org-a')
-    })
-    expect((await app.request('/orgs/org-a/ping')).status).toBe(200)
-  })
-
-  it('rejects inactive org', async () => {
-    const app = appWith(
-      createOrgMiddleware(
-        ports({
-          findOrgContext: async () => ({
-            status: 'suspended',
-            membershipRole: 'member',
-            platformRole: null,
-          }),
-        }),
-      ),
-      (c) => {
-        c.set('subject', 'user-1')
-      },
-    )
-    expect((await app.request('/orgs/org-a/ping')).status).toBe(403)
-  })
-
-  it('hides missing membership as 404', async () => {
-    const app = appWith(
-      createOrgMiddleware(
-        ports({
-          findOrgContext: async () => ({
-            status: 'suspended',
-            membershipRole: null,
-            platformRole: null,
-          }),
-        }),
-      ),
-      (c) => {
-        c.set('subject', 'user-1')
-      },
-    )
-    expect((await app.request('/orgs/org-a/ping')).status).toBe(404)
-  })
-
-  it('blocks super_admin write without break-glass', async () => {
-    const app = appWith(
-      createOrgMiddleware(
-        ports({
-          findOrgContext: async () => ({
-            status: 'active',
-            membershipRole: null,
-            platformRole: 'super_admin',
-          }),
-        }),
-      ),
-      (c) => {
-        c.set('subject', 'root')
-      },
-    )
-    expect((await app.request('/orgs/org-a/ping', { method: 'POST' })).status).toBe(403)
-  })
-
-  it('requireOrgRole respects membership', async () => {
-    const member = appWith(createOrgMiddleware(ports()), (c) => {
-      c.set('subject', 'user-1')
-    })
-    expect((await member.request('/orgs/org-a/admin')).status).toBe(403)
-
-    const admin = appWith(
-      createOrgMiddleware(
-        ports({
-          findOrgContext: async () => ({
-            status: 'active',
-            membershipRole: 'admin',
-            platformRole: null,
-          }),
-        }),
-      ),
-      (c) => {
-        c.set('subject', 'user-1')
-      },
-    )
-    expect((await admin.request('/orgs/org-a/admin')).status).toBe(200)
-  })
-
-  it('requireOrgCapability blocks delete_org on bypass', async () => {
-    const app = appWith(
-      createOrgMiddleware(
-        ports({
-          findOrgContext: async () => ({
-            status: 'active',
-            membershipRole: null,
-            platformRole: 'super_admin',
-          }),
-        }),
-      ),
-      (c) => {
-        c.set('subject', 'root')
-      },
-    )
-    expect((await app.request('/orgs/org-a/org', { method: 'DELETE' })).status).toBe(403)
-  })
-
-  it('requirePlatformRole checks staff', async () => {
-    const denied = appWith(createOrgMiddleware(ports()), (c) => {
-      c.set('subject', 'user-1')
-    })
-    expect((await denied.request('/staff')).status).toBe(403)
-
-    const allowed = appWith(
-      createOrgMiddleware(ports({ getPlatformRole: async () => 'staff' })),
-      (c) => {
-        c.set('subject', 'user-1')
-      },
-    )
-    expect((await allowed.request('/staff')).status).toBe(200)
-  })
-
-  it('MODULE_DENIAL pins the shared denial literals', () => {
-    expect(MODULE_DENIAL).toEqual({
-      notAvailable: 'Module not available',
-      insufficientGrant: 'Insufficient module grant',
-    })
-  })
-
-  it('requireModule distinguishes missing module vs missing grant', async () => {
-    const missing = appWith(
-      createOrgMiddleware(
-        ports({
-          resolveModuleAccess: async () => false,
-          isModuleEffective: async () => false,
-        }),
-      ),
-      (c) => {
-        c.set('subject', 'user-1')
-      },
-    )
-    expect((await missing.request('/orgs/org-a/mod')).status).toBe(404)
-
-    const forbidden = appWith(
-      createOrgMiddleware(
-        ports({
-          resolveModuleAccess: async () => false,
-          isModuleEffective: async () => true,
-        }),
-      ),
-      (c) => {
-        c.set('subject', 'user-1')
-      },
-    )
-    expect((await forbidden.request('/orgs/org-a/mod')).status).toBe(403)
+    sqlite.exec("DELETE FROM member; UPDATE user_platform_roles SET role = 'super_admin';")
+    expect((await app.request('/orgs/alpha/write', { method: 'POST', headers })).status).toBe(403)
+    expect((await app.request('/orgs/alpha', { method: 'DELETE', headers })).status).toBe(403)
   })
 })

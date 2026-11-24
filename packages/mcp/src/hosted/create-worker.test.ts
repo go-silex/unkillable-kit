@@ -3,10 +3,10 @@ import { getOAuthApi } from '@cloudflare/workers-oauth-provider'
 import { createBetterAuth } from '@kit/auth/factory'
 import { createOidcProvider, registerOidcClient } from '@kit/auth/oidc-provider'
 import { createSiteFetch } from '@kit/core'
-import { createSqliteD1 } from '@kit/db/testing'
-import Database from 'better-sqlite3'
-import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
+import { countD1RoundTrips } from '@kit/db/testing'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { McpIdentity, McpIdentityPort } from '../identity'
+import { createAuthFixture } from './auth-fixture.test-support'
 import { putConsent, readConsent } from './consent'
 import {
   createHostedMcpWorker,
@@ -18,6 +18,7 @@ import { createProductClient } from './product-registered'
 
 class MemoryKv {
   readonly data = new Map<string, { value: string; exp?: number }>()
+  readonly auth = createAuthFixture(DEMO.userId, OTHER.userId)
 
   async get(key: string, opts?: { type?: string } | string) {
     const row = this.data.get(key)
@@ -104,9 +105,7 @@ function ctx(): ExecutionContext {
 }
 
 function env(kv: MemoryKv, extra?: Partial<HostedMcpEnv>): HostedMcpEnv {
-  const DB = {
-    prepare: () => ({ bind: () => ({ raw: async () => [[0]] }) }),
-  } as unknown as D1Database
+  const DB = kv.auth.db as unknown as D1Database
   return { OAUTH_KV: kv as unknown as KVNamespace, DB, ...extra }
 }
 
@@ -231,6 +230,7 @@ function postConsent(
   kv: MemoryKv,
   url: string,
   form: { cookie: string; csrf: string; consent?: string },
+  hostedEnv = envFor(kv, new URL(url).origin),
 ) {
   return hosted.fetch(
     new Request(url, {
@@ -238,7 +238,7 @@ function postConsent(
       headers: { 'content-type': 'application/x-www-form-urlencoded', cookie: form.cookie },
       body: new URLSearchParams({ csrf: form.csrf, consent: form.consent ?? 'yes' }),
     }),
-    envFor(kv, new URL(url).origin),
+    hostedEnv,
     ctx(),
   )
 }
@@ -249,12 +249,13 @@ type TokenBody = { access_token?: string; refresh_token?: string; expires_in?: n
 async function exchangeCode(
   hosted: Hosted,
   kv: MemoryKv,
+  hostedEnv = env(kv),
 ): Promise<TokenBody & { clientId: string }> {
   const clientId = await registerClient(hosted, kv)
   const { verifier, challenge } = await pkce()
   const authorize = await hosted.fetch(
     new Request(await authorizeUrl(clientId, { challenge })),
-    env(kv),
+    hostedEnv,
     ctx(),
   )
   const code = new URL(authorize.headers.get('location') ?? '').searchParams.get('code') ?? ''
@@ -271,7 +272,7 @@ async function exchangeCode(
         resource: `${LOCAL}/mcp`,
       }),
     }),
-    env(kv),
+    hostedEnv,
     ctx(),
   )
   expect(token.status).toBe(200)
@@ -708,15 +709,9 @@ describe('hosted authorization-server contract', () => {
 
   it('rejects a real OIDC access token at MCP while accepting an MCP token', async () => {
     vi.stubGlobal('Cloudflare', { compatibilityFlags: { global_fetch_strictly_public: true } })
-    const sqlite = new Database(':memory:')
-    onTestFinished(() => {
-      sqlite.close()
-    })
+    const { db: database, sqlite } = createAuthFixture()
     for (const migration of [
-      '0005_better_auth.sql',
-      '0006_better_auth_organization.sql',
       '0014_better_auth_1_7_additive.sql',
-      '0025_account_state.sql',
       '0027_better_auth_oidc_provider.sql',
     ]) {
       sqlite.exec(
@@ -726,7 +721,6 @@ describe('hosted authorization-server contract', () => {
         ),
       )
     }
-    const database = createSqliteD1(sqlite)
     const auth = createBetterAuth({
       database,
       secret: 'test-better-auth-secret-xxxxxxxx32c!!',
@@ -849,7 +843,7 @@ describe('hosted authorization-server contract', () => {
     const rejected = await mcpCall(oidcToken)
     expect(rejected.status).toBe(401)
     expect(await rejected.text()).not.toContain(user.id)
-    const mcpToken = await exchangeCode(hosted, kv)
+    const mcpToken = await exchangeCode(hosted, kv, hostedEnv)
     expect(mcpToken.access_token).toBeTruthy()
     const accepted = await mcpCall(mcpToken.access_token as string)
     expect(accepted.status).toBe(200)
@@ -962,6 +956,46 @@ describe('hosted authorization-server contract', () => {
 })
 
 describe('hosted consent', () => {
+  it('checks live account state in one D1 call when submitting existing consent', async () => {
+    const kv = new MemoryKv()
+    const hosted = worker({ identityPort: port(DEMO) })
+    const clientId = await registerClient(hosted, kv)
+    const url = await authorizeUrl(clientId)
+    const page = await consentPage(hosted, kv, url)
+    expect(page.res.status).toBe(200)
+    expect(page.csrf).toBeTruthy()
+
+    const setDisabled = kv.auth.sqlite.prepare('UPDATE user SET disabled = ? WHERE id = ?')
+    setDisabled.run(1, DEMO.userId)
+    const unavailableBatch = {
+      ...kv.auth.db,
+      batch: async () => {
+        throw new Error('D1 read failed')
+      },
+    }
+    for (const [db, status] of [
+      [kv.auth.db, 401],
+      [unavailableBatch, 503],
+    ] as const) {
+      const budget = countD1RoundTrips(db)
+      const refused = await postConsent(
+        hosted,
+        kv,
+        url.href,
+        page,
+        env(kv, { DB: budget.db as unknown as D1Database }),
+      )
+      expect(refused.status).toBe(status)
+      expect(budget.count).toBe(1)
+      expect(kv.grantKeys()).toEqual([])
+    }
+
+    setDisabled.run(0, DEMO.userId)
+    const granted = await postConsent(hosted, kv, url.href, page)
+    expect(granted.status).toBe(302)
+    expect(new URL(granted.headers.get('location') ?? '').searchParams.get('code')).toBeTruthy()
+  })
+
   it('stores and reads consent using the SHA-256 digest of the cookie id', async () => {
     const kv = new MemoryKv()
     const namespace = kv as unknown as KVNamespace

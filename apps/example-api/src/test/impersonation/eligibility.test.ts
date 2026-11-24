@@ -119,12 +119,16 @@ describe('impersonation eligibility', () => {
     const { app, env, grant, start, staffCookie, request } = await setup()
     const other = await loginCookie(app, env, 'staff@kit.local', TENANCY_PASSWORD)
     expect((await grant(true, false)).status).toBe(200)
+    const before = meResponseSchema.parse(await (await request(staffCookie, '/api/me')).json())
+    expect(before.platformRole).toBe('staff')
+    expect(before.impersonationPermissions).toEqual({ read: true, write: false })
     const started = await start(staffCookie)
     expect(started.status).toBe(200)
     const { impersonation } = (await started.json()) as { impersonation: { id: string } }
     const me = meResponseSchema.parse(await (await request(staffCookie, '/api/me')).json())
     expect(me.subject).toBe('user_team_owner')
     expect(me.platformRole).toBeNull()
+    expect(me.impersonationPermissions).toEqual({ read: true, write: false })
     expect(me.orgs.map((org) => org.id)).toEqual([ORG])
     expect(me.impersonation).toMatchObject({
       id: impersonation.id,

@@ -61,12 +61,14 @@ async function seedInbox(app: ApiApp, env: ApiEnv, db: KitDb, staffHeaders: Head
 }
 
 async function measureInbox(probe: Probe, headers: HeadersInit) {
-  const count = await probe('GET /api/orgs/:orgId/notifications/unread-count', 24, {
+  const count = await probe('GET /api/orgs/:orgId/notifications/unread-count', 2, {
+    exact: true,
     path: `${inbox}/unread-count`,
     headers,
   })
   expect(await count.json()).toMatchObject({ unreadCount: 2 })
-  const page = await probe('GET /api/orgs/:orgId/notifications', 24, {
+  const page = await probe('GET /api/orgs/:orgId/notifications', 2, {
+    exact: true,
     path: `${inbox}?filter=unread&limit=1`,
     headers,
   })
@@ -75,13 +77,15 @@ async function measureInbox(probe: Probe, headers: HeadersInit) {
     nextCursor: string | null
   }
   expect(nextCursor).toBeTruthy()
-  const read = await probe('POST /api/orgs/:orgId/notifications/:notificationId/read', 24, {
+  const read = await probe('POST /api/orgs/:orgId/notifications/:notificationId/read', 2, {
+    exact: true,
     path: `${inbox}/${items[0]!.id}/read`,
     headers,
     body: {},
   })
   expect(await read.json()).toMatchObject({ ok: true })
-  const all = await probe('POST /api/orgs/:orgId/notifications/read-all', 24, {
+  const all = await probe('POST /api/orgs/:orgId/notifications/read-all', 2, {
+    exact: true,
     path: `${inbox}/read-all`,
     headers,
     body: {},
@@ -95,28 +99,28 @@ async function measureRules(probe: Probe, headers: HeadersInit, staffHeaders: He
   const adminRule = { ...body, enabled: true, locked: false }
   const orgRules = `${orgPath}/notification-rules`
 
-  await expectRow(await probe('GET /api/notification-types', 9, { headers }), {
+  await expectRow(await probe('GET /api/notification-types', 1, { headers }), {
     type: notificationType,
   })
   const userRule = await notificationRuleId(
-    await probe('PUT /api/me/notification-rules', 10, { headers, body }),
+    await probe('PUT /api/me/notification-rules', 2, { headers, body }),
   )
-  await expectRow(await probe('GET /api/me/notification-rules', 10, { headers }), { id: userRule })
+  await expectRow(await probe('GET /api/me/notification-rules', 2, { headers }), { id: userRule })
 
   const platformRule = await notificationRuleId(
-    await probe('PUT /api/platform/notification-rules', 11, { body: adminRule }),
+    await probe('PUT /api/platform/notification-rules', 2, { body: adminRule }),
   )
-  await expectRow(await probe('GET /api/platform/notification-rules', 11), { id: platformRule })
+  await expectRow(await probe('GET /api/platform/notification-rules', 2), { id: platformRule })
 
   const orgRule = await notificationRuleId(
-    await probe('PUT /api/orgs/:orgId/notification-rules', 11, {
+    await probe('PUT /api/orgs/:orgId/notification-rules', 2, {
       path: orgRules,
       headers: staffHeaders,
       body: adminRule,
     }),
   )
   await expectRow(
-    await probe('GET /api/orgs/:orgId/notification-rules', 11, {
+    await probe('GET /api/orgs/:orgId/notification-rules', 2, {
       path: orgRules,
       headers: staffHeaders,
     }),
@@ -124,7 +128,7 @@ async function measureRules(probe: Probe, headers: HeadersInit, staffHeaders: He
   )
 
   await expectRow(
-    await probe('GET /api/orgs/:orgId/notifications/effective-rules', 26, {
+    await probe('GET /api/orgs/:orgId/notifications/effective-rules', 9, {
       path: `${inbox}/effective-rules`,
       headers,
     }),
@@ -136,22 +140,22 @@ async function measureRules(probe: Probe, headers: HeadersInit, staffHeaders: He
     },
   )
 
-  await probe('DELETE /api/me/notification-rules/:ruleId', 10, {
+  await probe('DELETE /api/me/notification-rules/:ruleId', 2, {
     path: `/api/me/notification-rules/${userRule}`,
     headers,
   })
-  await probe('DELETE /api/orgs/:orgId/notification-rules/:ruleId', 11, {
+  await probe('DELETE /api/orgs/:orgId/notification-rules/:ruleId', 2, {
     path: `${orgRules}/${orgRule}`,
     headers: staffHeaders,
   })
-  await probe('DELETE /api/platform/notification-rules/:ruleId', 11, {
+  await probe('DELETE /api/platform/notification-rules/:ruleId', 2, {
     path: `/api/platform/notification-rules/${platformRule}`,
   })
 }
 
 async function measureAdministration(probe: Probe, headers: Record<string, string>) {
   const email = 'd1-budget-user@kit.local'
-  const created = await probe('POST /api/admin/users', 34, {
+  const created = await probe('POST /api/admin/users', 13, {
     headers,
     status: 201,
     body: { email, memberships: [{ orgId, role: 'member' }] },
@@ -162,30 +166,30 @@ async function measureAdministration(probe: Probe, headers: Record<string, strin
   }
   expect(user.email).toBe(email)
   expect(welcomeEmailSent).toBe(true)
-  await expectRow(await probe('GET /api/admin/users', 18, { headers }), { id: user.id })
-  await probe('POST /api/admin/users/:id/resend-welcome', 17, {
+  await expectRow(await probe('GET /api/admin/users', 5, { headers }), { id: user.id })
+  await probe('POST /api/admin/users/:id/resend-welcome', 8, {
     path: `/api/admin/users/${user.id}/resend-welcome`,
     headers,
   })
 
   const permission = { role: 'staff', read: true, write: true }
-  await probe('PATCH /api/admin/impersonation/permissions', 9, { body: permission })
-  const permissions = await probe('GET /api/admin/impersonation/permissions', 7)
+  await probe('PATCH /api/admin/impersonation/permissions', 3, { body: permission })
+  const permissions = await probe('GET /api/admin/impersonation/permissions', 2)
   expect(await permissions.json()).toMatchObject({
     permissions: expect.arrayContaining([permission]),
   })
-  const started = await probe('POST /api/impersonation/start', 14, {
+  const started = await probe('POST /api/impersonation/start', 3, {
     headers: { ...headers, 'X-Impersonation-Id': 'none' },
     body: { organizationId: orgId, subjectUserId: memberId, mode: 'write' },
   })
   const { impersonation } = (await started.json()) as { impersonation: { id: string } }
-  const stopped = await probe('POST /api/impersonation/stop', 9, {
+  const stopped = await probe('POST /api/impersonation/stop', 3, {
     headers: { ...headers, 'X-Impersonation-Id': impersonation.id },
     body: { impersonationId: impersonation.id },
   })
   expect(await stopped.json()).toMatchObject({ stopped: true })
 
-  await expectRow(await probe('GET /api/admin/audit-events', 15), {
+  await expectRow(await probe('GET /api/admin/audit-events', 2), {
     action: 'impersonation.stopped',
     targetId: memberId,
     orgId,
@@ -204,13 +208,13 @@ export async function measureNotificationsAndAdmin(record: Set<string>) {
   await measureRules(probe, memberHeaders, staffHeaders)
   const delivery = { id: deliveryId, status: 'failed' }
   await expectRow(
-    await probe('GET /api/orgs/:orgId/notification-deliveries', 11, {
+    await probe('GET /api/orgs/:orgId/notification-deliveries', 2, {
       path: `${orgPath}/notification-deliveries?status=failed`,
       headers: staffHeaders,
     }),
     delivery,
   )
-  await expectRow(await probe('GET /api/platform/notification-deliveries', 11), {
+  await expectRow(await probe('GET /api/platform/notification-deliveries', 2), {
     ...delivery,
     orgId,
   })

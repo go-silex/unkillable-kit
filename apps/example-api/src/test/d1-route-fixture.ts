@@ -13,6 +13,7 @@ export type Probe = (
     headers?: HeadersInit
     body?: unknown
     status?: number
+    exact?: true
     variant?: string
   },
 ) => Promise<Response>
@@ -41,7 +42,8 @@ export async function createRouteFixture(record?: Set<string>) {
     )
     const label = options.variant ? `${route} (${options.variant})` : route
     expect(response.status, label).toBe(options.status ?? 200)
-    measured.assertAtMost(label, ceiling)
+    if (options.exact) expect(measured.count, label).toBe(ceiling)
+    else measured.assertAtMost(label, ceiling)
     record?.add(label)
     return response
   }

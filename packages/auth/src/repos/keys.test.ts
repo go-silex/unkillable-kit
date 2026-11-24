@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { findApiKeyByPrefix, insertApiKey } from './keys'
+import { insertApiKey, listApiKeysForOrg } from './keys'
 import { createMemoryD1 } from './memory-d1'
 import {
   getKitModule,
@@ -11,10 +11,9 @@ import {
 import { getPlatformRole, getPlatformRolesForUsers, setPlatformRole } from './platform-roles'
 
 const KEY_PREFIX = 'sk_aaaaaaaaaa'
-const OTHER_PREFIX = 'sk_bbbbbbbbbb'
 
 describe('auth keys/modules/roles repos', () => {
-  it('executes key and module lookups', async () => {
+  it('lists inserted key metadata only for the owning subject and organization', async () => {
     const db = createMemoryD1()
     await insertApiKey(db, {
       id: 'k1',
@@ -25,16 +24,25 @@ describe('auth keys/modules/roles repos', () => {
       scopes: 'read,write',
       createdAt: 1,
     })
-    const hit = await findApiKeyByPrefix(db, KEY_PREFIX)
-    expect(hit).toMatchObject({
-      id: 'k1',
-      keyHash: 'h',
-      keyPrefix: KEY_PREFIX,
-      subject: 'user-1',
-      organizationId: 'org-a',
-      scopes: 'read,write',
-    })
-    expect(await findApiKeyByPrefix(db, OTHER_PREFIX)).toBeNull()
+    expect(await listApiKeysForOrg(db, 'user-1', 'org-a')).toEqual([
+      {
+        id: 'k1',
+        keyPrefix: KEY_PREFIX,
+        subject: 'user-1',
+        organizationId: 'org-a',
+        scopes: 'read,write',
+        name: null,
+        createdAt: 1,
+        expiresAt: null,
+        revokedAt: null,
+      },
+    ])
+    expect(await listApiKeysForOrg(db, 'user-1', 'org-b')).toEqual([])
+    expect(await listApiKeysForOrg(db, 'user-2', 'org-a')).toEqual([])
+  })
+
+  it('executes module lookups', async () => {
+    const db = createMemoryD1()
 
     expect(await listKitModules(db)).toEqual([])
     expect(await getKitModule(db, 'flows')).toBeUndefined()

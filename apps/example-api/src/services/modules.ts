@@ -7,18 +7,10 @@ import {
   isModuleConfigured,
   type ModulePublicState,
 } from '../lib/integration-config'
-import { isKitModuleId, KIT_MODULE_IDS, type KitModuleId } from '../lib/kit-modules'
+import { isKitModuleId, type KitModuleId } from '../lib/kit-modules'
 import * as platformModulesService from './platform-modules'
 
 type Db = DrizzleD1Database<typeof schema>
-
-/**
- * Idempotent bootstrap — platform_modules SSoT only (ADR-0003 residual fix).
- * Name kept for call-site compatibility; no longer writes kit_modules.
- */
-export async function ensureKitModules(db: Db): Promise<void> {
-  await platformModulesService.ensurePlatformModules(db)
-}
 
 /** platform_modules is the only catalogue (ADR-0003 D7); a missing row is unavailable. */
 async function readModuleRow(db: Db, id: KitModuleId) {
@@ -29,25 +21,13 @@ async function readModuleRow(db: Db, id: KitModuleId) {
   }
 }
 
-export async function getModulesState(
-  db: Db,
-  options?: { readOnly?: boolean },
-): Promise<Record<KitModuleId, ModulePublicState>> {
-  if (!options?.readOnly) await ensureKitModules(db)
+export async function getModulesState(db: Db): Promise<Record<KitModuleId, ModulePublicState>> {
+  const rows = await platformModulesService.listPlatformPublic(db)
   return Object.fromEntries(
-    await Promise.all(
-      KIT_MODULE_IDS.map(async (id) => {
-        const row = await readModuleRow(db, id)
-        return [
-          id,
-          {
-            enabled: row.enabled,
-            configured: isModuleConfigured(id, row.configJson),
-            configPath: INTEGRATION_CONFIG_PATHS[id],
-          },
-        ] as const
-      }),
-    ),
+    Object.entries(rows).map(([id, { available, ...state }]) => [
+      id,
+      { enabled: available, ...state },
+    ]),
   ) as Record<KitModuleId, ModulePublicState>
 }
 
@@ -60,7 +40,7 @@ export async function setModuleEnabled(db: Db, id: string, enabled: boolean): Pr
   if (!isKitModuleId(id)) {
     throw AppError.notFound('Unknown module')
   }
-  await ensureKitModules(db)
+  await platformModulesService.ensurePlatformModules(db)
   const row = await readModuleRow(db, id)
   if (enabled && !isModuleConfigured(id, row.configJson)) {
     throw AppError.integrationNotConfigured(

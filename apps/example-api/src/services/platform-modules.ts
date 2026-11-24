@@ -16,23 +16,21 @@ import {
 
 type Db = DrizzleD1Database<typeof schema>
 
-/** Ensure registry modules exist on platform_modules (idempotent). */
+/** Explicit provisioning defaults; existing settings always win. */
 export async function ensurePlatformModules(db: Db): Promise<void> {
   const now = Date.now()
-  for (const mod of KIT_MODULE_DEFAULTS) {
-    const row = await platformModulesRepo.getPlatformModule(db, mod.id)
-    if (row) continue
-    await platformModulesRepo.upsertPlatformModule(db, {
-      moduleId: mod.id,
+  await platformModulesRepo.insertMissingPlatformModules(
+    db,
+    KIT_MODULE_DEFAULTS.map(({ id }) => ({
+      moduleId: id,
       available: false,
       configJson: null,
       updatedAt: now,
-    })
-  }
+    })),
+  )
 }
 
-export async function listPlatformPublic(db: Db, options?: { readOnly?: boolean }) {
-  if (!options?.readOnly) await ensurePlatformModules(db)
+export async function listPlatformPublic(db: Db) {
   const rows = await platformModulesRepo.listPlatformModules(db)
   const byId = new Map(rows.map((r) => [r.moduleId, r]))
   return Object.fromEntries(
@@ -45,7 +43,7 @@ export async function listPlatformPublic(db: Db, options?: { readOnly?: boolean 
           configured: isModuleConfigured(id, row?.configJson ?? null),
           configPath: INTEGRATION_CONFIG_PATHS[id],
         },
-      ]
+      ] as const
     }),
   )
 }
@@ -64,12 +62,7 @@ export async function setPlatformAvailable(db: Db, moduleId: string, available: 
   await platformModulesRepo.setPlatformAvailable(db, moduleId, available, Date.now())
 }
 
-export async function getOrgModulesEffective(
-  db: Db,
-  organizationId: string,
-  options?: { readOnly?: boolean },
-) {
-  if (!options?.readOnly) await ensurePlatformModules(db)
+export async function getOrgModulesEffective(db: Db, organizationId: string) {
   const platform = await platformModulesRepo.listPlatformModules(db)
   const orgRows = await platformModulesRepo.listOrgModules(db, organizationId)
   const orgById = new Map(orgRows.map((r) => [r.moduleId, r]))
@@ -139,8 +132,5 @@ export async function isModuleEffective(
   organizationId: string,
   moduleId: KitModuleId,
 ): Promise<boolean> {
-  const platform = await platformModulesRepo.getPlatformModule(db, moduleId)
-  if (!platform?.available) return false
-  const org = await platformModulesRepo.getOrgModule(db, organizationId, moduleId)
-  return Boolean(org?.enabled)
+  return platformModulesRepo.hasEffectiveOrgModule(db, organizationId, moduleId)
 }
