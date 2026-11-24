@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { join, parse, relative, resolve } from 'node:path'
+import { isAbsolute, join, parse, relative, resolve, sep } from 'node:path'
 import type { BetterAuthApp } from './root-gate-better-auth-apps'
 import type { WorkerTarget } from './root-gate-better-auth-worker'
 
@@ -13,7 +13,7 @@ export type MountedProbe = {
   dir: string
   wrangler: string
   kitFactory: string
-  factoryPath: string
+  installation: BetterAuthApp['installation']
   composition: string
   factoryCallee: BetterAuthApp['factoryCallee']
   snapshotPath: string
@@ -145,18 +145,54 @@ requireFromWrangler.cache[path].exports = {
   return hook
 }
 
+type BundleInputs = Record<
+  string,
+  { imports: { original?: string; path: string; external?: boolean }[] }
+>
+
+function isBelow(root: string, file: string) {
+  const path = relative(root, file)
+  return path !== '' && path !== '..' && !path.startsWith(`..${sep}`) && !isAbsolute(path)
+}
+
+function verifyBetterAuthResolution(probe: MountedProbe, inputs: BundleInputs, entrypoint: string) {
+  const { kitRoot, betterAuthRoot } = probe.installation
+  const pending = new Set([entrypoint])
+  let foundServer = false
+  for (const module of pending) {
+    for (const entry of inputs[module]?.imports ?? []) {
+      const specifier = entry.original ?? entry.path
+      const file =
+        !entry.external && inputs[entry.path] && realpathSync(resolve(probe.dir, entry.path))
+      if (specifier === 'better-auth' || specifier.startsWith('better-auth/')) {
+        assert.ok(
+          file && isBelow(betterAuthRoot, file),
+          `Wrangler build resolved ${specifier} outside the installed Better Auth package`,
+        )
+        foundServer ||= specifier === 'better-auth'
+      } else if (file && isBelow(kitRoot, file)) {
+        pending.add(entry.path)
+      }
+    }
+  }
+  assert.ok(
+    foundServer,
+    'Wrangler build did not include the Kit factory’s Better Auth server import',
+  )
+}
+
 function verifyFactoryResolution(probe: MountedProbe, metafile: string) {
-  const meta: {
-    inputs: Record<string, { imports: { original?: string; path: string; external?: boolean }[] }>
-  } = JSON.parse(readFileSync(metafile, 'utf8'))
+  const meta: { inputs: BundleInputs } = JSON.parse(readFileSync(metafile, 'utf8'))
   const enrolled = meta.inputs[relative(probe.dir, probe.composition)]
   const factory = enrolled?.imports.find((entry) => entry.original === probe.kitFactory)
   assert.ok(
     factory &&
       !factory.external &&
-      realpathSync(resolve(probe.dir, factory.path)) === realpathSync(probe.factoryPath),
+      realpathSync(resolve(probe.dir, factory.path)) ===
+        realpathSync(probe.installation.factoryPath),
     'Wrangler build did not resolve the enrolled composition to the installed Kit factory',
   )
+  verifyBetterAuthResolution(probe, meta.inputs, factory.path)
 }
 
 function bundleWorker(probe: MountedProbe, challenge: string) {

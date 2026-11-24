@@ -117,7 +117,11 @@ try {
   mkdirSync(join(root, 'packages'), { recursive: true })
   symlinkSync(join(repo, 'node_modules'), join(root, 'node_modules'), 'dir')
   symlinkSync(join(repo, 'packages/db'), join(root, 'packages/db'), 'dir')
-  symlinkSync(join(repo, 'apps/starter-api/node_modules'), join(root, app, 'node_modules'), 'dir')
+  const modules = join(root, app, 'node_modules')
+  mkdirSync(join(modules, '@fixture'), { recursive: true })
+  for (const name of ['@kit', 'better-auth', 'wrangler']) {
+    symlinkSync(join(repo, 'apps/starter-api/node_modules', name), join(modules, name), 'dir')
+  }
   cpSync(join(repo, 'apps/starter-api/migrations'), join(root, app, 'migrations'), {
     recursive: true,
   })
@@ -228,8 +232,19 @@ export function alternateIssuer(options) { return createBetterAuth(options) }
 `,
   )
   symlinkSync(
+    // The real installed Kit dependencies resolve outside this synthetic workspace.
     join(repo, 'apps/starter-api/node_modules'),
     join(root, 'packages/alternate-issuer/node_modules'),
+    'dir',
+  )
+  json('packages/alternate-issuer/package.json', {
+    name: '@fixture/alternate-issuer',
+    exports: './issuer.ts',
+    dependencies: { '@kit/auth': 'workspace:*' },
+  })
+  symlinkSync(
+    join(root, 'packages/alternate-issuer'),
+    join(modules, '@fixture/alternate-issuer'),
     'dir',
   )
   put(
@@ -258,6 +273,51 @@ export function fetch(req, env) {
     `${workerConfig}\n[alias]\n"@kit/auth/factory" = "./src/configured-issuer.ts"\n`,
   )
   runCore(/Wrangler build did not resolve the enrolled composition to the installed Kit factory/)
+
+  put(
+    `${app}/src/configured-better-auth.ts`,
+    "export function betterAuth() { throw new Error('wrong configured Better Auth') }\n",
+  )
+  put(
+    `${app}/wrangler.toml`,
+    `${workerConfig}\n[alias]\n"better-auth" = "./src/configured-better-auth.ts"\n`,
+  )
+  runCore(/Wrangler build resolved better-auth outside the installed Better Auth package/)
+
+  // An unenrolled Worker may use the client and refer to the workspace issuer's types.
+  put(`${app}/wrangler.toml`, workerConfig)
+  put(`${app}/${wrapper}`, 'export {}\n')
+  const unenrolled = {
+    ...productManifest,
+    dependencies: { '@fixture/alternate-issuer': 'workspace:*' },
+  }
+  json(`${app}/package.json`, unenrolled)
+  put(
+    `${app}/src/worker.ts`,
+    `import type * as Issuer from '@fixture/alternate-issuer'
+import { createAuthClient } from 'better-auth/client'
+export default { fetch: () => Response.json(typeof createAuthClient) }
+`,
+  )
+  assert.doesNotMatch(runCore(), /apps\/product-fixture differential fixtures passed/)
+
+  // A runtime import of the same declared workspace cannot bypass enrollment.
+  put(
+    `${app}/src/worker.ts`,
+    `import { alternateIssuer } from '@fixture/alternate-issuer'
+export default { fetch: (request, env) => alternateIssuer(env).handler(request) }
+`,
+  )
+  runCore(
+    /apps\/product-fixture: shipping Better Auth composition must declare better-auth directly/,
+  )
+  json(`${app}/package.json`, {
+    ...unenrolled,
+    dependencies: { ...unenrolled.dependencies, 'better-auth': '*' },
+  })
+  runCore(
+    /kitBetterAuth must name the sole shipping createBetterAuth export.*runtime modules: none/,
+  )
 
   json('packages/nested-consumer/package.json', {
     name: 'nested-consumer',

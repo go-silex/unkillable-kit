@@ -10,14 +10,18 @@ import {
   shippingSource,
   verifyWorkerWiring,
   type WorkerTarget,
+  workerUsesServerFactory,
 } from './root-gate-better-auth-worker'
 
-export type BetterAuthApp = {
+type BetterAuthComposition = {
   workspace: string
   dir: string
   composition: string
   factoryCallee: { start: number; end: number; hash: string }
   targets: WorkerTarget[]
+}
+export type BetterAuthApp = BetterAuthComposition & {
+  installation: { factoryPath: string; kitRoot: string; betterAuthRoot: string }
 }
 const serverFactoryExports = new Map([
   [kitFactory, adapterName],
@@ -125,18 +129,23 @@ function findKitFactoryCallee(program: Program) {
   }
 }
 
-function installedVersion(from: string) {
-  const entry = Bun.resolveSync(dependency, from)
+function installedPackage(name: string, entry: string) {
   for (let dir = dirname(entry); dirname(dir) !== dir; dir = dirname(dir)) {
     const path = join(dir, 'package.json')
     if (!existsSync(path)) continue
     const manifest: { name?: string; version?: string } = JSON.parse(readFileSync(path, 'utf8'))
-    if (manifest.name === dependency && manifest.version) return manifest.version
+    if (manifest.name === name && manifest.version) {
+      return { root: realpathSync(dir), version: manifest.version }
+    }
   }
-  throw new Error(`${from}: could not read the resolved ${dependency} version`)
+  throw new Error(`${entry}: could not read the resolved ${name} manifest`)
 }
 
-function discoverComposition(root: string, path: string): BetterAuthApp | undefined {
+function discoverComposition(
+  root: string,
+  path: string,
+  workspaceRoots: readonly string[],
+): BetterAuthComposition | undefined {
   const workspace = dirname(path)
   const dir = join(root, workspace)
   const manifest: { dependencies?: Record<string, string>; kitBetterAuth?: unknown } = JSON.parse(
@@ -158,7 +167,13 @@ function discoverComposition(root: string, path: string): BetterAuthApp | undefi
         ]
       : []
   })
-  if (!factories.length && manifest.kitBetterAuth === undefined) return
+  if (
+    !factories.length &&
+    manifest.kitBetterAuth === undefined &&
+    !workerUsesServerFactory(dir, workspaceRoots, importsServerFactory)
+  ) {
+    return
+  }
   if (!manifest.dependencies?.[dependency]) {
     throw new Error(
       `${workspace}: shipping Better Auth composition must declare ${dependency} directly in dependencies`,
@@ -193,15 +208,17 @@ function discoverComposition(root: string, path: string): BetterAuthApp | undefi
   }
 }
 
-function verifyInstalledVersions(app: BetterAuthApp, lockedVersion: string | undefined) {
-  const appVersion = installedVersion(app.dir)
-  const kitEntry = Bun.resolveSync(kitFactory, dirname(app.composition))
-  const referenceVersion = installedVersion(dirname(kitEntry))
-  if (appVersion !== referenceVersion || appVersion !== lockedVersion) {
+function resolveInstallation(app: BetterAuthComposition, lockedVersion: string | undefined) {
+  const installed = installedPackage(dependency, Bun.resolveSync(dependency, app.dir))
+  const factoryPath = Bun.resolveSync(kitFactory, dirname(app.composition))
+  const reference = installedPackage(dependency, Bun.resolveSync(dependency, dirname(factoryPath)))
+  if (installed.version !== reference.version || installed.version !== lockedVersion) {
     throw new Error(
-      `${app.workspace}: Better Auth versions differ (App ${appVersion}, reference ${referenceVersion}, lock ${lockedVersion ?? 'unresolved'})`,
+      `${app.workspace}: Better Auth versions differ (App ${installed.version}, reference ${reference.version}, lock ${lockedVersion ?? 'unresolved'})`,
     )
   }
+  const kit = installedPackage('@kit/auth', factoryPath)
+  return { factoryPath, kitRoot: kit.root, betterAuthRoot: reference.root }
 }
 
 export function discoverBetterAuthApps(root: string, lockedVersion: string | undefined) {
@@ -211,13 +228,16 @@ export function discoverBetterAuthApps(root: string, lockedVersion: string | und
   const manifests = new Set<string>()
   for (const pattern of pkg.workspaces ?? []) {
     for (const path of new Bun.Glob(`${pattern}/package.json`).scanSync({ cwd: root })) {
-      if (path.startsWith('apps/')) manifests.add(path)
+      manifests.add(path)
     }
   }
-  return [...manifests].sort().flatMap((path) => {
-    const app = discoverComposition(root, path)
+  const workspaceRoots = [
+    ...new Set([...manifests].map((path) => realpathSync(dirname(join(root, path))))),
+  ]
+  const apps = [...manifests].filter((path) => path.startsWith('apps/')).sort()
+  return apps.flatMap((path) => {
+    const app = discoverComposition(root, path, workspaceRoots)
     if (!app) return []
-    verifyInstalledVersions(app, lockedVersion)
-    return [app]
+    return [{ ...app, installation: resolveInstallation(app, lockedVersion) }]
   })
 }

@@ -51,36 +51,42 @@ function workerMainFile(app: string, file: string, main: unknown) {
   throw new Error(`${relative(app, file)} main must be an App-local runtime source, got ${main}`)
 }
 
-function workerEntrypoints(app: string): WorkerTarget[] {
+function workerEntrypoints(app: string, required = true): WorkerTarget[] {
   // Nested Wrangler configs include test Workers. Only App-root configs describe its deploys.
   const configs = wranglerConfigs(app).filter((file) => dirname(file) === app)
-  if (!configs.length) throw new Error('add an App-root Wrangler config with a Worker main')
+  if (required && !configs.length)
+    throw new Error('add an App-root Wrangler config with a Worker main')
   const entries: WorkerTarget[] = []
+  function addTarget(config: string, main: unknown, env?: string) {
+    if (required || main !== undefined) {
+      entries.push({ config, env, entry: workerMainFile(app, config, main) })
+    }
+  }
   for (const file of configs) {
     const text = readFileSync(file, 'utf8')
     const config = (file.endsWith('.toml') ? Bun.TOML.parse(text) : Bun.JSONC.parse(text)) as {
       main?: unknown
       env?: Record<string, { main?: unknown }>
     }
-    entries.push({ config: file, entry: workerMainFile(app, file, config.main) })
+    addTarget(file, config.main)
     for (const [env, options] of Object.entries(config.env ?? {})) {
-      entries.push({
-        config: file,
-        env,
-        entry: workerMainFile(app, file, options.main ?? config.main),
-      })
+      addTarget(file, options.main ?? config.main, env)
     }
   }
   return entries
 }
 
-function localImport(app: string, file: string, specifier: string) {
+function resolveImport(file: string, specifier: string) {
   try {
-    const path = realpathSync(Bun.resolveSync(specifier, dirname(file)))
-    if (isLocalSource(app, path)) return path
+    return realpathSync(Bun.resolveSync(specifier, dirname(file)))
   } catch {
-    // Worker-native and package imports are not part of the App-local source graph.
+    // Worker-native and uninstalled imports have no source in this graph.
   }
+}
+
+function localImport(app: string, file: string, specifier: string) {
+  const path = resolveImport(file, specifier)
+  if (path && isLocalSource(app, path)) return path
 }
 
 type Statement = Program['body'][number]
@@ -98,6 +104,47 @@ function staticRuntimeSource(node: Statement) {
     const runtime = node.specifiers.some((item) => item.exportKind !== 'type')
     if (!node.specifiers.length || runtime) return node.source.value
   }
+}
+
+export function workerUsesServerFactory(
+  app: string,
+  workspaceRoots: readonly string[],
+  importsFactory: (program: Program) => boolean,
+) {
+  const sources = new Set(workerEntrypoints(app, false).map(({ entry }) => entry))
+  for (const file of sources) {
+    const program = parseProgram(file)
+    if (importsFactory(program)) return true
+    function follow(specifier: string) {
+      const imported = resolveImport(file, specifier)
+      if (imported && workspaceRoots.some((root) => isLocalSource(root, imported))) {
+        sources.add(imported)
+      }
+    }
+    for (const node of program.body) {
+      const specifier = staticRuntimeSource(node)
+      if (specifier) follow(specifier)
+    }
+    new Visitor({
+      ImportExpression(node) {
+        if (node.source.type === 'Literal' && typeof node.source.value === 'string') {
+          follow(node.source.value)
+        }
+      },
+      CallExpression(node) {
+        const arg = node.arguments[0]
+        if (
+          node.callee.type === 'Identifier' &&
+          node.callee.name === 'require' &&
+          arg?.type === 'Literal' &&
+          typeof arg.value === 'string'
+        ) {
+          follow(arg.value)
+        }
+      },
+    }).visit(program)
+  }
+  return false
 }
 
 function addFactoryBindings(node: ImportDeclaration, factories: Set<string>) {

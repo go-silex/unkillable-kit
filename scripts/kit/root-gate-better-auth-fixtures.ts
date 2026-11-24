@@ -170,7 +170,6 @@ type Fixture = {
 
 function proveMountedIssuer(app: BetterAuthApp, snapshotPath: string, passwordHash: string) {
   const wrangler = Bun.resolveSync('wrangler', app.dir)
-  const factoryPath = Bun.resolveSync(kitFactory, dirname(app.composition))
   const node = Bun.which('node')
   assert.ok(node, 'Node is required to run Wrangler’s local HTTP harness')
   for (const target of app.targets) {
@@ -181,7 +180,7 @@ function proveMountedIssuer(app: BetterAuthApp, snapshotPath: string, passwordHa
         dir: app.dir,
         wrangler,
         kitFactory,
-        factoryPath,
+        installation: app.installation,
         composition: app.composition,
         factoryCallee: app.factoryCallee,
         snapshotPath,
