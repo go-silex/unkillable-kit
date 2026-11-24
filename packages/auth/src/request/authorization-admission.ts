@@ -192,6 +192,17 @@ function isAdmittedFactScope<E extends Env>(
   return true
 }
 
+export function validateAdmittedFacts<E extends Env>(
+  state: GuardState<E>,
+  snapshot: RequestSnapshot,
+) {
+  if (!(state.authenticated && state.fence) || state.plan.pending.size) return
+  if (snapshot.identity?.method === 'api_key' && !state.keyScope) return
+  for (const descriptor of state.plan.facts) {
+    if (isAdmittedFactScope(state, descriptor.scope.kind)) snapshot.rows(descriptor)
+  }
+}
+
 export function admitOrganization<E extends Env>(
   c: Context<E>,
   state: GuardState<E>,

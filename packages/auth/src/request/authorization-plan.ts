@@ -36,17 +36,30 @@ export function authUnavailable() {
   return new AppError('INTERNAL_ERROR', 'Authorization unavailable', 503)
 }
 
-function dispatchWindow<E extends Env>(c: Context<E>, routes: readonly Match[]): RouteWindow {
-  const method = c.req.method
-  const headFallback = method === 'HEAD' && !routes.some((route) => route.method === 'HEAD')
+function selectedMethod(method: string, routes: readonly Match[]) {
+  return method === 'HEAD' && !routes.some((route) => route.method === 'HEAD') ? 'GET' : method
+}
+
+function dispatchWindow<E extends Env>(
+  c: Context<E>,
+  routes: readonly Match[],
+  uses: WeakMap<MiddlewareHandler<E>, AuthorizationUse>,
+): RouteWindow {
+  const method = selectedMethod(c.req.method, routes)
   let endpoint: string | undefined
   for (const [index, route] of routes.entries()) {
-    if (!(route.method === method || (headFallback && route.method === 'GET'))) continue
+    // Hono represents both .use and .all as ALL. A non-wildcard ALL group
+    // registering Kit guards can own dispatch; wildcard entries are middleware.
+    const guardedAll =
+      route.method === 'ALL' &&
+      !route.path.includes('*') &&
+      uses.has(route.handler as MiddlewareHandler<E>)
+    if (route.method !== method && !guardedAll) continue
     if (endpoint === undefined) {
       endpoint = route.path
     } else if (endpoint !== route.path) {
-      // Hono can match a literal endpoint before a parameter fallback. The
-      // literal chain owns dispatch; competing parameter patterns are ambiguous.
+      // A literal registered endpoint may precede a parameter fallback.
+      // Competing parameter patterns are ambiguous.
       if (endpoint !== c.req.path) throw authUnavailable()
       return { endpoint, end: index }
     }
@@ -62,9 +75,9 @@ function readSelection<E extends Env>(
   const originalIndex = c.req.routeIndex
   let pathOrgId: string | undefined
   try {
-    for (let index = 0; endpoint && index < end; index++) {
+    for (let index = 0; index < end; index++) {
       const route = routes[index]
-      if (route?.method === 'ALL' || route?.path !== endpoint) continue
+      if (route?.path !== endpoint && route?.method !== 'ALL') continue
       c.req.routeIndex = index
       const id = c.req.param('orgId')?.trim()
       if (!id) continue
@@ -80,9 +93,12 @@ function readSelection<E extends Env>(
   return orgId ? { kind: 'selected', id: orgId } : { kind: 'missing' }
 }
 
-export function organizationSelection<E extends Env>(c: Context<E>): OrganizationSelection {
+export function organizationSelection<E extends Env>(
+  c: Context<E>,
+  uses: WeakMap<MiddlewareHandler<E>, AuthorizationUse>,
+): OrganizationSelection {
   const routes = matchedRoutes(c)
-  return readSelection(c, routes, dispatchWindow(c, routes))
+  return readSelection(c, routes, dispatchWindow(c, routes, uses))
 }
 
 function includeModule(
@@ -101,7 +117,7 @@ export function planAuthorization<E extends Env>(
   moduleFacts: ((moduleId: string) => ModuleAuthorizationFacts | undefined) | undefined,
 ): AuthorizationPlan<E> {
   const routes = matchedRoutes(c)
-  const window = dispatchWindow(c, routes)
+  const window = dispatchWindow(c, routes, uses)
   const pending = new Set<MiddlewareHandler<E>>()
   const facts = new Set<AuthorizationFact<unknown>>()
   const modules = new Map<string, ModuleAuthorizationFacts>()

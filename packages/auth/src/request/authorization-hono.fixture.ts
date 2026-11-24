@@ -3,7 +3,7 @@ import { AppError } from '@kit/core'
 import type { KitD1Database } from '@kit/db'
 import { createSqliteD1 } from '@kit/db/testing'
 import Database from 'better-sqlite3'
-import { Hono } from 'hono'
+import { type Context, Hono } from 'hono'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import { expect, onTestFinished, vi } from 'vitest'
 import { createBetterAuth } from '../better-auth-factory'
@@ -116,6 +116,7 @@ export async function fixture(invalidModule = false) {
 
   const failure = {
     partial: false,
+    productSibling: false,
     malformedPolicy: undefined as 'availability' | 'grant' | undefined,
   }
   const batches: { success: boolean; results: unknown[] }[][] = []
@@ -134,12 +135,26 @@ export async function fixture(invalidModule = false) {
       } else if (failure.malformedPolicy === 'grant') {
         results[3] = { success: true, results: [{ access: 'unknown' }] }
       }
+      if (failure.productSibling) {
+        const index = results.findIndex((result) =>
+          result.results.some(
+            (row) =>
+              typeof row === 'object' && row !== null && Object.hasOwn(row, 'organization_id'),
+          ),
+        )
+        if (index >= 0) results[index] = { success: false, results: [] }
+      }
       batches.push(results)
       return results
     },
   }
   const decode = vi.fn((rows: readonly AuthorizationRow[]) => rows[0]?.label)
   const productFact = defineAuthorizationFact({ ...projection, decode })
+  const sibling = defineAuthorizationFact({
+    ...projection,
+    select: ['organization_id'],
+    decode: (rows) => rows[0]?.organization_id,
+  })
   const authorization = createRequestAuthorization({
     db: () => db,
     auth: () => auth,
@@ -183,6 +198,16 @@ export async function fixture(invalidModule = false) {
   )
   app.get('/conflict/:orgId/tail', authorization.requireAuth, (c) => c.json({ ok: true }))
   app.get('/conflict/start/:name', authorization.requireAuth, (c) => c.json({ ok: true }))
+  const productHandler = vi.fn(async (c: Context) =>
+    c.json({ label: await authorization.fact(c, productFact) }),
+  )
+  app.all(
+    '/all/:orgId',
+    authorization.requireAuth,
+    authorization.requireOrgContext(),
+    authorization.includeFacts(productFact, sibling),
+    productHandler,
+  )
   app.get(
     '/orgs/:orgId/admin',
     authorization.requireAuth,
@@ -210,5 +235,16 @@ export async function fixture(invalidModule = false) {
     exec(sql: string): void
     prepare(sql: string): { run(...values: unknown[]): unknown; readonly: boolean }
   } = sqlite
-  return { app, batches, cookie, decode, failure, key, prepare, sqlite: database, userId: user.id }
+  return {
+    app,
+    batches,
+    cookie,
+    decode,
+    failure,
+    key,
+    prepare,
+    productHandler,
+    sqlite: database,
+    userId: user.id,
+  }
 }

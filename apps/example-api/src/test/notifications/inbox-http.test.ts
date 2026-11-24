@@ -129,6 +129,21 @@ describe('notification inbox HTTP behavior', () => {
     ).toBeNull()
   })
 
+  it('does not read or mark notifications when Module policy is unreadable', async () => {
+    await insert('unread')
+    await f.env.DB.prepare(
+      "UPDATE organization_modules SET enabled = 2 WHERE module_id = 'tasks'",
+    ).run()
+    expect((await request(base)).status).toBe(503)
+    const failed = await read(`${base}/read-all`)
+    expect(failed.status).toBe(503)
+    expect(await failed.json()).toMatchObject({
+      error: { code: 'INTERNAL_ERROR', message: 'Internal error' },
+    })
+    const rows = await f.db.select().from(kitNotifications).where(eq(kitNotifications.id, 'unread'))
+    expect(rows[0]?.readAt).toBeNull()
+  })
+
   it('returns field errors for an out-of-range limit without exposing private input', async () => {
     const privateCursor = 'private-secret'
     const response = await request(`${base}?limit=101&cursor=${privateCursor}`)

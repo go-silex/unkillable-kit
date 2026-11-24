@@ -16,6 +16,12 @@ for (const definition of Object.values(notificationsDogfoodRegistry)) {
 
 const availabilityColumns = ['module_id', 'enabled', 'available'] as const
 const grantColumns = ['module_id', 'access'] as const
+
+function moduleFlag(value: unknown) {
+  if (value === 0 || value === 1) return value === 1
+  throw new TypeError('Unreadable Module policy')
+}
+
 // One bounded projection per registry module; never load unrelated org settings or grants.
 const moduleFacts = Array.from(notificationModuleIds, (moduleId) => ({
   moduleId,
@@ -25,7 +31,12 @@ const moduleFacts = Array.from(notificationModuleIds, (moduleId) => ({
     select: availabilityColumns,
     where: { module_id: moduleId },
     maxRows: 1,
-    decode: ([row]) => row?.module_id === moduleId && row.enabled === 1 && row.available === 1,
+    decode: ([row]) => {
+      if (!row) return false
+      const enabled = moduleFlag(row.enabled)
+      const available = moduleFlag(row.available)
+      return row.module_id === moduleId && enabled && available
+    },
   }),
   grant: defineAuthorizationFact({
     table: { name: 'organization_role_module_grants', columns: ['role_id', ...grantColumns] },
@@ -33,11 +44,13 @@ const moduleFacts = Array.from(notificationModuleIds, (moduleId) => ({
     select: grantColumns,
     where: { module_id: moduleId },
     maxRows: 1,
-    decode: ([row]) =>
-      row?.module_id === moduleId &&
-      typeof row.access === 'string' &&
-      isModuleAccess(row.access) &&
-      accessAllows(row.access, 'read'),
+    decode: ([row]) => {
+      if (!row) return false
+      if (typeof row.access !== 'string' || !isModuleAccess(row.access)) {
+        throw new TypeError('Unreadable Module grant')
+      }
+      return row.module_id === moduleId && accessAllows(row.access, 'read')
+    },
   }),
 }))
 

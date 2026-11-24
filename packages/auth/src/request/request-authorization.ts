@@ -23,6 +23,7 @@ import {
   projectIdentity,
   readAdmittedFact,
   snapshotFacts,
+  validateAdmittedFacts,
 } from './authorization-admission'
 import {
   type AuthorizationPlan,
@@ -93,8 +94,10 @@ export function createRequestAuthorization<E extends Env>(options: Options<E>) {
     const middleware = async (c: Context<E>, next: Next) => {
       const state = stateOf(c)
       if (c.req.routeIndex >= state.plan.end) throw authUnavailable()
-      check(c, state, await state.load)
+      const snapshot = await state.load
+      check(c, state, snapshot)
       state.plan.pending.delete(middleware)
+      validateAdmittedFacts(state, snapshot)
       await next()
     }
     uses.set(middleware, use)
@@ -240,7 +243,7 @@ export function createRequestAuthorization<E extends Env>(options: Options<E>) {
 
   function organizationSelection(c: Context<E>) {
     const selection = stateOf(c).plan.selection
-    return selection.kind === 'unused' ? readOrganizationSelection(c) : selection
+    return selection.kind === 'unused' ? readOrganizationSelection(c, uses) : selection
   }
 
   return {

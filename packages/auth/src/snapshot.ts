@@ -91,6 +91,17 @@ function hostedAdmission(
   const org = snapshot.organization
   const organization =
     scopeId && org?.status === 'active' && org.membershipRole ? Object.freeze(org) : null
+  // Validate siblings for the admitted scope before executing any Product decoder.
+  for (const descriptor of facts) {
+    if (!hostedOrgScope(descriptor.scope.kind)) snapshot.rows(descriptor)
+  }
+  function organizationAccess(id: string): HostedOrganization | null {
+    if (scopeId !== id || !organization) return null
+    for (const descriptor of facts) {
+      if (hostedOrgScope(descriptor.scope.kind)) snapshot.rows(descriptor)
+    }
+    return { organization, fact: (descriptor) => read(descriptor, true) }
+  }
   function read<T>(descriptor: AuthorizationFact<T>, scoped: boolean): T {
     if (!facts.includes(descriptor) || hostedOrgScope(descriptor.scope.kind) !== scoped) {
       throw AppError.forbidden('Authorization fact is not admitted for this scope')
@@ -105,9 +116,6 @@ function hostedAdmission(
     status: 'allowed',
     organization,
     fact: (descriptor) => read(descriptor, false),
-    forOrganization: (id) =>
-      scopeId === id && organization
-        ? { organization, fact: (descriptor) => read(descriptor, true) }
-        : null,
+    forOrganization: organizationAccess,
   }
 }

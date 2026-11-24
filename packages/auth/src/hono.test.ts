@@ -100,6 +100,31 @@ describe('HTTP authorization facts', () => {
     expect(batches).toHaveLength(0)
   })
 
+  it('binds an ALL endpoint to its path Organization', async () => {
+    const { app, batches, cookie } = await fixture()
+    const allowed = await app.request('/all/alpha', { method: 'PATCH', headers: { cookie } })
+    expect(allowed.status).toBe(200)
+    expect(await allowed.json()).toEqual({ label: marker })
+    expect(batches).toHaveLength(1)
+    const conflicted = await app.request('/all/alpha', {
+      method: 'PATCH',
+      headers: { cookie, 'X-Org-Id': 'other' },
+    })
+    expect(conflicted.status).toBe(403)
+  })
+
+  it('does not dispatch or decode when an admitted fact has a failed Product sibling', async () => {
+    const { app, batches, cookie, decode, failure, productHandler } = await fixture()
+    failure.productSibling = true
+    const response = await app.request('/all/alpha', { headers: { cookie } })
+    expect(response.status).toBe(503)
+    expect(await response.json()).toEqual({ message: 'Authorization unavailable' })
+    expect(batches[0]).toContainEqual({ success: false, results: [] })
+    expect(batches[0]).toContainEqual({ success: true, results: [{ label: marker }] })
+    expect(decode).not.toHaveBeenCalled()
+    expect(productHandler).not.toHaveBeenCalled()
+  })
+
   it.each(['availability', 'grant'] as const)(
     'treats unreadable Module %s as unavailable',
     async (kind) => {
