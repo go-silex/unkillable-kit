@@ -6,7 +6,7 @@ import { readBetterAuthLock } from './root-gate-better-auth-lock'
 try {
   const root = resolve(import.meta.dirname, '../..')
   const version = readBetterAuthLock(root)
-  const apps = discoverBetterAuthApps(root, version)
+  const apps = await discoverBetterAuthApps(root, version)
   for (const app of apps) {
     await runBetterAuthDifferential(app)
     console.log(`better-auth:check: ${app.workspace} differential fixtures passed (${version})`)

@@ -162,13 +162,15 @@ function indexScopes(program: Program) {
   return { root, scopes }
 }
 
-function lookupFactory(bindings: ReadonlyMap<string, string>, scope: Scope, name: string) {
-  const factory = bindings.get(name)
-  if (!factory) return
+function isShadowed(scope: Scope, name: string) {
   for (let here: Scope | undefined = scope; here; here = here.parent) {
-    if (here.shadows.has(name)) return
+    if (here.shadows.has(name)) return true
   }
-  return factory
+  return false
+}
+
+function lookupFactory(bindings: ReadonlyMap<string, string>, scope: Scope, name: string) {
+  if (!isShadowed(scope, name)) return bindings.get(name)
 }
 
 function isNameOnly(parent: Node | undefined, field: string | undefined) {
@@ -214,12 +216,27 @@ function identifierUsesFactory(
   }
 }
 
-export function namespaceUsesFactory(program: Program, bindings: ReadonlyMap<string, string>) {
-  if (!bindings.size) return false
+export type AttestedCallee = { name: string; start: number; end: number }
+
+export function factoryBindingEscapes(
+  program: Program,
+  bindings: ReadonlyMap<string, string>,
+  attested?: AttestedCallee,
+) {
+  if (!(bindings.size || attested)) return false
   const { root, scopes } = indexScopes(program)
   function visit(node: Node, surrounding: Scope, parent?: Node, field?: string): boolean {
     if (skipsSubtree(node, field)) return false
     const scope = scopes.get(node) ?? surrounding
+    if (
+      attested &&
+      node.type === 'Identifier' &&
+      node.name === attested.name &&
+      !isNameOnly(parent, field) &&
+      !isShadowed(scope, node.name)
+    ) {
+      return node.start !== attested.start || node.end !== attested.end
+    }
     const resolveFactory = (name: string) => lookupFactory(bindings, scope, name)
     const use =
       memberUsesFactory(node, resolveFactory, parent, field) ??

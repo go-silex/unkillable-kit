@@ -20,7 +20,7 @@ type BetterAuthComposition = {
   workspace: string
   dir: string
   composition: string
-  factoryCallee: { start: number; end: number; hash: string }
+  factoryCallee: { start: number; end: number; name: string; hash: string }
   targets: WorkerTarget[]
 }
 export type BetterAuthApp = BetterAuthComposition & {
@@ -74,8 +74,8 @@ function findKitFactoryCallee(program: Program) {
       returnValue.argument.callee.type === 'Identifier' &&
       kitNames.has(returnValue.argument.callee.name)
     ) {
-      const { start, end } = returnValue.argument.callee
-      return { start, end }
+      const { start, end, name } = returnValue.argument.callee
+      return { start, end, name }
     }
   }
 }
@@ -92,11 +92,11 @@ function installedPackage(name: string, entry: string) {
   throw new Error(`${entry}: could not read the resolved ${name} manifest`)
 }
 
-function discoverComposition(
+async function discoverComposition(
   root: string,
   path: string,
   workspaceRoots: readonly string[],
-): BetterAuthComposition | undefined {
+): Promise<BetterAuthComposition | undefined> {
   const workspace = dirname(path)
   const dir = join(root, workspace)
   const manifest: { dependencies?: Record<string, string>; kitBetterAuth?: unknown } = JSON.parse(
@@ -121,7 +121,7 @@ function discoverComposition(
   if (
     !factories.length &&
     manifest.kitBetterAuth === undefined &&
-    !workerUsesServerFactory(dir, workspaceRoots)
+    !(await workerUsesServerFactory(dir, workspaceRoots))
   ) {
     return
   }
@@ -172,7 +172,7 @@ function resolveInstallation(app: BetterAuthComposition, lockedVersion: string |
   return { factoryPath, kitRoot: kit.root, betterAuthRoot: reference.root }
 }
 
-export function discoverBetterAuthApps(root: string, lockedVersion: string | undefined) {
+export async function discoverBetterAuthApps(root: string, lockedVersion: string | undefined) {
   const pkg: { workspaces?: string[] } = JSON.parse(
     readFileSync(join(root, 'package.json'), 'utf8'),
   )
@@ -186,9 +186,16 @@ export function discoverBetterAuthApps(root: string, lockedVersion: string | und
     ...new Set([...manifests].map((path) => realpathSync(dirname(join(root, path))))),
   ]
   const apps = [...manifests].filter((path) => path.startsWith('apps/')).sort()
-  return apps.flatMap((path) => {
-    const app = discoverComposition(root, path, workspaceRoots)
-    if (!app) return []
-    return [{ ...app, workspaceRoots, installation: resolveInstallation(app, lockedVersion) }]
-  })
+  const discovered: BetterAuthApp[] = []
+  for (const path of apps) {
+    const app = await discoverComposition(root, path, workspaceRoots)
+    if (app) {
+      discovered.push({
+        ...app,
+        workspaceRoots,
+        installation: resolveInstallation(app, lockedVersion),
+      })
+    }
+  }
+  return discovered
 }

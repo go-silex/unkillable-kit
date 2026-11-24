@@ -30,6 +30,7 @@ export function bundleWorker(
   hook?: string,
 ) {
   const build = join(scratch, 'build')
+  const upload = join(scratch, 'release.multipart')
   const metafile = join(scratch, 'bundle.json')
   const emptyEnv = join(scratch, 'empty.env')
   mkdirSync(build)
@@ -49,6 +50,8 @@ export function bundleWorker(
       ...(target.env ? ['--env', target.env] : []),
       '--outdir',
       build,
+      '--outfile',
+      upload,
       '--metafile',
       metafile,
     ],
@@ -72,10 +75,11 @@ export function bundleWorker(
     0,
     `Wrangler could not build release entrypoint ${label}:\n${bundled.stdout}${bundled.stderr}`,
   )
-  if (target.noBundle) return { build, emptyEnv, inputs: undefined, outputs: undefined }
+  assert.ok(existsSync(upload), `Wrangler did not emit the release upload for ${label}`)
+  if (target.noBundle) return { build, upload, emptyEnv, inputs: undefined, outputs: undefined }
   assert.ok(existsSync(metafile), `Wrangler did not report the release input graph for ${label}`)
   const { inputs, outputs }: { inputs: BundleInputs; outputs: BundleOutputs } = JSON.parse(
     readFileSync(metafile, 'utf8'),
   )
-  return { build, emptyEnv, inputs, outputs }
+  return { build, upload, emptyEnv, inputs, outputs }
 }

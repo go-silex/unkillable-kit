@@ -1,6 +1,6 @@
-import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
+import { dirname, isAbsolute, relative, resolve } from 'node:path'
 import {
   type BindingPattern,
   type BindingRestElement,
@@ -11,19 +11,28 @@ import {
 } from 'oxc-parser'
 import { wranglerConfigs } from './lib/wrangler-d1'
 import { bundleWorker } from './root-gate-better-auth-build.ts'
-import { inspectWranglerInputs } from './root-gate-better-auth-inventory'
+import { inspectStagedModules, inspectWranglerInputs } from './root-gate-better-auth-inventory'
 import {
   adapterName,
-  generatedDirectory,
-  importsServerFactory,
   isWithin,
   parseProgram,
   runtimeExtension,
   shippingSource,
 } from './root-gate-better-auth-source'
 
-export type WorkerTarget = { config: string; env?: string; entry: string; noBundle?: boolean }
-type WorkerConfig = { main?: unknown; no_bundle?: boolean; build?: { command?: string } }
+export type WorkerTarget = {
+  config: string
+  env?: string
+  entry: string
+  moduleRoot: string
+  noBundle?: boolean
+}
+type WorkerConfig = {
+  main?: unknown
+  base_dir?: string
+  no_bundle?: boolean
+  build?: { command?: string }
+}
 function isLocalSource(app: string, file: string) {
   const path = relative(app, file)
   return isWithin(path) && runtimeExtension.test(path) && shippingSource(path)
@@ -54,12 +63,17 @@ function workerEntrypoints(app: string, required = true): WorkerTarget[] {
   if (required && !configs.length)
     throw new Error('add an App-root Wrangler config with a Worker main')
   const entries: WorkerTarget[] = []
-  function addTarget(config: string, { main, no_bundle, build }: WorkerConfig, env?: string) {
+  function addTarget(
+    config: string,
+    { main, base_dir, no_bundle, build }: WorkerConfig,
+    env?: string,
+  ) {
     if (!required && main === undefined) return
     const source = resolve(app, String(main))
     assertInspectableWorker(app, source, `${config}${env ? ` --env ${env}` : ''}`, build?.command)
     const entry = required ? workerMainFile(app, config, main) : source
-    entries.push({ config, env, entry, noBundle: no_bundle })
+    const moduleRoot = base_dir === undefined ? dirname(entry) : resolve(app, base_dir)
+    entries.push({ config, env, entry, moduleRoot, noBundle: no_bundle })
   }
   for (const file of configs) {
     const text = readFileSync(file, 'utf8')
@@ -72,6 +86,7 @@ function workerEntrypoints(app: string, required = true): WorkerTarget[] {
         file,
         {
           main: options.main ?? config.main,
+          base_dir: options.base_dir ?? config.base_dir,
           no_bundle: options.no_bundle ?? config.no_bundle,
           build: options.build ?? config.build,
         },
@@ -112,24 +127,7 @@ function staticRuntimeSource(node: Statement) {
   }
 }
 
-function unbundledUsesServerFactory(build: string, entry: string) {
-  if (!existsSync(join(build, basename(entry)))) {
-    throw new Error(`Wrangler did not emit the unbundled Worker entrypoint ${entry}`)
-  }
-  return readdirSync(build, { recursive: true, withFileTypes: true }).some((file) => {
-    if (!(file.isFile() && runtimeExtension.test(file.name))) return false
-    const path = join(file.parentPath, file.name)
-    const module = relative(build, path)
-    if (generatedDirectory.test(module)) {
-      throw new Error(
-        `Cannot inventory opaque Worker inputs for ${entry}: use transparent modules outside dist/build instead of ${module}`,
-      )
-    }
-    return importsServerFactory(parseProgram(path))
-  })
-}
-
-export function workerUsesServerFactory(app: string, workspaceRoots: readonly string[]) {
+export async function workerUsesServerFactory(app: string, workspaceRoots: readonly string[]) {
   const targets = workerEntrypoints(app, false)
   if (!targets.length) return false
   const node = Bun.which('node')
@@ -138,12 +136,11 @@ export function workerUsesServerFactory(app: string, workspaceRoots: readonly st
   for (const target of targets) {
     const scratch = mkdtempSync(resolve(tmpdir(), 'root-better-auth-inputs-'))
     try {
-      const { build, inputs, outputs } = bundleWorker(node, wrangler, app, target, scratch)
-      if (!inputs) {
-        if (unbundledUsesServerFactory(build, target.entry)) return true
-        continue
+      const { build, upload, inputs, outputs } = bundleWorker(node, wrangler, app, target, scratch)
+      const stagedIssuer = await inspectStagedModules(upload, build, app, target, outputs)
+      if (stagedIssuer || (inputs && inspectWranglerInputs(app, workspaceRoots, inputs, outputs))) {
+        return true
       }
-      if (inspectWranglerInputs(app, workspaceRoots, inputs, outputs)) return true
     } finally {
       rmSync(scratch, { recursive: true, force: true })
     }

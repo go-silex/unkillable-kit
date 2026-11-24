@@ -223,6 +223,42 @@ export default {
   }
   assert.match(runCore(), /apps\/product-fixture differential fixtures passed/)
 
+  // The attestation exempts only the proven Kit call, not more issuer code in that file.
+  const enrolledSource = readFileSync(join(root, app, wrapper), 'utf8')
+  const extraIssuerInComposition =
+    /Wrangler release includes an extra Better Auth issuer: .*src\/better-auth\.ts/
+  put(
+    `${app}/${wrapper}`,
+    `import { betterAuth as anotherIssuer } from 'better-auth'\n${enrolledSource.replace(
+      '  return createKitBetterAuth({',
+      '  if (env.USE_ALTERNATE) anotherIssuer({ baseURL })\n  return createKitBetterAuth({',
+    )}`,
+  )
+  runCore(extraIssuerInComposition)
+  put(
+    `${app}/${wrapper}`,
+    enrolledSource.replace(
+      '  return createKitBetterAuth({',
+      '  if (env.USE_ALTERNATE) { const alias = createKitBetterAuth; alias({ baseURL }) }\n  return createKitBetterAuth({',
+    ),
+  )
+  runCore(extraIssuerInComposition)
+  put(`${app}/${wrapper}`, enrolledSource)
+
+  // Wrangler independently stages matching modules, even when the entry never imports them.
+  const withStaged = `${workerConfig.replace(
+    '[[d1_databases]]',
+    'find_additional_modules = true\nbase_dir = "src"\n[[d1_databases]]',
+  )}\n[[rules]]\ntype = "ESModule"\nglobs = ["**/*.part"]\nfallthrough = true\n[[rules]]\ntype = "Text"\nglobs = ["**/staged-data.js"]\nfallthrough = true\n`
+  put(`${app}/wrangler.toml`, withStaged)
+  put(`${app}/src/__fixtures__/dist/staged-data.js`, 'not executable source\n')
+  runCore()
+  put(`${app}/src/__fixtures__/staged-issuer.part`, "export { betterAuth } from 'better-auth'\n")
+  runCore(/Wrangler release includes an extra Better Auth issuer: .*staged-issuer\.part/)
+  rmSync(join(root, app, 'src/__fixtures__/staged-issuer.part'))
+  put(`${app}/src/__fixtures__/dist/staged-generated.part`, 'export const embedded = true\n')
+  runCore(/Cannot inventory opaque Worker inputs.*staged-generated\.part/)
+
   // Enrolled Workers also fail before executing an unsupported build command.
   put(`${app}/wrangler.toml`, `${withRelease}\n[build]\ncommand = "touch enrolled-build-ran"\n`)
   runCore(/Cannot inventory opaque Worker inputs.*without build\.command/)

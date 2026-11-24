@@ -5,7 +5,7 @@ import { createRequire } from 'node:module'
 import { isAbsolute, join, parse, relative, resolve, sep } from 'node:path'
 import type { BetterAuthApp } from './root-gate-better-auth-apps'
 import { type BundleInputs, bundleWorker } from './root-gate-better-auth-build.ts'
-import { inspectWranglerInputs } from './root-gate-better-auth-inventory.ts'
+import { inspectStagedModules, inspectWranglerInputs } from './root-gate-better-auth-inventory.ts'
 import type { WorkerTarget } from './root-gate-better-auth-worker'
 
 export type CredentialWrites = [sql: string, values: (string | number)[]][]
@@ -208,7 +208,7 @@ async function migrateDatabase(
 async function run(probe: MountedProbe) {
   const challenge = crypto.randomUUID()
   const { target } = probe
-  const { build, emptyEnv, inputs, outputs } = bundleWorker(
+  const { build, upload, emptyEnv, inputs, outputs } = bundleWorker(
     process.execPath,
     probe.wrangler,
     probe.dir,
@@ -218,13 +218,12 @@ async function run(probe: MountedProbe) {
   )
   assert.ok(inputs && outputs, 'The enrolled issuer requires a Wrangler release input graph')
   verifyFactoryResolution(probe, inputs)
-  const extraIssuer = inspectWranglerInputs(
-    probe.dir,
-    probe.workspaceRoots,
-    inputs,
-    outputs,
-    probe.composition,
-  )
+  const stagedIssuer = await inspectStagedModules(upload, build, probe.dir, target, outputs)
+  const graphIssuer = inspectWranglerInputs(probe.dir, probe.workspaceRoots, inputs, outputs, {
+    file: probe.composition,
+    callee: probe.factoryCallee,
+  })
+  const extraIssuer = graphIssuer ?? stagedIssuer
   const requireFromWrangler = createRequire(probe.wrangler)
   const wrangler: Wrangler = requireFromWrangler(probe.wrangler)
   const config = wrangler.unstable_readConfig({ config: target.config, env: target.env })

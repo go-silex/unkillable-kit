@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { isAbsolute, sep } from 'node:path'
 import { type ModuleExportName, type Program, parseSync, Visitor } from 'oxc-parser'
-import { namespaceUsesFactory } from './root-gate-better-auth-namespace.ts'
+import { type AttestedCallee, factoryBindingEscapes } from './root-gate-better-auth-namespace.ts'
 
 export const adapterName = 'createBetterAuth'
 export const kitFactory = '@kit/auth/factory'
@@ -40,6 +40,7 @@ export function importsServerFactory(
   program: Program,
   resolveFactory: (source: string) => string | undefined = (source) =>
     Object.hasOwn(serverFactoryExports, source) ? serverFactoryExports[source] : undefined,
+  attested?: AttestedCallee,
 ) {
   let found = false
   const namespaces = new Map<string, string>()
@@ -55,7 +56,10 @@ export function importsServerFactory(
         if (item.type === 'ImportNamespaceSpecifier') {
           namespaces.set(item.local.name, factory)
         } else if (item.type === 'ImportSpecifier') {
-          found ||= item.importKind !== 'type' && exportName(item.imported) === factory
+          found ||=
+            item.importKind !== 'type' &&
+            exportName(item.imported) === factory &&
+            !(node.source.value === kitFactory && item.local.name === attested?.name)
         }
       }
     },
@@ -83,5 +87,5 @@ export function importsServerFactory(
         check(arg.value)
     },
   }).visit(program)
-  return found || namespaceUsesFactory(program, namespaces)
+  return found || factoryBindingEscapes(program, namespaces, attested)
 }
