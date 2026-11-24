@@ -4,13 +4,19 @@ import { type Program, Visitor } from 'oxc-parser'
 import { dependency } from './root-gate-better-auth-lock'
 import {
   adapterName,
+  kitFactory,
   parseProgram,
   shippingSource,
   verifyWorkerWiring,
+  type WorkerTarget,
 } from './root-gate-better-auth-worker'
 
-export type BetterAuthApp = { workspace: string; dir: string; composition: string }
-const kitFactory = '@kit/auth/factory'
+export type BetterAuthApp = {
+  workspace: string
+  dir: string
+  composition: string
+  targets: WorkerTarget[]
+}
 const serverFactoryExports = new Map([
   [kitFactory, adapterName],
   [dependency, 'betterAuth'],
@@ -157,11 +163,10 @@ function discoverComposition(root: string, path: string): BetterAuthApp | undefi
     throw new Error(`${workspace}: shipping Better Auth composition must be App-local`)
   }
   try {
-    verifyWorkerWiring(dir, composition)
+    return { workspace, dir, composition, targets: verifyWorkerWiring(dir, composition) }
   } catch (cause) {
     throw new Error(`${workspace}: ${cause instanceof Error ? cause.message : String(cause)}`)
   }
-  return { workspace, dir, composition }
 }
 
 function verifyInstalledVersions(app: BetterAuthApp, lockedVersion: string | undefined) {

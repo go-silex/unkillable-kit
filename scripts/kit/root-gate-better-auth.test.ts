@@ -121,14 +121,21 @@ try {
   cpSync(join(repo, 'apps/starter-api/migrations'), join(root, app, 'migrations'), {
     recursive: true,
   })
-  put(`${app}/wrangler.toml`, 'name = "product-fixture"\nmain = "src/worker.ts"\n')
+  const database = 'binding = "DB"\ndatabase_name = "product-fixture"\ndatabase_id = "fixture-db"\n'
+  const workerConfig = `name = "product-fixture"
+main = "src/worker.ts"
+compatibility_date = "2026-07-01"
+compatibility_flags = ["nodejs_compat"]
+[[d1_databases]]
+${database}`
+  put(`${app}/wrangler.toml`, workerConfig)
   put(
     `${app}/${wrapper}`,
     `import { createBetterAuth as createKitBetterAuth } from '@kit/auth/factory'
 export function createBetterAuth(env, baseURL) {
   return createKitBetterAuth({
     database: env.DB, secret: env.BETTER_AUTH_SECRET, baseURL,
-    allowPublicSignup: false, trustedOrigins: [baseURL],
+    allowPublicSignup: false, trustedOrigins: [env.CORS_ORIGINS ?? baseURL],
     cookieName: env.SESSION_COOKIE_NAME, useSecureCookies: env.ENVIRONMENT === 'production',
   })
 }
@@ -137,7 +144,7 @@ export function createBetterAuth(env, baseURL) {
   put(
     `${app}/src/auth-consumer.ts`,
     `import { createBetterAuth as issueAuth } from './better-auth'
-export function fetch(req, env) { return issueAuth(env, new URL(req.url).origin).handler(req) }
+export function fetch(req, env) { return issueAuth(env, env.BETTER_AUTH_URL).handler(req) }
 `,
   )
   put(
@@ -195,6 +202,34 @@ export default { fetch: () => new Response(null, { status: 503 }) }
   put(`${app}/src/worker.ts`, `import { fetch } from './edge'\nexport default { fetch }\n`)
   put(`${app}/src/edge.ts`, `export { fetch } from './auth-consumer'\n`)
   assert.match(runCore(), /apps\/product-fixture differential fixtures passed/)
+
+  // This release environment calls the enrolled composition, but sends a genuine, compatible
+  // cookie from a different instance. Neither call reachability nor successful sign-in is proof.
+  put(
+    `${app}/wrangler.toml`,
+    `${workerConfig}
+[env.release.vars]
+WRONG_ISSUER = "true"
+[[env.release.d1_databases]]
+${database}`,
+  )
+  const actualFactory = Bun.resolveSync('@kit/auth/factory', join(repo, 'apps/starter-api'))
+  put(
+    `${app}/src/auth-consumer.ts`,
+    `import { createBetterAuth as issueAuth } from './better-auth'
+import { createBetterAuth as alternateIssuer } from ${JSON.stringify(actualFactory)}
+export function fetch(req, env) {
+  const baseURL = env.BETTER_AUTH_URL
+  const enrolled = issueAuth(env, baseURL)
+  if (!env.WRONG_ISSUER) return enrolled.handler(req)
+  return alternateIssuer({
+    database: env.DB, secret: env.BETTER_AUTH_SECRET, baseURL,
+    allowPublicSignup: false, trustedOrigins: [env.CORS_ORIGINS],
+  }).handler(req)
+}
+`,
+  )
+  runCore(/--env release\) failed:[\s\S]*mounted Better Auth cookie lacks provenance/)
 
   json('packages/nested-consumer/package.json', {
     name: 'nested-consumer',

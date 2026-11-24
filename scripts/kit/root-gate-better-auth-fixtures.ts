@@ -1,12 +1,15 @@
 import { Database, type SQLQueryBindings } from 'bun:sqlite'
 import assert from 'node:assert/strict'
-import { readdirSync, readFileSync } from 'node:fs'
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { KitBetterAuth } from '../../packages/auth/src/factory'
 import type { resolveRequestSession } from '../../packages/auth/src/snapshot'
 import { createSqliteD1, type SqliteD1 } from '../../packages/db/src/test/sqlite-d1'
 import type { BetterAuthApp } from './root-gate-better-auth-apps'
+import type { CredentialWrites, MountedProbe } from './root-gate-better-auth-probe'
+import { kitFactory } from './root-gate-better-auth-worker'
 
 const secret = crypto.randomUUID()
 const wrongSecret = crypto.randomUUID()
@@ -95,19 +98,27 @@ async function atTime<T>(millisecond: number, run: () => Promise<T>): Promise<T>
   }
 }
 
-function seedCredential(sqlite: Database, passwordHash: string) {
+function credentialWrites(passwordHash: string) {
   // The migrated, isolated D1 image gets a User and credential, never a session.
   const userId = crypto.randomUUID()
   const now = Date.now()
-  sqlite.run(
-    'INSERT INTO user (id, name, email, email_verified, created_at, updated_at) VALUES (?, ?, ?, 1, ?, ?)',
-    [userId, 'Root Fixture', email, now, now],
-  )
-  sqlite.run(
-    `INSERT INTO account (id, account_id, provider_id, issuer, user_id, password, created_at, updated_at)
-     VALUES (?, ?, 'credential', 'local:credential', ?, ?, ?, ?)`,
-    [crypto.randomUUID(), userId, userId, passwordHash, now, now],
-  )
+  const writes: CredentialWrites = [
+    [
+      'INSERT INTO user (id, name, email, email_verified, created_at, updated_at) VALUES (?, ?, ?, 1, ?, ?)',
+      [userId, 'Root Fixture', email, now, now],
+    ],
+    [
+      `INSERT INTO account (id, account_id, provider_id, issuer, user_id, password, created_at, updated_at)
+       VALUES (?, ?, 'credential', 'local:credential', ?, ?, ?, ?)`,
+      [crypto.randomUUID(), userId, userId, passwordHash, now, now],
+    ],
+  ]
+  return { userId, writes }
+}
+
+function seedCredential(sqlite: Database, passwordHash: string) {
+  const { userId, writes } = credentialWrites(passwordHash)
+  for (const [sql, values] of writes) sqlite.run(sql, values)
   return userId
 }
 
@@ -157,6 +168,55 @@ type Fixture = {
   change?: (db: Database) => void
 }
 
+function proveMountedIssuer(app: BetterAuthApp, snapshotPath: string, passwordHash: string) {
+  const wrangler = Bun.resolveSync('wrangler', app.dir)
+  const wranglerManifest = Bun.resolveSync('wrangler/package.json', app.dir)
+  const factoryPath = Bun.resolveSync(kitFactory, dirname(app.composition))
+  const node = Bun.which('node')
+  assert.ok(node, 'Node is required to run Wrangler’s local HTTP harness')
+  for (const target of app.targets) {
+    const scratch = mkdtempSync(join(tmpdir(), 'root-better-auth-worker-'))
+    try {
+      const probe: MountedProbe = {
+        target,
+        dir: app.dir,
+        wrangler,
+        wranglerCli: join(dirname(wranglerManifest), 'bin/wrangler.js'),
+        kitFactory,
+        factoryPath,
+        snapshotPath,
+        scratch,
+        email,
+        password,
+        secret,
+        ...credentialWrites(passwordHash),
+      }
+      const result = Bun.spawnSync(
+        [node, join(import.meta.dirname, 'root-gate-better-auth-probe.ts')],
+        {
+          cwd: app.dir,
+          stdin: Buffer.from(JSON.stringify(probe)),
+          env: {
+            PATH: process.env.PATH,
+            HOME: scratch,
+            CI: 'true',
+            WRANGLER_SEND_METRICS: 'false',
+            CLOUDFLARE_LOAD_DEV_VARS_FROM_DOT_ENV: 'false',
+          },
+          timeout: 120_000,
+        },
+      )
+      if (!result.success) {
+        throw new Error(
+          `${app.workspace}: mounted issuer (${target.config}${target.env ? ` --env ${target.env}` : ''}) failed:\n${result.stdout.toString()}${result.stderr.toString()}`,
+        )
+      }
+    } finally {
+      rmSync(scratch, { recursive: true, force: true })
+    }
+  }
+}
+
 export async function runBetterAuthDifferential(app: BetterAuthApp) {
   // Root discovers the App and its exact shipping modules at runtime.
   const composition: { createBetterAuth: Factory } = await import(
@@ -172,6 +232,7 @@ export async function runBetterAuthDifferential(app: BetterAuthApp) {
     pathToFileURL(cryptoPath).href
   )
   const passwordHash = await hashPassword(password)
+  proveMountedIssuer(app, snapshotPath, passwordHash)
   const migrations = join(app.dir, 'migrations')
   const migrationSql = readdirSync(migrations)
     .filter((name) => name.endsWith('.sql'))

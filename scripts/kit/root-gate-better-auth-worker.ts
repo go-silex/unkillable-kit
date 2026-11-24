@@ -12,6 +12,9 @@ import {
 import { wranglerConfigs } from './lib/wrangler-d1'
 
 export const adapterName = 'createBetterAuth'
+export const kitFactory = '@kit/auth/factory'
+
+export type WorkerTarget = { config: string; env?: string; entry: string }
 
 export function shippingSource(path: string) {
   return !(
@@ -48,20 +51,24 @@ function workerMainFile(app: string, file: string, main: unknown) {
   throw new Error(`${relative(app, file)} main must be an App-local runtime source, got ${main}`)
 }
 
-function workerEntrypoints(app: string) {
+function workerEntrypoints(app: string): WorkerTarget[] {
   // Nested Wrangler configs include test Workers. Only App-root configs describe its deploys.
   const configs = wranglerConfigs(app).filter((file) => dirname(file) === app)
   if (!configs.length) throw new Error('add an App-root Wrangler config with a Worker main')
-  const entries = new Set<string>()
+  const entries: WorkerTarget[] = []
   for (const file of configs) {
     const text = readFileSync(file, 'utf8')
     const config = (file.endsWith('.toml') ? Bun.TOML.parse(text) : Bun.JSONC.parse(text)) as {
       main?: unknown
       env?: Record<string, { main?: unknown }>
     }
-    entries.add(workerMainFile(app, file, config.main))
-    for (const env of Object.values(config.env ?? {})) {
-      if (env.main !== undefined) entries.add(workerMainFile(app, file, env.main))
+    entries.push({ config: file, entry: workerMainFile(app, file, config.main) })
+    for (const [env, options] of Object.entries(config.env ?? {})) {
+      entries.push({
+        config: file,
+        env,
+        entry: workerMainFile(app, file, options.main ?? config.main),
+      })
     }
   }
   return entries
@@ -198,11 +205,13 @@ function reachesAdapter(
 
 export function verifyWorkerWiring(app: string, composition: string) {
   const parsed = new Map<string, { sources: string[]; callsAdapter: boolean }>()
-  for (const entry of workerEntrypoints(app)) {
+  const targets = workerEntrypoints(app)
+  for (const { entry } of targets) {
     if (!reachesAdapter(app, entry, composition, parsed)) {
       throw new Error(
         `Wrangler main ${relative(app, entry)} does not reach a runtime call to createBetterAuth imported directly from ${relative(app, composition)}`,
       )
     }
   }
+  return targets
 }
