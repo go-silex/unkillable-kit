@@ -4,6 +4,8 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ## Unreleased
 
+## unkillable-kit/v0.7.0 — 2026-11-24
+
 ### UI
 
 - `@kit/ui` exports `DialogPopup`, an unstyled dialog popup. Compose it with
