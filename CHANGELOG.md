@@ -35,9 +35,8 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
   is deployed (go-silex/unkillable-kit#156).
 - **Product action:** One Product pilots this release before wider adoption.
   The pilot proves the hosted 300-second Root budget on both its pull request
-  run and its push run to the default branch. A Product-only pull request runs
-  a narrowed bar and does not prove the push path
-  (go-silex/unkillable-kit#156).
+  run and its push run to the default branch. A pull-request run does not
+  prove the push path (go-silex/unkillable-kit#156).
 - The Example API D1 round-trip suite measures authenticated route groups in
   separate cases under the default timeout, with the same ceilings and route
   coverage (go-silex/unkillable-kit#174).
