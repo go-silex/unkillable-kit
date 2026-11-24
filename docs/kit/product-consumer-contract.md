@@ -149,30 +149,8 @@ Auth glue (ADR-0008 D6): import `createBetterAuth` from `@kit/auth/factory`, tab
 
 ### Authentication reads and Organization-context migration
 
-Create one `createRequestAuthorization` (`@kit/auth/hono`) per App with primary D1 and the shipping
-Better Auth instance. Replace the old ports with its auth, Organization, Platform Role and Module guards.
-Keep the Better Auth account guard on `/api/auth/*`; only Better Auth mutates sessions. Cookies and
-D1 schema are unchanged.
-
-Run `authenticateKey`, enforce the default-deny route scope, then call `admitKeyScope`. Match the
-key's Organization against the path `orgId` or `X-Org-Id`; reject conflicts. Nonmembers get `404`
-whether the Organization exists or not. Members of suspended Organizations get `403`.
-
-Declare scoped, read-only Product projections with `defineAuthorizationFact` (`@kit/auth/snapshot`).
-Register them on the endpoint with `includeFacts`; read them with `fact` after the guards pass.
-Keep policy and I/O out of decoders. Register Module availability and role-grant facts separately.
-
-Super-admin support still needs an active Organization, audit and write opt-in. **Unavailable
-Modules now return `404` even with super-admin bypass.** Verify existing Organization provisioning.
-Role reads, admin validation and Capability Grant minting no longer restore missing grants. Repair
-only grants meant to exist.
-
-In each App's `package.json`, set `kitBetterAuth` to its App-relative shipping `createBetterAuth(env,
-baseURL)` module using `@kit/auth/factory`. Declare `better-auth` directly; align the lockfile on
-one version without Kit edits or test issuers. Root inventories each Wrangler release target:
-keep Worker source and imports visible, not in opaque prebuilds. Unbundled Workers need enrollment
-only if they compose Better Auth. Run `bun run validate:full`. See
-[ADR-0025](./architecture/adr/0025-request-authorization-snapshot.md).
+Follow [Migrate to request authorization](./playbooks/migrate-request-authorization.md) for the
+removed exports, route wiring and response changes, Better Auth enrollment, and hosted MCP updates.
 
 ### Impersonation V1 migration
 

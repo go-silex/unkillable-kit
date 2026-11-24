@@ -84,6 +84,7 @@ This index locates the authoritative home for each rule and the operational guid
 - [Start a product](./playbooks/start-product.md) — create a zero-edit consumer of the kit.
 - [Create a Product: day 0](./playbooks/create-product-day0.md) — generate Apps, local remotes and Product wiring in a dedicated clone.
 - [One Worker for a SPA and API](./playbooks/one-worker-site.md) — compose static assets, API routes and optional hosted MCP on one origin.
+- [Migrate to request authorization](./playbooks/migrate-request-authorization.md) — replace retired auth ports and enroll shipping Better Auth Apps.
 
 ## Consumer templates
 
