@@ -1,9 +1,10 @@
 import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 
-const serverSubpaths: Record<string, readonly string[]> = {
-  'better-auth': ['.', './minimal'],
-  '@kit/auth': ['./factory'],
+type ServerPackage = { readonly factory: string; readonly subpaths: readonly string[] }
+const serverPackages: Record<string, ServerPackage> = {
+  'better-auth': { factory: 'betterAuth', subpaths: ['.', './minimal'] },
+  '@kit/auth': { factory: 'createBetterAuth', subpaths: ['./factory'] },
 }
 
 function collectTargets(dir: string, target: unknown, files: Set<string>) {
@@ -22,21 +23,22 @@ function readServerPackage(dir: string, manifestPath: string) {
     readFileSync(manifestPath, 'utf8'),
   )
   const name = manifest.name ?? ''
-  const subpaths = Object.hasOwn(serverSubpaths, name) ? serverSubpaths[name] : undefined
-  if (!subpaths) return
+  const server = Object.hasOwn(serverPackages, name) ? serverPackages[name] : undefined
+  if (!server) return
   const fields = manifest.exports && typeof manifest.exports === 'object' ? manifest.exports : {}
   const hasSubpaths = Object.keys(fields).some((key) => key.startsWith('.'))
   const files = new Set<string>()
-  for (const subpath of subpaths) {
+  for (const subpath of server.subpaths) {
     const target = subpath === '.' && !hasSubpaths ? manifest.exports : fields[subpath]
     collectTargets(dir, target, files)
   }
-  return files
+  return { files, factory: server.factory }
 }
 
 export function indexServerEntrypoints() {
-  const directories = new Map<string, Set<string> | undefined>()
-  function packageEntries(dir: string): Set<string> | undefined {
+  type PackageEntries = ReturnType<typeof readServerPackage>
+  const directories = new Map<string, PackageEntries>()
+  function packageEntries(dir: string): PackageEntries {
     if (directories.has(dir)) return directories.get(dir)
     const manifest = join(dir, 'package.json')
     const parent = dirname(dir)
@@ -50,10 +52,11 @@ export function indexServerEntrypoints() {
   }
   return {
     isSDKFile: (realFile: string) => packageEntries(dirname(realFile)) !== undefined,
-    isServerEntry(path: string) {
-      if (!existsSync(path)) return false
+    factoryExport(path: string) {
+      if (!existsSync(path)) return
       const file = realpathSync(path)
-      return packageEntries(dirname(file))?.has(file) ?? false
+      const sdk = packageEntries(dirname(file))
+      if (sdk?.files.has(file)) return sdk.factory
     },
   }
 }

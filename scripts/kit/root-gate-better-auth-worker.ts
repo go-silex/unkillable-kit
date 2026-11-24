@@ -18,7 +18,11 @@ export const adapterName = 'createBetterAuth'
 export const kitFactory = '@kit/auth/factory'
 
 export type WorkerTarget = { config: string; env?: string; entry: string; noBundle?: boolean }
-type WorkerConfig = { main?: unknown; no_bundle?: boolean }
+type WorkerConfig = { main?: unknown; no_bundle?: boolean; build?: { command?: string } }
+type DetectFactoryImports = (
+  program: Program,
+  resolveFactory?: (source: string) => string | undefined,
+) => boolean
 const runtimeExtension = /\.[cm]?[jt]sx?$/
 
 export function shippingSource(path: string) {
@@ -56,17 +60,27 @@ function workerMainFile(app: string, file: string, main: unknown) {
   throw new Error(`${relative(app, file)} main must be an App-local runtime source, got ${main}`)
 }
 
+function assertInspectableWorker(app: string, entry: string, label: string, command?: string) {
+  if (!command && existsSync(entry) && isLocalSource(app, realpathSync(entry))) return
+  throw new Error(
+    `Cannot inventory opaque Worker inputs for ${label}; use an App-local source main outside dist/build without build.command so Better Auth enrollment can be checked`,
+  )
+}
+
 function workerEntrypoints(app: string, required = true): WorkerTarget[] {
   // Nested Wrangler configs include test Workers. Only App-root configs describe its deploys.
   const configs = wranglerConfigs(app).filter((file) => dirname(file) === app)
   if (required && !configs.length)
     throw new Error('add an App-root Wrangler config with a Worker main')
   const entries: WorkerTarget[] = []
-  function addTarget(config: string, { main, no_bundle }: WorkerConfig, env?: string) {
-    if (required || main !== undefined) {
-      const entry = required ? workerMainFile(app, config, main) : resolve(app, String(main))
-      entries.push({ config, env, entry, noBundle: no_bundle })
+  function addTarget(config: string, { main, no_bundle, build }: WorkerConfig, env?: string) {
+    if (!required && main === undefined) return
+    const source = resolve(app, String(main))
+    if (!required || no_bundle) {
+      assertInspectableWorker(app, source, `${config}${env ? ` --env ${env}` : ''}`, build?.command)
     }
+    const entry = required ? workerMainFile(app, config, main) : source
+    entries.push({ config, env, entry, noBundle: no_bundle })
   }
   for (const file of configs) {
     const text = readFileSync(file, 'utf8')
@@ -77,7 +91,11 @@ function workerEntrypoints(app: string, required = true): WorkerTarget[] {
     for (const [env, options] of Object.entries(config.env ?? {})) {
       addTarget(
         file,
-        { main: options.main ?? config.main, no_bundle: options.no_bundle ?? config.no_bundle },
+        {
+          main: options.main ?? config.main,
+          no_bundle: options.no_bundle ?? config.no_bundle,
+          build: options.build ?? config.build,
+        },
         env,
       )
     }
@@ -123,25 +141,29 @@ function unbundledUsesServerFactory(
   if (!existsSync(join(build, basename(entry)))) {
     throw new Error(`Wrangler did not emit the unbundled Worker entrypoint ${entry}`)
   }
-  return readdirSync(build, { recursive: true, withFileTypes: true }).some(
-    (file) =>
-      file.isFile() &&
-      runtimeExtension.test(file.name) &&
-      importsFactory(parseProgram(join(file.parentPath, file.name))),
-  )
+  return readdirSync(build, { recursive: true, withFileTypes: true }).some((file) => {
+    if (!(file.isFile() && runtimeExtension.test(file.name))) return false
+    const path = join(file.parentPath, file.name)
+    const module = relative(build, path)
+    if (/(^|\/)(?:dist|build)\//.test(module)) {
+      throw new Error(
+        `Cannot inventory opaque Worker inputs for ${entry}: use transparent modules outside dist/build instead of ${module}`,
+      )
+    }
+    return importsFactory(parseProgram(path))
+  })
 }
 
 export function workerUsesServerFactory(
   app: string,
   workspaceRoots: readonly string[],
-  importsFactory: (program: Program) => boolean,
+  importsFactory: DetectFactoryImports,
 ) {
   const targets = workerEntrypoints(app, false)
   if (!targets.length) return false
   const node = Bun.which('node')
   if (!node) throw new Error('Node is required to inspect Wrangler’s release input graph')
   const wrangler = Bun.resolveSync('wrangler', app)
-  const inspected = new Set<string>()
   const entries = indexServerEntrypoints()
   function isServerInput([input, { imports }]: [string, BundleInputs[string]]) {
     const path = resolve(app, input)
@@ -151,12 +173,15 @@ export function workerUsesServerFactory(
       return false
     }
     // Resolve edges per target: the same source can map to another package in release.
-    if (imports.some((edge) => !edge.external && entries.isServerEntry(resolve(app, edge.path)))) {
-      return true
+    const factories = new Map<string, string>()
+    for (const edge of imports) {
+      if (edge.external) continue
+      const factory = entries.factoryExport(resolve(app, edge.path))
+      if (factory) factories.set(edge.original ?? edge.path, factory)
     }
-    if (inspected.has(file)) return false
-    inspected.add(file)
-    return importsFactory(parseProgram(file))
+    return (
+      factories.size > 0 && importsFactory(parseProgram(file), (source) => factories.get(source))
+    )
   }
   for (const target of targets) {
     const scratch = mkdtempSync(resolve(tmpdir(), 'root-better-auth-inputs-'))

@@ -30,10 +30,14 @@ const serverFactoryExports = new Map([
 ])
 const runtimeSources = new Bun.Glob('**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}')
 
-function importsServerFactory(program: Program) {
+function importsServerFactory(
+  program: Program,
+  resolveFactory: (source: string) => string | undefined = (source) =>
+    serverFactoryExports.get(source),
+) {
   let found = false
   function check(source: string, exported?: string) {
-    const factory = serverFactoryExports.get(source)
+    const factory = resolveFactory(source)
     found ||= factory !== undefined && (exported === undefined || exported === factory)
   }
   new Visitor({

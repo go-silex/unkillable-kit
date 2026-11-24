@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process'
 import {
   copyFileSync,
   cpSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -325,18 +326,24 @@ export default { fetch: (request, env) => alternateIssuer(env).handler(request) 
   runCore(missingDependency)
 
   // Resolution can also target a package export directly, with no shared wrapper.
-  put(
-    `${app}/src/release.ts`,
-    `import * as resolved from '@fixture/alternate-issuer/ordinary'
-export default { fetch: () => Response.json(Object.keys(resolved)) }
+  const aliasSource = '@fixture/alternate-issuer/ordinary'
+  function useReleaseImport(source: string, name: string) {
+    put(
+      `${app}/src/release.ts`,
+      `import { ${name} as selected } from ${JSON.stringify(source)}
+export default { fetch: () => Response.json(typeof selected) }
 `,
-  )
-  for (const [specifier, error] of [
-    ['better-auth/client', undefined],
-    ['better-auth', missingDependency],
-    ['better-auth/minimal', missingDependency],
-    ['@kit/auth/factory', missingDependency],
+    )
+  }
+  for (const [specifier, imported, error] of [
+    ['better-auth/client', 'createAuthClient', undefined],
+    ['better-auth', 'betterAuth', missingDependency],
+    ['better-auth/minimal', 'betterAuth', missingDependency],
+    ['@kit/auth/factory', 'createBetterAuth', missingDependency],
+    ['better-auth', 'getBaseURL', undefined],
+    ['@kit/auth/factory', 'hashVerificationIdentifier', undefined],
   ] as const) {
+    useReleaseImport(aliasSource, imported)
     const entry = Bun.resolveSync(specifier, join(root, app))
     put(
       `${app}/wrangler.toml`,
@@ -344,14 +351,61 @@ export default { fetch: () => Response.json(Object.keys(resolved)) }
     )
     runCore(error)
   }
+  put(`${app}/wrangler.toml`, distinctRelease)
+  for (const [specifier, helper] of [
+    ['better-auth', 'getBaseURL'],
+    ['@kit/auth/factory', 'hashVerificationIdentifier'],
+  ] as const) {
+    useReleaseImport(specifier, helper)
+    runCore()
+  }
 
-  // Valid prebuilt Workers are emitted without an esbuild metafile.
+  // Transparent no_bundle source is emitted without an esbuild metafile.
+  put(`${app}/src/plain-worker.mjs`, 'export default { fetch: () => new Response("unbundled") }\n')
   put(
     `${app}/wrangler.toml`,
-    workerConfig.replace('main = "src/worker.ts"', 'main = "dist/worker.mjs"\nno_bundle = true'),
+    workerConfig.replace(
+      'main = "src/worker.ts"',
+      'main = "src/plain-worker.mjs"\nno_bundle = true',
+    ),
   )
-  put(`${app}/dist/worker.mjs`, 'export default { fetch: () => new Response("unbundled") }\n')
   assert.doesNotMatch(runCore(), /apps\/product-fixture differential fixtures passed/)
+
+  // Prebuilding removes the dependency edge. An opaque input cannot certify no auth.
+  const prebuiltSource = `${app}/build/inline-worker.ts`
+  put(
+    prebuiltSource,
+    `import { betterAuth } from 'better-auth/minimal'
+export default { fetch: (request) => betterAuth({}).handler(request) }
+`,
+  )
+  const prebuilt = await Bun.build({
+    entrypoints: [join(root, prebuiltSource)],
+    outdir: join(root, app, 'dist'),
+    naming: 'worker.mjs',
+    target: 'node',
+    minify: true,
+  })
+  assert.ok(prebuilt.success)
+  assert.doesNotMatch(
+    readFileSync(join(root, app, 'dist/worker.mjs'), 'utf8'),
+    /\bfrom\s*['"]better-auth/,
+  )
+  const opaqueWorker =
+    /Cannot inventory opaque Worker inputs.*outside dist\/build without build\.command/
+  for (const noBundle of [false, true]) {
+    put(
+      `${app}/wrangler.toml`,
+      workerConfig.replace(
+        'main = "src/worker.ts"',
+        `main = "dist/worker.mjs"\nno_bundle = ${noBundle}`,
+      ),
+    )
+    runCore(opaqueWorker)
+  }
+  put(`${app}/wrangler.toml`, `${workerConfig}\n[build]\ncommand = "touch build-ran"\n`)
+  runCore(opaqueWorker)
+  assert.equal(existsSync(join(root, app, 'build-ran')), false)
   put(`${app}/wrangler.toml`, workerConfig)
 
   // A runtime import of the same declared workspace cannot bypass enrollment.
