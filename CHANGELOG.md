@@ -4,6 +4,8 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ## Unreleased
 
+## unkillable-kit/v0.8.0 — 2026-11-24
+
 ### Auth
 
 - **Product action:** Replace removed auth exports with Kit request authorization and register
