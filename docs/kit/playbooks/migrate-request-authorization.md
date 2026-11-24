@@ -48,8 +48,8 @@ No public `@kit/mcp` or `@kit/mcp/hosted` exports were removed.
 ## Wire the matched endpoint
 
 1. Create one authorization instance per App with `db` returning the primary D1 binding and
-   `auth` supplying the shipping Better Auth issuer. Keep the Kit Better Auth account guard
-   (`createBetterAuthHandler`) on `/api/auth/*`; keep session lifecycle writes with Better Auth.
+   `auth` supplying the shipping Better Auth issuer. Keep `createBetterAuthHandler()` mounted on
+   `/api/auth/*`. The Kit issuer installs the native account guard and owns session lifecycle writes.
 2. Mount the instance's Organization and Module guards and `includeFacts(...)` middleware directly,
    not inside wrappers. Kit plans the matched endpoint before its first read. On a guarded terminal
    `app.all(...)`, register `authorization.allEndpoint` before the guards; never mount the marker
@@ -61,7 +61,13 @@ No public `@kit/mcp` or `@kit/mcp/hosted` exports were removed.
    selection; if both are present they must agree. See [API key scopes](../../../packages/auth/README.md#api-key-scopes).
 4. Declare scoped, read-only Product projections with `defineAuthorizationFact`; register them
    with `includeFacts` and read them with `authorization.fact(c, descriptor)` after guards pass.
-   Keep policy and I/O out of decoders. Supply separate Module availability and role-grant facts.
+   Keep policy and I/O out of decoders. In `moduleFacts`, supply an `organization`-scoped
+   availability fact projecting raw `enabled` and `available` as integer `0` or `1`, and an
+   `organization-role`-scoped grant fact projecting raw `access` as `disabled`, `read`, or
+   `write`. For delegated Module access, supply `delegatedGrant` with `delegated-role` scope and
+   the same `access` projection. Filter each fact to the Module and return at most one row.
+   The guard reads these columns directly, not the decoder output. See the
+   [Example API wiring](../../../apps/example-api/src/middleware/authorization.ts).
    Verify existing Organization provisioning and repair only grants meant to exist. Role reads,
    admin validation and Capability Grant minting no longer restore missing grants.
 
@@ -88,13 +94,13 @@ No public `@kit/mcp` or `@kit/mcp/hosted` exports were removed.
    Use a named function declaration `export function createBetterAuth(env, baseURL)` whose final
    statement directly returns the single call to the named `createBetterAuth` import from
    `@kit/auth/factory` (alias the import). Do not substitute a test issuer.
-2. For each App-root Wrangler release target, including named environments, use a relative,
-   App-local runtime source `main` outside `dist` and `build`. Do not set `build.command` or
-   `no_bundle = true` on enrolled targets. The Worker must reach a runtime call to the adapter
-   imported directly from the enrolled module. For Root's local proof, bind D1 as `DB`, provide
-   the configured `migrations_dir` (defaults to `migrations`), and mount working
-   `POST /api/auth/sign-in/email` on that issuer. Workers that do not compose Better Auth need no
-   enrollment (and can be unbundled), but their Wrangler release inputs must remain inspectable.
+2. In an enrolled App, every App-root Wrangler release target, including named environments, must
+   use a relative, App-local runtime source `main` outside `dist` and `build`, without `build.command`
+   or `no_bundle = true`. From each `main`, the App-local static dependency graph must reach a runtime
+   call to `createBetterAuth` imported directly from the enrolled module. For each target's local
+   proof, bind D1 as `DB`, provide the configured `migrations_dir` (defaults to `migrations`), and
+   mount working `POST /api/auth/sign-in/email` on that issuer. An App that does not compose Better
+   Auth can omit enrollment and use unbundled Workers, but release inputs must remain inspectable.
 3. Align the shared Bun lockfile on one resolved `better-auth` version across workspaces, including
    nested resolutions, without editing Kit-owned files. Run `bun run validate:full`.
 
