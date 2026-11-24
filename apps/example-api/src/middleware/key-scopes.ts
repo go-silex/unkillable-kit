@@ -3,7 +3,7 @@ import { AppError } from '@kit/core'
 import type { MiddlewareHandler } from 'hono'
 import { matchedRoutes } from 'hono/route'
 import type { AppEnv } from '../types'
-import { requireAuth } from './require-auth'
+import { authorization } from './authorization'
 
 // An exact method and path declaration is required before a key can reach a handler.
 export const keyScopeRoutes: ReadonlyArray<{ method: string; path: string; scope: ApiKeyScope }> = [

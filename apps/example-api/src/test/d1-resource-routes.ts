@@ -28,7 +28,7 @@ export async function measureResources(record: Set<string>) {
     createdAt: new Date(),
   })
   const { id, key } = await responseJson<{ id: string; key: string }>(
-    await probe('POST /api/keys', 19, {
+    await probe('POST /api/keys', 7, {
       body: { name: 'Budget key', organizationId: orgId, scopes: ['read', 'write'] },
     }),
   )
@@ -44,11 +44,11 @@ export async function measureResources(record: Set<string>) {
     { type: 'demo.ping', subject: 'user_demo' },
     { type: 'demo.ping', subject: 'user_demo' },
   ])
-  await probe('DELETE /api/keys/:id', 11, { path: `/api/keys/${id}` })
+  await probe('DELETE /api/keys/:id', 3, { path: `/api/keys/${id}` })
 
   onTestFinished(resetIdentityTickets)
   const resume = 'http://127.0.0.1:8788/authorize?client_id=c1&state=s1'
-  const minted = await probe('GET /api/mcp-identity/ticket', 9, {
+  const minted = await probe('GET /api/mcp-identity/ticket', 1, {
     path: `/api/mcp-identity/ticket?resume=${encodeURIComponent(resume)}`,
     status: 302,
   })
@@ -62,44 +62,43 @@ export async function measureResources(record: Set<string>) {
 }
 
 async function measureDualResources(probe: Probe, credential: 'session' | 'api-key') {
-  const cap = (session: number, key: number) => (credential === 'session' ? session : key)
-  const profile = await probe('GET /api/me', cap(13, 11))
+  const profile = await probe('GET /api/me', 3)
   expect(await profile.json()).toMatchObject({
     subject: 'user_demo',
     authMethod: credential === 'session' ? 'session' : 'api_key',
   })
-  await probe('GET /api/keys', cap(14, 13))
-  await probe('GET /api/notes', cap(14, 13))
+  await probe('GET /api/keys', 2)
+  await probe('GET /api/notes', 2)
   const { note } = await responseJson<{ note: { id: string } }>(
-    await probe('POST /api/notes', cap(14, 13), {
+    await probe('POST /api/notes', 2, {
       body: { title: 'Budget note', attachmentText: 'Fixture attachment' },
       status: 201,
     }),
   )
-  await probe('GET /api/notes/:id', cap(10, 9), { path: `/api/notes/${note.id}` })
-  await probe('DELETE /api/notes/:id', cap(11, 10), { path: `/api/notes/${note.id}` })
-  await probe('GET /api/items', cap(14, 13))
+  await probe('GET /api/notes/:id', 2, { path: `/api/notes/${note.id}` })
+  await probe('DELETE /api/notes/:id', 3, { path: `/api/notes/${note.id}` })
+  await probe('GET /api/items', 2)
   const { item } = await responseJson<{ item: { id: string } }>(
-    await probe('POST /api/items', cap(15, 14), {
+    await probe('POST /api/items', 3, {
       body: { code: 'budget-item', label: 'Budget item' },
       status: 201,
     }),
   )
   const itemPath = `/api/items/${item.id}`
-  await probe('GET /api/items/:id', cap(10, 9), { path: itemPath })
-  await probe('PATCH /api/items/:id', cap(12, 11), { path: itemPath, body: { label: 'Updated' } })
-  await probe('DELETE /api/items/:id', cap(11, 10), { path: itemPath })
+  await probe('GET /api/items/:id', 2, { path: itemPath })
+  await probe('PATCH /api/items/:id', 4, { path: itemPath, body: { label: 'Updated' } })
+  await probe('DELETE /api/items/:id', 3, { path: itemPath })
   const upload = await responseJson<{ uploadId: string; key: string }>(
-    await probe('POST /api/uploads/presign', cap(9, 8), {
+    await probe('POST /api/uploads/presign', 1, {
       body: { filename: 'photo.jpg', contentType: 'image/jpeg', size: 1024 },
       status: 201,
     }),
   )
-  await probe('POST /api/uploads/:uploadId/complete', cap(9, 8), {
+  await probe('POST /api/uploads/:uploadId/complete', 1, {
     path: `/api/uploads/${upload.uploadId}/complete`,
     body: { key: upload.key },
   })
-  const job = await probe('POST /api/jobs/ping', cap(9, 8), { status: 202 })
+  const job = await probe('POST /api/jobs/ping', 1, { status: 202 })
   expect(await job.json()).toMatchObject({ enqueued: true })
-  await probe('POST /api/demo/email', cap(11, 10))
+  await probe('POST /api/demo/email', 3)
 }

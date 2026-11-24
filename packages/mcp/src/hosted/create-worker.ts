@@ -1,12 +1,12 @@
+import { type OAuthHelpers, OAuthProvider } from '@cloudflare/workers-oauth-provider'
 import {
-  OAuthError,
-  type OAuthHelpers,
-  OAuthProvider,
-  type TokenExchangeCallbackOptions,
-} from '@cloudflare/workers-oauth-provider'
+  type AuthorizationFact,
+  authorizeHostedPrincipal,
+  type HostedAuthorization,
+} from '@kit/auth/snapshot'
 import { EdgeFastMCP } from 'fastmcp/edge'
 import type { McpIdentity } from '../identity'
-import { accountAdmissionResponse, accountIsActive } from './account-admission'
+import { accountAdmissionResponse } from './account-admission'
 import { handleAuthorize } from './authorize'
 import {
   type ConsentPolicy,
@@ -30,6 +30,7 @@ import {
 } from './host-policy'
 import { normalizeIdentity } from './identity-props'
 import { snapshotPresentation } from './presentation'
+import { type GrantAdmission, type GrantPrincipal, tokenAdmission } from './token-admission'
 
 /**
  * A `fetch`-only handler. A co-located product Worker keeps its other handlers
@@ -43,23 +44,20 @@ export type HostedMcpWorkerOptions<Env extends HostedMcpEnv> = {
   name: string
   version?: string
   /**
-   * Called after authentication and optional admission. Tools close over the token
-   * identity. `env` has no `OAUTH_PROVIDER`. Not an authorization point.
+   * Called after grant admission. `env` has no `OAUTH_PROVIDER`. Tools needing an
+   * organization must first call `authorization.forOrganization` with their validated
+   * operation organization ID, then apply their own narrower access policy.
    */
-  register: (server: EdgeFastMCP, call: { identity: McpIdentity; env: Env }) => void
+  register: (
+    server: EdgeFastMCP,
+    call: { identity: McpIdentity; env: Env; authorization: HostedAuthorization },
+  ) => void
+  /** Read-only facts for resource requests, visible only through admitted accessors. */
+  facts?: readonly AuthorizationFact<unknown>[]
+  /** Presence of a matching hosted-grant fact denies resource and token admission. */
+  denyFact?: AuthorizationFact<unknown>
   /** Deny-only admission for an existing OAuth grant. The environment excludes OAUTH_PROVIDER. */
-  grantAdmission?: (
-    input:
-      | { phase: 'request'; userId: string; grantId: string; clientId: string }
-      | {
-          phase: 'token'
-          userId: string
-          grantId: string
-          clientId: string
-          grantType: 'authorization_code' | 'refresh_token'
-        },
-    env: Env,
-  ) => Promise<boolean>
+  grantAdmission?: GrantAdmission<Env>
   identityPort: IdentitySource<Env>
   /** Passed verbatim to `identityPort.resolve`. */
   apiBaseUrl: (env: Env, request: Request) => string
@@ -86,40 +84,21 @@ function hasProviderHelper<Env extends HostedMcpEnv>(
 ): env is Env & { OAUTH_PROVIDER: OAuthHelpers } {
   return 'OAUTH_PROVIDER' in env && Boolean(env.OAUTH_PROVIDER)
 }
-type Admission<Env extends HostedMcpEnv> = NonNullable<
-  HostedMcpWorkerOptions<Env>['grantAdmission']
->
-type AdmissionInput<Env extends HostedMcpEnv> = Parameters<Admission<Env>>[0]
-type AdmissionOutcome = 'allow' | 'deny' | 'unavailable'
 
-async function evaluateAdmission<Env extends HostedMcpEnv>(
-  admission: Admission<Env>,
-  input: AdmissionInput<Env>,
-  env: Env,
-): Promise<AdmissionOutcome> {
-  try {
-    const result = await admission(input, stripOauthHelper(env))
-    if (result === true) return 'allow'
-    if (result === false) return 'deny'
-  } catch {
-    // Caller errors, including OAuthError invalid_grant, are never revocation decisions.
-  }
-  return 'unavailable'
-}
-
-async function admitRequest<Env extends HostedMcpEnv>(
-  admission: Admission<Env>,
+async function requestPrincipal<Env extends HostedMcpEnv>(
   identity: McpIdentity,
   env: Env,
   ctx: ExecutionContext,
-): Promise<AdmissionOutcome> {
+): Promise<
+  { status: 'allowed'; principal: GrantPrincipal } | { status: 'denied' | 'unavailable' }
+> {
   const auth = (
     ctx as ExecutionContext & {
       auth?: { token?: string; userId?: string; clientId?: string }
     }
   ).auth
-  if (!(auth?.token && auth.userId && auth.clientId)) return 'deny'
-  if (!hasProviderHelper(env)) return 'unavailable'
+  if (!(auth?.token && auth.userId && auth.clientId)) return { status: 'denied' }
+  if (!hasProviderHelper(env)) return { status: 'unavailable' }
   try {
     const summary = await env.OAUTH_PROVIDER.unwrapToken(auth.token)
     if (
@@ -128,26 +107,21 @@ async function admitRequest<Env extends HostedMcpEnv>(
       summary.userId !== identity.userId ||
       summary.grant.clientId !== auth.clientId
     )
-      return 'deny'
-    return evaluateAdmission(
-      admission,
-      {
-        phase: 'request',
+      return { status: 'denied' }
+    return {
+      status: 'allowed',
+      principal: {
         userId: summary.userId,
         grantId: summary.grantId,
         clientId: summary.grant.clientId,
       },
-      env,
-    )
+    }
   } catch {
-    return 'unavailable'
+    return { status: 'unavailable' }
   }
 }
 
-function admissionResponse(
-  outcome: Exclude<AdmissionOutcome, 'allow'>,
-  request: Request,
-): Response {
+function admissionResponse(outcome: 'denied' | 'unavailable', request: Request): Response {
   if (outcome === 'unavailable') {
     return new Response('Service unavailable', {
       status: 503,
@@ -163,35 +137,6 @@ function admissionResponse(
   })
 }
 
-function tokenAdmission<Env extends HostedMcpEnv>(admission: Admission<Env>) {
-  return async ({
-    grantType,
-    userId,
-    grantId,
-    clientId,
-    env,
-  }: TokenExchangeCallbackOptions<Env>) => {
-    let outcome: AdmissionOutcome = 'unavailable'
-    if (grantType === 'authorization_code' || grantType === 'refresh_token') {
-      outcome = await evaluateAdmission(
-        admission,
-        { phase: 'token', grantType, userId, grantId, clientId },
-        env,
-      )
-    }
-    if (outcome === 'deny') {
-      throw new OAuthError('invalid_grant', { description: 'Authorization revoked' })
-    }
-    if (outcome === 'unavailable') {
-      throw new OAuthError('temporarily_unavailable', {
-        description: 'Grant admission unavailable',
-        statusCode: 503,
-        headers: { 'Cache-Control': 'no-store' },
-      })
-    }
-  }
-}
-
 export function createHostedMcpWorker<Env extends HostedMcpEnv>(
   opts: HostedMcpWorkerOptions<Env>,
 ): HostedMcpWorker<Env> {
@@ -201,10 +146,9 @@ export function createHostedMcpWorker<Env extends HostedMcpEnv>(
   if (grantAdmission !== undefined && typeof grantAdmission !== 'function') {
     throw new TypeError('grantAdmission must be a function')
   }
-  const admission: Admission<Env> = async (input, env) => {
-    if (!(await accountIsActive(input.userId, env))) return false
-    return grantAdmission ? grantAdmission(input, env) : true
-  }
+  const denyFact = opts.denyFact
+  const facts = opts.facts ? [...opts.facts] : undefined
+  const tokenExchangeCallback = tokenAdmission(grantAdmission, denyFact)
   const ttl = opts.refreshTokenTTL
   // The provider checks this when built, per request, where a bad value would fail every route.
   if (ttl !== undefined && ttl !== 0 && !(Number.isInteger(ttl) && ttl >= KV_MIN_TTL_SECONDS)) {
@@ -217,14 +161,29 @@ export function createHostedMcpWorker<Env extends HostedMcpEnv>(
     async fetch(request: Request, env: Env, ctx: ExecutionContext) {
       const identity = normalizeIdentity(ctx.props)
       if (!identity) return new Response('Unauthorized', { status: 401 })
-      const outcome = await admitRequest(admission, identity, env, ctx)
-      if (outcome !== 'allow') return admissionResponse(outcome, request)
+      const verified = await requestPrincipal(identity, env, ctx)
+      if (verified.status !== 'allowed') return admissionResponse(verified.status, request)
+      const { principal } = verified
+      const organizationId = request.headers.get('X-Org-Id')?.trim()
+      const callerEnv = stripOauthHelper(env)
+      const outcome = await authorizeHostedPrincipal({
+        db: env.DB,
+        principal,
+        ...(organizationId ? { organizationId } : {}),
+        ...(facts ? { facts } : {}),
+        ...(denyFact ? { denyFact } : {}),
+        ...(grantAdmission
+          ? { admit: () => grantAdmission({ phase: 'request', ...principal }, callerEnv) }
+          : {}),
+      })
+      if (outcome.status !== 'allowed') return admissionResponse(outcome.status, request)
       const server = new EdgeFastMCP({
         name: opts.name,
         version: opts.version ?? '0.0.1',
         mcpPath: MCP_PATH,
       })
-      opts.register(server, { identity, env: stripOauthHelper(env) })
+      const { fact, forOrganization } = outcome
+      opts.register(server, { identity, env: callerEnv, authorization: { fact, forOrganization } })
       return server.fetch(request)
     },
   }
@@ -282,7 +241,7 @@ export function createHostedMcpWorker<Env extends HostedMcpEnv>(
         // Custom-scheme apps stay a consent-page redirect class (ADR-0015 D5); remote http never is.
         allowPrivateUseRedirectUris: true,
         allowTokenExchangeGrant: false,
-        tokenExchangeCallback: tokenAdmission(admission),
+        tokenExchangeCallback,
         clientIdMetadataDocumentEnabled: true,
         scopesSupported: [MCP_SCOPE],
         requiredScopes: [MCP_SCOPE],

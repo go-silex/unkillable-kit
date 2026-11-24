@@ -42,10 +42,7 @@ function slugRoleKey(input: string): string {
     .slice(0, 48)
 }
 
-/**
- * Idempotent seed: create missing system roles + missing grants only.
- * Does **not** re-upsert existing grants (avoids hot-path write amplification).
- */
+/** Explicit provisioning only: create missing system roles and grants without changing existing ones. */
 export async function ensureSystemRoles(db: Db, organizationId: string): Promise<void> {
   const now = Date.now()
   // V0: FLOWS_ADMIN_ROLES (owner|admin) only — do not auto-write for member/reader (Roxabi/roxabi-boilerplate-cf#29 review).
@@ -84,12 +81,7 @@ export async function ensureSystemRoles(db: Db, organizationId: string): Promise
   }
 }
 
-export async function listRolesWithGrants(
-  db: Db,
-  organizationId: string,
-  options?: { readOnly?: boolean },
-) {
-  if (!options?.readOnly) await ensureSystemRoles(db, organizationId)
+export async function listRolesWithGrants(db: Db, organizationId: string) {
   const roles = await orgRolesRepo.listRolesForOrg(db, organizationId)
   const grants = await orgRolesRepo.listGrantsForRoles(
     db,
@@ -123,7 +115,6 @@ export async function createCustomRole(
     actorRoleKey: string
   },
 ) {
-  await ensureSystemRoles(db, input.organizationId)
   const key = slugRoleKey(input.key)
   if (!key || isOrgRoleKey(key)) {
     throw AppError.fieldErrors('Invalid custom role key', {
@@ -193,7 +184,6 @@ export async function setRoleGrant(
     actorRoleKey: string
   },
 ) {
-  await ensureSystemRoles(db, input.organizationId)
   const role = await orgRolesRepo.findRoleById(db, input.organizationId, input.roleId)
   if (!role) throw AppError.notFound('Role not found')
   if (role.isSystem) throw AppError.forbidden('System role grants are immutable')
@@ -249,7 +239,6 @@ async function grantsMapForRoleKey(
   organizationId: string,
   roleKey: string,
 ): Promise<Map<string, ModuleAccess>> {
-  await ensureSystemRoles(db, organizationId)
   const role = await orgRolesRepo.findRoleByKey(db, organizationId, roleKey)
   const map = new Map<string, ModuleAccess>()
   if (!role) return map
@@ -260,10 +249,7 @@ async function grantsMapForRoleKey(
   return map
 }
 
-/**
- * Single runtime resolver for module ops (Phase B).
- * platform.available ∧ org.enabled ∧ grant access.
- */
+/** Standalone Module policy check for callers outside the request authorization snapshot. */
 export async function resolveModuleAccess(
   db: Db,
   input: {
@@ -271,12 +257,8 @@ export async function resolveModuleAccess(
     roleKey: string | undefined
     moduleId: string
     op: ModuleOp
-    /** Super admin break-glass already decided at middleware. */
-    orgBypass?: boolean
-    readOnly?: boolean
   },
 ): Promise<boolean> {
-  if (input.orgBypass) return true
   if (!input.roleKey) return false
   if (!isKitModuleId(input.moduleId)) return false
 
@@ -287,7 +269,6 @@ export async function resolveModuleAccess(
   )
   if (!platformOk) return false
 
-  if (!input.readOnly) await ensureSystemRoles(db, input.organizationId)
   const role = await orgRolesRepo.findRoleByKey(db, input.organizationId, input.roleKey)
   if (!role) return false
   const grants = await orgRolesRepo.listGrantsForRole(db, role.id)
@@ -308,7 +289,6 @@ export async function assertAssignableRole(
   roleKey: string,
   actorRoleKey: string,
 ): Promise<void> {
-  await ensureSystemRoles(db, organizationId)
   const roles = await orgRolesRepo.listRolesForOrg(db, organizationId)
   const custom = roles.filter((r) => !r.isSystem).map((r) => r.key)
   if (!isAssignableRoleKey(roleKey, custom)) {

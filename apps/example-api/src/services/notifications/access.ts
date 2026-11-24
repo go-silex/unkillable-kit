@@ -27,7 +27,6 @@ export async function loadNotificationScope(c: Context<AppEnv>): Promise<InboxSc
         roleKey,
         moduleId,
         op: 'read',
-        orgBypass: false,
       })
     )
       readableModuleIds.push(moduleId)

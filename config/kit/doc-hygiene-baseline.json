@@ -85,9 +85,9 @@
     "fileBytes": 19886
   },
   "docs/kit/product-consumer-contract.md": {
-    "overLimitLines": 122,
+    "overLimitLines": 120,
     "maxLineBytes": 1657,
-    "fileBytes": 178804
+    "fileBytes": 177841
   },
   "docs/kit/security-dependabot.md": {
     "overLimitLines": 28,
@@ -95,9 +95,9 @@
     "fileBytes": 28728
   },
   "docs/kit/standards/stack.md": {
-    "overLimitLines": 51,
+    "overLimitLines": 50,
     "maxLineBytes": 867,
-    "fileBytes": 63844
+    "fileBytes": 63410
   },
   "docs/kit/testing/coverage.md": {
     "overLimitLines": 7,

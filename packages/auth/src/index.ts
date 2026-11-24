@@ -12,11 +12,6 @@ export {
   sessionCookieNameFromEnv,
   useSecureCookie,
 } from './better-auth-env'
-export {
-  type BetterAuthLike,
-  type CreateBetterAuthSessionPortOpts,
-  createBetterAuthSessionPort,
-} from './better-auth-port'
 export { type SessionCookieNameOpts, sessionCookieName } from './cookie-name'
 export {
   createFirstSessionAfterHook,
@@ -75,25 +70,9 @@ export {
 } from './password-schemas'
 export {
   type ApiKeyAuthIdentity,
-  type ApiKeyRecord,
   type ApiKeyScope,
   type AuthIdentity,
-  type AuthMethod,
-  allowsApiKeyScope,
-  createRequireAuth,
-  type DualAuthPorts,
   parseApiKeyScopes,
-  type RequireAuthContext,
-  resolveDualAuth,
   type SessionAuthIdentity,
 } from './require-auth'
-export {
-  clearSessionCookieHeader,
-  parseCookie,
-  parseSessionCookie,
-  SESSION_COOKIE,
-  type SessionCookieOpts,
-  type SessionPayload,
-  sessionCookieWireName,
-} from './session'
-export type { ResolveSessionInput, SessionPort } from './session-port'
+export { parseCookie, parseSessionCookie, SESSION_COOKIE } from './session'

@@ -4,6 +4,7 @@ import { resolveEmailPort } from '../lib/email-port'
 import { invalidRequest } from '../lib/openapi'
 import { requireBaAdapter } from '../lib/require-ba-adapter'
 import { corsAllowlist } from '../lib/session-env'
+import { authorization } from '../middleware/authorization'
 import { requireAuth } from '../middleware/require-auth'
 import * as invitationsService from '../services/invitations'
 import * as orgRolesService from '../services/org-roles'
@@ -18,6 +19,7 @@ import {
   listInvitations,
   listMembers,
   listOrgs,
+  orgDetail,
 } from './orgs.schemas'
 import {
   listOrgModules,
@@ -63,8 +65,11 @@ orgsRoutes.openapi(
 )
 
 orgsRoutes.openapi(getOrg, async (c) => {
-  const db = c.get('db')!
-  const org = await orgsService.getOrgForSubject(db, c.get('orgId')!, c.get('subject')!)
+  const org = {
+    ...(await authorization.fact(c, orgDetail)),
+    role: c.get('orgRole') ?? null,
+    bypass: c.get('orgBypass') ?? false,
+  }
   return c.json({ org, requestId: c.get('requestId') })
 })
 

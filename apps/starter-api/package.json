@@ -4,6 +4,7 @@
   "private": true,
   "license": "MIT",
   "type": "module",
+  "kitBetterAuth": "src/platform/better-auth.ts",
   "scripts": {
     "dev": "wrangler dev",
     "types": "wrangler types src/worker-configuration.d.ts --include-env=false",
@@ -17,6 +18,7 @@
     "@kit/auth": "workspace:*",
     "@kit/core": "workspace:*",
     "@kit/db": "workspace:*",
+    "better-auth": "^1.7.27",
     "drizzle-orm": "^0.45.4",
     "hono": "^4.13.18"
   },

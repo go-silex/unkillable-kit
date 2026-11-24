@@ -12,6 +12,7 @@ import {
   sessionOrKeySecurity,
   validationErrorResponse,
 } from '../lib/openapi'
+import { authorization } from '../middleware/authorization'
 import { requireAuth } from '../middleware/require-auth'
 import { appendAudit } from '../services/audit'
 import * as authService from '../services/auth'
@@ -94,11 +95,14 @@ const getMe = createRoute({
 meRoutes.openapi(getMe, async (c) => {
   const subject = c.get('subject')!
   const db = c.get('db')!
+  const authMethod = c.get('authMethod')
+  const browser = authMethod === 'session' ? await authorization.delegation(c) : null
   const profile = await meService.getMeProfile(db, subject, {
-    authMethod: c.get('authMethod'),
+    authMethod,
     keyOrganizationId: c.get('keyOrganizationId'),
+    platformRole: c.get('platformRole') ?? null,
     impersonation: c.get('impersonationInfo'),
-    actorUserId: c.get('actorSubject'),
+    impersonationPermissions: browser?.permission,
   })
 
   return c.json({

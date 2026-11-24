@@ -1,56 +1,21 @@
-import {
-  allowPublicSignup,
-  assertBetterAuthConfigured,
-  betterAuthBaseURL,
-  corsAllowlist,
-  getBetterAuthSecret,
-  isDevLikeEnvironment,
-  sessionCookieNameFromEnv,
-  useSecureCookie,
-} from '@kit/auth'
-import { createBetterAuth } from '@kit/auth/factory'
-import { createKitOrgMiddleware, createKitRequireAuth } from '@kit/auth/hono'
-import { insertFirstLoginIfAbsent } from '@kit/auth/repos/audit'
+import { betterAuthBaseURL } from '@kit/auth'
+import { createRequestAuthorization } from '@kit/auth/hono'
 import { createDb } from '@kit/db'
-import type { Context, MiddlewareHandler } from 'hono'
+import type { MiddlewareHandler } from 'hono'
+import { createBetterAuth } from './better-auth'
 import { type AppEnv, schema } from './types'
 
 export const bindPlatform: MiddlewareHandler<AppEnv> = async (c, next) => {
   const db = createDb(c.env.DB, schema)
-  assertBetterAuthConfigured(c.env)
-  const dev = isDevLikeEnvironment(c.env)
-  const auth = createBetterAuth({
-    database: c.env.DB,
-    secret: getBetterAuthSecret(c.env),
-    baseURL: betterAuthBaseURL(c.env, c.req.url),
-    requestDerivedBaseURL: !c.env.BETTER_AUTH_URL?.trim(),
-    trustedOrigins: corsAllowlist(c.env),
-    allowLoopbackOrigins: dev,
-    allowKitPlaceholderSecret: dev,
-    cookieName: sessionCookieNameFromEnv(c.env),
-    useSecureCookies: useSecureCookie(c.env),
-    allowPublicSignup: allowPublicSignup(c.env),
-    onFirstSession: async ({ userId }) => {
-      await insertFirstLoginIfAbsent(db, {
-        id: crypto.randomUUID(),
-        createdAt: Date.now(),
-        actorUserId: userId,
-        targetId: userId,
-        metaJson: '{"method":"session"}',
-      })
-    },
-  })
   c.set('db', db)
-  c.set('betterAuth', auth)
+  c.set('betterAuth', createBetterAuth(c.env, betterAuthBaseURL(c.env, c.req.url), db))
   await next()
 }
 
-export const requireAuth: MiddlewareHandler<AppEnv> = createKitRequireAuth<Context<AppEnv>>((c) =>
-  sessionCookieNameFromEnv(c.env),
-)
-
-const orgs = createKitOrgMiddleware({
-  resolveModuleAccess: async () => false,
-  isModuleEffective: async () => false,
+const authorization = createRequestAuthorization<AppEnv>({
+  db: (c) => c.env.DB,
+  auth: (c) => c.get('betterAuth'),
 })
-export const requireOrg = orgs.requireOrgContext() as unknown as MiddlewareHandler<AppEnv>
+
+export const { admitKeyScope, authenticateKey, requireAuth } = authorization
+export const requireOrg = authorization.requireOrgContext()

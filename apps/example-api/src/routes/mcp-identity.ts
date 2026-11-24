@@ -1,9 +1,9 @@
 import { createRoute, OpenAPIHono, z } from '@hono/zod-openapi'
-import { createBetterAuthSessionPort } from '@kit/auth'
 import { isAccountActive } from '@kit/auth/repos/account-state'
 import { AppError } from '@kit/core'
 import { authErrorResponses, invalidRequest, validationErrorResponse } from '../lib/openapi'
-import { corsAllowlist, sessionCookieNameFromEnv } from '../lib/session-env'
+import { corsAllowlist } from '../lib/session-env'
+import { authorization } from '../middleware/authorization'
 import {
   isAllowedMcpResumeUrl,
   mintIdentityTicket,
@@ -50,17 +50,8 @@ mcpIdentityRoutes.openapi(startTicket, async (c) => {
     })
   }
 
-  const auth = c.get('betterAuth')
-  if (!auth) {
-    throw AppError.internal('betterAuth not bound — withBetterAuth middleware required')
-  }
-  const sessions = createBetterAuthSessionPort({
-    cookieName: sessionCookieNameFromEnv(c.env),
-    getAuth: () => auth,
-    isAccountActive: (userId) => isAccountActive(c.get('db')!, userId),
-  })
-  const session = await sessions.resolveSession({ headers: c.req.raw.headers })
-  if (!session?.sub) {
+  const session = await authorization.session(c)
+  if (!session) {
     const web = corsAllowlist(c.env)[0] ?? 'http://127.0.0.1:5173'
     const login = new URL('/login', web)
     login.searchParams.set('next', `/mcp-oauth/resume?r=${encodeURIComponent(resume.toString())}`)
@@ -68,7 +59,7 @@ mcpIdentityRoutes.openapi(startTicket, async (c) => {
   }
 
   const ticket = await mintIdentityTicket({
-    userId: session.sub,
+    userId: session.subject,
     ...(session.email ? { email: session.email } : {}),
   })
   resume.searchParams.set('mcp_identity_ticket', ticket)

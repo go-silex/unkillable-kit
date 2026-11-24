@@ -106,6 +106,27 @@ describe('flows service org-policy mint', () => {
     }
   })
 
+  it('createRun cannot mint after removal of the system Role–module grant', async () => {
+    const { env, db } = await seedFlowsApp()
+    await enableFlowsForOrgs(db, BOTH_ORGS)
+    const { plan } = await createPlan(db, env, {
+      ...STAFF_ADMIN,
+      body: { yaml: INVOKE_ONLY_PLAN_YAML },
+    })
+    const admin = await orgRolesRepo.findRoleByKey(db, ORG_ACME, 'admin')
+    expect(admin).not.toBeNull()
+    expect(await orgRolesRepo.deleteGrant(db, ORG_ACME, admin!.id, FLOWS_MODULE_ID)).toBe(true)
+
+    await expect(
+      createRun(db, env, {
+        ...STAFF_ADMIN,
+        planId: plan.id,
+        authMethod: 'session',
+        body: {},
+      }),
+    ).rejects.toMatchObject(MINT_DENIALS.MODULE_ACCESS_DENIED)
+  })
+
   it('createPlan fails closed when role module access is disabled', async () => {
     const { env, db } = await seedFlowsApp()
     await enableFlowsForOrgs(db, BOTH_ORGS)

@@ -7,7 +7,7 @@ import { schema } from '../db/schema'
 import { isModuleConfigured } from '../lib/integration-config'
 import { isKitModuleId, KIT_MODULE_IDS } from '../lib/kit-modules'
 import { createMemoryEnv } from '../test/memory-env'
-import { listRolesWithGrants, resolveModuleAccess } from './org-roles'
+import { ensureSystemRoles, listRolesWithGrants, resolveModuleAccess } from './org-roles'
 import * as platformModulesService from './platform-modules'
 
 describe('platform-modules service (coverage / ADR dual-level)', () => {
@@ -27,7 +27,7 @@ describe('platform-modules service (coverage / ADR dual-level)', () => {
     const d = await db()
     await platformModulesService.listPlatformPublic(d, { readOnly: true })
     await platformModulesService.getOrgModulesEffective(d, 'org_x', { readOnly: true })
-    await listRolesWithGrants(d, 'org_x', { readOnly: true })
+    expect(await listRolesWithGrants(d, 'org_x')).toEqual([])
     expect(await listPlatformModules(d)).toEqual([])
     expect(await listRolesForOrg(d, 'org_x')).toEqual([])
 
@@ -40,10 +40,10 @@ describe('platform-modules service (coverage / ADR dual-level)', () => {
         roleKey: 'owner',
         moduleId: 'demo',
         op: 'read',
-        readOnly: true,
       }),
     ).toBe(false)
     expect(await listRolesForOrg(d, 'org_x')).toEqual([])
+    await ensureSystemRoles(d, 'org_x')
     expect(
       await resolveModuleAccess(d, {
         organizationId: 'org_x',
@@ -134,7 +134,6 @@ describe('platform-modules service (coverage / ADR dual-level)', () => {
 
   it('ensureSystemRoles seeds flows write for owner/admin only (not member)', async () => {
     const d = await db()
-    const { ensureSystemRoles, listRolesWithGrants } = await import('./org-roles')
     await ensureSystemRoles(d, 'org_flows_seed')
     const roles = await listRolesWithGrants(d, 'org_flows_seed')
     const byKey = Object.fromEntries(roles.map((r) => [r.key, r]))

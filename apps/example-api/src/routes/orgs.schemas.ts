@@ -1,4 +1,5 @@
 import { createRoute, z } from '@hono/zod-openapi'
+import { type AuthorizationFact, defineAuthorizationFact } from '@kit/auth/snapshot'
 import { invitationIdSchema } from '../lib/invitation-id'
 import {
   authErrorResponses,
@@ -10,6 +11,7 @@ import {
   sessionOrKeySecurity,
   validationErrorResponse,
 } from '../lib/openapi'
+import { authorization } from '../middleware/authorization'
 import { requireOrgCapability, requireOrgContext } from '../middleware/org-context'
 import { requireSession } from '../middleware/require-session'
 
@@ -124,6 +126,38 @@ export const createOrg = createRoute({
   },
 })
 
+const organizationRow = z.object({
+  id: z.string(),
+  name: z.string(),
+  slug: z.string(),
+  logo: z.string().nullable(),
+  metadata: z.string().nullable(),
+  created_at: z.number(),
+  updated_at: z.number().nullable(),
+  kind: z.string(),
+  status: z.string(),
+})
+
+type OrganizationDetail = Omit<z.infer<typeof organizationRow>, 'created_at' | 'updated_at'> & {
+  createdAt: string
+  updatedAt: string | null
+}
+
+export const orgDetail: AuthorizationFact<OrganizationDetail> = defineAuthorizationFact({
+  table: { name: 'organization', columns: Object.keys(organizationRow.shape) },
+  scope: { kind: 'organization', organizationId: 'id' },
+  select: Object.keys(organizationRow.shape),
+  maxRows: 1,
+  decode: ([row]) => {
+    const { created_at, updated_at, ...org } = organizationRow.parse(row)
+    return {
+      ...org,
+      createdAt: new Date(created_at).toISOString(),
+      updatedAt: updated_at === null ? null : new Date(updated_at).toISOString(),
+    }
+  },
+})
+
 export const getOrg = createRoute({
   method: 'get',
   path: '/api/orgs/{orgId}',
@@ -131,7 +165,7 @@ export const getOrg = createRoute({
   summary: 'Read one organization',
   description: orgIsolationDescription,
   security: sessionOrKeySecurity,
-  middleware: [orgCtxSuper] as const,
+  middleware: [orgCtxSuper, authorization.includeFacts(orgDetail)] as const,
   request: { params: orgIdParam },
   responses: {
     200: {

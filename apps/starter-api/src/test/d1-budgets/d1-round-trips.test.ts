@@ -1,6 +1,7 @@
 import { apiKeyPrefix, generateApiKey, hashApiKey } from '@kit/auth'
 import { insertApiKey } from '@kit/auth/repos/keys'
 import { insertMember, insertOrganization } from '@kit/auth/repos/orgs'
+import { setPlatformRole } from '@kit/auth/repos/platform-roles'
 import { createDb } from '@kit/db'
 import { expect, it } from 'vitest'
 import { createApp } from '../../app'
@@ -8,13 +9,14 @@ import { schema } from '../../platform/types'
 import { createRouteFixture } from '../d1-route-fixture'
 
 const orgId = 'org-route-budget'
+// One authorization batch, plus two profile reads or one member-list read.
 const budgets = [
-  { route: 'GET /api/me', session: 7, apiKey: 11 },
+  { route: 'GET /api/me', session: 3, apiKey: 3 },
   {
     route: 'GET /api/orgs/:orgId/members',
     path: `/api/orgs/${orgId}/members`,
-    session: 6,
-    apiKey: 10,
+    session: 2,
+    apiKey: 2,
   },
 ] as const
 
@@ -36,12 +38,13 @@ it('budgets every protected Starter Hono registration', () => {
   )
 })
 
-it.each(budgets)('$route stays within its session and API key budgets', async (budget) => {
+it.each(budgets)('$route uses its exact session and API key budgets', async (budget) => {
   const { env, request, cookie, measure } = await createRouteFixture()
   const session = await request('/api/auth/get-session', { headers: { cookie } })
   expect(session.status).toBe(200)
   const { user } = (await session.json()) as { user: { id: string } }
   const db = createDb(env.DB, schema)
+  if (budget.route === 'GET /api/me') await setPlatformRole(db, user.id, 'staff')
   const createdAt = new Date()
   await insertOrganization(db, {
     id: orgId,
@@ -70,14 +73,16 @@ it.each(budgets)('$route stays within its session and API key budgets', async (b
   })
 
   const path = 'path' in budget ? budget.path : undefined
-  const fromSession = await measure(budget.route, budget.session, { path })
+  const fromSession = await measure(budget.route, budget.session, { path, exact: true })
   const fromKey = await measure(budget.route, budget.apiKey, {
     path,
+    exact: true,
     headers: { authorization: `Bearer ${key}` },
   })
   if (budget.route === 'GET /api/me') {
-    expect(await fromSession.json()).toMatchObject({ subject: user.id, authMethod: 'session' })
-    expect(await fromKey.json()).toMatchObject({ subject: user.id, authMethod: 'api_key' })
+    const expected = { subject: user.id, platformRole: 'staff' }
+    expect(await fromSession.json()).toMatchObject({ ...expected, authMethod: 'session' })
+    expect(await fromKey.json()).toMatchObject({ ...expected, authMethod: 'api_key' })
   } else {
     for (const response of [fromSession, fromKey]) {
       expect(await response.json()).toMatchObject({

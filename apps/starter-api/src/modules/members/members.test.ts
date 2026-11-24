@@ -117,13 +117,24 @@ describe('starter HTTP composition', () => {
       createdAt: Date.now(),
     })
     const keyHeaders = { authorization: `Bearer ${key}` }
-    const keyMe = await request('/api/me', { headers: keyHeaders })
+    const keyWithSessionHeaders = { ...keyHeaders, cookie: signupCookie }
+    const invalidBearerHeaders = {
+      authorization: `Bearer ${generateApiKey()}`,
+      cookie: signupCookie,
+    }
+    for (const path of ['/api/me', '/api/orgs/org-a/members']) {
+      expect((await request(path, { headers: invalidBearerHeaders })).status).toBe(401)
+    }
+    const keyMe = await request('/api/me', { headers: keyWithSessionHeaders })
     expect(keyMe.status).toBe(200)
-    expect(((await keyMe.json()) as { orgs: { id: string }[] }).orgs.map((o) => o.id)).toEqual([
-      'org-a',
-    ])
+    expect(await keyMe.json()).toMatchObject({
+      authMethod: 'api_key',
+      orgs: [expect.objectContaining({ id: 'org-a' })],
+    })
     expect((await request('/api/orgs/org-a/members', { headers: keyHeaders })).status).toBe(200)
-    expect((await request('/api/orgs/org-b/members', { headers: keyHeaders })).status).toBe(403)
+    expect(
+      (await request('/api/orgs/org-b/members', { headers: keyWithSessionHeaders })).status,
+    ).toBe(403)
     const writeKey = generateApiKey()
     await insertApiKey(createDb(env.DB, schema), {
       id: 'key-write',

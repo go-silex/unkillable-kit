@@ -30,16 +30,16 @@ function withAuth(probe: Probe, headers: HeadersInit, variant?: string): Probe {
 async function measureFlows(db: KitDb, env: ApiEnv, probe: Probe) {
   await enableFlowsForOrgs(db, [ORG_ACME])
   const body = { yaml: approvalYaml }
-  await probe('POST /api/flows/plans/check', 48, { body })
-  const created = await probe('POST /api/flows/plans', 50, { body, status: 201 })
+  await probe('POST /api/flows/plans/check', 11, { body })
+  const created = await probe('POST /api/flows/plans', 13, { body, status: 201 })
   const { plan } = (await created.json()) as { plan: { id: string } }
-  const plans = await probe('GET /api/flows/plans', 35)
+  const plans = await probe('GET /api/flows/plans', 6)
   expect(await plans.json()).toMatchObject({ plans: expect.arrayContaining([plan]) })
   const planPath = `/api/flows/plans/${plan.id}`
-  const detail = await probe('GET /api/flows/plans/:planId', 23, { path: planPath })
+  const detail = await probe('GET /api/flows/plans/:planId', 2, { path: planPath })
   expect(await detail.json()).toMatchObject({ plan })
 
-  const queued = await probe('POST /api/flows/plans/:planId/runs', 50, {
+  const queued = await probe('POST /api/flows/plans/:planId/runs', 13, {
     path: `${planPath}/runs`,
     body: {},
     status: 202,
@@ -48,7 +48,7 @@ async function measureFlows(db: KitDb, env: ApiEnv, probe: Probe) {
   expect(run.status).toBe('queued')
   const runId = run.id
   const runPath = `/api/flows/runs/${runId}`
-  const runs = await probe('GET /api/flows/runs', 23)
+  const runs = await probe('GET /api/flows/runs', 2)
   expect(await runs.json()).toMatchObject({
     runs: expect.arrayContaining([expect.objectContaining(run)]),
   })
@@ -79,78 +79,77 @@ async function measureFlows(db: KitDb, env: ApiEnv, probe: Probe) {
   const taskId = 'gate'
   await notices.opened({ orgId: ORG_ACME, runId, taskId })
 
-  const running = await probe('GET /api/flows/runs/:runId', 35, { path: runPath })
+  const running = await probe('GET /api/flows/runs/:runId', 6, { path: runPath })
   expect(await running.json()).toMatchObject({ run: { id: runId, status: 'running' } })
-  const approval = await probe('POST /api/flows/runs/:runId/tasks/:taskId/approval', 25, {
+  const approval = await probe('POST /api/flows/runs/:runId/tasks/:taskId/approval', 4, {
     path: `${runPath}/tasks/${taskId}/approval`,
     body: { decision: 'approved' },
     status: 202,
   })
   expect(await approval.json()).toMatchObject({ runId, taskId, decision: 'approved', woken: true })
-  const cancelled = await probe('POST /api/flows/runs/:runId/cancel', 26, {
+  const cancelled = await probe('POST /api/flows/runs/:runId/cancel', 5, {
     path: `${runPath}/cancel`,
     body: {},
   })
   expect(await cancelled.json()).toMatchObject({ run: { id: runId, status: 'cancelled' } })
   expect(workflow.terminated).toBe(1)
-  const disabled = await probe('PATCH /api/flows/plans/:planId', 25, {
+  const disabled = await probe('PATCH /api/flows/plans/:planId', 4, {
     path: planPath,
     body: { enabled: false },
   })
   expect(await disabled.json()).toMatchObject({ plan: { id: plan.id, enabled: false } })
 }
 
-async function measureTasks(probe: Probe, anchorId: string, credential: 'session' | 'api-key') {
-  const cap = (session: number, key: number) => (credential === 'session' ? session : key)
-  const stages = await probe('GET /api/tasks/stages', cap(24, 23), {
+async function measureTasks(probe: Probe, anchorId: string) {
+  const stages = await probe('GET /api/tasks/stages', 3, {
     path: `/api/tasks/stages?boardKey=${boardKey}`,
   })
   expect(await stages.json()).toMatchObject({
     stages: expect.arrayContaining([expect.objectContaining({ boardKey, isDefault: true })]),
   })
-  const created = await probe('POST /api/tasks', cap(64, 63), {
+  const created = await probe('POST /api/tasks', 30, {
     body: { title: 'Task budget', boardKey, visibility: 'shared', assigneeIds: [assignee] },
     status: 201,
   })
   const { task } = (await created.json()) as { task: { id: string; assigneeIds: string[] } }
   expect(task.assigneeIds).toEqual([assignee])
   const taskPath = `/api/tasks/${task.id}`
-  const tasks = await probe('GET /api/tasks', cap(30, 29))
+  const tasks = await probe('GET /api/tasks', 4)
   expect(await tasks.json()).toMatchObject({
     tasks: expect.arrayContaining([
       expect.objectContaining(task),
       expect.objectContaining({ id: anchorId }),
     ]),
   })
-  const detail = await probe('GET /api/tasks/:id', cap(24, 23), { path: taskPath })
+  const detail = await probe('GET /api/tasks/:id', 3, { path: taskPath })
   expect(await detail.json()).toMatchObject({ task })
 
   const linkBody = { fromTaskId: task.id, toTaskId: anchorId, kind: 'blocks' }
-  const linked = await probe('POST /api/tasks/links', cap(28, 27), { status: 201, body: linkBody })
+  const linked = await probe('POST /api/tasks/links', 7, { status: 201, body: linkBody })
   expect(await linked.json()).toMatchObject({ link: linkBody })
-  const links = await probe('GET /api/tasks/links', cap(24, 23))
+  const links = await probe('GET /api/tasks/links', 3)
   expect(await links.json()).toMatchObject({
     links: expect.arrayContaining([expect.objectContaining(linkBody)]),
   })
 
   const commentPath = `${taskPath}/comments`
-  const added = await probe('POST /api/tasks/:id/comments', cap(37, 36), {
+  const added = await probe('POST /api/tasks/:id/comments', 4, {
     path: commentPath,
     body: { body: 'Task budget comment', visibility: 'shared' },
     status: 201,
   })
   const { comment } = (await added.json()) as { comment: { id: string } }
-  const comments = await probe('GET /api/tasks/:id/comments', cap(36, 35), { path: commentPath })
+  const comments = await probe('GET /api/tasks/:id/comments', 3, { path: commentPath })
   expect(await comments.json()).toMatchObject({ comments: expect.arrayContaining([comment]) })
-  await probe('DELETE /api/tasks/comments/:commentId', cap(36, 35), {
+  await probe('DELETE /api/tasks/comments/:commentId', 3, {
     path: `/api/tasks/comments/${comment.id}`,
   })
-  const updated = await probe('PATCH /api/tasks/:id', cap(30, 29), {
+  const updated = await probe('PATCH /api/tasks/:id', 9, {
     path: taskPath,
     body: { done: true },
   })
   expect(await updated.json()).toMatchObject({ task: { id: task.id, done: true } })
-  await probe('DELETE /api/tasks/:id', cap(31, 30), { path: taskPath })
+  await probe('DELETE /api/tasks/:id', 10, { path: taskPath })
 }
 
 export async function measureFlowsAndTasks(record: Set<string>) {
@@ -171,6 +170,6 @@ export async function measureFlowsAndTasks(record: Set<string>) {
     organizationId: ORG_ACME,
     scopes: ['read', 'write'],
   })
-  await measureTasks(sessionProbe, task.id, 'session')
-  await measureTasks(withAuth(probe, bearerHeaders(key, ORG_ACME), 'api-key'), task.id, 'api-key')
+  await measureTasks(sessionProbe, task.id)
+  await measureTasks(withAuth(probe, bearerHeaders(key, ORG_ACME), 'api-key'), task.id)
 }

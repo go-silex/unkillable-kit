@@ -119,9 +119,11 @@ function scanOrgPolicyViolations(): string[] {
   const violations: string[] = []
   for (const file of files) {
     const text = readFileSync(file, 'utf8')
-    if (/(?:export\s+)?function\s+createOrgMiddleware\s*\(/.test(text)) {
+    const localAuthorizationFactory =
+      /\bfunction\s+(createOrgMiddleware|createRequestAuthorization)\s*[<(]/.exec(text)?.[1]
+    if (localAuthorizationFactory) {
       violations.push(
-        `${rel(file)}: apps/ must not define createOrgMiddleware — import from @kit/auth/hono`,
+        `${rel(file)}: apps/ must not define ${localAuthorizationFactory} — compose createRequestAuthorization from @kit/auth/hono`,
       )
     }
     const body = extractFunctionBody(text, 'requireOrgContext')

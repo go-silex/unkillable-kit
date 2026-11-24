@@ -149,60 +149,48 @@ Auth glue (ADR-0008 D6): import `createBetterAuth` from `@kit/auth/factory`, tab
 
 ### Authentication reads and Organization-context migration
 
-`createBetterAuth` enables native Better Auth database joins. Its Drizzle schema includes the
-session/user, account/user and Organization-plugin relations; the factory builds those relations
-against the exact tables supplied through `schema`. Existing seven-table schema inputs remain
-accepted. `betterAuthDrizzleSchema` and `kitAuthSchema` include relation metadata; do not treat
-every value in those objects as a SQL table. The join optimization itself requires no table,
-migration, cookie-format or `SessionPort` change; Impersonation has its separate migration below.
+Use one `createRequestAuthorization` from `@kit/auth/hono` per App with the primary D1 binding
+and the shipping `createBetterAuth` instance. Use its auth, Organization, Platform Role and Module
+guards together; remove the old ports. Keep the Better Auth account guard on `/api/auth/*`.
+Only Better Auth issues, refreshes or deletes sessions. Cookies and D1 schema are unchanged.
 
-`createOrgMiddleware` now requires one Organization-context read instead of separate
-`findOrgById` and `findMembership` ports:
+Call `authenticateKey` before the default-deny route scope check; call `admitKeyScope` only on
+success. Match the key's Organization to the path `orgId` or `X-Org-Id` and reject conflicts.
+Nonmembers still get `404` for missing, active and suspended Organizations; members of suspended
+Organizations get `403`.
 
-```ts
-// Import repository functions from @kit/auth/repos/orgs.
-const orgMiddleware = createOrgMiddleware({
-  findOrgContext: (db, orgId, subject) =>
-    orgsRepo.findOrgContext(db as KitDb, orgId, subject),
-  getPlatformRole: (db, subject) =>
-    platformRolesRepo.getPlatformRole(db as KitDb, subject),
-  resolveModuleAccess: (db, input) =>
-    orgRolesService.resolveModuleAccess(db as KitDb, input),
-  isModuleEffective: (db, orgId, moduleId) =>
-    platformModulesService.isModuleEffective(db as KitDb, orgId, moduleId),
-})
-```
+Declare Product facts with `defineAuthorizationFact` from `@kit/auth/snapshot`; select registered
+columns with the narrowest supported subject, Organization, role or delegation scope. Include the
+descriptor on its endpoint with `includeFacts` and retrieve it with `fact` after the Kit guards
+succeed. The Kit compiles only correlated, bounded reads. Keep denials and additional Product
+authorization in the route; the decoder is not a guard or a place for I/O. Keep separate Module
+availability and role-grant descriptors in the App's Module registry.
 
-Replace both old port properties in the same change; no compatibility fallback is retained.
-Keep `getPlatformRole` for the independent Platform Role guard. Standalone repository
-`findOrgById` and `findMembership` remain available for callers that need those records.
-The new `OrgContextRecord` exported by `@kit/auth/hono` is
-`{ status: string; membershipRole: string | null; platformRole: PlatformRole | null }`;
-`null` means the Organization does not exist. Custom adapters must scope membership to
-**Organization + authenticated subject**, normalize Platform Roles to the Kit allowlist and
-read current database facts on each request. Organization Role keys remain strings, including
-custom roles.
+Route-enabled super-admin support still requires an active Organization, audit, and explicit
+write opt-in. Bypass can skip the membership grant, but **an unavailable Module now returns `404`
+even with super-admin bypass**. Check that existing Organizations have been provisioned explicitly;
+ordinary role reads, admin validation and Capability Grant minting no longer repair missing grants.
+Use an explicit, reviewed repair only when the grant is meant to exist.
 
-Identity and API-key Organization checks precede the joined read. An ordinary nonmember gets
-the same 404 for missing, active and suspended Organizations. A member of a suspended Organization
-gets 403. Route-enabled super-admin support still requires an active Organization, explicit
-write break-glass permission and the bypass audit; it does not inherit another Organization's
-role. Module checks are unchanged. No identity or authorization cache spans requests, and
-Product-specific account checks remain Product-owned.
-
-Better Auth still owns session refresh, cookies and applied revocations. The join optimization
-does not change handler-only cookie issuance or session resolution behavior.
-The optimization does not implement the password-reset changes tracked by Roxabi/roxabi-boilerplate-cf#395. The refusal
-ordering coordinates with still-open Roxabi/roxabi-boilerplate-cf#398; this document is not a
-claim that either issue has been delivered. See the permanent [authentication regressions](./testing/auth-seams.md#authentication-regressions) and their limits.
+Declare `better-auth` and set `kitBetterAuth` in each shipping App's `package.json` to the
+App-relative TypeScript module used by its Worker. It exports `createAppBetterAuth` and uses
+`createBetterAuth` from `@kit/auth/factory`. Align the lockfile on one resolved version without
+editing Kit files or substituting a test issuer. Run `bun run validate:full`.
+See [ADR-0025](./architecture/adr/0025-request-authorization-snapshot.md).
 
 ### Impersonation V1 migration
 
 Sync the catalog's additive `impersonation` core id (`0024_impersonation.sql` in the Example App journal), retaining `audit` and every other already selected schema set. `kitAuthSchema` exports `impersonationRolePermissions` and `impersonationSessions`; the repositories are available through `@kit/auth/repos/impersonation`. No permission is enabled by the migration or normal demo seed.
 
-`SessionPayload` now requires the verified Better Auth `sessionId`, not its cookie token. Consumers of `createBetterAuthSessionPort` receive it automatically; migrate custom session fixtures and port implementations rather than inventing an id. The cookie format and Better Auth session owner are unchanged. The shared `/api/me` parser now requires `impersonation` (nullable) and `impersonationPermissions` (independent read/write booleans).
+The Kit projects the verified Better Auth `sessionId`, never the cookie token. Integration fixtures
+should issue real cookies through the shipping Better Auth composition. The shared `/api/me` parser
+requires `impersonation` (nullable) and `impersonationPermissions` (independent read/write booleans).
 
-An App composing Impersonation must gate every request after verified session resolution and before route dispatch, including raw Better Auth, MCP and other paths outside `requireAuth`. Its operation policy is explicit and default-deny. Both identities must belong to the pinned Organization; target guards and live Module grants apply without operator bypass. Do not treat permission to administer users as permission to impersonate.
+An App composing Impersonation opts into delegation facts and gates every request before dispatch,
+including raw Better Auth, MCP and other paths outside `requireAuth`. It marks the fence admitted
+only after its explicit default-deny operation policy and any required audit. Both identities must
+belong to the pinned Organization; the represented User's live Module grants apply without operator
+bypass. Permission to administer Users does not imply permission to impersonate.
 
 Clients send `X-Impersonation-Id` with the exact public delegation id, or `none` for ordinary requests. It never authenticates a request. A stale fence must fail before any Bearer fallback can select another identity. `/api/me` remains available for recovery; `impersonation.active: false` means no business access, not an automatic return to the operator. The stop operation uses the real session and expected delegation id; refetch `/api/me` before assuming which identity is current.
 

@@ -120,20 +120,6 @@ export async function createOrganization(
   return { id: orgId, name, slug, kind, status: 'active' as const, role: 'owner' as const }
 }
 
-export async function getOrgForSubject(db: Db, orgId: string, subject: string) {
-  const org = await orgsRepo.findOrgById(db, orgId)
-  if (!org) throw AppError.notFound('Organization not found')
-  const membership = await orgsRepo.findMembership(db, orgId, subject)
-  if (membership) {
-    return { ...org, role: membership.role, bypass: false }
-  }
-  const platformRole = await platformRolesRepo.getPlatformRole(db, subject)
-  if (platformRole === 'super_admin') {
-    return { ...org, role: null as string | null, bypass: true }
-  }
-  throw AppError.notFound('Organization not found')
-}
-
 export async function listOrgMembers(db: Db, orgId: string) {
   const members = await orgsRepo.listMembers(db, orgId)
   return members.map((m) => ({
