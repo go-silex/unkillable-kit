@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { dirname, isAbsolute, join, relative } from 'node:path'
 import { type Program, Visitor } from 'oxc-parser'
@@ -15,6 +16,7 @@ export type BetterAuthApp = {
   workspace: string
   dir: string
   composition: string
+  factoryCallee: { start: number; end: number; hash: string }
   targets: WorkerTarget[]
 }
 const serverFactoryExports = new Map([
@@ -72,7 +74,7 @@ function importsServerFactory(program: Program) {
   return found
 }
 
-function returnsKitInstance(program: Program) {
+function kitFactoryBindings(program: Program) {
   const kitNames = new Set<string>()
   for (const statement of program.body) {
     if (
@@ -91,28 +93,36 @@ function returnsKitInstance(program: Program) {
         kitNames.add(item.local.name)
     }
   }
+  return kitNames
+}
+
+function findKitFactoryCallee(program: Program) {
+  const kitNames = kitFactoryBindings(program)
   let factoryCalls = 0
   new Visitor({
     CallExpression(node) {
       if (node.callee.type === 'Identifier' && kitNames.has(node.callee.name)) factoryCalls++
     },
   }).visit(program)
-  if (factoryCalls !== 1) return false
-  return program.body.some((node) => {
+  if (factoryCalls !== 1) return
+  for (const node of program.body) {
     if (
       node.type !== 'ExportNamedDeclaration' ||
       node.declaration?.type !== 'FunctionDeclaration' ||
       node.declaration.id?.name !== adapterName
     )
-      return false
+      continue
     const returnValue = node.declaration.body?.body.at(-1)
-    return (
+    if (
       returnValue?.type === 'ReturnStatement' &&
       returnValue.argument?.type === 'CallExpression' &&
       returnValue.argument.callee.type === 'Identifier' &&
       kitNames.has(returnValue.argument.callee.name)
-    )
-  })
+    ) {
+      const { start, end } = returnValue.argument.callee
+      return { start, end }
+    }
+  }
 }
 
 function installedVersion(from: string) {
@@ -138,7 +148,15 @@ function discoverComposition(root: string, path: string): BetterAuthApp | undefi
     const code = readFileSync(fullPath, 'utf8')
     if (!(code.includes(dependency) || code.includes(kitFactory))) return []
     const program = parseProgram(fullPath, code)
-    return importsServerFactory(program) ? [{ file, program }] : []
+    return importsServerFactory(program)
+      ? [
+          {
+            file,
+            callee: findKitFactoryCallee(program),
+            hash: createHash('sha256').update(code).digest('hex'),
+          },
+        ]
+      : []
   })
   if (!factories.length && manifest.kitBetterAuth === undefined) return
   if (!manifest.dependencies?.[dependency]) {
@@ -151,7 +169,7 @@ function discoverComposition(root: string, path: string): BetterAuthApp | undefi
     factories.length !== 1 ||
     !factory ||
     manifest.kitBetterAuth !== factory.file ||
-    !returnsKitInstance(factory.program)
+    !factory.callee
   ) {
     throw new Error(
       `${workspace}: kitBetterAuth must name the sole shipping createBetterAuth export that returns the Kit factory instance (runtime modules: ${factories.map(({ file }) => file).join(', ') || 'none'})`,
@@ -163,7 +181,13 @@ function discoverComposition(root: string, path: string): BetterAuthApp | undefi
     throw new Error(`${workspace}: shipping Better Auth composition must be App-local`)
   }
   try {
-    return { workspace, dir, composition, targets: verifyWorkerWiring(dir, composition) }
+    return {
+      workspace,
+      dir,
+      composition,
+      factoryCallee: { ...factory.callee, hash: factory.hash },
+      targets: verifyWorkerWiring(dir, composition),
+    }
   } catch (cause) {
     throw new Error(`${workspace}: ${cause instanceof Error ? cause.message : String(cause)}`)
   }

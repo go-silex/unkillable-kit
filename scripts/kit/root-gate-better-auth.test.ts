@@ -199,25 +199,43 @@ export default { fetch: () => new Response(null, { status: 503 }) }
 `,
   )
   runCore(unwired) // The reachable module imports the adapter but does not call it.
-  put(`${app}/src/worker.ts`, `import { fetch } from './edge'\nexport default { fetch }\n`)
+  put(
+    `${app}/src/worker.ts`,
+    `import { fetch } from './edge'
+export default {
+  fetch(req, env) {
+    if ('ROOT_GATE_LOCAL_ONLY' in env) return new Response(null, { status: 418 })
+    return fetch(req, env)
+  },
+}
+`,
+  )
   put(`${app}/src/edge.ts`, `export { fetch } from './auth-consumer'\n`)
+  const withRelease = `${workerConfig}\n[[env.release.d1_databases]]\n${database}`
+  put(`${app}/wrangler.toml`, withRelease)
+  for (const localFile of ['.dev.vars', '.dev.vars.release', '.env']) {
+    put(`${app}/${localFile}`, 'ROOT_GATE_LOCAL_ONLY=fixture-canary\n')
+  }
   assert.match(runCore(), /apps\/product-fixture differential fixtures passed/)
 
   // This release environment calls the enrolled composition, but sends a genuine, compatible
   // cookie from a different instance. Neither call reachability nor successful sign-in is proof.
+  put(`${app}/wrangler.toml`, `${withRelease}\n[env.release.vars]\nWRONG_ISSUER = "true"\n`)
   put(
-    `${app}/wrangler.toml`,
-    `${workerConfig}
-[env.release.vars]
-WRONG_ISSUER = "true"
-[[env.release.d1_databases]]
-${database}`,
+    'packages/alternate-issuer/issuer.ts',
+    `import { createBetterAuth } from '@kit/auth/factory'
+export function alternateIssuer(options) { return createBetterAuth(options) }
+`,
   )
-  const actualFactory = Bun.resolveSync('@kit/auth/factory', join(repo, 'apps/starter-api'))
+  symlinkSync(
+    join(repo, 'apps/starter-api/node_modules'),
+    join(root, 'packages/alternate-issuer/node_modules'),
+    'dir',
+  )
   put(
     `${app}/src/auth-consumer.ts`,
     `import { createBetterAuth as issueAuth } from './better-auth'
-import { createBetterAuth as alternateIssuer } from ${JSON.stringify(actualFactory)}
+import { alternateIssuer } from '../../../packages/alternate-issuer/issuer'
 export function fetch(req, env) {
   const baseURL = env.BETTER_AUTH_URL
   const enrolled = issueAuth(env, baseURL)
@@ -230,6 +248,16 @@ export function fetch(req, env) {
 `,
   )
   runCore(/--env release\) failed:[\s\S]*mounted Better Auth cookie lacks provenance/)
+
+  put(
+    `${app}/src/configured-issuer.ts`,
+    "export function createBetterAuth() { throw new Error('wrong configured issuer') }\n",
+  )
+  put(
+    `${app}/wrangler.toml`,
+    `${workerConfig}\n[alias]\n"@kit/auth/factory" = "./src/configured-issuer.ts"\n`,
+  )
+  runCore(/Wrangler build did not resolve the enrolled composition to the installed Kit factory/)
 
   json('packages/nested-consumer/package.json', {
     name: 'nested-consumer',
