@@ -60,6 +60,7 @@ export function bundleWorker(
     0,
     `Wrangler could not build release entrypoint ${label}:\n${bundled.stdout}${bundled.stderr}`,
   )
+  if (target.noBundle) return { build, emptyEnv, inputs: undefined }
   assert.ok(existsSync(metafile), `Wrangler did not report the release input graph for ${label}`)
   const { inputs }: { inputs: BundleInputs } = JSON.parse(readFileSync(metafile, 'utf8'))
   return { build, emptyEnv, inputs }

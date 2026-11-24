@@ -1,6 +1,6 @@
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import {
   type BindingPattern,
   type BindingRestElement,
@@ -11,12 +11,15 @@ import {
   Visitor,
 } from 'oxc-parser'
 import { wranglerConfigs } from './lib/wrangler-d1'
-import { bundleWorker } from './root-gate-better-auth-build.ts'
+import { type BundleInputs, bundleWorker } from './root-gate-better-auth-build.ts'
+import { indexServerEntrypoints } from './root-gate-better-auth-entries'
 
 export const adapterName = 'createBetterAuth'
 export const kitFactory = '@kit/auth/factory'
 
-export type WorkerTarget = { config: string; env?: string; entry: string }
+export type WorkerTarget = { config: string; env?: string; entry: string; noBundle?: boolean }
+type WorkerConfig = { main?: unknown; no_bundle?: boolean }
+const runtimeExtension = /\.[cm]?[jt]sx?$/
 
 export function shippingSource(path: string) {
   return !(
@@ -36,7 +39,7 @@ function isLocalSource(app: string, file: string) {
   const path = relative(app, file)
   return (
     !(isAbsolute(path) || path === '..' || path.startsWith(`..${sep}`)) &&
-    /\.[cm]?[jt]sx?$/.test(path) &&
+    runtimeExtension.test(path) &&
     shippingSource(path)
   )
 }
@@ -59,20 +62,24 @@ function workerEntrypoints(app: string, required = true): WorkerTarget[] {
   if (required && !configs.length)
     throw new Error('add an App-root Wrangler config with a Worker main')
   const entries: WorkerTarget[] = []
-  function addTarget(config: string, main: unknown, env?: string) {
+  function addTarget(config: string, { main, no_bundle }: WorkerConfig, env?: string) {
     if (required || main !== undefined) {
-      entries.push({ config, env, entry: workerMainFile(app, config, main) })
+      const entry = required ? workerMainFile(app, config, main) : resolve(app, String(main))
+      entries.push({ config, env, entry, noBundle: no_bundle })
     }
   }
   for (const file of configs) {
     const text = readFileSync(file, 'utf8')
-    const config = (file.endsWith('.toml') ? Bun.TOML.parse(text) : Bun.JSONC.parse(text)) as {
-      main?: unknown
-      env?: Record<string, { main?: unknown }>
-    }
-    addTarget(file, config.main)
+    const config = (
+      file.endsWith('.toml') ? Bun.TOML.parse(text) : Bun.JSONC.parse(text)
+    ) as WorkerConfig & { env?: Record<string, WorkerConfig> }
+    addTarget(file, config)
     for (const [env, options] of Object.entries(config.env ?? {})) {
-      addTarget(file, options.main ?? config.main, env)
+      addTarget(
+        file,
+        { main: options.main ?? config.main, no_bundle: options.no_bundle ?? config.no_bundle },
+        env,
+      )
     }
   }
   return entries
@@ -108,6 +115,22 @@ function staticRuntimeSource(node: Statement) {
   }
 }
 
+function unbundledUsesServerFactory(
+  build: string,
+  entry: string,
+  importsFactory: (program: Program) => boolean,
+) {
+  if (!existsSync(join(build, basename(entry)))) {
+    throw new Error(`Wrangler did not emit the unbundled Worker entrypoint ${entry}`)
+  }
+  return readdirSync(build, { recursive: true, withFileTypes: true }).some(
+    (file) =>
+      file.isFile() &&
+      runtimeExtension.test(file.name) &&
+      importsFactory(parseProgram(join(file.parentPath, file.name))),
+  )
+}
+
 export function workerUsesServerFactory(
   app: string,
   workspaceRoots: readonly string[],
@@ -119,20 +142,30 @@ export function workerUsesServerFactory(
   if (!node) throw new Error('Node is required to inspect Wrangler’s release input graph')
   const wrangler = Bun.resolveSync('wrangler', app)
   const inspected = new Set<string>()
-  function isServerInput(input: string) {
+  const entries = indexServerEntrypoints()
+  function isServerInput([input, { imports }]: [string, BundleInputs[string]]) {
     const path = resolve(app, input)
     if (!existsSync(path)) return false // Wrangler also reports virtual inputs.
     const file = realpathSync(path)
-    if (inspected.has(file) || !workspaceRoots.some((root) => isLocalSource(root, file)))
+    if (!workspaceRoots.some((root) => isLocalSource(root, file)) || entries.isSDKFile(file)) {
       return false
+    }
+    // Resolve edges per target: the same source can map to another package in release.
+    if (imports.some((edge) => !edge.external && entries.isServerEntry(resolve(app, edge.path)))) {
+      return true
+    }
+    if (inspected.has(file)) return false
     inspected.add(file)
     return importsFactory(parseProgram(file))
   }
   for (const target of targets) {
     const scratch = mkdtempSync(resolve(tmpdir(), 'root-better-auth-inputs-'))
     try {
-      const { inputs } = bundleWorker(node, wrangler, app, target, scratch)
-      if (Object.keys(inputs).some(isServerInput)) return true
+      const { build, inputs } = bundleWorker(node, wrangler, app, target, scratch)
+      const usesFactory = inputs
+        ? Object.entries(inputs).some(isServerInput)
+        : unbundledUsesServerFactory(build, target.entry, importsFactory)
+      if (usesFactory) return true
     } finally {
       rmSync(scratch, { recursive: true, force: true })
     }

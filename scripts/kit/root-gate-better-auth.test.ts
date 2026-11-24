@@ -323,6 +323,35 @@ export default { fetch: (request, env) => alternateIssuer(env).handler(request) 
   const missingDependency =
     /apps\/product-fixture: shipping Better Auth composition must declare better-auth directly/
   runCore(missingDependency)
+
+  // Resolution can also target a package export directly, with no shared wrapper.
+  put(
+    `${app}/src/release.ts`,
+    `import * as resolved from '@fixture/alternate-issuer/ordinary'
+export default { fetch: () => Response.json(Object.keys(resolved)) }
+`,
+  )
+  for (const [specifier, error] of [
+    ['better-auth/client', undefined],
+    ['better-auth', missingDependency],
+    ['better-auth/minimal', missingDependency],
+    ['@kit/auth/factory', missingDependency],
+  ] as const) {
+    const entry = Bun.resolveSync(specifier, join(root, app))
+    put(
+      `${app}/wrangler.toml`,
+      `${distinctRelease}\n[alias]\n"@fixture/alternate-issuer/ordinary" = ${JSON.stringify(entry)}\n`,
+    )
+    runCore(error)
+  }
+
+  // Valid prebuilt Workers are emitted without an esbuild metafile.
+  put(
+    `${app}/wrangler.toml`,
+    workerConfig.replace('main = "src/worker.ts"', 'main = "dist/worker.mjs"\nno_bundle = true'),
+  )
+  put(`${app}/dist/worker.mjs`, 'export default { fetch: () => new Response("unbundled") }\n')
+  assert.doesNotMatch(runCore(), /apps\/product-fixture differential fixtures passed/)
   put(`${app}/wrangler.toml`, workerConfig)
 
   // A runtime import of the same declared workspace cannot bypass enrollment.

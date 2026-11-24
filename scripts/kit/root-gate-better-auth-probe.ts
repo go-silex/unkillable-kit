@@ -214,6 +214,7 @@ async function run(probe: MountedProbe) {
     probe.scratch,
     installBuildHook(probe, challenge),
   )
+  assert.ok(inputs, 'The enrolled issuer requires a Wrangler release input graph')
   verifyFactoryResolution(probe, inputs)
   const requireFromWrangler = createRequire(probe.wrangler)
   const wrangler: Wrangler = requireFromWrangler(probe.wrangler)
