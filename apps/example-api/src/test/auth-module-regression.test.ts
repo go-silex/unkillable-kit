@@ -50,6 +50,8 @@ it('batches Module admission and checks availability even for audited support', 
   const supportHeaders = sessionHeaders(support)
   const response = await get(stages, staffHeaders, 200, 3)
   expect(await response.json()).toMatchObject({ stages: expect.any(Array) })
+  const memberResponse = await get('/test/support/org_acme', staffHeaders, 200, 1)
+  expect(await memberResponse.json()).toEqual({ bypass: false, role: 'admin' })
   const supportResponse = await get('/test/support/org_solo', supportHeaders, 200, 1)
   expect(await supportResponse.json()).toEqual({ bypass: true, role: null })
 
@@ -57,6 +59,7 @@ it('batches Module admission and checks availability even for audited support', 
   expect(role).toBeDefined()
   expect(await deleteGrant(db, 'org_acme', role!.id, TASKS_MODULE_ID)).toBe(true)
   await get(stages, staffHeaders, 403, 1)
+  await get('/test/support/org_acme', staffHeaders, 403, 1)
 
   await upsertPlatformModule(db, { moduleId: TASKS_MODULE_ID, available: false, updatedAt })
   await get(stages, staffHeaders, 404, 1)
