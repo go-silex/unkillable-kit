@@ -11,7 +11,11 @@ import {
   Visitor,
 } from 'oxc-parser'
 import { wranglerConfigs } from './lib/wrangler-d1'
-import { type BundleInputs, bundleWorker } from './root-gate-better-auth-build.ts'
+import {
+  type BundleInputs,
+  bundleInputContributions,
+  bundleWorker,
+} from './root-gate-better-auth-build.ts'
 import { indexServerEntrypoints } from './root-gate-better-auth-entries'
 
 export const adapterName = 'createBetterAuth'
@@ -24,6 +28,12 @@ type DetectFactoryImports = (
   resolveFactory?: (source: string) => string | undefined,
 ) => boolean
 const runtimeExtension = /\.[cm]?[jt]sx?$/
+const generatedDirectory = /(^|\/)(?:dist|build)\//
+const installedDirectory = /(^|\/)node_modules\//
+
+function isWithin(path: string) {
+  return !(isAbsolute(path) || path === '..' || path.startsWith(`..${sep}`))
+}
 
 export function shippingSource(path: string) {
   return !(
@@ -41,11 +51,7 @@ export function parseProgram(path: string, code = readFileSync(path, 'utf8')) {
 
 function isLocalSource(app: string, file: string) {
   const path = relative(app, file)
-  return (
-    !(isAbsolute(path) || path === '..' || path.startsWith(`..${sep}`)) &&
-    runtimeExtension.test(path) &&
-    shippingSource(path)
-  )
+  return isWithin(path) && runtimeExtension.test(path) && shippingSource(path)
 }
 
 function workerMainFile(app: string, file: string, main: unknown) {
@@ -145,13 +151,30 @@ function unbundledUsesServerFactory(
     if (!(file.isFile() && runtimeExtension.test(file.name))) return false
     const path = join(file.parentPath, file.name)
     const module = relative(build, path)
-    if (/(^|\/)(?:dist|build)\//.test(module)) {
+    if (generatedDirectory.test(module)) {
       throw new Error(
         `Cannot inventory opaque Worker inputs for ${entry}: use transparent modules outside dist/build instead of ${module}`,
       )
     }
     return importsFactory(parseProgram(path))
   })
+}
+
+function inspectableBundleInput(
+  file: string,
+  workspaceRoots: readonly string[],
+  contribution: boolean | undefined,
+) {
+  if (contribution === undefined || !runtimeExtension.test(file)) return false
+  const workspace = workspaceRoots.find((root) => isWithin(relative(root, file)))
+  const path = workspace && relative(workspace, file)
+  if (!path || installedDirectory.test(path)) return true
+  if (generatedDirectory.test(path) && contribution) {
+    throw new Error(
+      `Cannot inventory opaque Worker inputs: ${file} is a deployed workspace output; use inspectable source outside dist/build`,
+    )
+  }
+  return shippingSource(path)
 }
 
 export function workerUsesServerFactory(
@@ -165,20 +188,33 @@ export function workerUsesServerFactory(
   if (!node) throw new Error('Node is required to inspect Wrangler’s release input graph')
   const wrangler = Bun.resolveSync('wrangler', app)
   const entries = indexServerEntrypoints()
-  function isServerInput([input, { imports }]: [string, BundleInputs[string]]) {
-    const path = resolve(app, input)
-    if (!existsSync(path)) return false // Wrangler also reports virtual inputs.
-    const file = realpathSync(path)
-    if (!workspaceRoots.some((root) => isLocalSource(root, file)) || entries.isSDKFile(file)) {
-      return false
-    }
-    // Resolve edges per target: the same source can map to another package in release.
+  function resolvedFactories(
+    imports: BundleInputs[string]['imports'],
+    contributions: ReadonlyMap<string, boolean>,
+  ) {
     const factories = new Map<string, string>()
     for (const edge of imports) {
-      if (edge.external) continue
+      if (edge.external || !contributions.has(edge.path)) continue
       const factory = entries.factoryExport(resolve(app, edge.path))
       if (factory) factories.set(edge.original ?? edge.path, factory)
     }
+    return factories
+  }
+  function isServerInput(
+    [input, { imports }]: [string, BundleInputs[string]],
+    contributions: ReadonlyMap<string, boolean>,
+  ) {
+    const path = resolve(app, input)
+    if (!existsSync(path)) return false // Wrangler also reports virtual inputs.
+    const file = realpathSync(path)
+    if (
+      !inspectableBundleInput(file, workspaceRoots, contributions.get(input)) ||
+      entries.isSDKFile(file)
+    ) {
+      return false
+    }
+    // Resolve edges per target: the same source can map to another package in release.
+    const factories = resolvedFactories(imports, contributions)
     return (
       factories.size > 0 && importsFactory(parseProgram(file), (source) => factories.get(source))
     )
@@ -186,11 +222,13 @@ export function workerUsesServerFactory(
   for (const target of targets) {
     const scratch = mkdtempSync(resolve(tmpdir(), 'root-better-auth-inputs-'))
     try {
-      const { build, inputs } = bundleWorker(node, wrangler, app, target, scratch)
-      const usesFactory = inputs
-        ? Object.entries(inputs).some(isServerInput)
-        : unbundledUsesServerFactory(build, target.entry, importsFactory)
-      if (usesFactory) return true
+      const { build, inputs, outputs } = bundleWorker(node, wrangler, app, target, scratch)
+      if (!inputs) {
+        if (unbundledUsesServerFactory(build, target.entry, importsFactory)) return true
+        continue
+      }
+      const contributions = bundleInputContributions(outputs)
+      if (Object.entries(inputs).some((input) => isServerInput(input, contributions))) return true
     } finally {
       rmSync(scratch, { recursive: true, force: true })
     }

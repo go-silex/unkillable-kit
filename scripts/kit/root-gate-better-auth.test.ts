@@ -335,6 +335,12 @@ export default { fetch: () => Response.json(typeof selected) }
 `,
     )
   }
+  function useReleaseAlias(entry: string) {
+    put(
+      `${app}/wrangler.toml`,
+      `${distinctRelease}\n[alias]\n"${aliasSource}" = ${JSON.stringify(entry)}\n`,
+    )
+  }
   for (const [specifier, imported, error] of [
     ['better-auth/client', 'createAuthClient', undefined],
     ['better-auth', 'betterAuth', missingDependency],
@@ -344,11 +350,7 @@ export default { fetch: () => Response.json(typeof selected) }
     ['@kit/auth/factory', 'hashVerificationIdentifier', undefined],
   ] as const) {
     useReleaseImport(aliasSource, imported)
-    const entry = Bun.resolveSync(specifier, join(root, app))
-    put(
-      `${app}/wrangler.toml`,
-      `${distinctRelease}\n[alias]\n"@fixture/alternate-issuer/ordinary" = ${JSON.stringify(entry)}\n`,
-    )
+    useReleaseAlias(Bun.resolveSync(specifier, join(root, app)))
     runCore(error)
   }
   put(`${app}/wrangler.toml`, distinctRelease)
@@ -358,6 +360,37 @@ export default { fetch: () => Response.json(typeof selected) }
   ] as const) {
     useReleaseImport(specifier, helper)
     runCore()
+  }
+
+  function useNamespace(source: string, expression: string) {
+    put(
+      `${app}/src/release.ts`,
+      `import * as sdk from ${JSON.stringify(source)}
+type Namespace = typeof sdk
+export default { fetch: () => Response.json(${expression}) }
+`,
+    )
+  }
+  for (const [specifier, helper] of [
+    ['better-auth', 'getBaseURL'],
+    ['@kit/auth/factory', 'hashVerificationIdentifier'],
+  ] as const) {
+    put(`${app}/wrangler.toml`, distinctRelease)
+    useNamespace(specifier, `typeof sdk.${helper}`)
+    runCore()
+    useReleaseAlias(Bun.resolveSync(specifier, join(root, app)))
+    useNamespace(aliasSource, `typeof sdk[${JSON.stringify(helper)}]`)
+    runCore()
+  }
+  // Keep the Kit alias from the last iteration: statically reading the factory,
+  // passing the namespace to another function or computing the key are all unsafe.
+  for (const expression of [
+    'typeof sdk.createBetterAuth',
+    'Object.keys(sdk)',
+    "sdk[new URL('https://example.invalid/get').pathname.slice(1)]",
+  ]) {
+    useNamespace(aliasSource, expression)
+    runCore(missingDependency)
   }
 
   // Transparent no_bundle source is emitted without an esbuild metafile.
@@ -403,6 +436,12 @@ export default { fetch: (request) => betterAuth({}).handler(request) }
     )
     runCore(opaqueWorker)
   }
+  const workspaceOutput = 'packages/alternate-issuer/dist/worker.mjs'
+  mkdirSync(dirname(join(root, workspaceOutput)), { recursive: true })
+  copyFileSync(join(root, app, 'dist/worker.mjs'), join(root, workspaceOutput))
+  useReleaseImport(aliasSource, 'default')
+  useReleaseAlias(join(root, workspaceOutput))
+  runCore(/Cannot inventory opaque Worker inputs: .* is a deployed workspace output/)
   put(`${app}/wrangler.toml`, `${workerConfig}\n[build]\ncommand = "touch build-ran"\n`)
   runCore(opaqueWorker)
   assert.equal(existsSync(join(root, app, 'build-ran')), false)
@@ -423,6 +462,42 @@ export default { fetch: (request, env) => alternateIssuer(env).handler(request) 
   runCore(
     /kitBetterAuth must name the sole shipping createBetterAuth export.*runtime modules: none/,
   )
+
+  // An installed wrapper's normal dist directory is not a first-party opaque build,
+  // but a live edge from it to the server factory still requires enrollment.
+  const installedWrapper = '@fixture/installed-issuer'
+  const installedPath = `${app}/node_modules/${installedWrapper}`
+  const installedDependencies = { [installedWrapper]: '1.0.0' }
+  const wrapperDependencies = { 'better-auth': '*' }
+  json(`${installedPath}/package.json`, {
+    name: installedWrapper,
+    exports: './dist/index.mjs',
+    dependencies: wrapperDependencies,
+  })
+  json(`${app}/package.json`, { ...productManifest, dependencies: installedDependencies })
+  json('bun.lock', {
+    workspaces: {
+      ...workspaces,
+      [app]: { name: 'product-fixture', dependencies: installedDependencies },
+    },
+    packages: {
+      ...packages,
+      [installedWrapper]: [`${installedWrapper}@1.0.0`, '', { dependencies: wrapperDependencies }],
+    },
+  })
+  put(
+    `${installedPath}/dist/index.mjs`,
+    `import { betterAuth } from 'better-auth'
+export function issuer() { return betterAuth({}) }
+`,
+  )
+  put(
+    `${app}/src/worker.ts`,
+    `import { issuer } from '${installedWrapper}'
+export default { fetch: (request) => issuer().handler(request) }
+`,
+  )
+  runCore(missingDependency)
 
   json('packages/nested-consumer/package.json', {
     name: 'nested-consumer',

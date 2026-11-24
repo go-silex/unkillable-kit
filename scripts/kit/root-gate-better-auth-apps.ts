@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto'
 import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { dirname, isAbsolute, join, relative } from 'node:path'
-import { type Program, Visitor } from 'oxc-parser'
+import { type ModuleExportName, type Program, Visitor } from 'oxc-parser'
 import { dependency } from './root-gate-better-auth-lock'
+import { namespaceUsesFactory } from './root-gate-better-auth-namespace'
 import {
   adapterName,
   kitFactory,
@@ -30,25 +31,30 @@ const serverFactoryExports = new Map([
 ])
 const runtimeSources = new Bun.Glob('**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}')
 
+function exportName(node: ModuleExportName) {
+  return node.type === 'Identifier' ? node.name : node.value
+}
+
 function importsServerFactory(
   program: Program,
   resolveFactory: (source: string) => string | undefined = (source) =>
     serverFactoryExports.get(source),
 ) {
   let found = false
+  const namespaces = new Map<string, string>()
   function check(source: string, exported?: string) {
     const factory = resolveFactory(source)
     found ||= factory !== undefined && (exported === undefined || exported === factory)
   }
   new Visitor({
     ImportDeclaration(node) {
-      if (node.importKind === 'type') return
+      const factory = resolveFactory(node.source.value)
+      if (!factory || node.importKind === 'type') return
       for (const item of node.specifiers) {
-        if (item.type === 'ImportNamespaceSpecifier') check(node.source.value)
-        else if (item.type === 'ImportSpecifier' && item.importKind !== 'type') {
-          const name =
-            item.imported.type === 'Identifier' ? item.imported.name : item.imported.value
-          check(node.source.value, name)
+        if (item.type === 'ImportNamespaceSpecifier') {
+          namespaces.set(item.local.name, factory)
+        } else if (item.type === 'ImportSpecifier') {
+          found ||= item.importKind !== 'type' && exportName(item.imported) === factory
         }
       }
     },
@@ -56,8 +62,7 @@ function importsServerFactory(
       if (node.exportKind === 'type' || !node.source) return
       for (const item of node.specifiers) {
         if (item.exportKind !== 'type') {
-          const name = item.local.type === 'Identifier' ? item.local.name : item.local.value
-          check(node.source.value, name)
+          check(node.source.value, exportName(item.local))
         }
       }
     },
@@ -79,7 +84,7 @@ function importsServerFactory(
         check(arg.value)
     },
   }).visit(program)
-  return found
+  return found || namespaceUsesFactory(program, namespaces)
 }
 
 function kitFactoryBindings(program: Program) {

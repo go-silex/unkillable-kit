@@ -8,6 +8,18 @@ export type BundleInputs = Record<
   string,
   { imports: { original?: string; path: string; external?: boolean }[] }
 >
+type BundleOutputs = Record<string, { inputs: Record<string, { bytesInOutput: number }> }>
+
+export function bundleInputContributions(outputs: BundleOutputs) {
+  // A linked barrel can contribute zero bytes; absence means the whole input was shaken out.
+  const contributions = new Map<string, boolean>()
+  for (const output of Object.values(outputs)) {
+    for (const [input, { bytesInOutput }] of Object.entries(output.inputs)) {
+      if (!contributions.get(input)) contributions.set(input, bytesInOutput > 0)
+    }
+  }
+  return contributions
+}
 
 export function bundleWorker(
   node: string,
@@ -60,8 +72,10 @@ export function bundleWorker(
     0,
     `Wrangler could not build release entrypoint ${label}:\n${bundled.stdout}${bundled.stderr}`,
   )
-  if (target.noBundle) return { build, emptyEnv, inputs: undefined }
+  if (target.noBundle) return { build, emptyEnv, inputs: undefined, outputs: undefined }
   assert.ok(existsSync(metafile), `Wrangler did not report the release input graph for ${label}`)
-  const { inputs }: { inputs: BundleInputs } = JSON.parse(readFileSync(metafile, 'utf8'))
-  return { build, emptyEnv, inputs }
+  const { inputs, outputs }: { inputs: BundleInputs; outputs: BundleOutputs } = JSON.parse(
+    readFileSync(metafile, 'utf8'),
+  )
+  return { build, emptyEnv, inputs, outputs }
 }
