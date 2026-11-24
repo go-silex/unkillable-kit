@@ -103,11 +103,11 @@ Organization mutations use submitted Organization and values for requests and ca
 
 ### D. Auth + **cookies**
 
-| Élément                       | Choix                                                                                         | Quand | Statut | Paquets             |
-| ----------------------------- | --------------------------------------------------------------------------------------------- | ----- | ------ | ------------------- |
-| Sessions UI (**aujourd’hui**) | **Better Auth** — [ADR-0002](../architecture/adr/0002-session-hmac-interim-vs-better-auth.md) | kit   | livré  | `@kit/auth/factory` |
-| API keys machine              | `sk_…` hash en D1, **per-user**                                                               | kit   | livré  | `@kit/auth`         |
-| Guards (kit)                  | Hono : instantané d’autorisation par requête (Bearer **ou** cookie)                           | kit   | livré  | `@kit/auth/hono`    |
+| Élément                       | Choix                                                                                         | Quand | Statut | Paquets     |
+| ----------------------------- | --------------------------------------------------------------------------------------------- | ----- | ------ | ----------- |
+| Sessions UI (**aujourd’hui**) | **Better Auth** — [ADR-0002](../architecture/adr/0002-session-hmac-interim-vs-better-auth.md) | kit   | livré  | `@kit/auth` |
+| API keys machine              | `sk_…` hash en D1, **per-user**                                                               | kit   | livré  | `@kit/auth` |
+| Guards (kit)                  | Hono : instantané d’autorisation par requête (Bearer **ou** cookie)                           | kit   | livré  | `@kit/auth` |
 
 OpenID Provider opt-in : [`@kit/auth`](../../../packages/auth/README.md).
 
