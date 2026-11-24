@@ -149,37 +149,30 @@ Auth glue (ADR-0008 D6): import `createBetterAuth` from `@kit/auth/factory`, tab
 
 ### Authentication reads and Organization-context migration
 
-Use one `createRequestAuthorization` from `@kit/auth/hono` per App with the primary D1 binding
-and the shipping `createBetterAuth` instance. Use its auth, Organization, Platform Role and Module
-guards together; remove the old ports. Keep the Better Auth account guard on `/api/auth/*`.
-Only Better Auth issues, refreshes or deletes sessions. Cookies and D1 schema are unchanged.
+Create one `createRequestAuthorization` (`@kit/auth/hono`) per App with primary D1 and the shipping
+Better Auth instance. Replace the old ports with its auth, Organization, Platform Role and Module guards.
+Keep the Better Auth account guard on `/api/auth/*`; only Better Auth mutates sessions. Cookies and
+D1 schema are unchanged.
 
-Call `authenticateKey` before the default-deny route scope check; call `admitKeyScope` only on
-success. Match the key's Organization to the path `orgId` or `X-Org-Id` and reject conflicts.
-Nonmembers still get `404` for missing, active and suspended Organizations; members of suspended
-Organizations get `403`.
+Run `authenticateKey`, enforce the default-deny route scope, then call `admitKeyScope`. Match the
+key's Organization against the path `orgId` or `X-Org-Id`; reject conflicts. Nonmembers get `404`
+whether the Organization exists or not. Members of suspended Organizations get `403`.
 
-Declare Product facts with `defineAuthorizationFact` from `@kit/auth/snapshot`; select registered
-columns with the narrowest supported subject, Organization, role or delegation scope. Include the
-descriptor on its endpoint with `includeFacts` and retrieve it with `fact` after the Kit guards
-succeed. The Kit compiles only correlated, bounded reads. Keep denials and additional Product
-authorization in the route; the decoder is not a guard or a place for I/O. Keep separate Module
-availability and role-grant descriptors in the App's Module registry.
+Declare scoped, read-only Product projections with `defineAuthorizationFact` (`@kit/auth/snapshot`).
+Register them on the endpoint with `includeFacts`; read them with `fact` after the guards pass.
+Keep policy and I/O out of decoders. Register Module availability and role-grant facts separately.
 
-Route-enabled super-admin support still requires an active Organization, audit, and explicit
-write opt-in. Bypass can skip the membership grant, but **an unavailable Module now returns `404`
-even with super-admin bypass**. Check that existing Organizations have been provisioned explicitly;
-ordinary role reads, admin validation and Capability Grant minting no longer repair missing grants.
-Use an explicit, reviewed repair only when the grant is meant to exist.
+Super-admin support still needs an active Organization, audit and write opt-in. **Unavailable
+Modules now return `404` even with super-admin bypass.** Verify existing Organization provisioning.
+Role reads, admin validation and Capability Grant minting no longer restore missing grants. Repair
+only grants meant to exist.
 
-Set `kitBetterAuth` in each App's `package.json` to the shipping Worker’s App-relative module.
-It exports `createBetterAuth(env, baseURL)` using `@kit/auth/factory`. Declare `better-auth`
-and align the lockfile on one version, without Kit edits or a test issuer. Run `bun run validate:full`.
-Root inventories the release Worker source for each configured Wrangler environment, even if no App
-is enrolled. Keep the Worker entry and its imports visible to Wrangler; opaque prebuilt entries and
-custom Worker builds that hide the source graph cannot establish this proof. A declarative,
-unbundled Worker with visible sources does not need enrollment unless it composes Better Auth.
-See [ADR-0025](./architecture/adr/0025-request-authorization-snapshot.md).
+In each App's `package.json`, set `kitBetterAuth` to its App-relative shipping `createBetterAuth(env,
+baseURL)` module using `@kit/auth/factory`. Declare `better-auth` directly; align the lockfile on
+one version without Kit edits or test issuers. Root inventories each Wrangler release target:
+keep Worker source and imports visible, not in opaque prebuilds. Unbundled Workers need enrollment
+only if they compose Better Auth. Run `bun run validate:full`. See
+[ADR-0025](./architecture/adr/0025-request-authorization-snapshot.md).
 
 ### Impersonation V1 migration
 
