@@ -1,31 +1,22 @@
 import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { dirname, isAbsolute, join, relative } from 'node:path'
-import { type Program, parseSync, Visitor } from 'oxc-parser'
+import { type Program, Visitor } from 'oxc-parser'
 import { dependency } from './root-gate-better-auth-lock'
+import {
+  adapterName,
+  parseProgram,
+  shippingSource,
+  verifyWorkerWiring,
+} from './root-gate-better-auth-worker'
 
 export type BetterAuthApp = { workspace: string; dir: string; composition: string }
 const kitFactory = '@kit/auth/factory'
-const adapterName = 'createBetterAuth'
 const serverFactoryExports = new Map([
   [kitFactory, adapterName],
   [dependency, 'betterAuth'],
   [`${dependency}/minimal`, 'betterAuth'],
 ])
 const runtimeSources = new Bun.Glob('**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}')
-
-function shippingSource(path: string) {
-  return !(
-    /(^|\/)(?:node_modules|dist|build|coverage|test|tests|__tests__|__fixtures__|\.wrangler)\//.test(
-      path,
-    ) || /\.(?:d|test|spec)\.[^.]+$/.test(path)
-  )
-}
-
-function parse(path: string, code: string) {
-  const parsed = parseSync(path, code)
-  if (parsed.errors.length) throw new Error(`${path}: ${parsed.errors[0]?.message}`)
-  return parsed.program
-}
 
 function importsServerFactory(program: Program) {
   let found = false
@@ -118,31 +109,6 @@ function returnsKitInstance(program: Program) {
   })
 }
 
-function shippingConsumer(runtime: string[], dir: string, composition: string) {
-  return runtime.some((file) => {
-    const path = join(dir, file)
-    if (path === composition) return false
-    const code = readFileSync(path, 'utf8')
-    if (!code.includes(adapterName)) return false
-    return parse(path, code).body.some((statement) => {
-      if (statement.type !== 'ImportDeclaration' || statement.importKind === 'type') return false
-      const bindsFactory = statement.specifiers.some(
-        (item) =>
-          item.type === 'ImportSpecifier' &&
-          item.importKind !== 'type' &&
-          item.imported.type === 'Identifier' &&
-          item.imported.name === adapterName,
-      )
-      if (!bindsFactory) return false
-      try {
-        return realpathSync(Bun.resolveSync(statement.source.value, dirname(path))) === composition
-      } catch {
-        return false
-      }
-    })
-  })
-}
-
 function installedVersion(from: string) {
   const entry = Bun.resolveSync(dependency, from)
   for (let dir = dirname(entry); dirname(dir) !== dir; dir = dirname(dir)) {
@@ -165,7 +131,7 @@ function discoverComposition(root: string, path: string): BetterAuthApp | undefi
     const fullPath = join(dir, file)
     const code = readFileSync(fullPath, 'utf8')
     if (!(code.includes(dependency) || code.includes(kitFactory))) return []
-    const program = parse(fullPath, code)
+    const program = parseProgram(fullPath, code)
     return importsServerFactory(program) ? [{ file, program }] : []
   })
   if (!factories.length && manifest.kitBetterAuth === undefined) return
@@ -190,8 +156,10 @@ function discoverComposition(root: string, path: string): BetterAuthApp | undefi
   if (isAbsolute(normalized) || normalized.startsWith('..')) {
     throw new Error(`${workspace}: shipping Better Auth composition must be App-local`)
   }
-  if (!shippingConsumer(runtime, dir, composition)) {
-    throw new Error(`${workspace}: runtime source must import createBetterAuth from kitBetterAuth`)
+  try {
+    verifyWorkerWiring(dir, composition)
+  } catch (cause) {
+    throw new Error(`${workspace}: ${cause instanceof Error ? cause.message : String(cause)}`)
   }
   return { workspace, dir, composition }
 }

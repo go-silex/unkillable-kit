@@ -90,6 +90,28 @@ describe('authoritative request snapshot', () => {
     expect((await loadRequestSnapshot(keyInput)).identity).toBeNull()
   })
 
+  it('reports unreadable key expiry only after verifying the key hash', async () => {
+    const { db, sqlite } = fixture()
+    const key = generateApiKey()
+    const prefix = apiKeyPrefix(key)
+    sqlite
+      .prepare('INSERT INTO api_keys VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(prefix, await hashApiKey(key), 'actor', 'chosen', 'read', null, null)
+    const input = { db, authorization: `Bearer ${key}` }
+    expect((await loadRequestSnapshot(input)).identity?.method).toBe('api_key')
+    const setExpiry = sqlite.prepare('UPDATE api_keys SET expires_at = ? WHERE key_prefix = ?')
+    setExpiry.run('unreadable', prefix)
+    await expect(loadRequestSnapshot(input)).rejects.toMatchObject({
+      status: 503,
+      message: 'Authorization unavailable',
+    })
+    expect(
+      (await loadRequestSnapshot({ ...input, authorization: `Bearer ${key}x` })).identity,
+    ).toBeNull()
+    setExpiry.run(Date.now(), prefix)
+    expect((await loadRequestSnapshot(input)).identity).toBeNull()
+  })
+
   it('correlates all hosted grant keys and does not use a prior grant for account-only requests', async () => {
     const { db, sqlite } = fixture()
     const fact = defineAuthorizationFact({
@@ -196,7 +218,29 @@ describe('authoritative request snapshot', () => {
     expect(sqlite.prepare('SELECT id FROM session').pluck().get()).toBe('session-id')
   })
 
-  it('fails closed on views, unregistered descriptors, overflow and incomplete batch entries', async () => {
+  it('reports unreadable session expiry without releasing Product facts', async () => {
+    const { db, sqlite, cookie } = fixture()
+    const decode = vi.fn()
+    const fact = defineAuthorizationFact({
+      table: userFlags,
+      scope: { kind: 'user', userId: 'user_id' },
+      select: ['flag'],
+      decode,
+    })
+    const input = { db, cookie, facts: [fact] }
+    expect((await loadRequestSnapshot(input)).rows(fact)).toEqual([{ flag: 'eligible' }])
+    sqlite.prepare('UPDATE session SET expires_at = ?').run('unreadable')
+    await expect(loadRequestSnapshot(input)).rejects.toMatchObject({
+      status: 503,
+      message: 'Authorization unavailable',
+    })
+    await expect(
+      loadRequestSnapshot({ ...input, authorization: 'Bearer unsupported', delegation: true }),
+    ).rejects.toMatchObject({ status: 503, message: 'Authorization unavailable' })
+    expect(decode).not.toHaveBeenCalled()
+  })
+
+  it('validates each required fact on access without inspecting unrelated results', async () => {
     const { db, cookie, sqlite } = fixture()
     sqlite.exec('CREATE VIEW product_view AS SELECT user_id, flag FROM product_flags')
     const decode = vi.fn()
@@ -210,19 +254,22 @@ describe('authoritative request snapshot', () => {
       ...descriptor,
       table: { ...userFlags, name: 'product_view' },
     })
-    await expect(loadRequestSnapshot({ db, cookie, facts: [view] })).rejects.toMatchObject({
-      status: 503,
-      message: 'Authorization unavailable',
+    const available = defineAuthorizationFact({
+      ...descriptor,
+      where: { organization_id: 'chosen' },
     })
+    const snapshot = await loadRequestSnapshot({ db, cookie, facts: [view, available] })
+    expect(snapshot.rows(available)).toEqual([{ flag: 'eligible' }])
+    expect(() => snapshot.rows(view)).toThrow('Authorization unavailable')
     const forged = { ...view } as AuthorizationFact<unknown>
     await expect(loadRequestSnapshot({ db, cookie, facts: [forged] })).rejects.toMatchObject({
       status: 503,
     })
     sqlite.exec("INSERT INTO product_flags VALUES ('actor', 'other', 'second row')")
     const fact = defineAuthorizationFact({ ...descriptor, maxRows: 1 })
-    await expect(loadRequestSnapshot({ db, cookie, facts: [fact] })).rejects.toMatchObject({
-      status: 503,
-    })
+    const overflowing = await loadRequestSnapshot({ db, cookie, facts: [fact, available] })
+    expect(overflowing.rows(available)).toEqual([{ flag: 'eligible' }])
+    expect(() => overflowing.rows(fact)).toThrow('Authorization unavailable')
     db.batch.mockResolvedValueOnce([{ success: false, results: [{ flag: 'private row' }] }])
     await expect(loadRequestSnapshot({ db, cookie })).rejects.toMatchObject({
       status: 503,

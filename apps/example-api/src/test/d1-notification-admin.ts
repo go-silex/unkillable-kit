@@ -61,12 +61,14 @@ async function seedInbox(app: ApiApp, env: ApiEnv, db: KitDb, staffHeaders: Head
 }
 
 async function measureInbox(probe: Probe, headers: HeadersInit) {
-  const count = await probe('GET /api/orgs/:orgId/notifications/unread-count', 7, {
+  const count = await probe('GET /api/orgs/:orgId/notifications/unread-count', 2, {
+    exact: true,
     path: `${inbox}/unread-count`,
     headers,
   })
   expect(await count.json()).toMatchObject({ unreadCount: 2 })
-  const page = await probe('GET /api/orgs/:orgId/notifications', 7, {
+  const page = await probe('GET /api/orgs/:orgId/notifications', 2, {
+    exact: true,
     path: `${inbox}?filter=unread&limit=1`,
     headers,
   })
@@ -75,13 +77,15 @@ async function measureInbox(probe: Probe, headers: HeadersInit) {
     nextCursor: string | null
   }
   expect(nextCursor).toBeTruthy()
-  const read = await probe('POST /api/orgs/:orgId/notifications/:notificationId/read', 7, {
+  const read = await probe('POST /api/orgs/:orgId/notifications/:notificationId/read', 2, {
+    exact: true,
     path: `${inbox}/${items[0]!.id}/read`,
     headers,
     body: {},
   })
   expect(await read.json()).toMatchObject({ ok: true })
-  const all = await probe('POST /api/orgs/:orgId/notifications/read-all', 7, {
+  const all = await probe('POST /api/orgs/:orgId/notifications/read-all', 2, {
+    exact: true,
     path: `${inbox}/read-all`,
     headers,
     body: {},

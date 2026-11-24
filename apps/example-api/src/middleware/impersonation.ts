@@ -1,3 +1,4 @@
+import { parseBearer } from '@kit/auth'
 import {
   type ImpersonationSession,
   recordImpersonationRequest,
@@ -88,10 +89,12 @@ export const impersonationGate: MiddlewareHandler<AppEnv> = async (c, next) => {
   const path = new URL(c.req.url).pathname
   const introspect = path === '/api/me' && c.req.method === 'GET'
   const stop = path === '/api/impersonation/stop' && c.req.method === 'POST'
-  const hasBearer = /^\s*Bearer\b/i.test(c.req.header('authorization') ?? '')
+  const credential = c.req.header('authorization')
+  const hasBearer = /^\s*Bearer\b/i.test(credential ?? '')
   const delegation = await authorization.delegation(c)
   if (!delegation?.row) {
-    assertUnattachedFence(c, introspect || stop)
+    // Recovery can clear a stale browser context, but must never change to a key identity.
+    assertUnattachedFence(c, (introspect || stop) && !parseBearer(credential))
     if (delegation && !hasBearer) {
       c.set('actorSubject', delegation.actor.subject)
       c.set('sessionId', delegation.actor.sessionId)

@@ -172,10 +172,9 @@ even with super-admin bypass**. Check that existing Organizations have been prov
 ordinary role reads, admin validation and Capability Grant minting no longer repair missing grants.
 Use an explicit, reviewed repair only when the grant is meant to exist.
 
-Declare `better-auth` and set `kitBetterAuth` in each shipping App's `package.json` to the
-App-relative TypeScript module used by its Worker. It exports `createAppBetterAuth` and uses
-`createBetterAuth` from `@kit/auth/factory`. Align the lockfile on one resolved version without
-editing Kit files or substituting a test issuer. Run `bun run validate:full`.
+Set `kitBetterAuth` in each App's `package.json` to the shipping Worker’s App-relative module.
+It exports `createBetterAuth(env, baseURL)` using `@kit/auth/factory`. Declare `better-auth`
+and align the lockfile on one version, without Kit edits or a test issuer. Run `bun run validate:full`.
 See [ADR-0025](./architecture/adr/0025-request-authorization-snapshot.md).
 
 ### Impersonation V1 migration

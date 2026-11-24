@@ -12,7 +12,10 @@ import {
 import { requireOrgContext } from '../../middleware/org-context'
 import { requireAuth } from '../../middleware/require-auth'
 import { requireSession } from '../../middleware/require-session'
-import { loadNotificationScope } from '../../services/notifications/access'
+import {
+  includeNotificationAccess,
+  loadNotificationScope,
+} from '../../services/notifications/access'
 import { validateRuleInput } from '../../services/notifications/rule-input'
 import {
   listEffectiveRules,
@@ -145,7 +148,13 @@ const effectiveRoute = createRoute({
   tags: ['notifications'],
   summary: 'Preview effective personal notification rules',
   security: sessionOnlySecurity,
-  middleware: [requireAuth, requireSession, requireOrgContext(), pageQuery] as const,
+  middleware: [
+    requireAuth,
+    requireSession,
+    requireOrgContext(),
+    includeNotificationAccess,
+    pageQuery,
+  ] as const,
   request: { params: orgParamsSchema, query: notificationPageQuerySchema },
   responses: {
     200: {

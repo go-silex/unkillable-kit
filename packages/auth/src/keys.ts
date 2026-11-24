@@ -31,9 +31,13 @@ export function generateApiKey(): string {
   return `sk_${body}`
 }
 
+export function hasApiKeyFormat(plaintext: string): boolean {
+  return plaintext.startsWith('sk_') && plaintext.length >= 12
+}
+
 /** Stable prefix for DB index lookup (not secret enough alone — always pair with hash). */
 export function apiKeyPrefix(plaintext: string): string {
-  if (!plaintext.startsWith('sk_') || plaintext.length < 12) {
+  if (!hasApiKeyFormat(plaintext)) {
     throw new Error('invalid api key format for prefix')
   }
   return plaintext.slice(0, 12)

@@ -19,7 +19,6 @@ type Factory = (
     DB: SqliteD1
     BETTER_AUTH_SECRET: string
     BETTER_AUTH_URL: string
-    ALLOW_PUBLIC_SIGNUP: string
     CORS_ORIGINS: string
     ENVIRONMENT: string
     SESSION_COOKIE_NAME: string
@@ -59,7 +58,6 @@ function fixtureApp(
     {
       DB: db,
       ENVIRONMENT: profile.secure ? 'production' : 'test',
-      ALLOW_PUBLIC_SIGNUP: 'true',
       BETTER_AUTH_SECRET: authSecret,
       BETTER_AUTH_URL: origin,
       CORS_ORIGINS: origin,
@@ -97,12 +95,28 @@ async function atTime<T>(millisecond: number, run: () => Promise<T>): Promise<T>
   }
 }
 
-async function issue(auth: KitBetterAuth, sqlite: Database, profile: Profile) {
+function seedCredential(sqlite: Database, passwordHash: string) {
+  // The migrated, isolated D1 image gets a User and credential, never a session.
+  const userId = crypto.randomUUID()
+  const now = Date.now()
+  sqlite.run(
+    'INSERT INTO user (id, name, email, email_verified, created_at, updated_at) VALUES (?, ?, ?, 1, ?, ?)',
+    [userId, 'Root Fixture', email, now, now],
+  )
+  sqlite.run(
+    `INSERT INTO account (id, account_id, provider_id, issuer, user_id, password, created_at, updated_at)
+     VALUES (?, ?, 'credential', 'local:credential', ?, ?, ?, ?)`,
+    [crypto.randomUUID(), userId, userId, passwordHash, now, now],
+  )
+  return userId
+}
+
+async function issue(auth: KitBetterAuth, sqlite: Database, profile: Profile, userId: string) {
   const response = await auth.handler(
-    new Request(`${origin}/api/auth/sign-up/email`, {
+    new Request(`${origin}/api/auth/sign-in/email`, {
       method: 'POST',
       headers: { origin, 'content-type': 'application/json' },
-      body: JSON.stringify({ name: 'Root Fixture', email, password, rememberMe: profile.remember }),
+      body: JSON.stringify({ email, password, rememberMe: profile.remember }),
     }),
   )
   assert.ok(
@@ -116,6 +130,7 @@ async function issue(auth: KitBetterAuth, sqlite: Database, profile: Profile) {
     .all()
   assert.equal(rows.length, 1, 'issuance must persist exactly one session')
   const [{ subject, sessionId, token }] = rows
+  assert.equal(subject, userId, 'App must sign in the seeded User')
   const cookies = response.headers.getSetCookie()
   const issued = cookies.find((cookie) => {
     const value = cookie.split(';', 1)[0].slice(cookie.indexOf('=') + 1)
@@ -151,6 +166,12 @@ export async function runBetterAuthDifferential(app: BetterAuthApp) {
   const snapshot: { resolveRequestSession: typeof resolveRequestSession } = await import(
     pathToFileURL(snapshotPath).href
   )
+  // Root does not own Better Auth; use the discovered App's installed password hasher.
+  const cryptoPath = Bun.resolveSync('better-auth/crypto', app.dir)
+  const { hashPassword }: { hashPassword: (password: string) => Promise<string> } = await import(
+    pathToFileURL(cryptoPath).href
+  )
+  const passwordHash = await hashPassword(password)
   const migrations = join(app.dir, 'migrations')
   const migrationSql = readdirSync(migrations)
     .filter((name) => name.endsWith('.sql'))
@@ -167,8 +188,9 @@ export async function runBetterAuthDifferential(app: BetterAuthApp) {
     using issuer = new Database(':memory:')
     issuer.exec('PRAGMA foreign_keys = ON')
     for (const sql of migrationSql) issuer.exec(sql)
-    const initial = fixtureApp(create, issuer, profile)
-    const { wire, session, dontRemember, identity } = await issue(initial.auth, issuer, profile)
+    const userId = seedCredential(issuer, passwordHash)
+    const { auth } = fixtureApp(create, issuer, profile)
+    const { wire, session, dontRemember, identity } = await issue(auth, issuer, profile, userId)
     const image = issuer.serialize()
     const value = session.slice(wire.length + 1)
     const signatureStart = value.lastIndexOf('.') + 1

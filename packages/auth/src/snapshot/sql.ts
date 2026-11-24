@@ -8,23 +8,46 @@ export type { Candidate }
 type Query = { sql: string; values: readonly (string | number | null)[] }
 
 const SESSION = `
-SELECT u.id AS subject, s.id AS session_id, u.email, s.expires_at AS session_expiry
+SELECT u.id AS subject, s.id AS session_id, u.email,
+  CASE WHEN typeof(s.expires_at) = 'integer' THEN s.expires_at END AS session_expiry
 FROM main."session" AS s
 JOIN main."user" AS u ON u.id = s.user_id
-WHERE s.token = ? AND typeof(s.expires_at) = 'integer' AND s.expires_at >= ? AND u.disabled = 0`
+WHERE s.token = ? AND u.disabled = 0`
+
+// Confirmed expiry is a denial. Keep malformed expiry in the core result so it
+// becomes unavailable, but never select it as a Product fact candidate.
+const SESSION_STATE = [
+  SESSION,
+  "AND (typeof(s.expires_at) <> 'integer' OR s.expires_at >= ?)",
+].join(' ')
+const SESSION_ELIGIBLE = [
+  SESSION,
+  "AND typeof(s.expires_at) = 'integer' AND s.expires_at >= ?",
+].join(' ')
 
 const KEY = `
 SELECT u.id AS subject, k.organization_id AS key_org, k.key_hash, k.scopes AS key_scopes,
-  k.expires_at AS key_expiry
+  CASE typeof(k.expires_at)
+    WHEN 'null' THEN NULL
+    WHEN 'integer' THEN k.expires_at
+    ELSE 'invalid'
+  END AS key_expiry
 FROM main."api_keys" AS k
 JOIN main."user" AS u ON u.id = k.subject
 JOIN main."organization" AS pinned ON pinned.id = k.organization_id
 WHERE k.key_prefix = ? AND u.disabled = 0 AND pinned.status = 'active'
   AND k.revoked_at IS NULL
-  AND (k.expires_at IS NULL OR (typeof(k.expires_at) = 'integer' AND k.expires_at > ?))
   AND EXISTS (
     SELECT 1 FROM main."member" AS m WHERE m.user_id = u.id AND m.organization_id = pinned.id
   )`
+
+// Core must distinguish a verified key's malformed expiry from confirmed expiry.
+// Product fact candidates remain limited to non-expiring or unexpired keys.
+const KEY_STATE = [KEY, "AND (typeof(k.expires_at) <> 'integer' OR k.expires_at > ?)"].join(' ')
+const KEY_ELIGIBLE = [
+  KEY,
+  "AND (k.expires_at IS NULL OR (typeof(k.expires_at) = 'integer' AND k.expires_at > ?))",
+].join(' ')
 
 const HOSTED = `
 SELECT id AS subject, ? AS grant_id, ? AS client_id
@@ -43,13 +66,13 @@ export function candidateQuery(
   let bindings: (string | number | null)[]
   switch (candidate.kind) {
     case 'session':
-      source = SESSION
+      source = core ? SESSION_STATE : SESSION_ELIGIBLE
       credentials = 'session_id, NULL AS key_org, NULL AS grant_id, NULL AS client_id'
       if (core) credentials += ', email, session_expiry'
       bindings = [candidate.token, now]
       break
     case 'api_key':
-      source = KEY
+      source = core ? KEY_STATE : KEY_ELIGIBLE
       credentials = 'NULL AS session_id, key_org, NULL AS grant_id, NULL AS client_id'
       if (core) credentials += ', key_hash, key_scopes, key_expiry'
       bindings = [candidate.prefix, now]
@@ -122,7 +145,7 @@ LEFT JOIN main."impersonation_role_permissions" AS permission ON permission.role
 
 export function delegationQuery(token: string, now: number): Query {
   return {
-    sql: ['WITH cookie_actor AS (', SESSION, ')', DELEGATION, 'LIMIT 2'].join(' '),
+    sql: ['WITH cookie_actor AS (', SESSION_STATE, ')', DELEGATION, 'LIMIT 2'].join(' '),
     values: [token, now],
   }
 }
@@ -143,7 +166,7 @@ export function withDelegationCandidate(query: Query, token: string, now: number
     sql: [
       query.sql,
       ', cookie_actor AS (',
-      SESSION,
+      SESSION_ELIGIBLE,
       '), delegation_state AS (',
       DELEGATION,
       ELIGIBLE_DELEGATION,

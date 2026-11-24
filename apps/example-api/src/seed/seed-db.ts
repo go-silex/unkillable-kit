@@ -199,8 +199,6 @@ export async function seedDemoDatabase(
   const beforeIds = new Set(
     (await platformModulesRepo.listPlatformModules(db)).map((r) => r.moduleId),
   )
-  await modulesService.ensureKitModules(db)
-  // ADR-0003 dual-level catalogue (migrated from kit_modules via SQL + ensure)
   await platformModulesService.ensurePlatformModules(db)
   // Multi-tenant BA personas/orgs (dev|test only) — may flip platform.available (N0 demo)
   let tenancy: TenancySeedResult | undefined

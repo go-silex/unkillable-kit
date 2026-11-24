@@ -2,7 +2,7 @@ import { AppError } from '@kit/core'
 import { isPlatformRole, type OrgContextRecord, type PlatformRole } from '../org-roles'
 import type { ImpersonationSession } from '../repos/impersonation'
 import type { AuthIdentity, SessionAuthIdentity } from '../require-auth'
-import type { AuthorizationRow } from './facts'
+import type { AuthorizationFact, AuthorizationRow, CompiledFact } from './facts'
 
 type Profile = Readonly<{ name: string; email: string }>
 type SessionIdentity = Readonly<SessionAuthIdentity & { email: string }>
@@ -176,18 +176,23 @@ export function decodeDelegation(
   })
 }
 
-function results(entry: unknown): readonly AuthorizationRow[] {
+function resultValues(entry: unknown): readonly unknown[] {
   if (
     !entry ||
     typeof entry !== 'object' ||
     !('success' in entry) ||
     entry.success !== true ||
     !('results' in entry) ||
-    !Array.isArray(entry.results) ||
-    !entry.results.every(isRow)
+    !Array.isArray(entry.results)
   )
     throw unavailable()
   return entry.results
+}
+
+function results(entry: unknown): readonly AuthorizationRow[] {
+  const rows = resultValues(entry)
+  if (!rows.every(isRow)) throw unavailable()
+  return rows
 }
 
 export function singleResult(entry: unknown): AuthorizationRow | null {
@@ -196,7 +201,7 @@ export function singleResult(entry: unknown): AuthorizationRow | null {
   return rows[0] ?? null
 }
 
-export function readFact(
+function readFact(
   entry: unknown,
   columns: readonly string[],
   maxRows: number,
@@ -222,7 +227,38 @@ export function readFact(
   )
 }
 
-export function checkTableRegistration(entry: unknown, required: ReadonlySet<string>): void {
-  const registered = new Set(results(entry).map((row) => requiredString(row, 'name').toLowerCase()))
-  for (const table of required) if (!registered.has(table)) throw unavailable()
+export const EMPTY_ROWS: readonly AuthorizationRow[] = Object.freeze([])
+type Fact = AuthorizationFact<unknown>
+export type FactResult = { compiled: CompiledFact; index: number }
+
+export function productRows(
+  batch: readonly unknown[],
+  facts: ReadonlyMap<Fact, FactResult>,
+  registrationIndex: number,
+): (fact: Fact) => readonly AuthorizationRow[] {
+  const values = new Map<Fact, readonly AuthorizationRow[]>()
+  let registered: Set<string> | undefined
+  return (fact) => {
+    const pending = facts.get(fact)
+    if (!pending) return EMPTY_ROWS
+    const cached = values.get(fact)
+    if (cached) return cached
+    try {
+      const { compiled, index } = pending
+      if (compiled.productTable) {
+        registered ??= new Set(
+          resultValues(batch[registrationIndex]).flatMap((row) =>
+            isRow(row) && typeof row.name === 'string' ? [row.name] : [],
+          ),
+        )
+        if (!registered.has(compiled.table)) throw unavailable()
+      }
+      const rows = readFact(batch[index], compiled.columns, compiled.maxRows)
+      values.set(fact, rows)
+      return rows
+    } catch {
+      // Unreadable required rows are unavailable; do not attach private result data.
+      throw unavailable()
+    }
+  }
 }

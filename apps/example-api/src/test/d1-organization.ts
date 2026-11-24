@@ -107,25 +107,25 @@ export async function measureOrganizations(record: Set<string>) {
     headers: owner,
   })
 
-  await probe('GET /api/orgs/:orgId/modules', 7, { path: `${team}/modules`, headers: owner })
-  await probe('GET /api/orgs/:orgId/modules', 7, { ...apiKey, path: `${team}/modules` })
-  await probe('PATCH /api/orgs/:orgId/modules/:moduleId', 15, {
+  await probe('GET /api/orgs/:orgId/modules', 3, { path: `${team}/modules`, headers: owner })
+  await probe('GET /api/orgs/:orgId/modules', 3, { ...apiKey, path: `${team}/modules` })
+  await probe('PATCH /api/orgs/:orgId/modules/:moduleId', 8, {
     path: `${team}/modules/demo`,
     headers: owner,
     body: { enabled: false },
   })
-  const enableDemo = await probe('PATCH /api/orgs/:orgId/modules/:moduleId', 15, {
+  const enableDemo = await probe('PATCH /api/orgs/:orgId/modules/:moduleId', 8, {
     ...apiKey,
     path: `${team}/modules/demo`,
     body: { enabled: true },
   })
   expect(await enableDemo.json()).toMatchObject({ modules: { demo: { effective: true } } })
 
-  await probe('GET /api/platform/modules', 6)
-  await probe('PATCH /api/platform/modules/:moduleId', 12, {
+  await probe('GET /api/platform/modules', 2)
+  await probe('PATCH /api/platform/modules/:moduleId', 5, {
     path: '/api/platform/modules/demo',
     body: { available: false },
   })
-  await probe('GET /api/modules', 9)
-  await probe('PATCH /api/modules/:id', 19, { path: '/api/modules/demo', body: { enabled: true } })
+  await probe('GET /api/modules', 2)
+  await probe('PATCH /api/modules/:id', 5, { path: '/api/modules/demo', body: { enabled: true } })
 }

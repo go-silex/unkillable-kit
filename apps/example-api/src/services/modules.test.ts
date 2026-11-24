@@ -3,23 +3,25 @@ import { createDb } from '@kit/db'
 import { describe, expect, it } from 'vitest'
 import { schema } from '../db/schema'
 import { createMemoryEnv } from '../test/memory-env'
-import { ensureKitModules, getModulesState, isModuleEnabled, setModuleEnabled } from './modules'
+import { getModulesState, isModuleEnabled, setModuleEnabled } from './modules'
+import { ensurePlatformModules } from './platform-modules'
 
 describe('kit modules service', () => {
-  it('does not initialize the catalogue for read-only state', async () => {
+  it('does not initialize a missing catalogue when reading legacy state', async () => {
     const env = createMemoryEnv()
     const db = createDb(env.DB, schema)
+    expect((await getModulesState(db)).demo).toEqual({
+      enabled: false,
+      configured: true,
+      configPath: '/admin/modules',
+    })
     expect(await listPlatformModules(db)).toEqual([])
-    await getModulesState(db, { readOnly: true })
-    expect(await listPlatformModules(db)).toEqual([])
-    await getModulesState(db)
-    expect((await listPlatformModules(db)).length).toBeGreaterThan(0)
   })
 
   it('creates demo module disabled but configured (no remote integration)', async () => {
     const env = createMemoryEnv()
     const db = createDb(env.DB, schema)
-    await ensureKitModules(db)
+    await ensurePlatformModules(db)
     const state = await getModulesState(db)
     expect(state.demo).toEqual({
       enabled: false,
@@ -31,7 +33,6 @@ describe('kit modules service', () => {
   it('allows enable without external integration for demo module', async () => {
     const env = createMemoryEnv()
     const db = createDb(env.DB, schema)
-    await ensureKitModules(db)
     await setModuleEnabled(db, 'demo', true)
     expect(await isModuleEnabled(db, 'demo')).toBe(true)
   })

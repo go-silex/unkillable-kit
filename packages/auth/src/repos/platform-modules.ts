@@ -17,6 +17,16 @@ export async function getPlatformModule(db: Db, moduleId: string) {
   return rows[0] ?? null
 }
 
+/** Initialize missing catalogue rows without changing an existing Deployment setting. */
+export async function insertMissingPlatformModules(
+  db: Db,
+  rows: { moduleId: string; available: boolean; configJson: string | null; updatedAt: number }[],
+) {
+  await db.insert(platformModules).values(rows).onConflictDoNothing({
+    target: platformModules.moduleId,
+  })
+}
+
 export async function upsertPlatformModule(
   db: Db,
   row: {
@@ -73,6 +83,23 @@ export async function listOrgModules(db: Db, organizationId: string) {
     .select()
     .from(organizationModules)
     .where(eq(organizationModules.organizationId, organizationId))
+}
+
+export async function hasEffectiveOrgModule(db: Db, organizationId: string, moduleId: string) {
+  const rows = await db
+    .select({ moduleId: organizationModules.moduleId })
+    .from(organizationModules)
+    .innerJoin(platformModules, eq(platformModules.moduleId, organizationModules.moduleId))
+    .where(
+      and(
+        eq(organizationModules.organizationId, organizationId),
+        eq(organizationModules.moduleId, moduleId),
+        eq(organizationModules.enabled, true),
+        eq(platformModules.available, true),
+      ),
+    )
+    .limit(1)
+  return rows.length !== 0
 }
 
 export async function getOrgModule(db: Db, organizationId: string, moduleId: string) {

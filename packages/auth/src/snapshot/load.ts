@@ -11,13 +11,14 @@ import {
   MAX_FACTS,
 } from './facts'
 import {
-  checkTableRegistration,
   type DelegationSnapshot,
   decodeDelegation,
+  EMPTY_ROWS,
   expiry,
+  type FactResult,
   type Identity,
   organization,
-  readFact,
+  productRows,
   requiredString,
   role,
   sessionIdentity,
@@ -51,13 +52,12 @@ type LoadInput = {
   facts?: readonly AuthorizationFact<unknown>[]
 }
 
-const EMPTY: readonly AuthorizationRow[] = Object.freeze([])
 const emptySnapshot: RequestSnapshot = Object.freeze({
   identity: null,
   platformRole: null,
   organization: null,
   delegation: null,
-  rows: () => EMPTY,
+  rows: () => EMPTY_ROWS,
 })
 
 /** One bound batch, directly on the authoritative binding; never a D1 Sessions API or a cache. */
@@ -112,10 +112,9 @@ async function selectCredentials({
 
 type Fact = AuthorizationFact<unknown>
 type PlannedFact = { fact: Fact; compiled: CompiledFact }
-type RunningFact = PlannedFact & { index: number }
 type PreparedBatch = {
   statements: KitD1Statement[]
-  runningFacts: RunningFact[]
+  runningFacts: Map<Fact, FactResult>
   productTables: Set<string>
 }
 
@@ -175,7 +174,7 @@ function appendFactStatements(
         }),
       ) - 1
     if (compiled.productTable) prepared.productTables.add(compiled.table)
-    prepared.runningFacts.push({ fact, compiled, index })
+    prepared.runningFacts.set(fact, { compiled, index })
   }
 }
 
@@ -185,7 +184,7 @@ function appendProductTableCheck(
 ): number {
   if (productTables.size === 0) return -1
   const sql = [
-    "SELECT name FROM main.sqlite_schema WHERE type = 'table' AND sql NOT LIKE 'CREATE VIRTUAL TABLE%' AND lower(name) IN (",
+    "SELECT lower(name) AS name FROM main.sqlite_schema WHERE type = 'table' AND sql NOT LIKE 'CREATE VIRTUAL TABLE%' AND lower(name) IN (",
     Array.from(productTables, () => '?').join(', '),
     ')',
   ].join(' ')
@@ -199,11 +198,11 @@ async function keyIdentity(
 ): Promise<Identity | null> {
   const pin = normalizeApiKeyOrganizationId(requiredString(core, 'key_org'))
   const hash = requiredString(core, 'key_hash')
-  const scopes = parseApiKeyScopes(requiredString(core, 'key_scopes'))
-  const expiresAt = core.key_expiry === null ? null : expiry(core, 'key_expiry')
   if (!/^[0-9a-f]{64}$/i.test(hash)) throw unavailable()
   if (!(pin && (await verifyApiKey(bearer, hash)))) return null
+  const expiresAt = core.key_expiry === null ? null : expiry(core, 'key_expiry')
   if (expiresAt !== null && expiresAt <= Date.now()) return null
+  const scopes = parseApiKeyScopes(requiredString(core, 'key_scopes'))
   Object.freeze(scopes)
   return Object.freeze({ method: 'api_key', subject, organizationId: pin, scopes })
 }
@@ -228,21 +227,12 @@ async function resolveIdentity(
   }
 }
 
-function readProductRows(batch: readonly unknown[], plan: PreparedBatch, tableIndex: number) {
-  if (tableIndex >= 0) checkTableRegistration(batch[tableIndex], plan.productTables)
-  const rows = new Map<Fact, readonly AuthorizationRow[]>()
-  for (const { fact, compiled, index } of plan.runningFacts) {
-    rows.set(fact, readFact(batch[index], compiled.columns, compiled.maxRows))
-  }
-  return rows
-}
-
 async function projectSnapshot(
   core: AuthorizationRow | null,
   delegationRow: AuthorizationRow | null,
   credentials: Credentials,
   selectedOrg: string | null,
-  rows: ReadonlyMap<Fact, readonly AuthorizationRow[]>,
+  rows: RequestSnapshot['rows'],
 ): Promise<RequestSnapshot> {
   const admittedAt = Date.now()
   const delegation = decodeDelegation(delegationRow, admittedAt)
@@ -255,7 +245,7 @@ async function projectSnapshot(
     platformRole: identity ? platformRole : null,
     organization: identity ? org : null,
     delegation,
-    rows: (fact: Fact) => (identity ? (rows.get(fact) ?? EMPTY) : EMPTY),
+    rows: identity ? rows : emptySnapshot.rows,
   })
 }
 
@@ -272,7 +262,7 @@ async function load(input: LoadInput): Promise<RequestSnapshot> {
   if (!db.batch) throw unavailable()
   const now = Date.now()
   const selectedOrg = organizationId ?? null
-  const plan: PreparedBatch = { statements: [], runningFacts: [], productTables: new Set() }
+  const plan: PreparedBatch = { statements: [], runningFacts: new Map(), productTables: new Set() }
   const { statements } = plan
   const coreIndex = candidate
     ? statements.push(prepare(db, coreQuery(candidate, selectedOrg, now))) - 1
@@ -287,7 +277,7 @@ async function load(input: LoadInput): Promise<RequestSnapshot> {
   // A D1 binding without Sessions routes to the primary even when read replication is enabled.
   const batch = await db.batch(statements)
   if (!Array.isArray(batch) || batch.length !== statements.length) throw unavailable()
-  const rows = readProductRows(batch, plan, tableIndex)
+  const rows = productRows(batch, plan.runningFacts, tableIndex)
   const core = coreIndex >= 0 ? singleResult(batch[coreIndex]) : null
   const delegationRow = delegationIndex >= 0 ? singleResult(batch[delegationIndex]) : null
   return projectSnapshot(core, delegationRow, credentials, selectedOrg, rows)

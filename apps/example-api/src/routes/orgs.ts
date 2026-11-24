@@ -131,9 +131,7 @@ orgsRoutes.openapi(cancelInvitation, async (c) => {
 
 orgsRoutes.openapi(listOrgModules, async (c) => {
   const db = c.get('db')!
-  const modules = await platformModulesService.getOrgModulesEffective(db, c.get('orgId')!, {
-    readOnly: Boolean(c.get('impersonationRow')),
-  })
+  const modules = await platformModulesService.getOrgModulesEffective(db, c.get('orgId')!)
   return c.json({ modules, requestId: c.get('requestId') })
 })
 

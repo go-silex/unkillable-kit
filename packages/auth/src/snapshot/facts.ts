@@ -115,7 +115,8 @@ function compileTable(input: Declaration<unknown>['table']) {
   const availabilityJoin = table === 'organization_modules' && registered.has('available')
   const column: ProjectColumn = (name) => {
     if (typeof name !== 'string' || !registered.has(name.toLowerCase())) return invalid()
-    if (availabilityJoin && name.toLowerCase() === 'available') return 'deployment."available"'
+    if (availabilityJoin && name.toLowerCase() === 'available')
+      return 'coalesce(deployment."available", 0)'
     return ['fact', quotedIdentifier(name)].join('.')
   }
   const from = ['main.', quoted, ' AS fact']

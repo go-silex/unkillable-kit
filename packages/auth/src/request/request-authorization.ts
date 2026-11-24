@@ -2,7 +2,7 @@ import { AppError } from '@kit/core'
 import type { KitD1Database } from '@kit/db'
 import type { Context, Env, MiddlewareHandler, Next } from 'hono'
 import type { BetterAuthLike } from '../better-auth-port'
-import { parseBearer } from '../keys'
+import { hasApiKeyFormat, parseBearer } from '../keys'
 import {
   type OrgCapability,
   type OrgRoleKey,
@@ -15,7 +15,6 @@ import { loadRequestSnapshot, type RequestSnapshot } from '../snapshot/load'
 import {
   admitOrganization,
   assertModule,
-  authUnavailable,
   contextVariables,
   directIdentity,
   type GuardState,
@@ -28,6 +27,7 @@ import {
 import {
   type AuthorizationPlan,
   type AuthorizationUse,
+  authUnavailable,
   type ModuleAuthorizationFacts,
   planAuthorization,
   organizationSelection as readOrganizationSelection,
@@ -51,9 +51,9 @@ export function createRequestAuthorization<E extends Env>(options: Options<E>) {
 
   async function load(c: Context<E>, plan: AuthorizationPlan<E>): Promise<RequestSnapshot> {
     const authorization = c.req.header('authorization')
+    const bearer = parseBearer(authorization)
     const header = c.req.header('cookie')
-    const auth =
-      header && (options.delegation || !parseBearer(authorization)) ? options.auth(c) : undefined
+    const auth = header && (options.delegation || !bearer) ? options.auth(c) : undefined
     const cookie = auth ? requestSessionCookie(auth, header ?? null) : undefined
     try {
       return await loadRequestSnapshot({
@@ -62,7 +62,7 @@ export function createRequestAuthorization<E extends Env>(options: Options<E>) {
         cookie,
         organizationId: plan.selection.kind === 'selected' ? plan.selection.id : undefined,
         delegation: options.delegation,
-        facts: snapshotFacts(plan),
+        facts: plan.sessionOnly && bearer ? [] : snapshotFacts(plan),
       })
     } catch {
       throw authUnavailable()
@@ -92,6 +92,7 @@ export function createRequestAuthorization<E extends Env>(options: Options<E>) {
   ): MiddlewareHandler<E> {
     const middleware = async (c: Context<E>, next: Next) => {
       const state = stateOf(c)
+      if (c.req.routeIndex >= state.plan.end) throw authUnavailable()
       check(c, state, await state.load)
       state.plan.pending.delete(middleware)
       await next()
@@ -111,6 +112,12 @@ export function createRequestAuthorization<E extends Env>(options: Options<E>) {
       contextVariables(c).set('platformRole', snapshot.platformRole)
     }
     state.authenticated = true
+  })
+
+  const requireSession = guard({ sessionOnly: true }, (_c, state, snapshot) => {
+    if (!state.authenticated || (!state.delegated && snapshot.identity?.method !== 'session')) {
+      throw AppError.forbidden('This route requires a session cookie')
+    }
   })
 
   function requireOrgContext(opts: OrgContextOpts = {}) {
@@ -180,6 +187,8 @@ export function createRequestAuthorization<E extends Env>(options: Options<E>) {
   }
 
   async function authenticateKey(c: Context<E>) {
+    const bearer = parseBearer(c.req.header('authorization'))
+    if (!(bearer && hasApiKeyFormat(bearer))) throw AppError.unauthorized()
     const { identity } = await stateOf(c).load
     if (identity?.method !== 'api_key') throw AppError.unauthorized()
     return identity
@@ -221,7 +230,10 @@ export function createRequestAuthorization<E extends Env>(options: Options<E>) {
     const snapshot = await state.load
     try {
       assertModule(state.plan.modules.get(id), snapshot, 'delegated', op)
-    } catch {
+    } catch (error) {
+      if (!(error instanceof AppError && (error.status === 403 || error.status === 404))) {
+        throw error
+      }
       throw AppError.forbidden('Module access required')
     }
   }
@@ -233,6 +245,7 @@ export function createRequestAuthorization<E extends Env>(options: Options<E>) {
 
   return {
     requireAuth,
+    requireSession,
     requireOrgContext,
     requireOrgRole,
     requireOrgCapability,

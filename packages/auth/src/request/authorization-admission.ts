@@ -7,6 +7,7 @@ import type { AuthorizationFact } from '../snapshot/facts'
 import type { RequestSnapshot } from '../snapshot/load'
 import {
   type AuthorizationPlan,
+  authUnavailable,
   type ModuleAuthorizationFacts,
   selectedOrganization,
 } from './authorization-plan'
@@ -68,6 +69,13 @@ export function snapshotFacts<E extends Env>(
 ): AuthorizationFact<unknown>[] {
   const facts = new Set(plan.facts)
   for (const policy of plan.modules.values()) {
+    if (
+      policy.availability.scope.kind !== 'organization' ||
+      policy.grant.scope.kind !== 'organization-role' ||
+      (policy.delegatedGrant && policy.delegatedGrant.scope.kind !== 'delegated-role')
+    ) {
+      throw authUnavailable()
+    }
     facts.add(policy.availability)
     facts.add(policy.grant)
     if (policy.delegatedGrant) facts.add(policy.delegatedGrant)
@@ -82,10 +90,6 @@ export function isOrgFact(kind: AuthorizationFact<unknown>['scope']['kind']) {
     kind === 'delegated-role' ||
     kind === 'delegated-user'
   )
-}
-
-export function authUnavailable() {
-  return new AppError('INTERNAL_ERROR', 'Authorization unavailable', 503)
 }
 
 function organizationBypass(
@@ -103,6 +107,12 @@ function organizationBypass(
   throw AppError.notFound('Organization not found')
 }
 
+function policyFlag(value: unknown) {
+  if (value === 0) return false
+  if (value === 1) return true
+  throw authUnavailable()
+}
+
 export function assertModule(
   policy: ModuleAuthorizationFacts | undefined,
   snapshot: RequestSnapshot,
@@ -110,13 +120,19 @@ export function assertModule(
   op: 'read' | 'write',
 ) {
   if (!policy) throw AppError.notFound(MODULE_DENIAL.notAvailable)
-  const availability = snapshot.rows(policy.availability)[0]
-  if (availability?.enabled !== 1 || availability.available !== 1) {
+  const [availability, extra] = snapshot.rows(policy.availability)
+  if (extra) throw authUnavailable()
+  const enabled = availability ? policyFlag(availability.enabled) : false
+  const available = availability ? policyFlag(availability.available) : false
+  if (!(enabled && available)) {
     throw AppError.notFound(MODULE_DENIAL.notAvailable)
   }
   if (mode === 'bypass') return
   const fact = mode === 'delegated' ? policy.delegatedGrant : policy.grant
-  const access = fact && snapshot.rows(fact)[0]?.access
+  const [grant, extraGrant] = fact ? snapshot.rows(fact) : []
+  if (extraGrant) throw authUnavailable()
+  const access = grant?.access
+  if (grant && !(typeof access === 'string' && isModuleAccess(access))) throw authUnavailable()
   if (typeof access !== 'string' || !isModuleAccess(access) || !accessAllows(access, op)) {
     throw AppError.forbidden(MODULE_DENIAL.insufficientGrant)
   }

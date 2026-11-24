@@ -11,6 +11,7 @@ export type ModuleAuthorizationFacts = Readonly<{
 
 export type AuthorizationUse = Readonly<{
   org?: true
+  sessionOnly?: true
   module?: string
   facts?: readonly AuthorizationFact<unknown>[]
 }>
@@ -21,19 +22,49 @@ type OrganizationSelection =
 
 export type AuthorizationPlan<E extends Env> = Readonly<{
   selection: OrganizationSelection
+  end: number
+  sessionOnly: boolean
   pending: Set<MiddlewareHandler<E>>
   facts: ReadonlySet<AuthorizationFact<unknown>>
   modules: ReadonlyMap<string, ModuleAuthorizationFacts>
 }>
 
-export function organizationSelection<E extends Env>(c: Context<E>): OrganizationSelection {
-  const routes = matchedRoutes(c)
+type Match = ReturnType<typeof matchedRoutes>[number]
+type RouteWindow = Readonly<{ endpoint: string | undefined; end: number }>
+
+export function authUnavailable() {
+  return new AppError('INTERNAL_ERROR', 'Authorization unavailable', 503)
+}
+
+function dispatchWindow<E extends Env>(c: Context<E>, routes: readonly Match[]): RouteWindow {
+  const method = c.req.method
+  const headFallback = method === 'HEAD' && !routes.some((route) => route.method === 'HEAD')
+  let endpoint: string | undefined
+  for (const [index, route] of routes.entries()) {
+    if (!(route.method === method || (headFallback && route.method === 'GET'))) continue
+    if (endpoint === undefined) {
+      endpoint = route.path
+    } else if (endpoint !== route.path) {
+      // Hono can match a literal endpoint before a parameter fallback. The
+      // literal chain owns dispatch; competing parameter patterns are ambiguous.
+      if (endpoint !== c.req.path) throw authUnavailable()
+      return { endpoint, end: index }
+    }
+  }
+  return { endpoint, end: routes.length }
+}
+
+function readSelection<E extends Env>(
+  c: Context<E>,
+  routes: readonly Match[],
+  { endpoint, end }: RouteWindow,
+): OrganizationSelection {
   const originalIndex = c.req.routeIndex
   let pathOrgId: string | undefined
   try {
-    for (const [index, route] of routes.entries()) {
-      if (route.method !== c.req.method && !(c.req.method === 'HEAD' && route.method === 'GET'))
-        continue
+    for (let index = 0; endpoint && index < end; index++) {
+      const route = routes[index]
+      if (route?.method === 'ALL' || route?.path !== endpoint) continue
       c.req.routeIndex = index
       const id = c.req.param('orgId')?.trim()
       if (!id) continue
@@ -49,27 +80,51 @@ export function organizationSelection<E extends Env>(c: Context<E>): Organizatio
   return orgId ? { kind: 'selected', id: orgId } : { kind: 'missing' }
 }
 
+export function organizationSelection<E extends Env>(c: Context<E>): OrganizationSelection {
+  const routes = matchedRoutes(c)
+  return readSelection(c, routes, dispatchWindow(c, routes))
+}
+
+function includeModule(
+  modules: Map<string, ModuleAuthorizationFacts>,
+  moduleId: string | undefined,
+  moduleFacts: ((moduleId: string) => ModuleAuthorizationFacts | undefined) | undefined,
+) {
+  if (!moduleId || modules.has(moduleId)) return
+  const policy = moduleFacts?.(moduleId)
+  if (policy) modules.set(moduleId, policy)
+}
+
 export function planAuthorization<E extends Env>(
   c: Context<E>,
   uses: WeakMap<MiddlewareHandler<E>, AuthorizationUse>,
   moduleFacts: ((moduleId: string) => ModuleAuthorizationFacts | undefined) | undefined,
 ): AuthorizationPlan<E> {
+  const routes = matchedRoutes(c)
+  const window = dispatchWindow(c, routes)
   const pending = new Set<MiddlewareHandler<E>>()
   const facts = new Set<AuthorizationFact<unknown>>()
   const modules = new Map<string, ModuleAuthorizationFacts>()
   let org = false
-  for (const route of matchedRoutes(c)) {
-    const handler = route.handler as MiddlewareHandler<E>
+  let sessionOnly = false
+  for (let index = 0; index < window.end; index++) {
+    const handler = routes[index]!.handler as MiddlewareHandler<E>
     const use = uses.get(handler)
     if (!use) continue
     pending.add(handler)
     if (use.org) org = true
+    if (use.sessionOnly) sessionOnly = true
     for (const fact of use.facts ?? []) facts.add(fact)
-    if (!use.module || modules.has(use.module)) continue
-    const policy = moduleFacts?.(use.module)
-    if (policy) modules.set(use.module, policy)
+    includeModule(modules, use.module, moduleFacts)
   }
-  return { selection: org ? organizationSelection(c) : { kind: 'unused' }, pending, facts, modules }
+  return {
+    selection: org ? readSelection(c, routes, window) : { kind: 'unused' },
+    end: window.end,
+    sessionOnly,
+    pending,
+    facts,
+    modules,
+  }
 }
 
 export function selectedOrganization(plan: Pick<AuthorizationPlan<Env>, 'selection'>): string {

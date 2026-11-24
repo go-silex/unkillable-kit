@@ -14,7 +14,10 @@ import { notificationLocale } from '../../messages'
 import { requireOrgContext } from '../../middleware/org-context'
 import { requireAuth } from '../../middleware/require-auth'
 import { requireSession } from '../../middleware/require-session'
-import { loadNotificationScope } from '../../services/notifications/access'
+import {
+  includeNotificationAccess,
+  loadNotificationScope,
+} from '../../services/notifications/access'
 import { renderInboxRow } from '../../services/notifications/inbox'
 import type { AppEnv } from '../../types'
 import {
@@ -65,6 +68,7 @@ const middleware = [
   requireAuth,
   requireSession,
   requireOrgContext(),
+  includeNotificationAccess,
   strictInput,
 ] as const
 const errors = {

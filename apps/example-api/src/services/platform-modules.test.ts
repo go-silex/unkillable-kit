@@ -1,7 +1,13 @@
 import { listRolesForOrg } from '@kit/auth/repos/org-roles'
-import { listPlatformModules } from '@kit/auth/repos/platform-modules'
+import {
+  getPlatformModule,
+  listPlatformModules,
+  upsertPlatformModule,
+} from '@kit/auth/repos/platform-modules'
+import { organizationModules, platformModules } from '@kit/auth/schema'
 import { createDb } from '@kit/db'
 import { FLOWS_MODULE_ID } from '@kit/flows'
+import { eq, sql } from 'drizzle-orm'
 import { describe, expect, it } from 'vitest'
 import { schema } from '../db/schema'
 import { isModuleConfigured } from '../lib/integration-config'
@@ -25,8 +31,19 @@ describe('platform-modules service (coverage / ADR dual-level)', () => {
 
   it('reads module and role state without initializing missing rows', async () => {
     const d = await db()
-    await platformModulesService.listPlatformPublic(d, { readOnly: true })
-    await platformModulesService.getOrgModulesEffective(d, 'org_x', { readOnly: true })
+    expect((await platformModulesService.listPlatformPublic(d)).demo).toMatchObject({
+      available: false,
+      configured: true,
+      configPath: '/admin/modules',
+    })
+    expect((await platformModulesService.getOrgModulesEffective(d, 'org_x')).demo).toEqual({
+      available: false,
+      enabled: false,
+      locked: false,
+      effective: false,
+      configured: true,
+      configPath: '/admin/modules',
+    })
     expect(await listRolesWithGrants(d, 'org_x')).toEqual([])
     expect(await listPlatformModules(d)).toEqual([])
     expect(await listRolesForOrg(d, 'org_x')).toEqual([])
@@ -64,6 +81,49 @@ describe('platform-modules service (coverage / ADR dual-level)', () => {
     })
   })
 
+  it('provisions missing catalogue rows without replacing settings or timestamps', async () => {
+    const d = await db()
+    const configuredDemo = {
+      moduleId: 'demo',
+      available: true,
+      configJson: '{"saved":true}',
+      updatedAt: 123,
+    }
+    await upsertPlatformModule(d, configuredDemo)
+
+    await platformModulesService.ensurePlatformModules(d)
+
+    expect(await getPlatformModule(d, 'demo')).toEqual(configuredDemo)
+    expect(await getPlatformModule(d, FLOWS_MODULE_ID)).toEqual({
+      moduleId: FLOWS_MODULE_ID,
+      available: false,
+      configJson: null,
+      updatedAt: expect.any(Number),
+    })
+  })
+
+  it('does not overwrite a setting inserted at the bootstrap conflict point', async () => {
+    const d = await db()
+    // Inject the competing setting after any preflight read, before the default INSERT.
+    await d.run(sql`
+      CREATE TRIGGER competing_platform_setting BEFORE INSERT ON platform_modules
+      WHEN NEW.module_id = 'demo' AND NEW.available = 0
+      BEGIN
+        INSERT INTO platform_modules (module_id, available, config_json, updated_at)
+        VALUES ('demo', 1, '{"concurrent":true}', 123);
+      END
+    `)
+
+    await platformModulesService.ensurePlatformModules(d)
+
+    expect(await getPlatformModule(d, 'demo')).toEqual({
+      moduleId: 'demo',
+      available: true,
+      configJson: '{"concurrent":true}',
+      updatedAt: 123,
+    })
+  })
+
   it('effective = available ∧ org enabled', async () => {
     const d = await db()
     await platformModulesService.ensurePlatformModules(d)
@@ -79,6 +139,26 @@ describe('platform-modules service (coverage / ADR dual-level)', () => {
     expect(eff.demo.effective).toBe(true)
     expect(eff.demo.available).toBe(true)
     expect(eff.demo.enabled).toBe(true)
+  })
+
+  it('requires both availability flags to be stored as numeric 1', async () => {
+    const d = await db()
+    await platformModulesService.setPlatformAvailable(d, 'demo', true)
+    await platformModulesService.setOrgModuleEnabled(d, 'org_x', 'demo', true)
+
+    // A BLOB containing "1" is not the SQLite integer 1.
+    await d
+      .update(platformModules)
+      .set({ available: sql`x'31'` })
+      .where(eq(platformModules.moduleId, 'demo'))
+    expect(await platformModulesService.isModuleEffective(d, 'org_x', 'demo')).toBe(false)
+
+    await platformModulesService.setPlatformAvailable(d, 'demo', true)
+    await d
+      .update(organizationModules)
+      .set({ enabled: sql`x'31'` })
+      .where(eq(organizationModules.organizationId, 'org_x'))
+    expect(await platformModulesService.isModuleEffective(d, 'org_x', 'demo')).toBe(false)
   })
 
   it('rejects enable when platform unavailable', async () => {

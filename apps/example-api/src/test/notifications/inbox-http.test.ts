@@ -1,9 +1,10 @@
 import * as orgRoles from '@kit/auth/repos/org-roles'
-import { upsertOrgModule } from '@kit/auth/repos/platform-modules'
+import { upsertOrgModule, upsertPlatformModule } from '@kit/auth/repos/platform-modules'
 import { baMember } from '@kit/auth/schema'
+import { countD1RoundTrips } from '@kit/db/testing'
 import { kitNotifications } from '@kit/notifications/schema'
 import { eq } from 'drizzle-orm'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createNotificationFixture, type NotificationFixture } from './fixture'
 
 type InboxItem = {
@@ -114,6 +115,10 @@ describe('notification inbox HTTP behavior', () => {
     })
     expect((await page()).items.map((item) => item.id)).toEqual(['visible'])
     expect(await count()).toBe(1)
+    await upsertPlatformModule(f.db, { moduleId: 'tasks', available: false, updatedAt: Date.now() })
+    expect((await page()).items).toEqual([])
+    expect(await count()).toBe(0)
+    await upsertPlatformModule(f.db, { moduleId: 'tasks', available: true, updatedAt: Date.now() })
     const all = await read(`${base}/read-all`)
     expect(all.status).toBe(200)
     expect((await all.json()) as object).toMatchObject({ ok: true, updated: 1 })
@@ -166,7 +171,7 @@ describe('notification inbox HTTP behavior', () => {
     }
   })
 
-  it('uses live custom-role grants before list, count, and read mutations', async () => {
+  it('captures current custom-role grants with visibility, then observes changes on the next request', async () => {
     await insert('custom', { userId: 'user_team_owner' })
     const created = await request('/api/orgs/org_acme/roles', {
       method: 'POST',
@@ -177,8 +182,8 @@ describe('notification inbox HTTP behavior', () => {
       }),
     })
     expect(created.status).toBe(201)
-    const role = await orgRoles.findRoleByKey(f.db, 'org_acme', 'inbox_viewer')
-    expect(role).toBeTruthy()
+    const role = (await orgRoles.findRoleByKey(f.db, 'org_acme', 'inbox_viewer'))!
+    expect(role).toBeDefined()
     await f.db
       .update(baMember)
       .set({ role: 'inbox_viewer' })
@@ -186,11 +191,31 @@ describe('notification inbox HTTP behavior', () => {
     const headers = await f.headersFor('user_team_owner', 'org_acme')
     const call = (path: string, init: RequestInit = {}) =>
       f.app.request(path, { ...init, headers }, f.env)
-    const visible = await call(base)
+    const measured = countD1RoundTrips(f.env.DB)
+    const batch = vi.fn(async (statements: unknown[]) => {
+      const result = await measured.db.batch(statements)
+      // Revoke after authorization has read, but before the handler consumes its scope.
+      expect(await orgRoles.deleteGrant(f.db, 'org_acme', role.id, 'tasks')).toBe(true)
+      return result
+    })
+    const instrumented = new Proxy(measured.db, {
+      get(target, key, receiver) {
+        return key === 'batch' ? batch : Reflect.get(target, key, receiver)
+      },
+    })
+    const visible = await f.app.request(base, { headers }, { ...f.env, DB: instrumented })
+    expect(batch).toHaveBeenCalledTimes(1)
+    expect(measured.count).toBe(2)
+    const snapshot = batch.mock.results[0]
+    expect(await (snapshot?.type === 'return' ? snapshot.value : undefined)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ results: [{ module_id: 'tasks', enabled: 1, available: 1 }] }),
+        expect.objectContaining({ results: [{ module_id: 'tasks', access: 'read' }] }),
+      ]),
+    )
     expect(visible.status).toBe(200)
     const visiblePage = (await visible.json()) as Page
     expect(visiblePage.items.map((item) => item.id)).toEqual(['custom'])
-    await orgRoles.deleteGrant(f.db, 'org_acme', role!.id, 'tasks')
     const hidden = await call(base)
     const hiddenPage = (await hidden.json()) as Page
     expect(hidden.status).toBe(200)
@@ -202,7 +227,7 @@ describe('notification inbox HTTP behavior', () => {
     expect(await all.json()).toMatchObject({ updated: 0 })
     await orgRoles.upsertGrant(f.db, {
       organizationId: 'org_acme',
-      roleId: role!.id,
+      roleId: role.id,
       moduleId: 'tasks',
       access: 'read',
     })
