@@ -6,12 +6,13 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ### Auth
 
-- **Product action:** Replace the retired auth ports with Kit request authorization and register
-  read-only Product facts and Module policy. Enroll each shipping Better Auth App in Root's
-  differential and align the lockfile on one resolved `better-auth` version. Verify that existing
-  Organizations were explicitly provisioned; do not restore missing grants indiscriminately.
-  An unavailable Module now returns `404` even with super-admin bypass. Existing cookies stay valid;
-  no D1 migration is needed. See the [migration guide](docs/kit/product-consumer-contract.md#authentication-reads-and-organization-context-migration)
+- **Product action:** Replace removed auth exports with Kit request authorization and register
+  read-only Product facts and Module policy. Unreadable authorization loads now return `503`.
+  Enroll each shipping Better Auth App in Root's differential and align the lockfile on one
+  resolved `better-auth` version. Verify existing Organization provisioning; do not restore
+  missing grants indiscriminately. An unavailable Module now returns `404` even with super-admin
+  bypass. Existing cookies stay valid; no D1 migration is needed.
+  See the [migration guide](docs/kit/playbooks/migrate-request-authorization.md)
   (go-silex/unkillable-kit#162).
 
 ## unkillable-kit/v0.7.0 — 2026-11-24
