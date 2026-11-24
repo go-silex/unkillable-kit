@@ -9,7 +9,7 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 - `@kit/ui` exports `DialogPopup`, an unstyled dialog popup. Compose it with
   `Dialog`, `DialogPortal` and a `DialogOverlay` rendered as the Product's own
   veil to bring Product dialog markup while keeping the kit's focus trap,
-  focus return and dismissal (go-silex/unkillable-ui#2).
+  focus return and dismissal (go-silex/unkillable-kit#173).
 
 ### CI
 
@@ -17,15 +17,27 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
   enforces Product App enrollment and omits Kit-owned coverage only on proven
   Product-only pull requests; pushes still prove the whole bar
   (go-silex/unkillable-kit#156).
-- **Product action:** In the same Kit upgrade PR, ensure each Product App
-  declares `typecheck` and `test:coverage`, sets floors through `makeCoverage`,
-  and has a risk tier in `config/product/coverage-order.txt`. Add coverage
-  partitions under ADR-0023 only where needed. Remove duplicate typecheck,
-  tests (including MCP), `zero-edit` and `deploy-gate:check` from copied Product
+- **Product action:** In the same Kit upgrade PR, enroll each Product App in
+  Root. Keep `apps/*` in the root `workspaces`. Declare non-empty `typecheck`
+  and `test:coverage` scripts. Build the Vitest coverage options with
+  `makeCoverage` and the App directory name, keep its `json-summary` reporter,
+  and set a positive global floor on a metric the run measures. The run needs
+  at least one passing test. Give each App a risk tier in
+  `config/product/coverage-order.txt`, and add coverage partitions under
+  ADR-0023 only where needed (go-silex/unkillable-kit#156).
+- **Product action:** In the same PR, remove duplicate typecheck, tests
+  (including MCP), `zero-edit` and `deploy-gate:check` from the copied Product
   validation. Move standalone App smoke checks into Root coverage before
-  removing their old calls. Keep deployment builds and Product-specific guards.
-  One Product must pilot the release and prove the hosted 300-second Root budget
-  before wider adoption (go-silex/unkillable-kit#156).
+  removing their old calls. Keep Product-specific guards. Keep or add the
+  deployment builds shown in `docs/kit/templates/product-validate.example.sh`:
+  a Vite-only SPA build where the Product has a web App, and a Worker dry-run
+  for each deployed environment, including the unnamed configuration when it
+  is deployed (go-silex/unkillable-kit#156).
+- **Product action:** One Product pilots this release before wider adoption.
+  The pilot proves the hosted 300-second Root budget on both its pull request
+  run and its push run to the default branch. A Product-only pull request runs
+  a narrowed bar and does not prove the push path
+  (go-silex/unkillable-kit#156).
 - The Example API D1 round-trip suite measures authenticated route groups in
   separate cases under the default timeout, with the same ceilings and route
   coverage (go-silex/unkillable-kit#174).
