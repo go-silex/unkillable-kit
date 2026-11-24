@@ -9,7 +9,7 @@ import type { resolveRequestSession } from '../../packages/auth/src/snapshot'
 import { createSqliteD1, type SqliteD1 } from '../../packages/db/src/test/sqlite-d1'
 import type { BetterAuthApp } from './root-gate-better-auth-apps'
 import type { CredentialWrites, MountedProbe } from './root-gate-better-auth-probe'
-import { kitFactory } from './root-gate-better-auth-worker'
+import { kitFactory } from './root-gate-better-auth-source'
 
 const secret = crypto.randomUUID()
 const wrongSecret = crypto.randomUUID()
@@ -182,6 +182,7 @@ function proveMountedIssuer(app: BetterAuthApp, snapshotPath: string, passwordHa
         kitFactory,
         installation: app.installation,
         composition: app.composition,
+        workspaceRoots: app.workspaceRoots,
         factoryCallee: app.factoryCallee,
         snapshotPath,
         scratch,

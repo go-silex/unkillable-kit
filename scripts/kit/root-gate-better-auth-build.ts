@@ -8,7 +8,7 @@ export type BundleInputs = Record<
   string,
   { imports: { original?: string; path: string; external?: boolean }[] }
 >
-type BundleOutputs = Record<string, { inputs: Record<string, { bytesInOutput: number }> }>
+export type BundleOutputs = Record<string, { inputs: Record<string, { bytesInOutput: number }> }>
 
 export function bundleInputContributions(outputs: BundleOutputs) {
   // A linked barrel can contribute zero bytes; absence means the whole input was shaken out.

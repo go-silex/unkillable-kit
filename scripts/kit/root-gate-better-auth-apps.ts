@@ -1,14 +1,16 @@
 import { createHash } from 'node:crypto'
 import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import { dirname, isAbsolute, join, relative } from 'node:path'
-import { type ModuleExportName, type Program, Visitor } from 'oxc-parser'
+import { type Program, Visitor } from 'oxc-parser'
 import { dependency } from './root-gate-better-auth-lock'
-import { namespaceUsesFactory } from './root-gate-better-auth-namespace'
 import {
   adapterName,
+  importsServerFactory,
   kitFactory,
   parseProgram,
   shippingSource,
+} from './root-gate-better-auth-source'
+import {
   verifyWorkerWiring,
   type WorkerTarget,
   workerUsesServerFactory,
@@ -23,69 +25,9 @@ type BetterAuthComposition = {
 }
 export type BetterAuthApp = BetterAuthComposition & {
   installation: { factoryPath: string; kitRoot: string; betterAuthRoot: string }
+  workspaceRoots: readonly string[]
 }
-const serverFactoryExports = new Map([
-  [kitFactory, adapterName],
-  [dependency, 'betterAuth'],
-  [`${dependency}/minimal`, 'betterAuth'],
-])
 const runtimeSources = new Bun.Glob('**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}')
-
-function exportName(node: ModuleExportName) {
-  return node.type === 'Identifier' ? node.name : node.value
-}
-
-function importsServerFactory(
-  program: Program,
-  resolveFactory: (source: string) => string | undefined = (source) =>
-    serverFactoryExports.get(source),
-) {
-  let found = false
-  const namespaces = new Map<string, string>()
-  function check(source: string, exported?: string) {
-    const factory = resolveFactory(source)
-    found ||= factory !== undefined && (exported === undefined || exported === factory)
-  }
-  new Visitor({
-    ImportDeclaration(node) {
-      const factory = resolveFactory(node.source.value)
-      if (!factory || node.importKind === 'type') return
-      for (const item of node.specifiers) {
-        if (item.type === 'ImportNamespaceSpecifier') {
-          namespaces.set(item.local.name, factory)
-        } else if (item.type === 'ImportSpecifier') {
-          found ||= item.importKind !== 'type' && exportName(item.imported) === factory
-        }
-      }
-    },
-    ExportNamedDeclaration(node) {
-      if (node.exportKind === 'type' || !node.source) return
-      for (const item of node.specifiers) {
-        if (item.exportKind !== 'type') {
-          check(node.source.value, exportName(item.local))
-        }
-      }
-    },
-    ExportAllDeclaration(node) {
-      if (node.exportKind !== 'type') check(node.source.value)
-    },
-    ImportExpression(node) {
-      if (node.source.type === 'Literal' && typeof node.source.value === 'string')
-        check(node.source.value)
-    },
-    CallExpression(node) {
-      const arg = node.arguments[0]
-      if (
-        node.callee.type === 'Identifier' &&
-        node.callee.name === 'require' &&
-        arg?.type === 'Literal' &&
-        typeof arg.value === 'string'
-      )
-        check(arg.value)
-    },
-  }).visit(program)
-  return found || namespaceUsesFactory(program, namespaces)
-}
 
 function kitFactoryBindings(program: Program) {
   const kitNames = new Set<string>()
@@ -179,7 +121,7 @@ function discoverComposition(
   if (
     !factories.length &&
     manifest.kitBetterAuth === undefined &&
-    !workerUsesServerFactory(dir, workspaceRoots, importsServerFactory)
+    !workerUsesServerFactory(dir, workspaceRoots)
   ) {
     return
   }
@@ -247,6 +189,6 @@ export function discoverBetterAuthApps(root: string, lockedVersion: string | und
   return apps.flatMap((path) => {
     const app = discoverComposition(root, path, workspaceRoots)
     if (!app) return []
-    return [{ ...app, installation: resolveInstallation(app, lockedVersion) }]
+    return [{ ...app, workspaceRoots, installation: resolveInstallation(app, lockedVersion) }]
   })
 }

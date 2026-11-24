@@ -5,6 +5,7 @@ import { createRequire } from 'node:module'
 import { isAbsolute, join, parse, relative, resolve, sep } from 'node:path'
 import type { BetterAuthApp } from './root-gate-better-auth-apps'
 import { type BundleInputs, bundleWorker } from './root-gate-better-auth-build.ts'
+import { inspectWranglerInputs } from './root-gate-better-auth-inventory.ts'
 import type { WorkerTarget } from './root-gate-better-auth-worker'
 
 export type CredentialWrites = [sql: string, values: (string | number)[]][]
@@ -15,6 +16,7 @@ export type MountedProbe = {
   kitFactory: string
   installation: BetterAuthApp['installation']
   composition: string
+  workspaceRoots: readonly string[]
   factoryCallee: BetterAuthApp['factoryCallee']
   snapshotPath: string
   scratch: string
@@ -206,7 +208,7 @@ async function migrateDatabase(
 async function run(probe: MountedProbe) {
   const challenge = crypto.randomUUID()
   const { target } = probe
-  const { build, emptyEnv, inputs } = bundleWorker(
+  const { build, emptyEnv, inputs, outputs } = bundleWorker(
     process.execPath,
     probe.wrangler,
     probe.dir,
@@ -214,8 +216,15 @@ async function run(probe: MountedProbe) {
     probe.scratch,
     installBuildHook(probe, challenge),
   )
-  assert.ok(inputs, 'The enrolled issuer requires a Wrangler release input graph')
+  assert.ok(inputs && outputs, 'The enrolled issuer requires a Wrangler release input graph')
   verifyFactoryResolution(probe, inputs)
+  const extraIssuer = inspectWranglerInputs(
+    probe.dir,
+    probe.workspaceRoots,
+    inputs,
+    outputs,
+    probe.composition,
+  )
   const requireFromWrangler = createRequire(probe.wrangler)
   const wrangler: Wrangler = requireFromWrangler(probe.wrangler)
   const config = wrangler.unstable_readConfig({ config: target.config, env: target.env })
@@ -301,6 +310,9 @@ async function run(probe: MountedProbe) {
   } finally {
     await worker.dispose()
   }
+  // A successful sign-in proves this request's issuer, not the absence of other issuers.
+  if (extraIssuer)
+    throw new Error(`Wrangler release includes an extra Better Auth issuer: ${extraIssuer}`)
 }
 
 // Miniflare needs Node's Undici dispatcher for Worker HTTP; Root itself runs on Bun.

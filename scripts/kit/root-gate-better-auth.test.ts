@@ -223,9 +223,43 @@ export default {
   }
   assert.match(runCore(), /apps\/product-fixture differential fixtures passed/)
 
+  // Enrolled Workers also fail before executing an unsupported build command.
+  put(`${app}/wrangler.toml`, `${withRelease}\n[build]\ncommand = "touch enrolled-build-ran"\n`)
+  runCore(/Cannot inventory opaque Worker inputs.*without build\.command/)
+  assert.equal(existsSync(join(root, app, 'enrolled-build-ran')), false)
+  put('packages/opaque-enrolled/package.json', '{"name":"opaque-enrolled"}')
+  put(
+    'packages/opaque-enrolled/dist/index.js',
+    'export function enabled(req) { return req.method !== "CONNECT" }\n',
+  )
+  const edge = `${app}/src/edge.ts`
+  put(
+    edge,
+    `import { enabled } from '../../../packages/opaque-enrolled/dist/index.js'
+import { fetch as handle } from './auth-consumer'
+export function fetch(req, env) { return enabled(req) ? handle(req, env) : new Response(null) }
+`,
+  )
+  put(`${app}/wrangler.toml`, withRelease)
+  runCore(/Cannot inventory opaque Worker inputs: .*opaque-enrolled\/dist\/index\.js/)
+  put(edge, `export { fetch } from './auth-consumer'\n`)
+
   // This release environment calls the enrolled composition, but sends a genuine, compatible
   // cookie from a different instance. Neither call reachability nor successful sign-in is proof.
-  put(`${app}/wrangler.toml`, `${withRelease}\n[env.release.vars]\nWRONG_ISSUER = "true"\n`)
+  const releaseWithAlternate = withRelease.replace(
+    '[[env.release.d1_databases]]',
+    '[env.release]\nmain = "src/alternate-worker.ts"\n[[env.release.d1_databases]]',
+  )
+  const alternateFlag = (value: string) =>
+    releaseWithAlternate.replace(
+      '[[env.release.d1_databases]]',
+      `[env.release.vars]\nWRONG_ISSUER = ${JSON.stringify(value)}\n[[env.release.d1_databases]]`,
+    )
+  put(`${app}/wrangler.toml`, alternateFlag('true'))
+  put(
+    `${app}/src/alternate-worker.ts`,
+    "import { fetch } from './alternate-consumer'\nexport default { fetch }\n",
+  )
   put(
     'packages/alternate-issuer/issuer.ts',
     `import { createBetterAuth } from '@kit/auth/factory'
@@ -249,7 +283,7 @@ export function alternateIssuer(options) { return createBetterAuth(options) }
     'dir',
   )
   put(
-    `${app}/src/auth-consumer.ts`,
+    `${app}/src/alternate-consumer.ts`,
     `import { createBetterAuth as issueAuth } from './better-auth'
 import { alternateIssuer } from '../../../packages/alternate-issuer/issuer'
 export function fetch(req, env) {
@@ -264,6 +298,9 @@ export function fetch(req, env) {
 `,
   )
   runCore(/--env release\) failed:[\s\S]*mounted Better Auth cookie lacks provenance/)
+  // Mounted sign-in now succeeds, but another live branch still provisions an extra issuer.
+  put(`${app}/wrangler.toml`, alternateFlag(''))
+  runCore(/Wrangler release includes an extra Better Auth issuer: .*alternate-issuer\/issuer\.ts/)
 
   put(
     `${app}/src/configured-issuer.ts`,
@@ -362,11 +399,12 @@ export default { fetch: () => Response.json(typeof selected) }
     runCore()
   }
 
-  function useNamespace(source: string, expression: string) {
+  function useNamespace(source: string, expression: string, helpers = '') {
     put(
       `${app}/src/release.ts`,
       `import * as sdk from ${JSON.stringify(source)}
 type Namespace = typeof sdk
+${helpers}
 export default { fetch: () => Response.json(${expression}) }
 `,
     )
@@ -382,7 +420,18 @@ export default { fetch: () => Response.json(${expression}) }
     useNamespace(aliasSource, `typeof sdk[${JSON.stringify(helper)}]`)
     runCore()
   }
-  // Keep the Kit alias from the last iteration: statically reading the factory,
+  put(`${app}/wrangler.toml`, distinctRelease)
+  useNamespace(
+    'better-auth',
+    'typeof sdk.getBaseURL + parameter({ betterAuth: 1 }) + local()',
+    `function parameter(sdk) { return sdk.betterAuth }
+function local() {
+  { const { sdk } = { sdk: { betterAuth: 2 } }; return sdk.betterAuth }
+}`,
+  )
+  runCore()
+  useReleaseAlias(Bun.resolveSync('@kit/auth/factory', join(root, app)))
+  // With the Kit alias, statically reading the factory,
   // passing the namespace to another function or computing the key are all unsafe.
   for (const expression of [
     'typeof sdk.createBetterAuth',
