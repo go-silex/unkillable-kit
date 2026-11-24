@@ -11,6 +11,7 @@ export type ModuleAuthorizationFacts = Readonly<{
 
 export type AuthorizationUse = Readonly<{
   org?: true
+  allEndpoint?: true
   sessionOnly?: true
   module?: string
   facts?: readonly AuthorizationFact<unknown>[]
@@ -48,13 +49,11 @@ function dispatchWindow<E extends Env>(
   const method = selectedMethod(c.req.method, routes)
   let endpoint: string | undefined
   for (const [index, route] of routes.entries()) {
-    // Hono represents both .use and .all as ALL. A non-wildcard ALL group
-    // registering Kit guards can own dispatch; wildcard entries are middleware.
-    const guardedAll =
-      route.method === 'ALL' &&
-      !route.path.includes('*') &&
-      uses.has(route.handler as MiddlewareHandler<E>)
-    if (route.method !== method && !guardedAll) continue
+    // Hono uses ALL for both .use and .all; only an explicit endpoint
+    // declaration can tell those registrations apart.
+    const allEndpoint =
+      route.method === 'ALL' && uses.get(route.handler as MiddlewareHandler<E>)?.allEndpoint
+    if (route.method !== method && !allEndpoint) continue
     if (endpoint === undefined) {
       endpoint = route.path
     } else if (endpoint !== route.path) {
@@ -77,7 +76,7 @@ function readSelection<E extends Env>(
   try {
     for (let index = 0; index < end; index++) {
       const route = routes[index]
-      if (route?.path !== endpoint && route?.method !== 'ALL') continue
+      if (!endpoint || route?.path !== endpoint) continue
       c.req.routeIndex = index
       const id = c.req.param('orgId')?.trim()
       if (!id) continue
@@ -133,6 +132,7 @@ export function planAuthorization<E extends Env>(
     for (const fact of use.facts ?? []) facts.add(fact)
     includeModule(modules, use.module, moduleFacts)
   }
+  if (org && !window.endpoint) throw authUnavailable()
   return {
     selection: org ? readSelection(c, routes, window) : { kind: 'unused' },
     end: window.end,

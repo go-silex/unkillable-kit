@@ -41,6 +41,7 @@ export const MODULE_DENIAL = {
 export type GuardState<E extends Env> = {
   plan: AuthorizationPlan<E>
   load: Promise<RequestSnapshot>
+  factsAdmitted: boolean
   authenticated: boolean
   keyScope: boolean
   fence: boolean
@@ -201,6 +202,7 @@ export function validateAdmittedFacts<E extends Env>(
   for (const descriptor of state.plan.facts) {
     if (isAdmittedFactScope(state, descriptor.scope.kind)) snapshot.rows(descriptor)
   }
+  state.factsAdmitted = true
 }
 
 export function admitOrganization<E extends Env>(
@@ -236,15 +238,15 @@ export async function readAdmittedFact<T, E extends Env>(
   descriptor: AuthorizationFact<T>,
 ): Promise<T> {
   if (
-    !(state?.authenticated && state.fence) ||
-    state.plan.pending.size ||
-    !state.plan.facts.has(descriptor) ||
-    !isAdmittedFactScope(state, descriptor.scope.kind)
+    !(
+      state?.factsAdmitted &&
+      state.plan.facts.has(descriptor) &&
+      isAdmittedFactScope(state, descriptor.scope.kind)
+    )
   ) {
     throw AppError.forbidden('Authorization fact is not admitted for this scope')
   }
   const snapshot = await state.load
-  if (snapshot.identity?.method === 'api_key' && !state.keyScope) throw AppError.forbidden()
   try {
     return descriptor.decode(snapshot.rows(descriptor))
   } catch {

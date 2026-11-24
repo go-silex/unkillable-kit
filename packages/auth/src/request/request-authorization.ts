@@ -77,6 +77,7 @@ export function createRequestAuthorization<E extends Env>(options: Options<E>) {
     const state: GuardState<E> = {
       plan,
       load: load(c, plan),
+      factsAdmitted: false,
       authenticated: false,
       keyScope: false,
       fence: !options.delegation,
@@ -93,6 +94,7 @@ export function createRequestAuthorization<E extends Env>(options: Options<E>) {
   ): MiddlewareHandler<E> {
     const middleware = async (c: Context<E>, next: Next) => {
       const state = stateOf(c)
+      state.factsAdmitted = false
       if (c.req.routeIndex >= state.plan.end) throw authUnavailable()
       const snapshot = await state.load
       check(c, state, snapshot)
@@ -170,6 +172,9 @@ export function createRequestAuthorization<E extends Env>(options: Options<E>) {
       assertModule(state.plan.modules.get(moduleId), snapshot, mode, op)
     })
   }
+
+  /** Attach to a terminal app.all registration, never to app.use middleware. */
+  const allEndpoint = guard({ allEndpoint: true }, () => {})
 
   function includeFacts(...facts: AuthorizationFact<unknown>[]): MiddlewareHandler<E> {
     return guard(
@@ -254,6 +259,7 @@ export function createRequestAuthorization<E extends Env>(options: Options<E>) {
     requireOrgCapability,
     requirePlatformRole,
     requireModule,
+    allEndpoint,
     includeFacts,
     fact,
     authenticateKey,

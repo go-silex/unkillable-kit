@@ -62,6 +62,10 @@ gate calls `authenticateKey`, checks its default-deny route scope allowlist, the
 `admitKeyScope`. The regular guards project `keyScopes` only after admission. A key scope
 never substitutes for Organization or role checks. See the [Product migration](../../docs/kit/product-consumer-contract.md#authentication-reads-and-organization-context-migration).
 
+For guarded routes registered with Hono `app.all`, attach the authorization instance's
+`allEndpoint` middleware to that endpoint before its guards. Do not attach it with `app.use`:
+Hono labels both registrations `ALL`, but only the endpoint may supply the path `orgId`.
+
 ## Account state
 
 The Product decides who may call `disableAccount` and `enableAccount` from

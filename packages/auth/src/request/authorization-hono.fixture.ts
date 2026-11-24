@@ -201,12 +201,29 @@ export async function fixture(invalidModule = false) {
   const productHandler = vi.fn(async (c: Context) =>
     c.json({ label: await authorization.fact(c, productFact) }),
   )
+  const rejectedRead = vi.fn<(status: number | string) => void>()
+  app.use('/all/*', async (c, next) => {
+    await next()
+    if (c.res.status !== 503) return
+    try {
+      await authorization.fact(c, productFact)
+      rejectedRead('exposed')
+    } catch (error) {
+      rejectedRead(error instanceof AppError ? error.status : 'unexpected')
+    }
+  })
   app.all(
     '/all/:orgId',
+    authorization.allEndpoint,
     authorization.requireAuth,
     authorization.requireOrgContext(),
     authorization.includeFacts(productFact, sibling),
     productHandler,
+  )
+  app.use('/middleware/:orgId/status', authorization.requireAuth)
+  app.use('/middleware/:orgId/*', authorization.requireAuth)
+  app.get('/middleware/:section/status', authorization.requireOrgContext(), (c) =>
+    c.json({ admitted: true }),
   )
   app.get(
     '/orgs/:orgId/admin',
@@ -244,6 +261,7 @@ export async function fixture(invalidModule = false) {
     key,
     prepare,
     productHandler,
+    rejectedRead,
     sqlite: database,
     userId: user.id,
   }

@@ -113,8 +113,17 @@ describe('HTTP authorization facts', () => {
     expect(conflicted.status).toBe(403)
   })
 
+  it('uses the endpoint selector rather than parameters on matched middleware', async () => {
+    const { app, cookie } = await fixture()
+    const route = '/middleware/section/status'
+    expect((await app.request(route, { headers: { cookie } })).status).toBe(400)
+    const allowed = await app.request(route, { headers: { cookie, 'X-Org-Id': 'alpha' } })
+    expect(allowed.status).toBe(200)
+    expect(await allowed.json()).toEqual({ admitted: true })
+  })
+
   it('does not dispatch or decode when an admitted fact has a failed Product sibling', async () => {
-    const { app, batches, cookie, decode, failure, productHandler } = await fixture()
+    const { app, batches, cookie, decode, failure, productHandler, rejectedRead } = await fixture()
     failure.productSibling = true
     const response = await app.request('/all/alpha', { headers: { cookie } })
     expect(response.status).toBe(503)
@@ -123,6 +132,7 @@ describe('HTTP authorization facts', () => {
     expect(batches[0]).toContainEqual({ success: true, results: [{ label: marker }] })
     expect(decode).not.toHaveBeenCalled()
     expect(productHandler).not.toHaveBeenCalled()
+    expect(rejectedRead).toHaveBeenCalledExactlyOnceWith(403)
   })
 
   it.each(['availability', 'grant'] as const)(
