@@ -13,7 +13,6 @@ import {
   isWithin,
   parseProgram,
   runtimeExtension,
-  shippingSource,
 } from './root-gate-better-auth-source.ts'
 
 const installedDirectory = /(^|\/)node_modules\//
@@ -26,13 +25,12 @@ function inspectableInput(
   if (contribution === undefined || !runtimeExtension.test(file)) return false
   const workspace = workspaceRoots.find((root) => isWithin(relative(root, file)))
   const path = workspace && relative(workspace, file)
-  if (!path || installedDirectory.test(path)) return true
-  if (generatedDirectory.test(path) && contribution) {
-    throw new Error(
-      `Cannot inventory opaque Worker inputs: ${file} is a deployed workspace output; use inspectable source outside dist/build`,
-    )
-  }
-  return shippingSource(path)
+  // The release graph, not source-directory conventions, determines what ships.
+  if (!path || installedDirectory.test(path) || !generatedDirectory.test(path)) return true
+  if (!contribution) return false
+  throw new Error(
+    `Cannot inventory opaque Worker inputs: ${file} is a deployed workspace output; use inspectable source outside dist/build`,
+  )
 }
 
 function readUpload(upload: string) {

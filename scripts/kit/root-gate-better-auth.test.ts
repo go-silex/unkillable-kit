@@ -278,6 +278,24 @@ export function fetch(req, env) { return enabled(req) ? handle(req, env) : new R
   )
   put(`${app}/wrangler.toml`, withRelease)
   runCore(/Cannot inventory opaque Worker inputs: .*opaque-enrolled\/dist\/index\.js/)
+
+  // Fixture-looking paths are ignored during source discovery, but not when Wrangler ships them.
+  put(
+    `${app}/src/__fixtures__/retained-issuer.test.ts`,
+    `import { betterAuth } from 'better-auth'
+export function issue(req) { return betterAuth({}).handler(req) }
+`,
+  )
+  put(
+    edge,
+    `import { issue } from './__fixtures__/retained-issuer.test'
+import { fetch as handle } from './auth-consumer'
+export function fetch(req, env) { return env.USE_FIXTURE_ISSUER ? issue(req) : handle(req, env) }
+`,
+  )
+  runCore(
+    /Wrangler release includes an extra Better Auth issuer: .*__fixtures__\/retained-issuer\.test\.ts/,
+  )
   put(edge, `export { fetch } from './auth-consumer'\n`)
 
   // This release environment calls the enrolled composition, but sends a genuine, compatible
