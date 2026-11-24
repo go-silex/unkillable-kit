@@ -175,6 +175,10 @@ Use an explicit, reviewed repair only when the grant is meant to exist.
 Set `kitBetterAuth` in each App's `package.json` to the shipping Worker’s App-relative module.
 It exports `createBetterAuth(env, baseURL)` using `@kit/auth/factory`. Declare `better-auth`
 and align the lockfile on one version, without Kit edits or a test issuer. Run `bun run validate:full`.
+Root inventories the release Worker source for each configured Wrangler environment, even if no App
+is enrolled. Keep the Worker entry and its imports visible to Wrangler; opaque prebuilt entries and
+custom Worker builds that hide the source graph cannot establish this proof. A declarative,
+unbundled Worker with visible sources does not need enrollment unless it composes Better Auth.
 See [ADR-0025](./architecture/adr/0025-request-authorization-snapshot.md).
 
 ### Impersonation V1 migration
