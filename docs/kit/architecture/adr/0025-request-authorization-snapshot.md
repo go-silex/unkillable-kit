@@ -21,7 +21,9 @@ summary: 'One authorization snapshot per request; one D1 batch for its facts'
 
 Each guard can repeat a D1 read made by another guard on the same request. `getSession` can read the session and User after its account guard already read both. API-key scope and route guards can both resolve the key. Organization and Module guards then use separate ports, and Products needing another fact add another read. A join in one repository cannot remove round trips between those ports.
 
-Baseline: the [round-trip suites](../../testing.md#d1-round-trip-ceilings) from go-silex/unkillable-kit#160 passed 59 tests. Counts below are measured on the local D1 test bindings for the complete HTTP request, after setup; they are not latency measurements. Hosted `whoami` used one D1 call on its test binding, excluding provider KV operations.
+Baseline at `9f2b53b` (`unkillable-kit/v0.7.0`): the [round-trip suites](../../testing.md#d1-round-trip-ceilings) from
+go-silex/unkillable-kit#160 passed 59 tests. The table records local test binding calls for the complete request
+after setup, not production latency and not values inferred from ceilings.
 
 | Request                                              | Session | Organization-bound API key |
 | ---------------------------------------------------- | ------: | -------------------------: |
@@ -30,6 +32,14 @@ Baseline: the [round-trip suites](../../testing.md#d1-round-trip-ceilings) from 
 | Example `GET /api/tasks/stages`                      |      24 |                         23 |
 | Example `GET /api/auth/get-session`, without refresh |       8 |                          — |
 | Starter `GET /api/orgs/:orgId/members`               |       6 |                         10 |
+
+To reproduce, record `countD1RoundTrips(...).count` after dispatch in the Example and Starter
+`src/test/d1-route-fixture.ts` probes. Run `bun run --cwd apps/example-api test` with `d1-auth-round-trips.test.ts`
+and `d1-round-trips.test.ts`, and `bun run --cwd apps/starter-api test` with `d1-budgets`.
+For hosted MCP, wrap the `workerFetch` DB binding only for the `whoami` call in `apps/mcp-example/src/http-oauth.test.ts`
+(`PKCE + localhost DCR + demo identity` case). That probe measured one D1 call, excluding provider KV operations.
+Use the real HTTP handlers, dispose of the instrumentation afterward, and do not replace `count` with `assertAtMost`:
+the latter only detects exceeded ceilings.
 
 ## Decision
 
@@ -196,25 +206,31 @@ Use `GET /api/orgs/:orgId` in `apps/example-api` to prove exactly one binding ca
 requests. Load the existing response projection as an App fact, scoped to the selected principal and Organization.
 Assert wire parity, including the member and audited support projections, path-only selection, and the single batch
 carrying core and Product facts. Separately exercise an existing Module-guarded route with one authorization batch and
-consumer-visible allow, unavailable `404` and insufficient-grant `403` outcomes; loading unused grant rows is not
-evidence of enforcement. Other routes can still perform business reads, audit and writes. Lower the measured
-go-silex/unkillable-kit#160 ceilings. Native Better Auth handler work and OAuth provider KV work are not promised one
-D1 call.
+consumer-visible allow, unavailable `404` and insufficient-grant `403` outcomes. With audited support bypass on that
+Module guard, prove an available Module is reachable without a membership grant and becomes `404` when unavailable.
+Other routes can still perform business reads, audit and writes. Lower the measured go-silex/unkillable-kit#160
+ceilings. Native Better Auth handler work and OAuth provider KV work are not promised one D1 call.
 
 Assert the response and binding-call count on locally decidable refusals and verify recovery does not depend on an unrelated App fact.
 
 Prove next-request refusals for sign-out, session revocation, account disable, membership removal, Organization
 suspension, Module grant removal, key revocation and hosted MCP revocation at their own stores. After deleting a
 system Role–module grant, also exercise an ordinary role-list read and the flows minting backstop to prove no lazy
-initialization restores it. Prove hosted tool scope separately from org-free `whoami`, as well as unavailable
-admission without revocation. Do not claim stronger consistency for OAuth KV than
-[ADR-0015](./0015-mcp-remote-oauth-worker.md) or cancellation of work already admitted.
+initialization restores it. Test the authoritative D1 adapter path separately from the binding-call ceiling; the proof
+must fail if a replica-capable, unconstrained read session is substituted. Prove hosted tool scope separately from
+org-free `whoami`, as well as unavailable admission without revocation. Do not claim stronger consistency for OAuth KV
+than [ADR-0015](./0015-mcp-remote-oauth-worker.md) or cancellation of work already admitted.
 
 Security review must explicitly verify that no write can enter the extension batch and that refused principals'
-Product facts are neither exposed nor logged. Exercise descriptor rejection and use a fact not otherwise visible in
-the response to prove that credential, scope, Module and failed-load refusals do not publish it or run its decoder.
-Exercise Root from synthetic Product-owned App wiring and the shared lockfile, including missing enrollment, missing
-direct dependency and conflicting nested resolutions. The Example App is not proof of external Product adoption.
+Product facts are neither exposed nor logged. Exercise descriptor rejection. Give the privacy fixture a known
+Product row and prove its decoder and accessor work on an admitted control. Where a refused request reaches the batch,
+observe the fact in the binding response before verifying the request does not publish or log it or run its decoder.
+Cover credential, scope, Module and failed-load refusals; for partial failure, keep the successful fact result in the
+test binding. Locally rejected credentials separately prove no read.
+
+Exercise Root from synthetic Product-owned App wiring and the shared lockfile: missing enrollment, missing direct
+dependency, conflicting nested resolutions, and a separate test factory resolving the same version as the runtime
+factory. Root must reject the latter despite version parity. The Example App is not proof of external Product adoption.
 
 The release notes carry a `**Product action:**` entry. Each Product upgrades in its own repository: swap the auth
 wiring, replace wrapping ports with batched facts, enroll its Better Auth Apps in the differential, align the shared
