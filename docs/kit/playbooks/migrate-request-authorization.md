@@ -71,6 +71,63 @@ No public `@kit/mcp` or `@kit/mcp/hosted` exports were removed.
    Verify existing Organization provisioning and repair only grants meant to exist. Role reads,
    admin validation and Capability Grant minting no longer restore missing grants.
 
+## Preserve a visibility-based write precondition
+
+This composition needs a Kit release after `unkillable-kit/v0.8.0` that includes
+go-silex/unkillable-kit#182. Use it when a client submits the authority fingerprint it last read.
+It does not replace resource-specific access checks or any recheck at the point of effect.
+
+```ts
+import { defineAuthorizationProjection } from '@kit/auth/snapshot'
+
+const visibility = defineAuthorizationProjection({
+  table: {
+    name: 'app_visibility',
+    columns: ['organization_id', 'user_id', 'resource_id', 'access'],
+  },
+  scope: { kind: 'organization-role', organizationId: 'organization_id', userId: 'user_id' },
+  select: ['resource_id', 'access'],
+})
+const authority = authorization.moduleAuthority('documents', {
+  view: 'document-visibility',
+  projection: visibility,
+})
+
+app.get('/orgs/:orgId/document-authority',
+  authorization.requireAuth, authorization.requireOrgContext(), authority.read,
+  async (c) => {
+    c.header('Cache-Control', 'private, no-store')
+    return c.json({ fingerprint: await authority.fingerprint(c) })
+  },
+)
+app.patch('/orgs/:orgId/documents/:id',
+  authorization.requireAuth, authorization.requireOrgContext(), authority.write,
+  updateDocument, // the App still owns authorization for the resource and the write itself
+)
+```
+
+- Replace the Module guard with `authority.read` or `authority.write`. Mount it directly on a
+  concrete method endpoint (`app.get`, `app.patch`, etc.), last among its planned Kit guards, with
+  the handler after it. Do not mount it through `app.use`, `app.all` or a wrapper.
+  Reuse the same registration and a stable view identifier for the read and write. The
+  precondition is for ordinary member sessions; it does not replace Bearer scope, Impersonation or
+  break-glass policy.
+- Use columns storing the exact Organization and User IDs as SQLite `TEXT`. Correlation is
+  case-sensitive regardless of the Product columns' collations. Select every scalar field whose
+  change must invalidate the fingerprint. The Kit orders the tuples deterministically, keeps
+  duplicates, and aggregates the complete matching set, not a count. The same statement skips
+  the Product rows for an inactive Organization, an unavailable Module or no read grant. The
+  bounded `defineAuthorizationFact` path is unchanged. D1 execution and result-size limits still
+  apply; there is no partial read or second query. A missing or incompatible projection table or
+  column fails the whole load with `503`, before any refusal that depends on that load, including
+  the Module's `404` or `403`.
+- Send the opaque value back in `X-Authority-Fingerprint` (or configure the header name on the
+  view). Credential and Organization refusals come first. An unavailable Module still yields
+  `404`; no current read access yields `403` without comparison. With current read access, a
+  missing or malformed value yields `400`, a stale value yields `409`, and a match still requires
+  write access (`403` for read-only). Neither refusal includes the projection or a fingerprint.
+  On `409` the client can refresh through the read route, subject to current access.
+
 ## Handle admission responses
 
 - **`503`:** A failed or unreadable required authorization load returns a generic response without

@@ -12,6 +12,7 @@ import {
 } from '../org-roles'
 import type { AuthorizationFact } from '../snapshot/facts'
 import { loadRequestSnapshot, type RequestSnapshot } from '../snapshot/load'
+import { bindModuleAuthority } from './authority-fingerprint'
 import {
   admitOrganization,
   assertModule,
@@ -22,6 +23,7 @@ import {
   type OrgContextOpts,
   projectIdentity,
   readAdmittedFact,
+  resolveRequestSessionCookie,
   snapshotFacts,
   validateAdmittedFacts,
 } from './authorization-admission'
@@ -33,7 +35,6 @@ import {
   planAuthorization,
   organizationSelection as readOrganizationSelection,
 } from './authorization-plan'
-import { requestSessionCookie } from './effective-session-cookie'
 
 export { MODULE_DENIAL, type OrgContextOpts } from './authorization-admission'
 export type { ModuleAuthorizationFacts } from './authorization-plan'
@@ -50,12 +51,20 @@ export function createRequestAuthorization<E extends Env>(options: Options<E>) {
   const requests = new WeakMap<Context<E>, GuardState<E>>()
   const uses = new WeakMap<MiddlewareHandler<E>, AuthorizationUse>()
 
-  async function load(c: Context<E>, plan: AuthorizationPlan<E>): Promise<RequestSnapshot> {
+  async function load(
+    c: Context<E>,
+    plan: AuthorizationPlan<E>,
+    authority: GuardState<E>['authority'],
+  ): Promise<RequestSnapshot> {
     const authorization = c.req.header('authorization')
     const bearer = parseBearer(authorization)
-    const header = c.req.header('cookie')
-    const auth = header && (options.delegation || !bearer) ? options.auth(c) : undefined
-    const cookie = auth ? requestSessionCookie(auth, header ?? null) : undefined
+    const cookie = resolveRequestSessionCookie(
+      c,
+      options,
+      options.delegation === true || !bearer,
+      authority,
+    )
+    const modulePolicy = plan.authority && plan.modules.get(plan.authority.moduleId)
     try {
       return await loadRequestSnapshot({
         db: options.db(c),
@@ -64,6 +73,14 @@ export function createRequestAuthorization<E extends Env>(options: Options<E>) {
         organizationId: plan.selection.kind === 'selected' ? plan.selection.id : undefined,
         delegation: options.delegation,
         facts: plan.sessionOnly && bearer ? [] : snapshotFacts(plan),
+        authority:
+          !bearer && plan.authority && modulePolicy
+            ? {
+                projection: plan.authority.projection,
+                availability: modulePolicy.availability,
+                grant: modulePolicy.grant,
+              }
+            : undefined,
       })
     } catch {
       throw authUnavailable()
@@ -74,9 +91,11 @@ export function createRequestAuthorization<E extends Env>(options: Options<E>) {
     const found = requests.get(c)
     if (found) return found
     const plan = planAuthorization(c, uses, options.moduleFacts)
+    const authority = plan.authority ? {} : undefined
     const state: GuardState<E> = {
       plan,
-      load: load(c, plan),
+      load: load(c, plan, authority),
+      authority,
       factsAdmitted: false,
       authenticated: false,
       keyScope: false,
@@ -98,6 +117,8 @@ export function createRequestAuthorization<E extends Env>(options: Options<E>) {
       if (c.req.routeIndex >= state.plan.end) throw authUnavailable()
       const snapshot = await state.load
       check(c, state, snapshot)
+      const pending = state.plan.authority?.pending
+      if (pending?.get(c.req.routeIndex) === middleware) pending.delete(c.req.routeIndex)
       state.plan.pending.delete(middleware)
       validateAdmittedFacts(state, snapshot)
       await next()
@@ -259,6 +280,7 @@ export function createRequestAuthorization<E extends Env>(options: Options<E>) {
     requireOrgCapability,
     requirePlatformRole,
     requireModule,
+    moduleAuthority: bindModuleAuthority(requests, uses, stateOf),
     allEndpoint,
     includeFacts,
     fact,

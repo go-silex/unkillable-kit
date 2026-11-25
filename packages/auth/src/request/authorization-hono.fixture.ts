@@ -1,15 +1,16 @@
 import { readFileSync } from 'node:fs'
 import { AppError } from '@kit/core'
 import type { KitD1Database } from '@kit/db'
-import { createSqliteD1 } from '@kit/db/testing'
+import { createSqliteD1, type SqliteD1 } from '@kit/db/testing'
 import Database from 'better-sqlite3'
 import { type Context, Hono } from 'hono'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import { expect, onTestFinished, vi } from 'vitest'
 import { createBetterAuth } from '../better-auth-factory'
+import type { BetterAuthLike } from '../better-auth-port'
 import { createRequestAuthorization } from '../hono'
 import { apiKeyPrefix, generateApiKey, hashApiKey } from '../keys'
-import { type AuthorizationRow, defineAuthorizationFact } from '../snapshot'
+import { type AuthorizationFact, type AuthorizationRow, defineAuthorizationFact } from '../snapshot'
 
 const origin = 'https://auth.example.test'
 export const marker = 'product-fixture-label'
@@ -41,7 +42,18 @@ export const projection = {
   maxRows: 1,
 }
 
-export async function fixture(invalidModule = false) {
+export async function authorizationDatabase(
+  issuerBinding?: (database: SqliteD1) => KitD1Database,
+): Promise<{
+  auth: BetterAuthLike
+  availability: AuthorizationFact<unknown>
+  cookie: string
+  grant: AuthorizationFact<unknown>
+  key: string
+  realDb: SqliteD1
+  sqlite: Database.Database
+  userId: string
+}> {
   const sqlite = new Database(':memory:')
   onTestFinished(() => {
     sqlite.close()
@@ -65,7 +77,7 @@ export async function fixture(invalidModule = false) {
   }
   const realDb = createSqliteD1(sqlite)
   const auth = createBetterAuth({
-    database: realDb,
+    database: issuerBinding ? issuerBinding(realDb) : realDb,
     secret: crypto.randomUUID() + crypto.randomUUID(),
     baseURL: origin,
     trustedOrigins: [origin],
@@ -113,6 +125,11 @@ export async function fixture(invalidModule = false) {
         'VALUES (?, ?, ?, ?, ?, ?, ?)',
     )
     .run('key', await hashApiKey(key), apiKeyPrefix(key), user.id, 'alpha', 'read', 1)
+  return { auth, availability, cookie, grant, key, realDb, sqlite, userId: user.id }
+}
+
+export async function fixture(invalidModule = false) {
+  const { auth, cookie, key, realDb, sqlite, userId } = await authorizationDatabase()
 
   const failure = {
     partial: false,
@@ -263,6 +280,6 @@ export async function fixture(invalidModule = false) {
     productHandler,
     rejectedRead,
     sqlite: database,
-    userId: user.id,
+    userId,
   }
 }

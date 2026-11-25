@@ -4,6 +4,13 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ## Unreleased
 
+### Auth
+
+- Products can preserve a complete Organization- and principal-scoped visibility projection
+  and distinguish a stale write precondition (`409`) from a current write denial (`403`) in
+  the same request authorization batch. See the [migration guide](docs/kit/playbooks/migrate-request-authorization.md#preserve-a-visibility-based-write-precondition)
+  (go-silex/unkillable-kit#182).
+
 ## unkillable-kit/v0.8.0 — 2026-11-24
 
 ### Auth

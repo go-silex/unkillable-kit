@@ -1,21 +1,15 @@
-import type { KitD1Database, KitD1Statement } from '@kit/db'
+import type { KitD1Database } from '@kit/db'
 import { apiKeyPrefix, parseBearer, verifyApiKey } from '../keys'
 import type { OrgContextRecord, PlatformRole } from '../org-roles'
 import { normalizeApiKeyOrganizationId, parseApiKeyScopes } from '../require-auth'
+import { type AuthorityPrerequisites, planFacts, prepareSnapshotBatch } from './batch'
 import { type SessionCookieInput, verifySessionCookie } from './cookie'
-import {
-  type AuthorizationFact,
-  type AuthorizationRow,
-  type CompiledFact,
-  compiledAuthorizationFact,
-  MAX_FACTS,
-} from './facts'
+import type { AuthorizationFact, AuthorizationRow } from './facts'
 import {
   type DelegationSnapshot,
   decodeDelegation,
   EMPTY_ROWS,
   expiry,
-  type FactResult,
   type Identity,
   organization,
   productRows,
@@ -25,13 +19,7 @@ import {
   singleResult,
   unavailable,
 } from './rows'
-import {
-  type Candidate,
-  candidateQuery,
-  coreQuery,
-  delegationQuery,
-  withDelegationCandidate,
-} from './sql'
+import type { Candidate } from './sql'
 
 export type RequestSnapshot = Readonly<{
   identity: Identity | null
@@ -50,6 +38,7 @@ type LoadInput = {
   organizationId?: string
   delegation?: boolean
   facts?: readonly AuthorizationFact<unknown>[]
+  authority?: AuthorityPrerequisites
 }
 
 const emptySnapshot: RequestSnapshot = Object.freeze({
@@ -108,87 +97,6 @@ async function selectCredentials({
     // Bearer selection is final; the separate delegation fence may still use the cookie.
     return { candidate: null, delegationToken, bearer }
   }
-}
-
-type Fact = AuthorizationFact<unknown>
-type PlannedFact = { fact: Fact; compiled: CompiledFact }
-type PreparedBatch = {
-  statements: KitD1Statement[]
-  runningFacts: Map<Fact, FactResult>
-  productTables: Set<string>
-}
-
-function prepare(db: KitD1Database, query: { sql: string; values: readonly unknown[] }) {
-  return db.prepare(query.sql).bind(...query.values)
-}
-
-function applicableFact(
-  scope: Fact['scope']['kind'],
-  candidate: Candidate,
-  selectedOrg: string | null,
-  delegationToken: string | null,
-): boolean {
-  switch (scope) {
-    case 'hosted-grant':
-      return (
-        candidate.kind === 'mcp' &&
-        candidate.grantId !== undefined &&
-        candidate.clientId !== undefined
-      )
-    case 'organization':
-    case 'organization-role':
-      return selectedOrg !== null
-    case 'delegated-user':
-    case 'delegated-role':
-      return selectedOrg !== null && candidate.kind === 'session' && delegationToken !== null
-    case 'user':
-      return true
-  }
-}
-
-function appendFactStatements(
-  db: KitD1Database,
-  prepared: PreparedBatch,
-  facts: readonly PlannedFact[],
-  candidate: Candidate,
-  selectedOrg: string | null,
-  delegationToken: string | null,
-  now: number,
-): void {
-  if (facts.length === 0) return
-  const base = candidateQuery(candidate, selectedOrg, now, false)
-  let delegatedSource: typeof base | undefined
-  for (const { fact, compiled } of facts) {
-    const scope = fact.scope.kind
-    if (!applicableFact(scope, candidate, selectedOrg, delegationToken)) continue
-    let source = base
-    if (delegationToken && (scope === 'delegated-user' || scope === 'delegated-role')) {
-      delegatedSource ??= withDelegationCandidate(base, delegationToken, now)
-      source = delegatedSource
-    }
-    const index =
-      prepared.statements.push(
-        prepare(db, {
-          sql: ['WITH', source.sql, compiled.sql].join(' '),
-          values: [...source.values, ...compiled.values],
-        }),
-      ) - 1
-    if (compiled.productTable) prepared.productTables.add(compiled.table)
-    prepared.runningFacts.set(fact, { compiled, index })
-  }
-}
-
-function appendProductTableCheck(
-  db: KitD1Database,
-  { statements, productTables }: PreparedBatch,
-): number {
-  if (productTables.size === 0) return -1
-  const sql = [
-    "SELECT lower(name) AS name FROM main.sqlite_schema WHERE type = 'table' AND sql NOT LIKE 'CREATE VIRTUAL TABLE%' AND lower(name) IN (",
-    Array.from(productTables, () => '?').join(', '),
-    ')',
-  ].join(' ')
-  return statements.push(prepare(db, { sql, values: [...productTables] })) - 1
 }
 
 async function keyIdentity(
@@ -251,33 +159,23 @@ async function projectSnapshot(
 
 async function load(input: LoadInput): Promise<RequestSnapshot> {
   const { db, organizationId, facts = [] } = input
-  if (facts.length > MAX_FACTS) throw unavailable()
-  const registered = Array.from(new Set(facts), (fact) => ({
-    fact,
-    compiled: compiledAuthorizationFact(fact),
-  }))
+  const registered = planFacts(facts)
   const credentials = await selectCredentials(input)
   const { candidate, delegationToken } = credentials
   if (!(candidate || delegationToken)) return emptySnapshot
   if (!db.batch) throw unavailable()
   const now = Date.now()
   const selectedOrg = organizationId ?? null
-  const plan: PreparedBatch = { statements: [], runningFacts: new Map(), productTables: new Set() }
-  const { statements } = plan
-  const coreIndex = candidate
-    ? statements.push(prepare(db, coreQuery(candidate, selectedOrg, now))) - 1
-    : -1
-  const delegationIndex = delegationToken
-    ? statements.push(prepare(db, delegationQuery(delegationToken, now))) - 1
-    : -1
-  if (candidate)
-    appendFactStatements(db, plan, registered, candidate, selectedOrg, delegationToken, now)
-  const tableIndex = appendProductTableCheck(db, plan)
+  const { coreIndex, delegationIndex, tableIndex, statements, runningFacts } = prepareSnapshotBatch(
+    db,
+    registered,
+    { candidate, selectedOrg, delegationToken, now, authority: input.authority },
+  )
 
   // A D1 binding without Sessions routes to the primary even when read replication is enabled.
   const batch = await db.batch(statements)
   if (!Array.isArray(batch) || batch.length !== statements.length) throw unavailable()
-  const rows = productRows(batch, plan.runningFacts, tableIndex)
+  const rows = productRows(batch, runningFacts, tableIndex)
   const core = coreIndex >= 0 ? singleResult(batch[coreIndex]) : null
   const delegationRow = delegationIndex >= 0 ? singleResult(batch[delegationIndex]) : null
   return projectSnapshot(core, delegationRow, credentials, selectedOrg, rows)
