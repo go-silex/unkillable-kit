@@ -11,11 +11,11 @@
  *   R6 hosted authority internals are private; the MCP shell imports the dispatch subpath only
  *      test code (*.test.*, *.spec.*, *.test-support.*) may import hosted authority;
  *      production code cannot import *.test-support.* (even with an exemption)
- *      R6 follows exact workspace package.json exports for test-support targets
+ *      R6 follows exact and wildcard workspace package.json exports for test-support targets
  *   exemptions require reason; invalid config → exit 2
  *
  * Does NOT prove: runtime/DI purity, non-literal dynamic imports,
- * full tsconfig alias graph, wildcard package exports, product-owned graphs, R5 routes↛repos.
+ * full tsconfig alias graph, product-owned graphs, R5 routes↛repos.
  *
  * Env: IMPORT_BOUNDARY_ROOT — override monorepo root (self-test harness).
  * Exit: 0 clean · 1 violations · 2 bad exemptions config
@@ -440,10 +440,33 @@ function resolvedAbsTarget(resolved: ResolveResult): string | null {
 const R6_TEST_IMPORTER = /\.(?:test|spec|test-support)\.[cm]?[jt]sx?$/
 const R6_TEST_SUPPORT_TARGET = /\.test-support(?:\.[cm]?[jt]sx?)?$/
 
-function hasTestSupportTarget(target: unknown): boolean {
-  if (typeof target === 'string') return R6_TEST_SUPPORT_TARGET.test(target)
+function hasTestSupportTarget(target: unknown, match?: string): boolean {
+  if (typeof target === 'string') {
+    return R6_TEST_SUPPORT_TARGET.test(
+      match === undefined ? target : target.replaceAll('*', () => match),
+    )
+  }
   if (target === null || typeof target !== 'object') return false
-  return Object.values(target).some(hasTestSupportTarget)
+  return Object.values(target).some((value) => hasTestSupportTarget(value, match))
+}
+
+function patternExportsTestSupport(map: Record<string, unknown>, subpath: string): boolean {
+  let bestKey = ''
+  let bestStar = -1
+  for (const key in map) {
+    if (!key.startsWith('./')) continue
+    const star = key.indexOf('*')
+    if (star < 0 || key.indexOf('*', star + 1) !== -1 || subpath.length < key.length) continue
+    // Node prefers the longest prefix, then the longest key (most specific suffix).
+    if (star < bestStar || (star === bestStar && key.length <= bestKey.length)) continue
+    if (!(subpath.startsWith(key.slice(0, star)) && subpath.endsWith(key.slice(star + 1)))) continue
+    bestKey = key
+    bestStar = star
+  }
+  if (bestStar === -1) return false
+  const suffixLength = bestKey.length - bestStar - 1
+  const match = subpath.slice(bestStar, subpath.length - suffixLength)
+  return hasTestSupportTarget(map[bestKey], match)
 }
 
 function workspaceExportsTestSupport(entry: WorkspaceEntry, specBare: string): boolean {
@@ -452,6 +475,7 @@ function workspaceExportsTestSupport(entry: WorkspaceEntry, specBare: string): b
   if (exports !== null && typeof exports === 'object' && !Array.isArray(exports)) {
     const map = exports as Record<string, unknown>
     if (Object.hasOwn(map, subpath)) return hasTestSupportTarget(map[subpath])
+    if (subpath !== '.') return patternExportsTestSupport(map, subpath)
     if (Object.keys(map).some((key) => key.startsWith('.'))) return false
   }
   // A string or a condition-only object is shorthand for the root export.

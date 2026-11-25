@@ -183,8 +183,9 @@ with no `;` inside and exactly one positional `?` for the fixture User ID, using
 disable mechanism. Root runs it in its isolated fixture databases and requires `user.disabled = 1`
 while the issued session keeps its row, token, User ID and expiry, so the refusal proves the
 disabled-User check. Without the field, Root runs `UPDATE user SET disabled = 1` and names the
-field when that fails. A configured `assets.directory` must be a non-empty path, but Root replaces
-it with an empty scratch directory: do not build static assets to run the gate.
+field when that fails. A configured `assets.directory` must be a non-empty path to a directory, or
+to nothing yet; Root replaces it with an empty scratch directory: do not build static assets to run
+the gate.
 
 ## Update hosted MCP tools, if used
 

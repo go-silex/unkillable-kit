@@ -45,7 +45,7 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
   An App may add an unrelated cookie to that response (go-silex/unkillable-kit#188).
 - Root's Better Auth check no longer requires built static assets: Wrangler and the local probe use
   an empty scratch directory for a configured `assets.directory`, which must still be a non-empty
-  path (go-silex/unkillable-kit#195).
+  path to a directory, or to nothing yet (go-silex/unkillable-kit#195).
 - **Product action:** An App that guards direct writes to `user.disabled` declares
   `kitBetterAuthDisableUser` in its `package.json`: one SQL statement that disables the fixture User
   through the App's own mechanism and leaves its session valid. See [Enroll shipping Better Auth Apps in Root](docs/kit/playbooks/migrate-request-authorization.md#enroll-shipping-better-auth-apps-in-root)

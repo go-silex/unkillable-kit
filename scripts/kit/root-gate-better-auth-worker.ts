@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, relative, resolve } from 'node:path'
 import {
@@ -59,6 +59,24 @@ function assertInspectableWorker(app: string, entry: string, label: string, comm
   )
 }
 
+function hasWorkerAssets(
+  assets: WorkerConfig['assets'],
+  config: string,
+  label: string,
+): true | undefined {
+  if (assets === undefined) return
+  const directory = assets?.directory
+  if (typeof directory !== 'string' || !directory) {
+    throw new Error(`${label}: assets.directory must be a non-empty string`)
+  }
+  const path = resolve(dirname(config), directory)
+  const stat = statSync(path, { throwIfNoEntry: false })
+  if (stat && !stat.isDirectory()) {
+    throw new Error(`${label}: assets.directory points to a non-directory path: ${path}`)
+  }
+  return true
+}
+
 function workerEntrypoints(app: string, required = true): WorkerTarget[] {
   // Nested Wrangler configs include test Workers. Only App-root configs describe its deploys.
   const configs = wranglerConfigs(app).filter((file) => dirname(file) === app)
@@ -72,9 +90,7 @@ function workerEntrypoints(app: string, required = true): WorkerTarget[] {
   ) {
     if (!required && main === undefined) return
     const label = `${config}${env ? ` --env ${env}` : ''}`
-    if (assets !== undefined && (typeof assets?.directory !== 'string' || !assets.directory)) {
-      throw new Error(`${label}: assets.directory must be a non-empty string`)
-    }
+    const configuredAssets = hasWorkerAssets(assets, config, label)
     const source = resolve(app, String(main))
     assertInspectableWorker(app, source, label, build?.command)
     const entry = required ? workerMainFile(app, config, main) : source
@@ -85,7 +101,7 @@ function workerEntrypoints(app: string, required = true): WorkerTarget[] {
       entry,
       moduleRoot,
       noBundle: no_bundle,
-      assets: assets === undefined ? undefined : true,
+      assets: configuredAssets,
     })
   }
   for (const file of configs) {

@@ -260,6 +260,13 @@ END;
 
   put(`${app}/wrangler.toml`, withRelease.replace('directory = "../web/dist"', 'directory = ""'))
   runCore(/wrangler\.toml --env release: assets\.directory must be a non-empty string/)
+  put(
+    `${app}/wrangler.toml`,
+    withRelease.replace('directory = "../web/dist"', 'directory = "./src/auth-consumer.ts"'),
+  )
+  runCore(
+    /wrangler\.toml --env release: assets\.directory points to a non-directory path: .*auth-consumer\.ts/,
+  )
 
   // Only the default target is needed to prove the disabled-User failures.
   put(`${app}/wrangler.toml`, workerConfig)
