@@ -1,7 +1,10 @@
 import { auditEvents, baMember, impersonationSessions } from '@kit/auth/schema'
+import { countD1RoundTrips } from '@kit/db/testing'
 import { kitTaskStages, kitTasks } from '@kit/tasks/schema'
 import { eq } from 'drizzle-orm'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { authorization } from '../../middleware/authorization'
+import { onError } from '../../middleware/error-handler'
 import { TENANCY_PASSWORD } from '../../seed/tenancy-data'
 import { createSeededDemoApi, loginCookie, sessionHeaders } from '../api-fixture'
 
@@ -112,6 +115,9 @@ describe('impersonation audit and request fencing', () => {
     expect((await request(actor, '/api/tasks', 'GET', undefined, impersonation.id)).status).toBe(
       200,
     )
+    const me = await request(actor, '/api/me')
+    expect(me.status).toBe(200)
+    expect(await me.json()).toMatchObject({ impersonation: { id: impersonation.id, startedAt: 1 } })
   })
 
   it('rolls back start when its mandatory audit insert fails', async () => {
@@ -129,16 +135,33 @@ describe('impersonation audit and request fencing', () => {
   })
 
   it('fails closed before a business mutation but permits stop while audit is unavailable', async () => {
-    const { env, db, actor, request, start, stop } = await setup()
+    const { app, env, db, actor, request, start, stop } = await setup()
+    const observed = vi.fn()
+    app.onError((err, c) => {
+      observed(authorization.view(c), c.get('subject'), c.get('orgId'))
+      return onError(err, c)
+    })
     const started = await start('write')
     expect(started.status).toBe(200)
     const { impersonation } = (await started.json()) as { impersonation: { id: string } }
     await env.DB.prepare(
       "CREATE TRIGGER reject_impersonation_audit BEFORE INSERT ON audit_events WHEN NEW.action LIKE 'impersonation.%' BEGIN SELECT RAISE(ABORT, 'audit unavailable'); END",
     ).run()
-    expect(
-      (await request(actor, '/api/tasks', 'POST', task, impersonation.id)).status,
-    ).toBeGreaterThanOrEqual(500)
+    const binding = env.DB
+    const measured = countD1RoundTrips(binding)
+    env.DB = measured.db
+    try {
+      const response = await request(actor, '/api/tasks', 'POST', task, impersonation.id)
+      expect(response.status).toBe(503)
+      expect(await response.json()).toMatchObject({
+        error: { code: 'INTERNAL_ERROR', message: 'Internal error' },
+      })
+      expect(observed.mock.calls).toEqual([[{}, undefined, undefined]])
+      // One Kit load + the failed audit write. No business handler read or write.
+      expect(measured.count).toBe(2)
+    } finally {
+      env.DB = binding
+    }
     expect(await db.select().from(kitTasks).where(eq(kitTasks.title, task.title))).toEqual([])
     expect((await stop(impersonation.id)).status).toBe(200)
     expect(await db.select().from(impersonationSessions)).toEqual([])

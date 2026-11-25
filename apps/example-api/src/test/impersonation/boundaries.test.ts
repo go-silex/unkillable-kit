@@ -124,7 +124,7 @@ describe('impersonation security boundaries', () => {
     expect(await db.select().from(kitTasks).where(eq(kitTasks.title, title))).toEqual([])
   })
 
-  it('recovers the browser session even when the Organization detail App fact is unavailable', async () => {
+  it('recovers the browser session even when the separate Organization detail query fails', async () => {
     const { app, env, actor, request, id } = await setup()
     const detail = '/api/orgs/org_acme'
     const other = await loginCookie(app, env, 'staff@kit.local', TENANCY_PASSWORD)
@@ -135,11 +135,9 @@ describe('impersonation security boundaries', () => {
     env.DB = {
       ...binding,
       prepare(sql: string) {
-        if (sql.includes('FROM main."organization" AS fact JOIN kit_candidate AS candidate')) {
+        if (sql.startsWith('select "name", "slug", "logo", "metadata"')) {
           detailReads++
-          return binding.prepare(
-            sql.replace('fact."id" AS "id"', 'fact."missing_test_column" AS "id"'),
-          )
+          return binding.prepare(sql.replace('"logo"', '"missing_test_column"'))
         }
         return binding.prepare(sql)
       },

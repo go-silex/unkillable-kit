@@ -1,9 +1,10 @@
 import { type OAuthHelpers, OAuthProvider } from '@cloudflare/workers-oauth-provider'
 import {
-  type AuthorizationFact,
-  authorizeHostedPrincipal,
-  type HostedAuthorization,
-} from '@kit/auth/snapshot'
+  createHostedDispatch,
+  type HostedDispatch,
+  type HostedDispatchOptions,
+} from '@kit/auth/hosted-dispatch'
+import { authorizeHostedPrincipal } from '@kit/auth/snapshot'
 import { EdgeFastMCP } from 'fastmcp/edge'
 import type { McpIdentity } from '../identity'
 import { accountAdmissionResponse } from './account-admission'
@@ -30,7 +31,12 @@ import {
 } from './host-policy'
 import { normalizeIdentity } from './identity-props'
 import { snapshotPresentation } from './presentation'
-import { type GrantAdmission, type GrantPrincipal, tokenAdmission } from './token-admission'
+import {
+  type GrantAdmission,
+  type GrantPrincipal,
+  runGrantAdmission,
+  tokenAdmission,
+} from './token-admission'
 
 /**
  * A `fetch`-only handler. A co-located product Worker keeps its other handlers
@@ -40,22 +46,20 @@ export type HostedMcpWorker<Env extends HostedMcpEnv> = {
   fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response>
 }
 
-export type HostedMcpWorkerOptions<Env extends HostedMcpEnv> = {
+/** In-process access to declared App operations, scoped to this MCP request. */
+export type HostedToolDispatch = Pick<HostedDispatch, 'fetch'>
+
+export type HostedMcpWorkerOptions<
+  Env extends HostedMcpEnv,
+  AppEnv extends { Bindings: Env } = { Bindings: Env },
+> = {
   name: string
   version?: string
-  /**
-   * Called after grant admission. `env` has no `OAUTH_PROVIDER`. Tools needing an
-   * organization must first call `authorization.forOrganization` with their validated
-   * operation organization ID, then apply their own narrower access policy.
-   */
+  /** Called after grant admission; `env` excludes OAUTH_PROVIDER. */
   register: (
     server: EdgeFastMCP,
-    call: { identity: McpIdentity; env: Env; authorization: HostedAuthorization },
+    call: { identity: McpIdentity; env: Env; dispatch?: HostedToolDispatch },
   ) => void
-  /** Read-only facts for resource requests, visible only through admitted accessors. */
-  facts?: readonly AuthorizationFact<unknown>[]
-  /** Presence of a matching hosted-grant fact denies resource and token admission. */
-  denyFact?: AuthorizationFact<unknown>
   /** Deny-only admission for an existing OAuth grant. The environment excludes OAUTH_PROVIDER. */
   grantAdmission?: GrantAdmission<Env>
   identityPort: IdentitySource<Env>
@@ -72,6 +76,9 @@ export type HostedMcpWorkerOptions<Env extends HostedMcpEnv> = {
   refreshTokenTTL?: number
   /** Product routes when the shell fronts the product Worker. Omitted: 404. */
   fallthrough?: Fallthrough<Env>
+  /** Supply the served Hono App and its Kit authorization instance together. */
+  app?: HostedDispatchOptions<AppEnv>['app']
+  authorization?: HostedDispatchOptions<AppEnv>['authorization']
 }
 
 const REGISTER_DENIED = JSON.stringify({ error: 'access_denied' })
@@ -137,24 +144,67 @@ function admissionResponse(outcome: 'denied' | 'unavailable', request: Request):
   })
 }
 
-export function createHostedMcpWorker<Env extends HostedMcpEnv>(
-  opts: HostedMcpWorkerOptions<Env>,
-): HostedMcpWorker<Env> {
+export function createHostedMcpWorker<
+  Env extends HostedMcpEnv,
+  AppEnv extends { Bindings: Env } = { Bindings: Env },
+>(opts: HostedMcpWorkerOptions<Env, AppEnv>): HostedMcpWorker<Env> {
   const consent = opts.consent ?? 'always'
   const consentPresentation = snapshotPresentation(opts.consentPresentation)
   const grantAdmission = opts.grantAdmission
   if (grantAdmission !== undefined && typeof grantAdmission !== 'function') {
     throw new TypeError('grantAdmission must be a function')
   }
-  const denyFact = opts.denyFact
-  const facts = opts.facts ? [...opts.facts] : undefined
-  const tokenExchangeCallback = tokenAdmission(grantAdmission, denyFact)
+  const { app, authorization, register } = opts
+  if (Boolean(app) !== Boolean(authorization)) {
+    throw new TypeError('app and authorization must be configured together')
+  }
+  const tokenExchangeCallback = tokenAdmission(grantAdmission)
   const ttl = opts.refreshTokenTTL
   // The provider checks this when built, per request, where a bad value would fail every route.
   if (ttl !== undefined && ttl !== 0 && !(Number.isInteger(ttl) && ttl >= KV_MIN_TTL_SECONDS)) {
     throw new TypeError(
       `refreshTokenTTL must be 0 or an integer of at least ${KV_MIN_TTL_SECONDS} seconds`,
     )
+  }
+
+  async function serveMcp(
+    request: Request,
+    env: Env,
+    ctx: ExecutionContext,
+    identity: McpIdentity,
+    admission: HostedDispatchOptions<AppEnv>['admission'],
+  ) {
+    const server = new EdgeFastMCP({
+      name: opts.name,
+      version: opts.version ?? '0.0.1',
+      mcpPath: MCP_PATH,
+    })
+    const dispatch =
+      app && authorization
+        ? createHostedDispatch<AppEnv>({
+            admission,
+            authorization,
+            app,
+            env,
+            // A synthetic App request does not inherit provider authorization props.
+            executionCtx: {
+              waitUntil: ctx.waitUntil.bind(ctx),
+              passThroughOnException: ctx.passThroughOnException.bind(ctx),
+              props: {},
+            },
+            outer: request,
+          })
+        : undefined
+    try {
+      register(server, {
+        identity,
+        env,
+        ...(dispatch ? { dispatch: Object.freeze({ fetch: dispatch.fetch }) } : {}),
+      })
+      return await server.fetch(request)
+    } finally {
+      dispatch?.close()
+    }
   }
 
   const apiHandler = {
@@ -164,27 +214,18 @@ export function createHostedMcpWorker<Env extends HostedMcpEnv>(
       const verified = await requestPrincipal(identity, env, ctx)
       if (verified.status !== 'allowed') return admissionResponse(verified.status, request)
       const { principal } = verified
-      const organizationId = request.headers.get('X-Org-Id')?.trim()
+      const admission = await authorizeHostedPrincipal({ db: env.DB, principal })
+      if (admission.status !== 'allowed') return admissionResponse(admission.status, request)
       const callerEnv = stripOauthHelper(env)
-      const outcome = await authorizeHostedPrincipal({
-        db: env.DB,
-        principal,
-        ...(organizationId ? { organizationId } : {}),
-        ...(facts ? { facts } : {}),
-        ...(denyFact ? { denyFact } : {}),
-        ...(grantAdmission
-          ? { admit: () => grantAdmission({ phase: 'request', ...principal }, callerEnv) }
-          : {}),
-      })
-      if (outcome.status !== 'allowed') return admissionResponse(outcome.status, request)
-      const server = new EdgeFastMCP({
-        name: opts.name,
-        version: opts.version ?? '0.0.1',
-        mcpPath: MCP_PATH,
-      })
-      const { fact, forOrganization } = outcome
-      opts.register(server, { identity, env: callerEnv, authorization: { fact, forOrganization } })
-      return server.fetch(request)
+      if (grantAdmission) {
+        const grant = await runGrantAdmission(
+          grantAdmission,
+          { phase: 'request', ...principal },
+          callerEnv,
+        )
+        if (grant !== 'allowed') return admissionResponse(grant, request)
+      }
+      return serveMcp(request, callerEnv, ctx, identity, admission)
     },
   }
 

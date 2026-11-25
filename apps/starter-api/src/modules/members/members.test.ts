@@ -91,6 +91,9 @@ describe('starter HTTP composition', () => {
       (await request('/api/orgs/org-b/members', { headers: { cookie: signupCookie } })).status,
     ).toBe(404)
     expect(
+      (await request('/api/orgs/org-a%20/members', { headers: { cookie: signupCookie } })).status,
+    ).toBe(400)
+    expect(
       (
         await request('/api/orgs/org-a/members', {
           headers: { cookie: signupCookie, 'x-org-id': 'org-b' },
@@ -148,10 +151,24 @@ describe('starter HTTP composition', () => {
     const writeHeaders = { authorization: `Bearer ${writeKey}` }
     expect((await request('/api/me', { headers: writeHeaders })).status).toBe(403)
     expect((await request('/api/orgs/org-a/members', { headers: writeHeaders })).status).toBe(403)
-    expect((await request('/api/unknown', { headers: keyHeaders })).status).toBe(403)
-    expect((await request('/api/auth/session', { headers: keyHeaders })).status).toBe(403)
-    expect((await request('/health', { headers: keyHeaders })).status).toBe(403)
-    expect((await request('/api/me', { method: 'POST', headers: keyHeaders })).status).toBe(403)
+    for (const [path, method, status] of [
+      ['/api/me', 'HEAD', 200],
+      ['/api/orgs/org-a/members', 'HEAD', 200],
+      ['/api/unknown', 'GET', 404],
+      ['/api/orgs/org-a/unknown', 'GET', 404],
+      ['/health', 'GET', 200],
+      ['/api/me', 'POST', 404],
+    ] as const) {
+      expect((await request(path, { method, headers: keyHeaders })).status).toBe(status)
+    }
+    for (const [headers, status] of [
+      [keyWithSessionHeaders, 403],
+      [invalidBearerHeaders, 401],
+    ] as const) {
+      expect((await request('/api/auth/get-session', { headers })).status).toBe(status)
+    }
+    sqlite.prepare("UPDATE api_keys SET scopes = 'write' WHERE id = 'key-a'").run()
+    expect((await request('/api/me', { headers: keyWithSessionHeaders })).status).toBe(403)
     expect((await post('/api/auth/sign-out', {}, signupCookie)).status).toBeLessThan(400)
     expect((await request('/api/me', { headers: { cookie: signupCookie } })).status).toBe(401)
     const signin = await post('/api/auth/sign-in/email', credentials)

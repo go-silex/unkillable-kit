@@ -5,7 +5,7 @@ import { apiKeyPrefix, generateApiKey, hashApiKey } from '@kit/auth'
 import { baMember } from '@kit/auth/schema'
 import { countD1RoundTrips } from '@kit/db/testing'
 import { describe, expect, it } from 'vitest'
-import { keyScopeRoutes } from '../middleware/key-scopes'
+import { keyScopeRoutes } from '../middleware/authorization'
 import { TENANCY_PASSWORD } from '../seed/tenancy-data'
 import { mintApiKey } from '../services/auth'
 import {
@@ -19,6 +19,8 @@ import {
 const ORG = 'org_acme'
 const full = ['read', 'write', 'admin'] as const
 
+// Liveness and one-time ticket redemption are not consumers of browser/key identity.
+const identityFreeRoutes = ['GET /health', 'POST /api/mcp-identity/ticket/redeem']
 function undeclaredRoutes(app: ApiApp): Set<string> {
   const routes = new Set<string>()
   for (const route of app.routes) {
@@ -27,20 +29,27 @@ function undeclaredRoutes(app: ApiApp): Set<string> {
     if (keyScopeRoutes.some((entry) => entry.method === route.method && entry.path === route.path))
       continue
     const path = route.path.replace(/:[^/]+/g, 'scope-probe').replace(/\*/g, 'scope-probe')
-    routes.add(`${route.method} ${path}`)
+    const operation = `${route.method} ${path}`
+    if (!identityFreeRoutes.includes(operation)) routes.add(operation)
   }
   return routes
 }
 
 describe('API key scopes over HTTP', () => {
-  it('rejects a malformed Bearer without a D1 call even when a session cookie exists', async () => {
+  it('rejects a malformed Bearer without falling back to the session cookie', async () => {
     const { app, env } = await createSeededDemoApi({ seed: { notes: false, environment: 'test' } })
     const cookie = await loginCookie(app, env, 'staff@kit.local', TENANCY_PASSWORD)
-    const measured = countD1RoundTrips(env.DB)
-    const headers = { ...sessionHeaders(cookie), authorization: 'Bearer invalid' }
-    const response = await app.request('/api/me', { headers }, { ...env, DB: measured.db })
-    expect(response.status).toBe(401)
-    expect(measured.count).toBe(0)
+    for (const withCookie of [false, true]) {
+      const measured = countD1RoundTrips(env.DB)
+      const headers = {
+        ...sessionHeaders(withCookie ? cookie : ''),
+        authorization: 'Bearer invalid',
+      }
+      const response = await app.request('/api/me', { headers }, { ...env, DB: measured.db })
+      expect(response.status).toBe(401)
+      // A valid browser cookie supplies one delegation check, not a fallback identity.
+      expect(measured.count).toBe(withCookie ? 1 : 0)
+    }
   })
 
   it('requires explicit valid scopes when creating a key', async () => {

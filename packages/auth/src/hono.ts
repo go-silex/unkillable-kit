@@ -5,13 +5,21 @@ export { type BetterAuthHandlerEnv, createBetterAuthHandler } from './policy/bet
 export { isPasswordSignInPath, normalizePasswordSignInResponse } from './policy/sign-in-anti-enum'
 export { isEmailSignUpPath, normalizeEmailSignUpResponse } from './policy/sign-up-anti-enum'
 export {
+  type AdmittedView,
   createRequestAuthorization,
-  MODULE_DENIAL,
-  type ModuleAuthorizationFacts,
-  type OrgContextOpts,
+  type RequestAuthorization,
+  type RequestAuthorizationOptions,
 } from './request/request-authorization'
+export {
+  type ImpersonationOperation,
+  type ImpersonationPolicy,
+  type KeyScopePolicy,
+  MODULE_DENIAL,
+  type OrgContextOpts,
+} from './request/request-policy'
 export {
   applySecurityHeaders,
   type SecurityHeadersEnv,
   securityHeaders,
 } from './security-headers'
+export type { SessionIdentity } from './snapshot/core-rows'

@@ -57,11 +57,16 @@ export async function findEligibleImpersonation(db: KitDb, row: ImpersonationSes
     .get()
   if (!(candidate?.actorMembership && candidate.targetMembership)) return null
   if (candidate.targetRole && isPlatformRole(candidate.targetRole)) return null
-  return impersonationInfo(row, candidate.actor, candidate.target)
+  return impersonationInfo({ ...row, startedAt: row.createdAt }, candidate.actor, candidate.target)
 }
 
 export function impersonationInfo(
-  row: ImpersonationSession,
+  row: Pick<
+    ImpersonationSession,
+    'id' | 'mode' | 'organizationId' | 'actorUserId' | 'subjectUserId'
+  > & {
+    startedAt: number
+  },
   actor: Profile | null,
   subject: Profile | null,
 ) {
@@ -69,7 +74,7 @@ export function impersonationInfo(
     id: row.id,
     mode: row.mode,
     organizationId: row.organizationId,
-    startedAt: row.createdAt,
+    startedAt: row.startedAt,
   }
   if (!(actor && subject)) {
     return {

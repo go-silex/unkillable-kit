@@ -177,7 +177,7 @@ describe('organization authorization HTTP regressions', () => {
         { ...env, DB: measured.db },
       )
       expect(response.status).toBe(200)
-      expect(measured.count).toBe(1)
+      expect(measured.count).toBe(2) // One Kit batch and one Product detail read.
       expect(await response.json()).toEqual({
         org: { ...expected, role: null, bypass: true },
         requestId: 'req_auth532_read_bypass',

@@ -1,11 +1,11 @@
 import { OpenAPIHono } from '@hono/zod-openapi'
+import { baOrganization } from '@kit/auth/schema'
 import { AppError } from '@kit/core'
+import { sql } from 'drizzle-orm'
 import { resolveEmailPort } from '../lib/email-port'
 import { invalidRequest } from '../lib/openapi'
-import { requireBaAdapter } from '../lib/require-ba-adapter'
 import { corsAllowlist } from '../lib/session-env'
 import { authorization } from '../middleware/authorization'
-import { requireAuth } from '../middleware/require-auth'
 import * as invitationsService from '../services/invitations'
 import * as orgRolesService from '../services/org-roles'
 import * as orgsService from '../services/orgs'
@@ -19,7 +19,6 @@ import {
   listInvitations,
   listMembers,
   listOrgs,
-  orgDetail,
 } from './orgs.schemas'
 import {
   listOrgModules,
@@ -30,10 +29,6 @@ import {
 import { createRole, deleteRole, listRoles, patchRoleGrant } from './orgs-roles.schemas'
 
 export const orgsRoutes = new OpenAPIHono<AppEnv>()
-
-orgsRoutes.use('/api/orgs', requireBaAdapter, requireAuth)
-orgsRoutes.use('/api/orgs/*', requireBaAdapter, requireAuth)
-orgsRoutes.use('/api/platform/*', requireBaAdapter, requireAuth)
 
 orgsRoutes.openapi(listOrgs, async (c) => {
   const db = c.get('db')!
@@ -65,12 +60,34 @@ orgsRoutes.openapi(
 )
 
 orgsRoutes.openapi(getOrg, async (c) => {
-  const org = {
-    ...(await authorization.fact(c, orgDetail)),
-    role: c.get('orgRole') ?? null,
-    bypass: c.get('orgBypass') ?? false,
+  const admitted = authorization.view(c).organization!
+  const { id, kind, status, role, bypass } = admitted
+  const { name, slug, logo, metadata, createdAt, updatedAt } = baOrganization
+  // Product detail, scoped to the already admitted Organization. Do not reread Kit facts.
+  try {
+    const detail = await c
+      .get('db')!
+      .select({ name, slug, logo, metadata, createdAt, updatedAt })
+      .from(baOrganization)
+      .where(
+        sql`typeof(${baOrganization.id}) = 'text' and ${baOrganization.id} = ${id} collate binary`,
+      )
+      .get()
+    if (!detail) throw new Error('Admitted organization detail missing')
+    const org = {
+      ...detail,
+      id,
+      kind,
+      status,
+      role,
+      bypass,
+      createdAt: detail.createdAt.toISOString(),
+      updatedAt: detail.updatedAt?.toISOString() ?? null,
+    }
+    return c.json({ org, requestId: c.get('requestId') })
+  } catch {
+    throw new AppError('INTERNAL_ERROR', 'Authorization unavailable', 503)
   }
-  return c.json({ org, requestId: c.get('requestId') })
 })
 
 orgsRoutes.openapi(listMembers, async (c) => {

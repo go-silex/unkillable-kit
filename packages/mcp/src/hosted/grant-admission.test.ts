@@ -1,346 +1,17 @@
-import { getOAuthApi, OAuthError } from '@cloudflare/workers-oauth-provider'
-import {
-  type AuthorizationFact,
-  type AuthorizationRow,
-  defineAuthorizationFact,
-} from '@kit/auth/snapshot'
-import { countD1RoundTrips } from '@kit/db/testing'
+import { OAuthError } from '@cloudflare/workers-oauth-provider'
 import { describe, expect, it, vi } from 'vitest'
-import { z } from 'zod'
-import { createAuthFixture } from './auth-fixture.test-support'
-import { createHostedMcpWorker, type HostedMcpWorkerOptions } from './create-worker'
-import type { HostedMcpEnv } from './env'
-
-const ORIGIN = 'http://127.0.0.1:8788'
-const REDIRECT = 'http://127.0.0.1:9999/cb'
-const USER = 'user_demo'
-
-type Admission = NonNullable<HostedMcpWorkerOptions<HostedMcpEnv>['grantAdmission']>
-type AuthorizationCode = { clientId: string; verifier: string; code: string }
-
-type AccountState = 'active' | 'disabled' | 'missing' | 'unavailable'
-
-function admissionDb() {
-  const { db, sqlite } = createAuthFixture(USER)
-  let unavailable = false
-  let unreadable = false
-  let results: unknown
-  const budget = countD1RoundTrips({
-    ...db,
-    async batch(statements: unknown[]) {
-      if (unavailable) throw new Error('D1 unavailable')
-      results = await db.batch(statements)
-      if (unreadable && Array.isArray(results)) {
-        return [{ success: false }, ...results.slice(1)]
-      }
-      return results
-    },
-  })
-  return {
-    sqlite,
-    budget,
-    get results() {
-      return results
-    },
-    setUnreadable(state: boolean) {
-      unreadable = state
-    },
-    setAccountState(state: AccountState) {
-      unavailable = state === 'unavailable'
-      if (state === 'missing') {
-        sqlite.prepare('DELETE FROM user WHERE id = ?').run(USER)
-      } else if (!unavailable) {
-        sqlite
-          .prepare('UPDATE user SET disabled = ? WHERE id = ?')
-          .run(Number(state === 'disabled'), USER)
-      }
-    },
-  }
-}
-
-class MemoryKv {
-  private readonly data = new Map<string, { value: string; exp?: number }>()
-
-  async get(key: string, opts?: { type?: string } | string) {
-    const row = this.data.get(key)
-    if (!row || (row.exp !== undefined && Date.now() > row.exp)) return null
-    return (typeof opts === 'string' ? opts : opts?.type) === 'json'
-      ? JSON.parse(row.value)
-      : row.value
-  }
-
-  async put(key: string, value: string, opts?: { expirationTtl?: number; expiration?: number }) {
-    const exp =
-      opts?.expiration !== undefined
-        ? opts.expiration * 1000
-        : opts?.expirationTtl !== undefined
-          ? Date.now() + opts.expirationTtl * 1000
-          : undefined
-    this.data.set(key, { value, exp })
-  }
-
-  async delete(key: string) {
-    this.data.delete(key)
-  }
-  async list(opts?: { prefix?: string }) {
-    const keys = [...this.data.keys()].filter((key) => key.startsWith(opts?.prefix ?? '')).sort()
-    return { keys: keys.map((name) => ({ name })), list_complete: true as const }
-  }
-}
-
-function fixture(
-  admission?: Admission,
-  snapshot: {
-    organizationFact?: AuthorizationFact<string>
-    denyFact?: AuthorizationFact<unknown>
-  } = {},
-) {
-  const kv = new MemoryKv()
-  const auth = admissionDb()
-  const env: HostedMcpEnv = {
-    OAUTH_KV: kv as unknown as KVNamespace,
-    DB: auth.budget.db as unknown as D1Database,
-  }
-  const ctx = { waitUntil() {}, passThroughOnException() {} } as unknown as ExecutionContext
-  let registered = 0
-  let executed = 0
-  const options: HostedMcpWorkerOptions<HostedMcpEnv> = {
-    name: 'admission-test',
-    identityPort: { resolve: async () => ({ userId: USER, email: 'demo@kit.local' }) },
-    apiBaseUrl: () => 'http://127.0.0.1:8787',
-    consent: { mode: 'demo-loopback', email: 'demo@kit.local' },
-    register(server, { authorization }) {
-      registered++
-      server.addTool({
-        name: 'who',
-        description: 'test tool',
-        execute: async () => {
-          executed++
-          return USER
-        },
-      })
-      const { organizationFact } = snapshot
-      if (organizationFact) {
-        server.addTool({
-          name: 'scoped',
-          description: 'test organization-scoped tool',
-          parameters: z.object({ organizationId: z.string().trim().min(1) }),
-          execute: async ({ organizationId }) => {
-            const scope = authorization.forOrganization(organizationId)
-            if (scope?.organization.membershipRole !== 'member') {
-              return { isError: true, content: [{ type: 'text', text: 'Scope refused' }] }
-            }
-            return scope.fact(organizationFact)
-          },
-        })
-      }
-    },
-    ...(admission !== undefined ? { grantAdmission: admission } : {}),
-    ...(snapshot.organizationFact ? { facts: [snapshot.organizationFact] } : {}),
-    ...(snapshot.denyFact ? { denyFact: snapshot.denyFact } : {}),
-  }
-  const hosted = createHostedMcpWorker(options)
-  const fetch = (request: Request) => hosted.fetch(request, env, ctx)
-  const unused = { fetch: async () => new Response(null, { status: 404 }) }
-  const helpers = getOAuthApi(
-    {
-      apiRoute: '/mcp',
-      apiHandler: unused,
-      defaultHandler: unused,
-      authorizeEndpoint: '/authorize',
-      tokenEndpoint: '/token',
-      resourceMetadata: { resource: `${ORIGIN}/mcp` },
-    },
-    env,
-  )
-
-  async function code(mismatchedIdentity = false) {
-    const registration = await fetch(
-      new Request(`${ORIGIN}/register`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          redirect_uris: [REDIRECT],
-          token_endpoint_auth_method: 'none',
-          grant_types: ['authorization_code', 'refresh_token'],
-          response_types: ['code'],
-          client_name: 'test',
-        }),
-      }),
-    )
-    expect(registration.status).toBe(201)
-    const { client_id: clientId } = (await registration.json()) as { client_id: string }
-    const verifier = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~'
-    const hash = new Uint8Array(
-      await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)),
-    )
-    const challenge = btoa(String.fromCharCode(...hash))
-      .replaceAll('+', '-')
-      .replaceAll('/', '_')
-      .replaceAll('=', '')
-    const url = new URL(`${ORIGIN}/authorize`)
-    for (const [key, value] of Object.entries({
-      response_type: 'code',
-      client_id: clientId,
-      redirect_uri: REDIRECT,
-      code_challenge: challenge,
-      code_challenge_method: 'S256',
-      resource: `${ORIGIN}/mcp`,
-    }))
-      url.searchParams.set(key, value)
-    let location: string
-    if (mismatchedIdentity) {
-      const request = await helpers.parseAuthRequest(new Request(url))
-      const result = await helpers.completeAuthorization({
-        request,
-        userId: USER,
-        scope: ['mcp'],
-        metadata: {},
-        props: { userId: 'different_user' },
-      })
-      location = result.redirectTo
-    } else {
-      const response = await fetch(new Request(url))
-      expect(response.status).toBe(302)
-      location = response.headers.get('location') ?? ''
-    }
-    const authorizationCode = new URL(location).searchParams.get('code')
-    expect(authorizationCode).toBeTruthy()
-    return { clientId, verifier, code: authorizationCode ?? '' }
-  }
-
-  function token(params: Record<string, string>) {
-    return fetch(
-      new Request(`${ORIGIN}/token`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams(params),
-      }),
-    )
-  }
-  function exchange(c: AuthorizationCode, verifier = c.verifier) {
-    return token({
-      grant_type: 'authorization_code',
-      code: c.code,
-      client_id: c.clientId,
-      redirect_uri: REDIRECT,
-      code_verifier: verifier,
-      resource: `${ORIGIN}/mcp`,
-    })
-  }
-  function refresh(clientId: string, refreshToken: string) {
-    return token({
-      grant_type: 'refresh_token',
-      client_id: clientId,
-      refresh_token: refreshToken,
-      resource: `${ORIGIN}/mcp`,
-    })
-  }
-  async function issue() {
-    const before = auth.budget.count
-    const c = await code()
-    expect(auth.budget.count - before).toBe(1)
-    const response = await exchange(c)
-    expect(response.status).toBe(200)
-    expect(auth.budget.count - before).toBe(2)
-    const body = (await response.json()) as { access_token: string; refresh_token: string }
-    expect(body.access_token).toBeTruthy()
-    expect(body.refresh_token).toBeTruthy()
-    const summary = await helpers.unwrapToken(body.access_token)
-    expect(summary).not.toBeNull()
-    return { ...c, ...body, summary: summary! }
-  }
-  function call(
-    accessToken: string,
-    extraHeaders: Record<string, string> = {},
-    organizationId?: string,
-  ) {
-    return fetch(
-      new Request(`${ORIGIN}/mcp`, {
-        method: 'POST',
-        headers: {
-          authorization: `Bearer ${accessToken}`,
-          'content-type': 'application/json',
-          accept: 'application/json',
-          ...extraHeaders,
-        },
-        body: JSON.stringify({
-          jsonrpc: '2.0',
-          id: 1,
-          method: 'tools/call',
-          params:
-            organizationId === undefined
-              ? { name: 'who', arguments: {} }
-              : { name: 'scoped', arguments: { organizationId } },
-        }),
-      }),
-    )
-  }
-  return {
-    code,
-    exchange,
-    refresh,
-    issue,
-    call,
-    helpers,
-    auth,
-    setAccountState: auth.setAccountState,
-    options,
-    counts: () => ({ registered, executed }),
-  }
-}
-
-const ORG = 'org_selected'
-const OTHER_ORG = 'org_other'
-const PRIVATE_LABEL = 'selected-organization-private-label'
-const OTHER_LABEL = 'other-organization-private-label'
-
-function scopedFixture(admission?: Admission) {
-  const decode = vi.fn((rows: readonly AuthorizationRow[]) => z.string().parse(rows[0]?.label))
-  const organizationFact = defineAuthorizationFact({
-    table: { name: 'product_contacts', columns: ['organization_id', 'label'] },
-    scope: { kind: 'organization', organizationId: 'organization_id' },
-    select: ['label'],
-    decode,
-  })
-  const f = fixture(admission, { organizationFact })
-  f.auth.sqlite.exec(
-    'CREATE TABLE product_contacts (organization_id TEXT NOT NULL, label TEXT NOT NULL)',
-  )
-  for (const [orgId, label] of [
-    [ORG, PRIVATE_LABEL],
-    [OTHER_ORG, OTHER_LABEL],
-  ] as const) {
-    f.auth.sqlite
-      .prepare('INSERT INTO organization (id, name, slug, created_at) VALUES (?, ?, ?, 0)')
-      .run(orgId, orgId, orgId)
-    f.auth.sqlite
-      .prepare(
-        "INSERT INTO member (id, organization_id, user_id, role, created_at) VALUES (?, ?, ?, 'member', 0)",
-      )
-      .run(`${orgId}_member`, orgId, USER)
-    f.auth.sqlite.prepare('INSERT INTO product_contacts VALUES (?, ?)').run(orgId, label)
-  }
-  return { ...f, decode }
-}
+import { type Admission, fixture, USER } from './oauth-fixture.test-support'
 
 function denyFixture() {
-  const decode = vi.fn(() => 'do-not-decode-a-deny-fact')
-  const denyFact = defineAuthorizationFact({
-    table: { name: 'product_grant_denials', columns: ['user_id', 'grant_id', 'client_id'] },
-    scope: { kind: 'hosted-grant', userId: 'user_id', grantId: 'grant_id', clientId: 'client_id' },
-    select: ['grant_id'],
-    decode,
-  })
-  const f = fixture(undefined, { denyFact })
-  f.auth.sqlite.exec(
-    'CREATE TABLE product_grant_denials (user_id TEXT NOT NULL, grant_id TEXT NOT NULL, client_id TEXT NOT NULL)',
+  const denials = new Set<string>()
+  const key = (userId: string, grantId: string, clientId: string) =>
+    JSON.stringify([userId, grantId, clientId])
+  const f = fixture(
+    async ({ userId, grantId, clientId }) => !denials.has(key(userId, grantId, clientId)),
   )
-  const deny = f.auth.sqlite.prepare('INSERT INTO product_grant_denials VALUES (?, ?, ?)')
   return {
     ...f,
-    decode,
-    deny: (grantId: string, clientId: string) => deny.run(USER, grantId, clientId),
+    deny: (grantId: string, clientId: string) => denials.add(key(USER, grantId, clientId)),
   }
 }
 
@@ -435,6 +106,20 @@ describe('hosted OAuth grant admission', () => {
     expect((await f.helpers.listUserGrants(USER)).items).toEqual(
       expect.arrayContaining([expect.objectContaining({ id: grant.summary.grantId })]),
     )
+    expect(await f.helpers.unwrapToken(grant.access_token)).not.toBeNull()
+  })
+
+  it('does not run grant policy or register tools on an unreadable account batch', async () => {
+    const admission = vi.fn<Admission>(async () => true)
+    const f = fixture(admission)
+    const grant = await f.issue()
+    admission.mockClear()
+    f.auth.setUnreadable(true)
+    const response = await f.call(grant.access_token, { 'X-Org-Id': 'ignored' })
+    await expectUnavailable(response)
+    expect(await response.text()).toBe('Service unavailable')
+    expect(admission).not.toHaveBeenCalled()
+    expect(f.counts()).toEqual({ registered: 0, executed: 0 })
     expect(await f.helpers.unwrapToken(grant.access_token)).not.toBeNull()
   })
 
@@ -593,103 +278,8 @@ describe('hosted OAuth grant admission', () => {
   })
 })
 
-describe('hosted request authorization snapshot', () => {
-  it('binds a scoped tool to the selected organization and rechecks its membership and status', async () => {
-    const f = scopedFixture()
-    const grant = await f.issue()
-    async function scopedCall(organizationId: string, selected?: string) {
-      const before = f.auth.budget.count
-      const result = await f.call(
-        grant.access_token,
-        selected ? { 'X-Org-Id': selected } : {},
-        organizationId,
-      )
-      expect(result.status).toBe(200)
-      expect(f.auth.budget.count - before).toBe(1)
-      return result.json()
-    }
-
-    const matched = await scopedCall(ORG, ORG)
-    expect(JSON.stringify(matched)).toContain(PRIVATE_LABEL)
-    expect(JSON.stringify(matched)).not.toContain(OTHER_LABEL)
-    expect(f.decode).toHaveBeenCalledExactlyOnceWith([{ label: PRIVATE_LABEL }])
-    f.decode.mockClear()
-
-    for (const [operation, selector] of [
-      [ORG, undefined],
-      [OTHER_ORG, ORG],
-    ] as const) {
-      const refused = await scopedCall(operation, selector)
-      expect(refused).toMatchObject({ result: { isError: true } })
-      expect(JSON.stringify(refused)).not.toContain(PRIVATE_LABEL)
-      expect(JSON.stringify(refused)).not.toContain(OTHER_LABEL)
-      const boundRows = JSON.stringify(f.auth.results)
-      expect(boundRows).not.toContain(OTHER_LABEL)
-      if (selector) expect(boundRows).toContain(PRIVATE_LABEL)
-      else expect(boundRows).not.toContain(PRIVATE_LABEL)
-    }
-    expect(f.decode).not.toHaveBeenCalled()
-
-    f.auth.sqlite.prepare("UPDATE organization SET status = 'suspended' WHERE id = ?").run(ORG)
-    expect(await scopedCall(ORG, ORG)).toMatchObject({ result: { isError: true } })
-    f.auth.sqlite.prepare("UPDATE organization SET status = 'active' WHERE id = ?").run(ORG)
-    f.auth.sqlite
-      .prepare('DELETE FROM member WHERE organization_id = ? AND user_id = ?')
-      .run(ORG, USER)
-    expect(await scopedCall(ORG, ORG)).toMatchObject({ result: { isError: true } })
-    expect(f.decode).not.toHaveBeenCalled()
-    expect(await f.helpers.unwrapToken(grant.access_token)).not.toBeNull()
-    const withoutSelector = await f.call(grant.access_token)
-    expect(withoutSelector.status).toBe(200)
-    expect(await withoutSelector.text()).toContain(USER)
-  })
-
-  it('keeps returned facts private on an external denial or a partial batch failure', async () => {
-    let requestAllowed = true
-    const admit = vi.fn<Admission>(async (input) => input.phase === 'token' || requestAllowed)
-    const f = scopedFixture(admit)
-    const grant = await f.issue()
-    const headers = { 'X-Org-Id': ORG }
-    const logs = (['debug', 'error', 'info', 'log', 'warn'] as const).map((level) =>
-      vi.spyOn(console, level),
-    )
-    try {
-      requestAllowed = false
-      const denied = await f.call(grant.access_token, headers, ORG)
-      expect(denied.status).toBe(401)
-      expect(await denied.text()).not.toContain(PRIVATE_LABEL)
-      expect(JSON.stringify(f.auth.results)).toContain(PRIVATE_LABEL)
-      expect(admit.mock.lastCall?.[0]).toEqual({
-        phase: 'request',
-        userId: USER,
-        grantId: grant.summary.grantId,
-        clientId: grant.clientId,
-      })
-      expect(admit.mock.lastCall?.[1]).not.toHaveProperty('OAUTH_PROVIDER')
-      expect(admit.mock.lastCall).toHaveLength(2)
-
-      requestAllowed = true
-      admit.mockClear()
-      f.auth.setUnreadable(true)
-      const unavailable = await f.call(grant.access_token, headers, ORG)
-      await expectUnavailable(unavailable)
-      expect(await unavailable.text()).toBe('Service unavailable')
-      expect(JSON.stringify(f.auth.results)).toContain(PRIVATE_LABEL)
-      expect(admit).not.toHaveBeenCalled()
-      expect(f.counts()).toEqual({ registered: 0, executed: 0 })
-      expect(f.decode).not.toHaveBeenCalled()
-      expect(JSON.stringify(logs.flatMap((spy) => spy.mock.calls))).not.toContain(PRIVATE_LABEL)
-    } finally {
-      for (const spy of logs) spy.mockRestore()
-    }
-    f.auth.setUnreadable(false)
-    const admitted = await f.call(grant.access_token, headers, ORG)
-    expect(admitted.status).toBe(200)
-    expect(await admitted.text()).toContain(PRIVATE_LABEL)
-    expect(f.decode).toHaveBeenCalledExactlyOnceWith([{ label: PRIVATE_LABEL }])
-  })
-
-  it('denies only the matching OAuth grant, without decoding the deny fact or revoking on a resource refusal', async () => {
+describe('hosted grant policy barriers', () => {
+  it('denies only the matching OAuth grant without revoking on a resource refusal', async () => {
     const f = denyFixture()
     const first = await f.issue()
     const second = await f.issue()
@@ -708,10 +298,9 @@ describe('hosted request authorization snapshot', () => {
     expect(f.auth.budget.count - before).toBe(2)
     expect(await f.helpers.unwrapToken(first.access_token)).toBeNull()
     expect((await f.call(second.access_token)).status).toBe(200)
-    expect(f.decode).not.toHaveBeenCalled()
   })
 
-  it('checks the D1-backed denial on code exchange and revokes just that grant', async () => {
+  it('checks grant policy on code exchange and revokes just that grant', async () => {
     const f = denyFixture()
     const other = await f.issue()
     const code = await f.code()
@@ -728,7 +317,6 @@ describe('hosted request authorization snapshot', () => {
     expect((await f.helpers.listUserGrants(USER)).items.map(({ id }) => id)).toEqual([
       other.summary.grantId,
     ])
-    expect(f.decode).not.toHaveBeenCalled()
   })
 
   it('keeps codes and refresh tokens retryable on unavailable D1 admission', async () => {

@@ -41,7 +41,7 @@ export async function mintApiKey(
       scopes: ['At least one valid scope is required'],
     })
   }
-  const organizationId = opts?.organizationId?.trim() || null
+  const organizationId = opts?.organizationId
   if (!organizationId) {
     throw AppError.fieldErrors('organizationId is required to mint an API key', {
       organizationId: ['organizationId is required'],

@@ -14,10 +14,7 @@ import { notificationLocale } from '../../messages'
 import { requireOrgContext } from '../../middleware/org-context'
 import { requireAuth } from '../../middleware/require-auth'
 import { requireSession } from '../../middleware/require-session'
-import {
-  includeNotificationAccess,
-  loadNotificationScope,
-} from '../../services/notifications/access'
+import { loadNotificationScope } from '../../services/notifications/access'
 import { renderInboxRow } from '../../services/notifications/inbox'
 import type { AppEnv } from '../../types'
 import {
@@ -68,7 +65,6 @@ const middleware = [
   requireAuth,
   requireSession,
   requireOrgContext(),
-  includeNotificationAccess,
   strictInput,
 ] as const
 const errors = {
@@ -146,7 +142,7 @@ const invalid = invalidRequest('Invalid notification request')
 notificationsInboxRoutes.openapi(
   countRoute,
   async (c) => {
-    const scope = await loadNotificationScope(c)
+    const scope = loadNotificationScope(c)
     const db = c.get('db')
     if (!db) throw AppError.internal()
     return c.json({ unreadCount: await countUnread(db, scope), requestId: c.get('requestId') }, 200)
@@ -156,7 +152,7 @@ notificationsInboxRoutes.openapi(
 notificationsInboxRoutes.openapi(
   readAllRoute,
   async (c) => {
-    const scope = await loadNotificationScope(c)
+    const scope = loadNotificationScope(c)
     const db = c.get('db')
     if (!db) throw AppError.internal()
     const updated = await markRead(db, scope, { now: Date.now() })
@@ -167,7 +163,7 @@ notificationsInboxRoutes.openapi(
 notificationsInboxRoutes.openapi(
   listRoute,
   async (c) => {
-    const scope = await loadNotificationScope(c)
+    const scope = loadNotificationScope(c)
     const db = c.get('db')
     if (!db) throw AppError.internal()
     const { filter, ...query } = c.req.valid('query')
@@ -187,7 +183,7 @@ notificationsInboxRoutes.openapi(
 notificationsInboxRoutes.openapi(
   readRoute,
   async (c) => {
-    const scope = await loadNotificationScope(c)
+    const scope = loadNotificationScope(c)
     const db = c.get('db')
     if (!db) throw AppError.internal()
     const { notificationId } = c.req.valid('param')

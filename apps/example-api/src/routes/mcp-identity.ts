@@ -1,6 +1,8 @@
 import { createRoute, OpenAPIHono, z } from '@hono/zod-openapi'
+import { parseBearer } from '@kit/auth'
 import { isAccountActive } from '@kit/auth/repos/account-state'
 import { AppError } from '@kit/core'
+import { createMiddleware } from 'hono/factory'
 import { authErrorResponses, invalidRequest, validationErrorResponse } from '../lib/openapi'
 import { corsAllowlist } from '../lib/session-env'
 import { authorization } from '../middleware/authorization'
@@ -27,6 +29,13 @@ const redeemResponse = z.object({
   requestId: z.string(),
 })
 
+const browserSession = createMiddleware<AppEnv>(async (c, next) => {
+  const session = await authorization.session(c)
+  if (!session && parseBearer(c.req.header('authorization'))) throw AppError.unauthorized()
+  c.set('mcpSession', session)
+  await next()
+})
+
 const startTicket = createRoute({
   method: 'get',
   path: '/api/mcp-identity/ticket',
@@ -34,6 +43,7 @@ const startTicket = createRoute({
   summary: 'Mint a one-time MCP identity ticket and resume authorize',
   description:
     'Session cookie only. Missing session redirects to the SPA login. The ticket is not an MCP access token.',
+  middleware: [browserSession] as const,
   request: { query: ticketQuery },
   responses: {
     302: { description: 'Redirect to MCP authorize with ticket, or to /login' },
@@ -50,7 +60,7 @@ mcpIdentityRoutes.openapi(startTicket, async (c) => {
     })
   }
 
-  const session = await authorization.session(c)
+  const session = c.get('mcpSession')
   if (!session) {
     const web = corsAllowlist(c.env)[0] ?? 'http://127.0.0.1:5173'
     const login = new URL('/login', web)

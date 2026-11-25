@@ -2,6 +2,7 @@ export {
   createHostedMcpWorker,
   type HostedMcpWorker,
   type HostedMcpWorkerOptions,
+  type HostedToolDispatch,
 } from './create-worker'
 export type {
   ConsentPolicy,

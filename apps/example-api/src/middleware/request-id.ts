@@ -1,6 +1,5 @@
-import type { ImpersonationInfo } from '@kit/api-client/me'
 import type { ApiKeyScope, PlatformRole } from '@kit/auth'
-import type { ImpersonationSession } from '@kit/auth/repos/impersonation'
+import type { SessionIdentity } from '@kit/auth/hono'
 import { newRequestId } from '@kit/core'
 import type { MiddlewareHandler } from 'hono'
 import type { KitBetterAuth } from '../lib/better-auth'
@@ -11,13 +10,11 @@ export type AppVariables = {
   subject?: string
   authMethod?: 'session' | 'api_key'
   /** Set by withDb middleware (Drizzle D1). */
-  sessionId?: string
-  actorSubject?: string
-  impersonationRow?: ImpersonationSession
-  impersonationInfo?: ImpersonationInfo
   db?: KitDb
   /** Per-request Better Auth instance (Better Auth BA-only). */
   betterAuth?: KitBetterAuth
+  /** Browser identity for the MCP ticket route, before OpenAPI validates the resume URL. */
+  mcpSession?: SessionIdentity | null
   /** ADR-0003 org context (requireOrgContext). */
   orgId?: string
   orgRole?: string

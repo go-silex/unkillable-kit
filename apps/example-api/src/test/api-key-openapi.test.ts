@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { keyScopeRoutes } from '../middleware/key-scopes'
+import { keyScopeRoutes } from '../middleware/authorization'
 import { mintApiKey } from '../services/auth'
 import { bearerHeaders, createSeededDemoApi } from './api-fixture'
 
