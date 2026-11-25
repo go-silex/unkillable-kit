@@ -25,13 +25,3 @@ export type ApiKeyAuthIdentity = {
 }
 
 export type AuthIdentity = SessionAuthIdentity | ApiKeyAuthIdentity
-
-/**
- * ADR-0003 D11 — after credential verification, org id must be non-empty.
- * Returns normalized id or null (missing, null, blank, whitespace-only).
- */
-export function normalizeApiKeyOrganizationId(value: string | null | undefined): string | null {
-  if (value == null) return null
-  const trimmed = value.trim()
-  return trimmed.length > 0 ? trimmed : null
-}

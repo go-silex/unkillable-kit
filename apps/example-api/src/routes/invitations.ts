@@ -9,7 +9,6 @@ import {
   sessionOnlySecurity,
   validationErrorResponse,
 } from '../lib/openapi'
-import { requireBaAdapter } from '../lib/require-ba-adapter'
 import { requireAuth } from '../middleware/require-auth'
 import * as invitationsService from '../services/invitations'
 import type { AppEnv } from '../types'
@@ -33,7 +32,7 @@ const acceptInvitationResponseSchema = z.object({
 
 export const invitationsRoutes = new OpenAPIHono<AppEnv>()
 
-invitationsRoutes.use('/api/invitations/*', requireBaAdapter, requireAuth)
+invitationsRoutes.use('/api/invitations/*', requireAuth)
 
 const acceptInvitation = createRoute({
   method: 'post',

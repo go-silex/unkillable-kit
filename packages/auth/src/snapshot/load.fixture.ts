@@ -5,34 +5,28 @@ import Database from 'better-sqlite3'
 import { type Mock, onTestFinished, vi } from 'vitest'
 
 const DDL = `
-CREATE TABLE user (id TEXT PRIMARY KEY, name TEXT, email TEXT, disabled INTEGER);
-CREATE TABLE session (id TEXT PRIMARY KEY, token TEXT UNIQUE, user_id TEXT, expires_at INTEGER);
-CREATE TABLE api_keys (key_prefix TEXT PRIMARY KEY, key_hash TEXT, subject TEXT,
-  organization_id TEXT, scopes TEXT, expires_at INTEGER, revoked_at INTEGER);
-CREATE TABLE user_platform_roles (user_id TEXT PRIMARY KEY, role TEXT);
-CREATE TABLE organization (id TEXT PRIMARY KEY, status TEXT);
-CREATE TABLE member (id TEXT PRIMARY KEY, organization_id TEXT, user_id TEXT, role TEXT);
-CREATE TABLE organization_roles (id TEXT PRIMARY KEY, organization_id TEXT, key TEXT);
+CREATE TABLE user (id TEXT COLLATE NOCASE PRIMARY KEY, name TEXT, email TEXT, disabled INTEGER);
+CREATE TABLE session (id TEXT COLLATE NOCASE PRIMARY KEY, token TEXT COLLATE NOCASE UNIQUE, user_id TEXT COLLATE NOCASE, expires_at INTEGER);
+CREATE TABLE api_keys (id TEXT PRIMARY KEY, key_prefix TEXT COLLATE NOCASE UNIQUE, key_hash TEXT,
+  subject TEXT COLLATE NOCASE, organization_id TEXT COLLATE NOCASE, scopes TEXT, expires_at INTEGER, revoked_at INTEGER);
+CREATE TABLE user_platform_roles (user_id TEXT COLLATE NOCASE PRIMARY KEY, role TEXT);
+CREATE TABLE organization (id TEXT COLLATE NOCASE PRIMARY KEY, kind TEXT, status TEXT);
+CREATE TABLE member (id TEXT PRIMARY KEY, organization_id TEXT COLLATE NOCASE, user_id COLLATE NOCASE, role TEXT COLLATE NOCASE);
+CREATE TABLE organization_roles (id TEXT COLLATE NOCASE PRIMARY KEY, organization_id TEXT COLLATE NOCASE, key TEXT COLLATE NOCASE);
 CREATE TABLE organization_role_module_grants (role_id TEXT, module_id TEXT, access TEXT);
 CREATE TABLE organization_modules (organization_id TEXT, module_id TEXT, enabled INTEGER);
 CREATE TABLE platform_modules (module_id TEXT PRIMARY KEY, available INTEGER);
 CREATE TABLE impersonation_sessions (id TEXT PRIMARY KEY, session_id TEXT UNIQUE, actor_user_id TEXT,
   subject_user_id TEXT, organization_id TEXT, mode TEXT, created_at INTEGER);
 CREATE TABLE impersonation_role_permissions (role TEXT PRIMARY KEY, read INTEGER, write INTEGER);
-CREATE TABLE product_flags (user_id TEXT, organization_id TEXT, flag TEXT);
-CREATE TABLE product_grants (user_id TEXT, grant_id TEXT, client_id TEXT, denied INTEGER);
-INSERT INTO user VALUES ('actor', 'Actor', 'actor@example.test', 0), ('target', 'Target', 'target@example.test', 0);
-INSERT INTO organization VALUES ('chosen', 'active'), ('other', 'active');
-INSERT INTO member VALUES ('ma', 'chosen', 'actor', 'staff_like'), ('mt', 'chosen', 'target', 'reader'),
-  ('mo', 'other', 'actor', 'staff_like');
-INSERT INTO organization_roles VALUES ('a', 'chosen', 'staff_like'), ('r', 'chosen', 'reader'), ('b', 'other', 'staff_like');
+INSERT INTO user VALUES ('actor', 'Private Actor', 'actor@example.test', 0), ('target', 'Private Target', 'target@example.test', 0);
+INSERT INTO organization VALUES ('chosen', 'client', 'active'), ('other', 'internal', 'active');
+INSERT INTO member VALUES ('ma', 'chosen', 'actor', 'member'), ('mt', 'chosen', 'target', 'reader'),
+  ('mo', 'other', 'actor', 'member');
+INSERT INTO organization_roles VALUES ('a', 'chosen', 'member'), ('r', 'chosen', 'reader'), ('b', 'other', 'member');
 INSERT INTO organization_role_module_grants VALUES ('a', 'calendar', 'write'), ('r', 'calendar', 'read'), ('b', 'calendar', 'disabled');
 INSERT INTO platform_modules VALUES ('calendar', 1);
 INSERT INTO organization_modules VALUES ('chosen', 'calendar', 1), ('other', 'calendar', 0);
-INSERT INTO product_flags VALUES ('actor', 'chosen', 'eligible'), ('target', 'chosen', 'represented'),
-  ('target', 'other', 'different organization');
-INSERT INTO product_grants VALUES ('actor', 'grant', 'client', 1), ('actor', 'grant', 'another-client', 0),
-  ('target', 'grant', 'client', 0), ('actor', 'another-grant', 'client', 0);
 `
 
 export const DELEGATION_ROWS = `

@@ -8,6 +8,7 @@
  *   R4 example-web ↛ cloudflare:workers (and WORKER_BAR_IMPORTS)
  *   R5 non-SPA apps (example-api and apps/* except *-web) ↛ @kit/auth/react
  *       (SPA password forms: example-web and apps/*-web may import)
+ *   R6 hosted authority internals are private; the MCP shell imports the dispatch subpath only
  *   exemptions require reason; invalid config → exit 2
  *
  * Does NOT prove: runtime/DI purity, non-literal dynamic imports,
@@ -428,6 +429,30 @@ function resolvedAbsTarget(resolved: ResolveResult): string | null {
   return null
 }
 
+function hostedAuthorityViolation(
+  hit: ImportHit,
+  specBare: string,
+  absTarget: string | null,
+  root: string,
+): Violation | null {
+  const dispatchPackage =
+    specBare === '@kit/auth/hosted-dispatch' || specBare.startsWith('@kit/auth/hosted-dispatch/')
+  const target = absTarget && stripSpecifierSuffix(relPosix(root, absTarget))
+  const internal =
+    target &&
+    /^packages\/auth\/src\/(?:request\/(?:hosted-dispatch|hosted-routes|request-authorization)|snapshot(?:\/hosted-principal)?)(?:\.[cm]?[jt]s)?$/.test(
+      target,
+    )
+  if (!(dispatchPackage || internal)) return null
+  if (
+    hit.file.startsWith('packages/auth/src/') ||
+    (dispatchPackage && hit.file.startsWith('packages/mcp/src/hosted/')) ||
+    /\.(?:test|spec)\.[cm]?[jt]sx?$/.test(hit.file)
+  )
+    return null
+  return { ...hit, rule: 'R6' }
+}
+
 function classify(
   hit: ImportHit,
   importerZone: Zone,
@@ -436,6 +461,8 @@ function classify(
   workspace: WorkspaceEntry[],
 ): Violation | null {
   const specBare = stripSpecifierSuffix(hit.specifier)
+  const hosted = hostedAuthorityViolation(hit, specBare, resolvedAbsTarget(resolved), root)
+  if (hosted) return hosted
   if (importerZone === 'example-web' && WORKER_BAR_IMPORTS.has(specBare)) {
     return { ...hit, rule: 'R4' }
   }
@@ -472,7 +499,6 @@ export function scanRoot(root: string = ROOT): {
 
   for (const abs of files) {
     const rel = relPosix(root, abs)
-    if (exemptions.paths.has(rel)) continue
 
     const importerZone = zoneOfPath(abs, root)
     if (importerZone === 'outside') continue
@@ -487,7 +513,7 @@ export function scanRoot(root: string = ROOT): {
     for (const hit of extractImports(content, rel)) {
       const resolved = resolveSpecifier(hit.specifier, abs, workspace)
       const v = classify(hit, importerZone, resolved, root, workspace)
-      if (v) violations.push(v)
+      if (v && (v.rule === 'R6' || !exemptions.paths.has(rel))) violations.push(v)
     }
   }
 

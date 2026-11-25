@@ -7,6 +7,7 @@ import {
   stopImpersonationSession,
 } from '@kit/auth/repos/impersonation'
 import { AppError } from '@kit/core'
+import type { Context } from 'hono'
 import {
   authErrorResponses,
   errorResponse,
@@ -54,6 +55,7 @@ const permissionsGet = createRoute({
   tags: ['impersonation'],
   summary: 'Get impersonation permissions',
   security: sessionOnlySecurity,
+  middleware: [authorization.requireSession] as const,
   responses: {
     200: { description: 'Role permissions', content: json(permissionsResponse) },
     ...authErrorResponses,
@@ -65,6 +67,7 @@ const permissionsPatch = createRoute({
   tags: ['impersonation'],
   summary: 'Set impersonation permissions',
   security: sessionOnlySecurity,
+  middleware: [authorization.requireSession] as const,
   request: { body: { content: { 'application/json': { schema: rolePermission } } } },
   responses: {
     200: { description: 'Role permissions', content: json(permissionsResponse) },
@@ -79,6 +82,7 @@ const start = createRoute({
   tags: ['impersonation'],
   summary: 'Start impersonating an organization member',
   security: sessionOnlySecurity,
+  middleware: [authorization.requireSession] as const,
   request: { body: { content: { 'application/json': { schema: startBody } } } },
   responses: {
     200: {
@@ -98,6 +102,7 @@ const stop = createRoute({
   tags: ['impersonation'],
   summary: 'Return to the operator identity',
   security: sessionOnlySecurity,
+  middleware: [authorization.requireSession] as const,
   request: { body: { content: { 'application/json': { schema: stopBody } } } },
   responses: {
     200: {
@@ -112,23 +117,16 @@ const stop = createRoute({
   },
 })
 
-function identity(c: {
-  get: (key: 'actorSubject' | 'sessionId') => string | undefined
-  req: { header: (name: string) => string | undefined }
-}) {
-  if (/^Bearer\s/i.test(c.req.header('authorization') ?? ''))
-    throw AppError.forbidden('A session cookie is required')
-  const actorUserId = c.get('actorSubject')
-  const sessionId = c.get('sessionId')
-  if (!(actorUserId && sessionId)) throw AppError.unauthorized('A valid session is required')
-  return { actorUserId, sessionId }
+function actorSession(c: Context<AppEnv>) {
+  const { identity, delegation } = authorization.view(c)
+  if (delegation) return delegation.actor
+  if (identity?.method !== 'session') throw AppError.unauthorized('A valid session is required')
+  return identity
 }
 
 impersonationRoutes.openapi(permissionsGet, async (c) => {
-  identity(c)
   const db = c.get('db')!
-  if ((await authorization.delegation(c))?.actorPlatformRole !== 'super_admin')
-    throw AppError.forbidden()
+  if (authorization.view(c).platformRole !== 'super_admin') throw AppError.forbidden()
   return c.json({
     permissions: await listImpersonationPermissions(db),
     requestId: c.get('requestId'),
@@ -138,10 +136,9 @@ impersonationRoutes.openapi(permissionsGet, async (c) => {
 impersonationRoutes.openapi(
   permissionsPatch,
   async (c) => {
-    const { actorUserId } = identity(c)
+    const { subject: actorUserId } = actorSession(c)
     const db = c.get('db')!
-    if ((await authorization.delegation(c))?.actorPlatformRole !== 'super_admin')
-      throw AppError.forbidden()
+    if (authorization.view(c).platformRole !== 'super_admin') throw AppError.forbidden()
     await setImpersonationPermissions(db, c.req.valid('json'), {
       actorUserId,
       requestId: c.get('requestId'),
@@ -161,7 +158,7 @@ impersonationRoutes.openapi(
 impersonationRoutes.openapi(
   start,
   async (c) => {
-    const { actorUserId, sessionId } = identity(c)
+    const { subject: actorUserId, sessionId } = actorSession(c)
     const db = c.get('db')!
     const row = {
       id: crypto.randomUUID(),
@@ -197,11 +194,11 @@ impersonationRoutes.openapi(
 impersonationRoutes.openapi(
   stop,
   async (c) => {
-    const { actorUserId, sessionId } = identity(c)
+    const { subject: actorUserId, sessionId } = actorSession(c)
     const db = c.get('db')!
     const expectedId = c.req.valid('json').impersonationId
-    const current = c.get('impersonationRow')
-    if (current && (current.id !== expectedId || current.actorUserId !== actorUserId))
+    const current = authorization.view(c).delegation
+    if (current && (current.id !== expectedId || current.actor.subject !== actorUserId))
       throw AppError.conflict('Impersonation context changed')
     const stopped = await stopImpersonationSession(
       db,

@@ -73,13 +73,12 @@ const PROOF_APP = `import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { Database } from 'bun:sqlite'
 import { Hono } from 'hono'
-import { apiKeyPrefix, generateApiKey, hashApiKey, parseBearer } from '@kit/auth'
+import { apiKeyPrefix, generateApiKey, hashApiKey } from '@kit/auth'
 import { createBetterAuth, type KitBetterAuth } from '@kit/auth/factory'
 import { createRequestAuthorization } from '@kit/auth/hono'
 import { insertApiKey } from '@kit/auth/repos/keys'
 import * as orgsRepo from '@kit/auth/repos/orgs'
 import { kitAuthSchema } from '@kit/auth/schema'
-import { AppError } from '@kit/core'
 import { createDb, type KitD1Statement } from '@kit/db'
 
 type AppEnv = {
@@ -157,22 +156,16 @@ export async function runComposeProof(): Promise<void> {
   const authorization = createRequestAuthorization<AppEnv>({
     db: () => binding,
     auth: () => auth,
+    keyScope: ({ method, path }, scopes) =>
+      method === 'GET' && path === '/orgs/:orgId/ping' && scopes.includes('read'),
   })
-  app.all('/api/auth/*', (c) => auth.handler(c.req.raw))
+  app.all('/api/auth/*', authorization.betterAuthMount, (c) => auth.handler(c.req.raw))
   app.get(
     '/orgs/:orgId/ping',
-    async (c, next) => {
-      if (parseBearer(c.req.header('authorization'))) {
-        const { scopes } = await authorization.authenticateKey(c)
-        if (!scopes.includes('read')) throw AppError.forbidden()
-        authorization.admitKeyScope(c)
-      }
-      await next()
-    },
-    authorization.requireAuth,
     authorization.requireOrgContext(),
     (c) => c.json({ subject: c.get('subject'), authMethod: c.get('authMethod'), orgId: c.get('orgId') }),
   )
+  app.get('/outside-allowlist', authorization.requireAuth, (c) => c.body(null, 204))
   app.onError((err, c) => {
     const raw = 'status' in err ? err.status : 500
     const status = raw === 404 || raw === 401 || raw === 403 || raw === 400 ? raw : 500
@@ -241,6 +234,9 @@ export async function runComposeProof(): Promise<void> {
     ['/orgs/org-b/ping', { cookie }, 404],
     ['/orgs/org-b/ping', { cookie, authorization: 'Bearer ' + key }, 403],
     [ownPath, { cookie, authorization: 'Bearer ' + generateApiKey() }, 401],
+    ['/outside-allowlist', { cookie }, 204],
+    ['/outside-allowlist', { cookie, authorization: 'Bearer ' + key }, 403],
+    ['/api/auth/get-session', { cookie, authorization: 'Bearer ' + key }, 403],
     [ownPath, undefined, 401],
   ] as const) {
     const denied = await request(path, { headers: new Headers(headers) })

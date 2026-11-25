@@ -68,6 +68,8 @@ type LocalWorker = {
 }
 
 const proofHeader = 'x-root-fixture-issuer'
+const issuerCookiesHeader = 'x-root-fixture-issuer-cookies'
+const replayCookiesHeader = 'x-root-fixture-replay-cookies'
 const fixtureClientOrigin = 'https://root-client.example.invalid'
 const fixtureOrigin = 'https://root-fixture.example.invalid'
 
@@ -80,19 +82,32 @@ function ${wrapper}(factory) {
   return (options) => {
     const auth = factory(options)
     const handle = auth.handler
-    auth.fetch = auth.handler = async (request) => {
-      const response = await handle(request)
-      if (!response.ok || request.method !== 'POST' || new URL(request.url).pathname !== '/api/auth/sign-in/email') return response
-      const cookies = response.headers.getSetCookie().map((cookie) => cookie.split(';', 1)[0])
-      const headers = new Headers({ cookie: cookies.join('; ') })
+    async function attest(cookies, cookieHeader) {
+      const headers = new Headers({ cookie: cookieHeader })
       const resolved = await ${wrapper}_resolve({ db: options.database, auth, headers })
-      if (!resolved) return response
+      if (!resolved) return
       const reference = await auth.api.getSession({ headers, query: { disableCookieCache: true, disableRefresh: true } })
-      if (reference?.session.id !== resolved.sessionId || reference?.user.id !== resolved.subject || reference?.user.email !== resolved.email) return response
+      if (reference?.session.id !== resolved.sessionId || reference?.user.id !== resolved.subject || reference?.user.email !== resolved.email) return
       const payload = JSON.stringify([${JSON.stringify(challenge)}, cookies, resolved.subject, resolved.sessionId, resolved.email])
       const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(payload)))
+      return Array.from(digest, (byte) => byte.toString(16).padStart(2, '0')).join('')
+    }
+    auth.fetch = auth.handler = async (request) => {
+      if (request.method !== 'POST' || new URL(request.url).pathname !== '/api/auth/sign-in/email') return handle(request)
+      // Replay only inside the disposable fixture, without signing in a second time.
+      const replay = request.headers.get(${JSON.stringify(replayCookiesHeader)})
+      if (replay !== null && request.headers.get(${JSON.stringify(proofHeader)}) === ${JSON.stringify(challenge)}) {
+        const digest = await attest(replay, replay)
+        return digest ? new Response(null, { headers: { [${JSON.stringify(proofHeader)}]: digest } }) : new Response(null, { status: 401 })
+      }
+      const response = await handle(request)
+      if (!response.ok) return response
+      const cookies = response.headers.getSetCookie()
+      const digest = await attest(cookies, cookies.map((cookie) => cookie.split(';', 1)[0]).join('; '))
+      if (!digest) return response
       const proved = new Response(response.body, response)
-      proved.headers.set(${JSON.stringify(proofHeader)}, Array.from(digest, (byte) => byte.toString(16).padStart(2, '0')).join(''))
+      proved.headers.set(${JSON.stringify(issuerCookiesHeader)}, encodeURIComponent(JSON.stringify(cookies)))
+      proved.headers.set(${JSON.stringify(proofHeader)}, digest)
       return proved
     }
     return auth
@@ -205,6 +220,95 @@ async function migrateDatabase(
   }
 }
 
+function cookiePair(field: string) {
+  const trimOWS = (text: string) => text.replace(/^[ \t]+|[ \t]+$/g, '')
+  const index = field.indexOf('=')
+  return [
+    trimOWS(index < 0 ? field : field.slice(0, index)),
+    index < 0 ? null : trimOWS(field.slice(index + 1)),
+  ] as const
+}
+
+function parseSetCookie(field: string) {
+  const [pair, ...attributes] = field.split(';')
+  const [name, value] = cookiePair(pair)
+  assert.ok(
+    value !== null && name.length > 0,
+    'mounted Better Auth sent an invalid Set-Cookie field',
+  )
+  // Distinct attributes can be reordered. Preserve the order of repeated attributes (last wins).
+  const attrs = new Map<string, (string | null)[]>()
+  for (const part of attributes) {
+    const [key, value] = cookiePair(part)
+    if (!key) continue
+    const attribute = key.toLowerCase()
+    const values = attrs.get(attribute)
+    if (values) values.push(value)
+    else attrs.set(attribute, [value])
+  }
+  return { name, value, attrs }
+}
+
+function lookupName(name: string) {
+  return name.replace(/^(?:__Secure-|__Host-)+/, '')
+}
+
+function chunkParent(name: string) {
+  const dot = name.lastIndexOf('.')
+  if (dot < 0) return name
+  const suffix = name.slice(dot + 1)
+  const index = Number(suffix)
+  return Number.isSafeInteger(index) && index >= 0 && String(index) === suffix
+    ? name.slice(0, dot)
+    : name
+}
+
+function checkedMountedCookies(issuerFields: string[], mountedFields: string[]) {
+  const issuer = new Map(
+    issuerFields.map((field) => {
+      const cookie = parseSetCookie(field)
+      return [cookie.name, cookie] as const
+    }),
+  )
+  assert.ok(issuer.size === issuerFields.length, 'enrolled Better Auth issued duplicate cookies')
+  const families = new Set(
+    [...issuer.keys()].flatMap((name) => {
+      const logical = lookupName(name)
+      return [logical, chunkParent(logical)]
+    }),
+  )
+  const seen = new Set<string>()
+  const mounted = mountedFields.map((field) => {
+    const { name, value, attrs } = parseSetCookie(field)
+    const expected = issuer.get(name)
+    if (expected) {
+      assert.ok(!seen.has(name), 'mounted Better Auth duplicated an issuer cookie')
+      seen.add(name)
+      assert.ok(
+        value === expected.value &&
+          attrs.size === expected.attrs.size &&
+          [...attrs].every(([key, values]) => {
+            const original = expected.attrs.get(key)
+            return (
+              original?.length === values.length &&
+              values.every((value, i) => value === original[i])
+            )
+          }),
+        'mounted Better Auth rewrote an issuer cookie',
+      )
+    } else {
+      const logical = lookupName(name)
+      assert.ok(
+        !(families.has(logical) || families.has(chunkParent(logical))),
+        'mounted Better Auth added a cookie in an issuer cookie family',
+      )
+    }
+    return `${name}=${value}`
+  })
+  assert.ok(seen.size === issuer.size, 'mounted Better Auth omitted an issuer cookie')
+  return mounted.join('; ')
+}
+
 async function run(probe: MountedProbe) {
   const challenge = crypto.randomUUID()
   const { target } = probe
@@ -269,12 +373,18 @@ async function run(probe: MountedProbe) {
       wrangler.unstable_splitSqlQuery,
     )
     await db.batch(probe.writes.map(([sql, values]) => db.prepare(sql).bind(...values)))
-    const response = await worker.fetch(`${fixtureOrigin}/api/auth/sign-in/email`, {
-      method: 'POST',
-      // Exercise the cross-origin HTTP path used by the Worker Apps.
-      headers: { origin: fixtureClientOrigin, 'content-type': 'application/json' },
-      body: JSON.stringify({ email: probe.email, password: probe.password, rememberMe: true }),
-    })
+    const signIn = (fixtureHeaders?: Record<string, string>) =>
+      worker.fetch(`${fixtureOrigin}/api/auth/sign-in/email`, {
+        method: 'POST',
+        // Exercise the cross-origin HTTP path used by the Worker Apps.
+        headers: {
+          origin: fixtureClientOrigin,
+          'content-type': 'application/json',
+          ...fixtureHeaders,
+        },
+        body: JSON.stringify({ email: probe.email, password: probe.password, rememberMe: true }),
+      })
+    const response = await signIn()
     if (!response.ok) {
       const body = (await response.json().catch(() => null)) as {
         error?: { message?: string }
@@ -283,8 +393,6 @@ async function run(probe: MountedProbe) {
       throw new Error(`mounted Better Auth sign-in failed: HTTP ${response.status}${reason}`)
     }
     await response.arrayBuffer()
-    const cookies = response.headers.getSetCookie().map((cookie) => cookie.split(';', 1)[0])
-    assert.ok(cookies.length, 'mounted Better Auth sign-in did not emit a cookie')
     const sessions = await db.prepare('SELECT id, user_id, token FROM session').all<{
       id: string
       user_id: string
@@ -293,18 +401,32 @@ async function run(probe: MountedProbe) {
     assert.equal(sessions.results.length, 1, 'mounted Better Auth must create exactly one session')
     const [{ id, user_id, token }] = sessions.results
     assert.equal(user_id, probe.userId, 'mounted Better Auth signed in a different User')
+    const digestFor = (cookies: string[] | string) =>
+      createHash('sha256')
+        .update(JSON.stringify([challenge, cookies, probe.userId, id, probe.email]))
+        .digest('hex')
+    const issuerProof = response.headers.get(issuerCookiesHeader)
+    const issuerFields: unknown = issuerProof && JSON.parse(decodeURIComponent(issuerProof))
     assert.ok(
-      cookies.some((cookie) =>
-        decodeURIComponent(cookie.slice(cookie.indexOf('=') + 1)).startsWith(`${token}.`),
-      ),
+      Array.isArray(issuerFields) &&
+        issuerFields.length > 0 &&
+        issuerFields.every((field) => typeof field === 'string') &&
+        response.headers.get(proofHeader) === digestFor(issuerFields),
+      'mounted Better Auth cookie lacks provenance from the enrolled Kit issuer or did not resolve to the same session',
+    )
+    assert.ok(
+      issuerFields.some((field) => {
+        const { value } = parseSetCookie(field)
+        return decodeURIComponent(value).startsWith(`${token}.`)
+      }),
       'mounted Better Auth cookie must carry the persisted session token',
     )
-    const expected = createHash('sha256')
-      .update(JSON.stringify([challenge, cookies, probe.userId, id, probe.email]))
-      .digest('hex')
+    const mountedCookies = checkedMountedCookies(issuerFields, response.headers.getSetCookie())
+    const replay = await signIn({ [proofHeader]: challenge, [replayCookiesHeader]: mountedCookies })
+    await replay.arrayBuffer()
     assert.ok(
-      response.headers.get(proofHeader) === expected,
-      'mounted Better Auth cookie lacks provenance from the enrolled Kit issuer or did not resolve to the same session',
+      replay.ok && replay.headers.get(proofHeader) === digestFor(mountedCookies),
+      'mounted Better Auth cookies did not resolve to the same User and session through both readers',
     )
   } finally {
     await worker.dispose()

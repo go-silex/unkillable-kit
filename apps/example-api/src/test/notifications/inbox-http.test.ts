@@ -221,13 +221,6 @@ describe('notification inbox HTTP behavior', () => {
     const visible = await f.app.request(base, { headers }, { ...f.env, DB: instrumented })
     expect(batch).toHaveBeenCalledTimes(1)
     expect(measured.count).toBe(2)
-    const snapshot = batch.mock.results[0]
-    expect(await (snapshot?.type === 'return' ? snapshot.value : undefined)).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ results: [{ module_id: 'tasks', enabled: 1, available: 1 }] }),
-        expect.objectContaining({ results: [{ module_id: 'tasks', access: 'read' }] }),
-      ]),
-    )
     expect(visible.status).toBe(200)
     const visiblePage = (await visible.json()) as Page
     expect(visiblePage.items.map((item) => item.id)).toEqual(['custom'])

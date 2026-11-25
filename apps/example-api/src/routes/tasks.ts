@@ -1,6 +1,7 @@
 import { OpenAPIHono } from '@hono/zod-openapi'
 import type { Context } from 'hono'
 import { invalidRequest } from '../lib/openapi'
+import { authorization } from '../middleware/authorization'
 import { requireOrgContext } from '../middleware/org-context'
 import { requireAuth } from '../middleware/require-auth'
 import { createNotificationDeliveryRuntime } from '../notifications-delivery/admission'
@@ -35,7 +36,7 @@ tasksRoutes.use('/api/tasks/*', orgMw)
 
 tasksRoutes.openapi(listTasks, async (c) => {
   const tasks = await tasksService.listTasksForOrg(c.get('db')!, c.get('orgId')!, audienceOf(c), {
-    readOnly: Boolean(c.get('impersonationRow')),
+    readOnly: Boolean(authorization.view(c).delegation),
   })
   return c.json({ tasks, requestId: c.get('requestId') })
 })
@@ -43,7 +44,7 @@ tasksRoutes.openapi(listTasks, async (c) => {
 tasksRoutes.openapi(listStages, async (c) => {
   const { boardKey } = c.req.valid('query')
   const stages = await tasksService.listStagesForOrg(c.get('db')!, c.get('orgId')!, boardKey, {
-    readOnly: Boolean(c.get('impersonationRow')),
+    readOnly: Boolean(authorization.view(c).delegation),
   })
   return c.json({ stages, requestId: c.get('requestId') })
 })

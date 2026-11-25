@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { sessionCookieName } from './cookie-name'
 import { apiKeyPrefix, generateApiKey, hashApiKey, parseBearer, verifyApiKey } from './keys'
-import { normalizeApiKeyOrganizationId, parseApiKeyScopes } from './require-auth'
+import { parseApiKeyScopes } from './require-auth'
 import { parseCookie, parseSessionCookie, SESSION_COOKIE } from './session'
 import { hashVerificationIdentifier } from './verification-identifier'
 
@@ -66,12 +66,4 @@ describe('session cookie helpers', () => {
     expect(parseSessionCookie('kit_session=tok', SESSION_COOKIE)).toBe('tok')
     expect(parseSessionCookie('a=1', SESSION_COOKIE)).toBeNull()
   })
-})
-
-it('normalizes organization ids and rejects absent or blank values', () => {
-  expect(normalizeApiKeyOrganizationId(null)).toBeNull()
-  expect(normalizeApiKeyOrganizationId(undefined)).toBeNull()
-  expect(normalizeApiKeyOrganizationId('')).toBeNull()
-  expect(normalizeApiKeyOrganizationId('  ')).toBeNull()
-  expect(normalizeApiKeyOrganizationId(' org_x ')).toBe('org_x')
 })

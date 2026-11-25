@@ -249,7 +249,7 @@ async function grantsMapForRoleKey(
   return map
 }
 
-/** Standalone Module policy check for callers outside the request authorization snapshot. */
+/** Standalone Module policy check for callers outside a Kit request guard. */
 export async function resolveModuleAccess(
   db: Db,
   input: {

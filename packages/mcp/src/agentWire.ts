@@ -37,6 +37,7 @@ export const PUBLIC_TOOL_ERROR_CODES = [
   'UNAUTHORIZED',
   'BAD_CONFIG',
   'UNREACHABLE',
+  'UNAVAILABLE',
   'INTERNAL_ERROR',
 ] as const
 
@@ -48,6 +49,7 @@ export const PUBLIC_TOOL_ERROR_MESSAGES: Record<PublicToolErrorCode, string> = {
   UNAUTHORIZED: 'Missing or invalid API credentials for this tool.',
   BAD_CONFIG: 'Server configuration is incomplete or invalid for this tool.',
   UNREACHABLE: 'Upstream service was unreachable.',
+  UNAVAILABLE: 'Authorization is temporarily unavailable.',
   INTERNAL_ERROR: 'Internal tool error.',
 }
 

@@ -16,6 +16,7 @@ import { authorization } from '../middleware/authorization'
 import { requireAuth } from '../middleware/require-auth'
 import { appendAudit } from '../services/audit'
 import * as authService from '../services/auth'
+import { impersonationInfo } from '../services/impersonation'
 import * as meService from '../services/me'
 import type { AppEnv } from '../types'
 
@@ -96,13 +97,20 @@ meRoutes.openapi(getMe, async (c) => {
   const subject = c.get('subject')!
   const db = c.get('db')!
   const authMethod = c.get('authMethod')
-  const browser = authMethod === 'session' ? await authorization.delegation(c) : null
+  const { delegation, impersonationPermissions } = authorization.view(c)
+  const impersonation =
+    delegation &&
+    impersonationInfo(
+      { ...delegation, actorUserId: delegation.actor.subject, subjectUserId: subject },
+      delegation.actorProfile,
+      delegation.targetProfile,
+    )
   const profile = await meService.getMeProfile(db, subject, {
     authMethod,
     keyOrganizationId: c.get('keyOrganizationId'),
     platformRole: c.get('platformRole') ?? null,
-    impersonation: c.get('impersonationInfo'),
-    impersonationPermissions: browser?.permission,
+    impersonation,
+    impersonationPermissions,
   })
 
   return c.json({
@@ -144,7 +152,7 @@ meRoutes.openapi(listKeys, async (c) => {
   // D11: api_key is org-scoped. Missing/blank key org → [] owned HERE (never call listApiKeysForOrg).
   if (c.get('authMethod') === 'api_key') {
     const org = c.get('keyOrganizationId')
-    if (!org?.trim()) return c.json({ keys: [], requestId })
+    if (!org) return c.json({ keys: [], requestId })
     const keys = await authService.listApiKeysForOrg(db, subject, org)
     return c.json({ keys, requestId })
   }
@@ -197,8 +205,8 @@ meRoutes.openapi(
 
     const data = c.req.valid('json')
 
-    const orgFromHeader = c.req.header('x-org-id')?.trim()
-    const organizationId = data.organizationId?.trim() || orgFromHeader || null
+    const orgFromHeader = c.req.header('x-org-id')
+    const organizationId = data.organizationId ?? (orgFromHeader || null)
     // `mintApiKey` refuses a missing organization itself (ADR-0003 D11) — no opt-in flag to pass.
     const minted = await authService.mintApiKey(db, subject, {
       name: data.name,

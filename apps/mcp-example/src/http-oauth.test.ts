@@ -11,18 +11,32 @@ class MemoryKv {
 
   readonly db = {
     prepare: () => ({
-      bind: (...values: unknown[]) => ({ userId: values.at(-1) }),
+      bind: (userId: string, organizationId?: string) => ({ userId, organizationId }),
     }),
-    batch: async (statements: readonly { userId: string }[]) => {
+    batch: async (statements: readonly { userId: string; organizationId?: string }[]) => {
       this.d1Calls++
       if (this.accountState === 'unavailable') throw new Error('D1 unavailable')
-      return statements.map(({ userId }) => ({
-        success: true,
-        results:
-          this.accountState === 'active' && [DEMO.userId, 'user_b'].includes(userId)
-            ? [{ subject: userId, platform_role: null }]
-            : [],
-      }))
+      return statements.map(({ userId, organizationId }) => {
+        if (this.accountState !== 'active' || ![DEMO.userId, 'user_b'].includes(userId)) {
+          return { success: true, results: [] }
+        }
+        const organization =
+          organizationId === DEMO_ORG
+            ? { org_id: DEMO_ORG, org_kind: 'client', org_status: 'active' }
+            : { org_id: null }
+        return {
+          success: true,
+          results: [
+            {
+              subject: userId,
+              disabled: 0,
+              platform_role: null,
+              ...organization,
+              membership_role: userId === DEMO.userId ? 'member' : null,
+            },
+          ],
+        }
+      })
     },
   } as unknown as D1Database
 
@@ -58,6 +72,8 @@ class MemoryKv {
     this.data.clear()
   }
 }
+
+const DEMO_ORG = 'demo_organization'
 
 const LOCAL = 'http://127.0.0.1:8788'
 const REDIRECT = 'http://127.0.0.1:9999/cb'
@@ -479,7 +495,7 @@ describe('CP-MCP-HTTP-OAUTH', () => {
     expect(res.headers.get('location')).toBeNull()
   })
 
-  it('PKCE + localhost DCR + demo identity → ping and whoami', async () => {
+  it('PKCE + localhost DCR + demo identity → ping, whoami and guarded Organization dispatch', async () => {
     const kv = new MemoryKv()
     const worker = createMcpWorker({ identityPort: stubIdentity(DEMO) })
     const { accessToken } = await mintAccessToken(worker, kv)
@@ -521,6 +537,7 @@ describe('CP-MCP-HTTP-OAUTH', () => {
     const names = JSON.stringify(listBody)
     expect(names).toContain('ping')
     expect(names).toContain('whoami')
+    expect(names).toContain('organization')
 
     const ping = await workerFetch(
       worker,
@@ -563,6 +580,30 @@ describe('CP-MCP-HTTP-OAUTH', () => {
     expect(whoText).toContain('demo@kit.local')
     expect(whoText).not.toMatch(/sk_/)
     expect(whoText).toContain('"verified":true')
+
+    for (const [organizationId, expected, d1] of [
+      [DEMO_ORG, { id: DEMO_ORG, role: 'member' }, 2],
+      ['another_organization', { code: 'ORGANIZATION_ACCESS_REFUSED' }, 1],
+    ] as const) {
+      const before = kv.d1Calls
+      const result = await workerFetch(
+        worker,
+        kv,
+        new Request(`${LOCAL}/mcp`, {
+          method: 'POST',
+          headers: { ...headers, 'X-Org-Id': DEMO_ORG },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 5,
+            method: 'tools/call',
+            params: { name: 'organization', arguments: { organizationId } },
+          }),
+        }),
+      )
+      expect(result.status).toBe(200)
+      expect(JSON.parse(mcpToolText(await mcpJson(result)))).toEqual(expected)
+      expect(kv.d1Calls - before).toBe(d1)
+    }
   })
 
   it('unknown MCP method fail-closes', async () => {

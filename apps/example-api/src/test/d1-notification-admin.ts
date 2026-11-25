@@ -128,7 +128,7 @@ async function measureRules(probe: Probe, headers: HeadersInit, staffHeaders: He
   )
 
   await expectRow(
-    await probe('GET /api/orgs/:orgId/notifications/effective-rules', 9, {
+    await probe('GET /api/orgs/:orgId/notifications/effective-rules', 4, {
       path: `${inbox}/effective-rules`,
       headers,
     }),

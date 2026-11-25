@@ -68,7 +68,7 @@ function git(...args: string[]) {
   assert.equal(result.status, 0, result.output)
   return result.output.trim()
 }
-function runCore(expectedFailure?: RegExp) {
+function runCore(expectedFailure?: RegExp, name?: string) {
   const result = command(
     process.execPath,
     'run',
@@ -79,8 +79,12 @@ function runCore(expectedFailure?: RegExp) {
     '--receipt',
     'root-core.json',
   )
-  assert.equal(result.status, expectedFailure ? 1 : 0, result.output)
-  if (expectedFailure) assert.match(result.output, expectedFailure)
+  assert.equal(
+    result.status,
+    expectedFailure ? 1 : 0,
+    name ? `${name}\n${result.output}` : result.output,
+  )
+  if (expectedFailure) assert.match(result.output, expectedFailure, name ?? 'expected core failure')
   const receipt = JSON.parse(readFileSync(join(root, 'root-core.json'), 'utf8'))
   assert.deepEqual(receipt.tasks, ['better-auth:check'])
   assert.equal(receipt.complete, !expectedFailure)
@@ -223,6 +227,85 @@ export default {
   }
   assert.match(runCore(), /apps\/product-fixture differential fixtures passed/)
 
+  const consumer = `${app}/src/auth-consumer.ts`
+  const enrolledConsumer = readFileSync(join(root, consumer), 'utf8')
+  // Test response changes through the shipping sign-in mount, not against a standalone parser.
+  put(`${app}/wrangler.toml`, workerConfig)
+  for (const [name, modify, failure, secure] of [
+    [
+      'allows unrelated App cookies (including a near-match name and Expires with a comma)',
+      `mounted.headers.append('Set-Cookie', 'app_locale=fr; Expires=Wed, 21 Oct 2037 07:28:00 GMT; Path=/')
+       mounted.headers.append('Set-Cookie', name + '.display=compact; Path=/')`,
+    ],
+    [
+      'allows reordering issuer attributes without changing their meaning',
+      `replaceCookies(original.map((field) => {
+         const [pair, ...attrs] = field.split(';')
+         return [pair, ...attrs.reverse()].join(';')
+       }).reverse())`,
+    ],
+    [
+      'refuses removal of a non-session issuer cookie while keeping the session cookie',
+      `replaceCookies(original.filter((field) => !/^(?:__Secure-)?better-auth\\.dont_remember=/.test(field)))`,
+      /mounted Better Auth omitted an issuer cookie/,
+    ],
+    [
+      'refuses rewriting an issuer cookie attribute while retaining its name and value',
+      `replaceCookies([original[0].replace(/;\\s*Path=\\/(?=;|$)/i, '; Path=/elsewhere'), ...original.slice(1)])`,
+      /mounted Better Auth rewrote an issuer cookie/,
+    ],
+    [
+      'refuses rewriting an issuer cookie value',
+      `replaceCookies([original[0].replace(/=[^;]*/, '=rewritten'), ...original.slice(1)])`,
+      /mounted Better Auth rewrote an issuer cookie/,
+    ],
+    [
+      'refuses duplicating an issuer cookie',
+      `mounted.headers.append('Set-Cookie', original[0])`,
+      /mounted Better Auth duplicated an issuer cookie/,
+    ],
+    ...[
+      ['a prefixed spelling', `"__Secure-" + logical`],
+      ['an unprefixed spelling', 'logical', true],
+      ['an unprefixed chunk', 'logical + ".0"'],
+      ['a prefixed chunk', '"__Host-" + logical + ".1"'],
+    ].map(
+      ([kind, alias, secure]) =>
+        [
+          `refuses ${kind} in an issuer cookie family`,
+          `mounted.headers.append('Set-Cookie', ${alias} + '=other; Path=/')`,
+          /mounted Better Auth added a cookie in an issuer cookie family/,
+          secure,
+        ] as const,
+    ),
+  ] as const) {
+    put(
+      consumer,
+      `import { createBetterAuth as issueAuth } from './better-auth'
+export async function fetch(req, env) {
+  const auth = issueAuth({ ...env, ENVIRONMENT: ${JSON.stringify(secure ? 'production' : '')} }, env.BETTER_AUTH_URL)
+  req = new Request(req, { body: JSON.stringify({ ...await req.json(), rememberMe: false }) })
+  const response = await auth.handler(req)
+  const original = response.headers.getSetCookie()
+  if (original.length === 0) return response
+  const mounted = new Response(response.body, response)
+  const replaceCookies = (fields) => {
+    mounted.headers.delete('Set-Cookie')
+    for (const field of fields) mounted.headers.append('Set-Cookie', field)
+  }
+  const name = original[0].slice(0, original[0].indexOf('='))
+  const logical = name.replace(/^__(?:Secure|Host)-/, '')
+  ${modify}
+  return mounted
+}
+`,
+    )
+    const output = runCore(failure, name)
+    if (!failure) assert.match(output, /apps\/product-fixture differential fixtures passed/, name)
+  }
+  put(consumer, enrolledConsumer)
+  put(`${app}/wrangler.toml`, withRelease)
+
   // The attestation exempts only the proven Kit call, not more issuer code in that file.
   const enrolledSource = readFileSync(join(root, app, wrapper), 'utf8')
   const extraIssuerInComposition =
@@ -351,7 +434,10 @@ export function fetch(req, env) {
 }
 `,
   )
-  runCore(/--env release\) failed:[\s\S]*mounted Better Auth cookie lacks provenance/)
+  runCore(
+    /--env release\) failed:[\s\S]*mounted Better Auth cookie lacks provenance/,
+    'refuses a compatible cookie from another issuer',
+  )
   // Mounted sign-in now succeeds, but another live branch still provisions an extra issuer.
   put(`${app}/wrangler.toml`, alternateFlag(''))
   runCore(/Wrangler release includes an extra Better Auth issuer: .*alternate-issuer\/issuer\.ts/)

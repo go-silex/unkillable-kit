@@ -9,8 +9,9 @@ Authentication primitives and integration surfaces; it does not own product-spec
 - `@kit/auth/factory`: Worker authentication factory and email integration.
 - `@kit/auth/oidc-provider`: optional OpenID provider composition and administration helpers.
 - `@kit/auth/react`: React authentication forms and helpers.
-- `@kit/auth/hono`: Hono authentication middleware.
-- `@kit/auth/snapshot`: declarative authorization facts, hosted admission, and a read-only session probe.
+- `@kit/auth/hono`: Kit request authorization and Hono guards.
+- `@kit/auth/snapshot`: hosted principal admission and a read-only session probe.
+- `@kit/auth/hosted-dispatch`: in-process dispatch capability for the hosted MCP shell.
 - `@kit/auth/repos/*`: individual repository modules under `src/repos/`.
 - `@kit/auth/repos/memory-d1`: explicitly unavailable as a public export.
 
@@ -57,14 +58,20 @@ such as invitations and welcome e-mails do not use this hook.
 
 New keys must explicitly store a comma-separated selection of `read`, `write` and `admin` in `scopes`. The scopes are independent: `admin` does not imply `read` or `write`. The migration backfills existing keys with all three scopes. Malformed stored scope strings grant no scopes.
 
-Use `createRequestAuthorization` from `@kit/auth/hono`. For a parsed Bearer, the App's key
-gate calls `authenticateKey`, checks its default-deny route scope allowlist, then calls
-`admitKeyScope`. The regular guards project `keyScopes` only after admission. A key scope
-never substitutes for Organization or role checks. See the [Product migration](../../docs/kit/product-consumer-contract.md#authentication-reads-and-organization-context-migration).
+Configure `createRequestAuthorization` with `db`, `auth`, and an optional synchronous
+`keyScope({ method, path }, scopes)` allowlist. Without the hook, all API keys are denied.
+Kit consults it for every matched terminal registration before any identity is projected.
+A key scope never substitutes for Organization or Role checks.
 
-For guarded routes registered with Hono `app.all`, attach the authorization instance's
-`allEndpoint` middleware to that endpoint before its guards. Do not attach it with `app.use`:
-Hono labels both registrations `ALL`, but only the endpoint may supply the path `orgId`.
+On the served App, register actual middleware before any Kit guard with
+`authorization.middleware(app, () => app.use('*', middleware))`. Hono reports both
+`app.use` and `app.all` as `ALL`. Only the recorded registrations matched before the
+first Kit guard are exempt; all other `ALL` registrations count as terminal even
+if they reuse the same function or fall through. Never mark an operation as middleware.
+
+Mount the appropriate guard on each protected route and `betterAuthMount` on Better Auth.
+Set `modules: true` (and apply the RBAC schema) before creating a Module guard. Read the
+admitted stages via `authorization.view(c)`; App policy and business SQL run after admission.
 
 ## Account state
 

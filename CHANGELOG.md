@@ -4,6 +4,28 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ## Unreleased
 
+### Auth
+
+- **Product action:** Kit guards now load a fixed Kit authorization core after routing
+  ([ADR-0026](docs/kit/architecture/adr/0026-request-authorization-kit-core.md)). Replace the global
+  key and Impersonation gates with the `keyScope` and `impersonation` hooks, register global
+  middleware with `authorization.middleware`, mount `betterAuthMount` on Better Auth and give every
+  protected route its own guard. Replace `moduleFacts` with `modules: true`. Replace Product facts,
+  projections and fingerprints with Product queries after the guards, and read admitted facts from
+  `view(c)`. Remove `allEndpoint`. `X-Org-Id` is no longer trimmed. Existing cookies stay valid; no
+  D1 migration is needed. See the [migration guide](docs/kit/playbooks/migrate-request-authorization.md)
+  (go-silex/unkillable-kit#191).
+- **Product action:** Hosted MCP tools call declared App operations in process through the
+  `dispatch` capability and designate the Organization from validated input or a server default.
+  `facts`, `forOrganization` and `denyFact` are removed; move a `denyFact` barrier into
+  `grantAdmission` before upgrading. See [Update hosted MCP tools](docs/kit/playbooks/migrate-request-authorization.md#update-hosted-mcp-tools-if-used)
+  (go-silex/unkillable-kit#181).
+
+### Root
+
+- Root's Better Auth differential compares only the cookies the enrolled issuer sets on sign-in.
+  An App may add an unrelated cookie to that response (go-silex/unkillable-kit#188).
+
 ## unkillable-kit/v0.8.1 — 2026-11-25
 
 ### Auth

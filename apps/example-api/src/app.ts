@@ -1,15 +1,13 @@
 import { OpenAPIHono } from '@hono/zod-openapi'
 import { applySecurityHeaders, originGuard, securityHeaders } from '@kit/auth/hono'
 import { AppError, toApiErrorBody } from '@kit/core'
-import { cors } from 'hono/cors'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import { defaultHook, securitySchemes } from './lib/openapi'
-import { corsAllowlist } from './lib/session-env'
+import { authorization } from './middleware/authorization'
 import { withBetterAuth } from './middleware/better-auth'
+import { corsMiddleware } from './middleware/cors'
 import { withDb } from './middleware/db'
 import { onError } from './middleware/error-handler'
-import { impersonationGate } from './middleware/impersonation'
-import { keyScopeGate } from './middleware/key-scopes'
 import { requestIdMiddleware } from './middleware/request-id'
 import { adminAuditRoutes } from './routes/admin-audit'
 import { adminUsersRoutes } from './routes/admin-users'
@@ -39,33 +37,14 @@ export type { AppEnv }
 export function createApp() {
   const app = new OpenAPIHono<AppEnv>({ defaultHook })
 
-  app.use('*', requestIdMiddleware)
-  app.use('*', securityHeaders)
-  app.use(
-    '*',
-    cors({
-      origin: (origin, c) => {
-        const list = corsAllowlist(c.env)
-        if (!origin) return list[0]
-        return list.includes(origin) ? origin : null
-      },
-      credentials: true,
-      allowHeaders: [
-        'Content-Type',
-        'Authorization',
-        'x-request-id',
-        'X-Org-Id',
-        'X-Impersonation-Id',
-      ],
-      // SPA must be able to read Retry-After on 429 (credentials + expose).
-      exposeHeaders: ['x-request-id', 'Retry-After'],
-    }),
-  )
-  app.use('*', originGuard)
-  app.use('*', withDb)
-  app.use('*', withBetterAuth)
-  app.use('*', keyScopeGate)
-  app.use('*', impersonationGate)
+  authorization.middleware(app, () => {
+    app.use('*', requestIdMiddleware)
+    app.use('*', securityHeaders)
+    app.use('*', corsMiddleware)
+    app.use('*', originGuard)
+    app.use('*', withDb)
+    app.use('*', withBetterAuth)
+  })
   app.onError((err, c) => onError(err, c))
   app.notFound((c) => {
     const requestId = c.get('requestId') || 'req_unknown'

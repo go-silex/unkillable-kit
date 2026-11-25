@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createApp } from '../app'
-import { keyScopeRoutes } from '../middleware/key-scopes'
+import { keyScopeRoutes } from '../middleware/authorization'
 import { measureFlowsAndTasks } from './d1-flows-tasks'
 import { measureNotificationsAndAdmin } from './d1-notification-admin'
 import { measureOrganizations } from './d1-organization'
@@ -14,16 +14,16 @@ it('classifies the ALL registrations that do not have their own route budget', (
   // Hono uses ALL for middleware too. Compare multiplicities so an added handler
   // cannot hide behind an existing middleware registration with the same path.
   expect(Object.fromEntries(registrations)).toEqual({
-    '/*': 8,
+    '/*': 6,
     '/api/admin/audit-events': 1,
     '/api/admin/audit-events/*': 1,
-    '/api/admin/users': 2,
-    '/api/admin/users/*': 2,
-    '/api/auth/*': 1, // Actual Better Auth endpoints have a separate budget suite.
+    '/api/admin/users': 1,
+    '/api/admin/users/*': 1,
+    '/api/auth/*': 2, // Native mount guard and handler; measured in the Better Auth suite.
     '/api/demo/*': 1,
     '/api/flows': 3,
     '/api/flows/*': 3,
-    '/api/invitations/*': 2,
+    '/api/invitations/*': 1,
     '/api/items': 1,
     '/api/items/*': 1,
     '/api/jobs': 1,
@@ -35,9 +35,6 @@ it('classifies the ALL registrations that do not have their own route budget', (
     '/api/modules/*': 1,
     '/api/notes': 1,
     '/api/notes/*': 1,
-    '/api/orgs': 2,
-    '/api/orgs/*': 2,
-    '/api/platform/*': 2,
     '/api/tasks': 2,
     '/api/tasks/*': 2,
     '/api/uploads': 1,

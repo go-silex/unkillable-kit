@@ -1,14 +1,15 @@
 # Migrate to request authorization
 
-Upgrade from `unkillable-kit/v0.7.0` to `v0.8.0` using the request snapshot in
-[ADR-0025](../architecture/adr/0025-request-authorization-snapshot.md). Keep the same issuer and
-cookie configuration: the cutover itself requires no forced sign-in or D1 schema change.
+Upgrade from `unkillable-kit/v0.7.x` to `v0.9.0` using the Kit authorization core in
+[ADR-0026](../architecture/adr/0026-request-authorization-kit-core.md). If the Product already adopted
+`v0.8.0` or `v0.8.1`, also apply [Replace the v0.8.x surface](#replace-the-v08x-surface). Keep the same
+issuer and cookie configuration: existing sessions and cookies stay valid, and the cutover needs no
+forced sign-in. Check schema readiness separately (see [Module facts](#enable-module-facts)).
 
 ## Replace the removed exports
 
-Upgrade the App's `better-auth` dependency: the `@kit/auth` peer range changed from `>=1.2.0`
-to `^1.7.27`. The new `@kit/auth/snapshot` entry point provides standalone read-only session
-resolution and authorization facts. See the [auth entry points](../../../packages/auth/README.md#entry-points).
+Upgrade the App's `better-auth` dependency: the `@kit/auth` peer range is `^1.7.27`. See the
+[auth entry points](../../../packages/auth/README.md#entry-points).
 
 From `@kit/auth`:
 
@@ -16,15 +17,15 @@ From `@kit/auth`:
   `ResolveSessionInput`, `SessionPort`, `SessionPayload`: pass the shipping issuer directly.
   On Hono use `authorization.session(c)`; for a standalone read use
   `resolveRequestSession({ db, headers, auth })` from `@kit/auth/snapshot`. It returns `null` or
-  a session identity with `subject` (not `sub`), `sessionId` and `email`, not `exp`. It does not
-  write cookies or refresh the session.
+  a session identity with `subject` (not `sub`), `sessionId` and `email`, not `exp`. It throws a
+  `503` error when the database cannot be read, and an internal error when `auth` is not an issuer
+  from the Kit factory. It does not write cookies or refresh the session.
 - `createRequireAuth`, `DualAuthPorts`, `RequireAuthContext`, `resolveDualAuth`: use
-  `createRequestAuthorization<AppEnv>` from `@kit/auth/hono` and mount `authorization.requireAuth`.
-  Replace injected ports with the issuer and primary D1 binding.
-- `ApiKeyRecord`: no public lookup row replacement. Use the verified identity from
-  `authorization.authenticateKey(c)` or the `ApiKeyAuthIdentity` type, not a row with a stored hash.
-- `AuthMethod`, `allowsApiKeyScope`: use `AuthIdentity['method']` for the method type. Check the
-  authenticated key's `scopes` against the route's required scope, then call `admitKeyScope`.
+  `createRequestAuthorization<AppEnv>` from `@kit/auth/hono` and mount its guards. Replace
+  injected ports with the issuer and the primary D1 binding.
+- `ApiKeyRecord`, `AuthMethod`, `allowsApiKeyScope`: no public lookup row. Use the admitted
+  identity from `authorization.view(c)` or the `ApiKeyAuthIdentity` type, and declare route
+  scopes in the `keyScope` hook.
 - `clearSessionCookieHeader`, `SessionCookieOpts`, `sessionCookieWireName`: no public wire-name or
   cookie-writing replacement. Keep cookie configuration with the issuer; for sign-out use
   Better Auth `POST /api/auth/sign-out`.
@@ -34,115 +35,114 @@ From `@kit/auth/hono`:
 - `createKitRequireAuth`, `KitRequireAuthContext`: use `authorization.requireAuth` and your App's
   Hono environment type.
 - `createKitOrgMiddleware`, `createOrgMiddleware`, `OrgContextPorts`, `OrgMiddlewareEnv`,
-  `OrgMiddlewareVariables`: use the same authorization instance's Organization, Platform Role and
-  Module guards. Use your App's Hono environment and variables and supply Module policy through
-  `moduleFacts`, not callback ports.
+  `OrgMiddlewareVariables`: use the same instance's Organization, Platform Role and Module guards.
 
 From `@kit/auth/repos/keys`:
 
-- `findApiKeyByPrefix`, `findActiveOrgApiKeyByPrefix`: use `authorization.authenticateKey(c)` for
-  request authentication; there is no public prefix lookup replacement.
+- `findApiKeyByPrefix`, `findActiveOrgApiKeyByPrefix`: no public prefix lookup. Kit guards
+  authenticate the key.
 
-No public `@kit/mcp` or `@kit/mcp/hosted` exports were removed.
+## Compose the authorization instance
 
-## Wire the matched endpoint
+1. Create one instance per App:
 
-1. Create one authorization instance per App with `db` returning the primary D1 binding and
-   `auth` supplying the shipping Better Auth issuer. Keep `createBetterAuthHandler()` mounted on
-   `/api/auth/*`. The Kit issuer installs the native account guard and owns session lifecycle writes.
-2. Mount the instance's Organization and Module guards and `includeFacts(...)` middleware directly,
-   not inside wrappers. Kit plans the matched endpoint before its first read. On a guarded terminal
-   `app.all(...)`, register `authorization.allEndpoint` before the guards; never mount the marker
-   with `app.use(...)`. An Organization-dependent route without a resolvable endpoint (such as an
-   unmarked `app.all`) returns `503`. Remove ambiguous overlapping parameterized endpoints; Kit
-   returns `503` for competing parameter patterns instead of loading either plan.
-3. For a parsed Bearer, call `authenticateKey(c)`, enforce a default-deny route scope allowlist,
-   then call `admitKeyScope(c)` before `requireAuth`. Use the path `orgId` or `X-Org-Id` for tenant
-   selection; if both are present they must agree. See [API key scopes](../../../packages/auth/README.md#api-key-scopes).
-4. Declare scoped, read-only Product projections with `defineAuthorizationFact`; register them
-   with `includeFacts` and read them with `authorization.fact(c, descriptor)` after guards pass.
-   Keep policy and I/O out of decoders. In `moduleFacts`, supply an `organization`-scoped
-   availability fact projecting raw `enabled` and `available` as integer `0` or `1`, and an
-   `organization-role`-scoped grant fact projecting raw `access` as `disabled`, `read`, or
-   `write`. For delegated Module access, supply `delegatedGrant` with `delegated-role` scope and
-   the same `access` projection. Filter each fact to the Module and return at most one row.
-   The guard reads these columns directly, not the decoder output. See the
-   [Example API wiring](../../../apps/example-api/src/middleware/authorization.ts).
-   Verify existing Organization provisioning and repair only grants meant to exist. Role reads,
-   admin validation and Capability Grant minting no longer restore missing grants.
+   ```ts
+   export const authorization = createRequestAuthorization<AppEnv>({
+     db: (c) => c.env.DB, // the primary binding, never a D1 Sessions handle
+     auth: (c) => c.get('betterAuth'),
+     modules: true, // only with the `rbac` schema set applied
+     keyScope: (route, scopes) => {
+       const entry = keyScopeRoutes.find((r) => r.method === route.method && r.path === route.path)
+       return Boolean(entry && scopes.includes(entry.scope))
+     },
+   })
+   authorization.middleware(app, () => app.use('*', requestId, cors, bindPlatform))
+   ```
 
-## Preserve a visibility-based write precondition
+   See the [Example API wiring](../../../apps/example-api/src/middleware/authorization.ts) and the
+   [Starter wiring](../../../apps/starter-api/src/platform/auth.ts).
+2. Remove every global admission middleware: no key gate, no Impersonation gate, no call that
+   authenticates or admits before routing. Kit reads nothing until a guard or `session(c)` runs.
+3. Mount the most specific guard on each protected route: `requireAuth`, `requireSession`,
+   `requireOrgContext(opts)`, `requireOrgRole`, `requireOrgCapability`, `requirePlatformRole` or
+   `requireModule(id, op)`. Every guard authenticates and runs the hooks itself, and `requireModule`
+   also admits the Organization. Inventory every handler the removed global middleware covered and
+   give each an explicit guard, or leave it public with no identity.
+4. Mount `authorization.betterAuthMount` before the Better Auth handler on `/api/auth/*`. It lets
+   anonymous requests through, refuses machine credentials, and applies the Impersonation fence.
+5. The `keyScope` hook is synchronous and does no I/O. Without it, every API key is refused. Kit
+   calls it for each terminal registration Hono matched and admits a key only when there is at
+   least one and every call returns `true`. A throw or a non-boolean is a `503`. The hook receives
+   the registration's method and path: Hono answers `HEAD` with a `GET` registration, so a key
+   allowed to read that route may also send `HEAD`.
+6. Register the App's global middleware on the served App, before any route guard, inside
+   `authorization.middleware(app, () => { ... })`. Only the registrations made there count as
+   middleware, and only before the first Kit guard. Hono reports `app.use` and `app.all` as `ALL`:
+   any other `ALL` registration, even of the same function, counts as terminal, so a key or a hosted
+   dispatch reaching it is refused. Never register an operation handler there.
+7. With Impersonation, pass `impersonation: { operation, fence, audit }`. `operation` classifies
+   the request as `recovery`, `business` (Modules and `read`/`write`), `conflict` or `null`
+   (unavailable during Impersonation), synchronously. `fence` reads the App's context header, and
+   `audit` records each business attempt; an audit failure is a `503`. The view exposes the admitted
+   delegation, so drop context variables the former gate set.
 
-This composition needs a Kit release after `unkillable-kit/v0.8.0` that includes
-go-silex/unkillable-kit#182. Use it when a client submits the authority fingerprint it last read.
-It does not replace resource-specific access checks or any recheck at the point of effect.
+The Kit no longer plans the matched endpoint. Remove `authorization.allEndpoint`. Hono decides
+overlaps and unknown addresses: an unknown address under a guarded prefix gets the guard's refusal
+or the App's not-found handler, not a `503`.
 
-```ts
-import { defineAuthorizationProjection } from '@kit/auth/snapshot'
+## Read admitted facts and Product facts
 
-const visibility = defineAuthorizationProjection({
-  table: {
-    name: 'app_visibility',
-    columns: ['organization_id', 'user_id', 'resource_id', 'access'],
-  },
-  scope: { kind: 'organization-role', organizationId: 'organization_id', userId: 'user_id' },
-  select: ['resource_id', 'access'],
-})
-const authority = authorization.moduleAuthority('documents', {
-  view: 'document-visibility',
-  projection: visibility,
-})
+- `authorization.view(c)` returns a frozen view of the stages admitted so far: `identity`,
+  `delegation` (under Impersonation), `platformRole` and, after Organization admission,
+  `organization` with its `id`, `kind`, `status`, `role`, `bypass` and `modules` map. A refused or
+  pending stage is absent. The guards still set the `subject`, `sessionId`, `authMethod`,
+  `keyOrganizationId`, `keyScopes`, `orgId`, `orgRole`, `orgBypass` and `platformRole` variables.
+- Read Product facts with Product code in the handler, or in a step mounted after the guards it
+  requires. Scope them to the admitted subject and Organization, and use at most one batch on the
+  primary binding per operation. Reuse admitted facts instead of reading them again, and keep
+  checks at the point of effect, including predicates inside write statements.
+- A Product check only narrows Kit authority. A Module entry in the view describes access; it does
+  not admit an operation by itself.
 
-app.get('/orgs/:orgId/document-authority',
-  authorization.requireAuth, authorization.requireOrgContext(), authority.read,
-  async (c) => {
-    c.header('Cache-Control', 'private, no-store')
-    return c.json({ fingerprint: await authority.fingerprint(c) })
-  },
-)
-app.patch('/orgs/:orgId/documents/:id',
-  authorization.requireAuth, authorization.requireOrgContext(), authority.write,
-  updateDocument, // the App still owns authorization for the resource and the write itself
-)
-```
+### Preserve a visibility-based write precondition
 
-- Replace the Module guard with `authority.read` or `authority.write`. Mount it directly on a
-  concrete method endpoint (`app.get`, `app.patch`, etc.), last among its planned Kit guards, with
-  the handler after it. Do not mount it through `app.use`, `app.all` or a wrapper.
-  Reuse the same registration and a stable view identifier for the read and write. The
-  precondition is for ordinary member sessions; it does not replace Bearer scope, Impersonation or
-  break-glass policy.
-- Use columns storing the exact Organization and User IDs as SQLite `TEXT`. Correlation is
-  case-sensitive regardless of the Product columns' collations. Select every scalar field whose
-  change must invalidate the fingerprint. The Kit orders the tuples deterministically, keeps
-  duplicates, and aggregates the complete matching set, not a count. The same statement skips
-  the Product rows for an inactive Organization, an unavailable Module or no read grant. The
-  bounded `defineAuthorizationFact` path is unchanged. D1 execution and result-size limits still
-  apply; there is no partial read or second query. A missing or incompatible projection table or
-  column fails the whole load with `503`, before any refusal that depends on that load, including
-  the Module's `404` or `403`.
-- Send the opaque value back in `X-Authority-Fingerprint` (or configure the header name on the
-  view). Credential and Organization refusals come first. An unavailable Module still yields
-  `404`; no current read access yields `403` without comparison. With current read access, a
-  missing or malformed value yields `400`, a stale value yields `409`, and a match still requires
-  write access (`403` for read-only). Neither refusal includes the projection or a fingerprint.
-  On `409` the client can refresh through the read route, subject to current access.
+For an ordinary member session, a stale-write `409` that must precede Module refusals mounts only
+`requireOrgContext()` and then, in Product code:
+
+1. returns `404` for a Module that is absent, or disabled by the Deployment or the Organization
+   (`view(c).organization.modules`);
+2. computes the precondition from what the caller can currently see and compares it with the
+   submitted value (`409` on mismatch, `400` when missing or malformed);
+3. enforces Module access from the view (`403`) before any effect, then writes with its own
+   point-of-effect predicates.
+
+Neither the comparison nor the refusal may reveal state the caller can no longer read.
+
+## Enable Module facts
+
+`modules: true` makes the Kit read every Module row of the selected Organization, with
+availability and the Role–module grant, in the same batch. The bound database must have the `rbac`
+schema set applied; a missing table is a `503`, not an empty map. Without the option, the view
+reports Module facts as `disabled` and creating `requireModule` throws when the App is built. Remove
+App-supplied Module descriptors. Verify existing Organization provisioning and repair only grants
+meant to exist; no read or guard restores a missing grant.
 
 ## Handle admission responses
 
-- **`503`:** A failed or unreadable required authorization load returns a generic response without
-  dispatching the guarded handler. Treat it as service unavailability, not bad credentials; do not
-  clear the session. For example, unreadable account state on guarded `/api/me` now returns `503`
-  instead of `401`.
-- **`401`:** Reject an API key if its owner is inactive, is no longer a member of the key's
-  Organization, or that Organization is inactive, even on non-tenant routes. The standard Kit
-  guard already enforced all three in `v0.7.0`; now Kit also enforces them for Products migrating
-  from custom key lookup ports. See [account state](../../../packages/auth/README.md#account-state).
-- **`403` / `404`:** A valid, scope-admitted key targeting a different Organization gets `403`,
-  as does a path/header conflict. For session callers without an allowed bypass, a nonmember gets
-  `404` whether the Organization exists or not, and a member of a suspended Organization gets
-  `403`. Super-admin bypass still requires an active Organization, is audited and needs explicit
-  opt-in for writes. An unavailable Module returns `404` even with super-admin bypass.
+- **`503`:** a failed or unreadable authorization load, a duplicate required row, a hook that
+  cannot decide or a failed attempt audit returns a generic response without dispatching the
+  handler. Treat it as service unavailability; do not clear the session.
+- **`401`:** an API key is refused if its owner is inactive, is no longer a member of the key's
+  Organization, or that Organization is inactive, even on routes without an Organization.
+- **`400` / `403` / `404`:** a repeated or malformed `X-Org-Id` gets `400`. A valid key targeting a
+  different Organization gets `403`, as does a path/header conflict or a selection that differs from
+  one already seen in the request. Organization identifiers are compared exactly: the Kit no
+  longer trims `X-Org-Id`, so a client must send the exact ID. For session callers without an allowed bypass, a nonmember
+  gets `404` and a member of a suspended Organization gets `403`. Super-admin bypass still requires
+  an active Organization, is audited and needs explicit opt-in for writes. An unavailable Module
+  returns `404` even with bypass.
+- A guard may receive an Organization chosen by the server through
+  `requireOrgContext({ organizationId: (c) => id })`; a path or header naming another one is `403`.
 
 ## Enroll shipping Better Auth Apps in Root
 
@@ -161,16 +161,46 @@ app.patch('/orgs/:orgId/documents/:id',
 3. Align the shared Bun lockfile on one resolved `better-auth` version across workspaces, including
    nested resolutions, without editing Kit-owned files. Run `bun run validate:full`.
 
+Root compares only the cookies the enrolled issuer emits on sign-in: each must appear once, with
+the same value and attributes. An App may add its own unrelated cookies to that response; a cookie
+whose name falls in an issuer cookie's family is refused.
+
 ## Update hosted MCP tools, if used
 
-- On `/mcp`, the shell selects the optional `X-Org-Id` before it loads authorization. In each
-  Organization-scoped tool, call `authorization.forOrganization(validatedOperationOrgId)` and
-  refuse `null` (missing or mismatched selection, inactive Organization or no membership). Then
-  apply the tool's policy before reading scoped facts or dispatching. The header itself grants
-  no access. Organization-free tools such as `whoami` need no header.
-- Pass `denyFact` for deny-only policy on the same D1 binding: use a `hosted-grant` descriptor
-  whose matching row signals denial. Keep `grantAdmission` for additional policy outside that
-  binding. This applies to request admission and code/refresh exchange.
-- On unavailable admission, expect `503` without revocation (`temporarily_unavailable` at
-  `/token`). Clients should rely on HTTP status and the OAuth error code where present, not the
-  error description. See [hosted shell](../../../packages/mcp/README.md#hosted-shell).
+- Remove `facts`, `denyFact` and `authorization.forOrganization` from `createHostedMcpWorker`.
+  Tools receive `register(server, { identity, env, dispatch })`. See the
+  [hosted shell](../../../packages/mcp/README.md#hosted-shell).
+- Declare each operation a tool may call on the App the shell is composed with, with
+  `authorization.hosted(app, () => { /* register the route */ }, { platformRole: true })`.
+  Omit `platformRole` unless the operation needs the hosted principal's Platform Role. Mount its
+  Kit guards on the route as usual. A dispatch reaching an undeclared, unguarded or mis-wired route
+  is refused before any handler runs.
+- In each tool, map validated arguments to the declared method and path, and designate the
+  Organization from the validated input or a server default: `dispatch.fetch({ method, path,
+  organizationId, body })`. An Organization-free dispatch never acquires an Organization. A nonempty
+  `X-Org-Id` on the outer `/mcp` request must equal the designation. Each `/mcp` request allows
+  eight dispatches.
+- A refused dispatch returns its Kit status; an unavailable one returns `503`. Neither revokes the
+  OAuth grant. Unavailable outer admission still returns `503` without revocation
+  (`temporarily_unavailable` at `/token`).
+
+## Replace the v0.8.x surface
+
+| Removed in `v0.9.0`                                                                                                         | Replacement                                                                                                   |
+| --------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `authenticateKey`, `admitKeyScope`, global key gate                                                                         | `keyScope` hook on the instance                                                                               |
+| `delegation`, `admitFence`, `admitDelegation`, `assertDelegationModule`, `organizationSelection`, global Impersonation gate | `impersonation` hook on the instance; `view(c).delegation`                                                    |
+| `allEndpoint`                                                                                                               | Remove; register global middleware with `authorization.middleware(app, …)`                                    |
+| `moduleFacts` descriptors                                                                                                   | `modules: true`                                                                                               |
+| `defineAuthorizationFact`, `includeFacts`, `authorization.fact`                                                             | Product query in the handler, after the guards; `view(c)` for admitted facts                                  |
+| `defineAuthorizationProjection`, `moduleAuthority`, `X-Authority-Fingerprint`                                               | Product precondition after `requireOrgContext()` ([pattern](#preserve-a-visibility-based-write-precondition)) |
+| hosted `facts`, `authorization.fact`, `forOrganization`                                                                     | `dispatch` capability with a designated Organization                                                          |
+| hosted `denyFact`                                                                                                           | `grantAdmission`                                                                                              |
+
+- Move a `denyFact` barrier into `grantAdmission` before upgrading, so the denial stays in force
+  without a gap. `grantAdmission` runs on resource requests and code/refresh exchanges, may perform
+  its own I/O, and must return `true` to allow.
+- A hosted client that selected its Organization only through the outer `X-Org-Id` header must now
+  designate it from tool input or a server default.
+- Fingerprints issued under `v0.8.1` stop matching. A client holding one gets the Product's new
+  precondition response and must read again.

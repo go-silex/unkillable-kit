@@ -27,8 +27,9 @@ export async function measureOrganizations(record: Set<string>) {
     body: { name: 'Budget Organization', slug: 'budget-organization' },
     status: 201,
   })
-  await probe('GET /api/orgs/:orgId', 1, { path: team, headers: owner, exact: true })
-  await probe('GET /api/orgs/:orgId', 1, {
+  // Organization detail: one Kit batch, then one Product read.
+  await probe('GET /api/orgs/:orgId', 2, { path: team, headers: owner, exact: true })
+  await probe('GET /api/orgs/:orgId', 2, {
     path: team,
     headers: bearerHeaders(key),
     variant: 'api-key',

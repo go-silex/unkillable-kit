@@ -1,6 +1,5 @@
 /**
- * mcp-example tool catalogue — ping / whoami only.
- * Shared by stdio FastMCP and Worker EdgeFastMCP. Not authorization.
+ * Shared ping/whoami tools for stdio FastMCP and Worker EdgeFastMCP. Not authorization.
  */
 import {
   createToolCatalogue,
@@ -23,7 +22,10 @@ const pingTool: ToolDef = {
   execute: async () => handlePing(),
 }
 
-export function createExampleCatalogue(whoamiExecute: ToolDef['execute']) {
+export function createExampleCatalogue(
+  whoamiExecute: ToolDef['execute'],
+  additionalTools: readonly ToolDef[] = [],
+) {
   const whoamiTool: ToolDef = {
     name: 'whoami',
     description: 'Identity probe. Stdio: GET /api/me with sk_. Hosted: Worker MCP token props.',
@@ -33,5 +35,5 @@ export function createExampleCatalogue(whoamiExecute: ToolDef['execute']) {
     auth: 'api_key',
     execute: whoamiExecute,
   }
-  return createToolCatalogue([pingTool, whoamiTool])
+  return createToolCatalogue([pingTool, whoamiTool, ...additionalTools])
 }

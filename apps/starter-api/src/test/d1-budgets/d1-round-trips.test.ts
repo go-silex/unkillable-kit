@@ -24,8 +24,9 @@ it('budgets every protected Starter Hono registration', () => {
   // Multiple handlers for a method/path (for example, guards) are one HTTP route.
   const routes = createApp().routes
   expect(routes.filter(({ method }) => method === 'ALL').map(({ path }) => path)).toEqual([
-    ...Array<string>(6).fill('/*'), // global middleware
-    '/api/auth/*', // separately budgeted Better Auth mount
+    ...Array<string>(5).fill('/*'), // global middleware
+    '/api/auth/*', // Kit mount guard
+    '/api/auth/*', // separately budgeted Better Auth handler
   ])
   const registered = new Set(
     routes.filter(({ method }) => method !== 'ALL').map(({ method, path }) => `${method} ${path}`),
@@ -36,6 +37,16 @@ it('budgets every protected Starter Hono registration', () => {
       ...budgets.map(({ route }) => route),
     ].sort(),
   )
+})
+
+it('does not load authorization for public or unmatched requests carrying a Bearer', async () => {
+  const { measure } = await createRouteFixture()
+  const options = {
+    exact: true,
+    headers: { authorization: `Bearer ${generateApiKey()}` },
+  }
+  expect(await (await measure('GET /health', 0, options)).json()).toEqual({ ok: true })
+  await measure('GET /api/orgs/unknown/missing-endpoint', 0, { ...options, status: 404 })
 })
 
 it.each(budgets)('$route uses its exact session and API key budgets', async (budget) => {

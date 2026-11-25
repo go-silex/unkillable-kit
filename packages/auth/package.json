@@ -40,6 +40,11 @@
       "import": "./src/snapshot.ts",
       "default": "./src/snapshot.ts"
     },
+    "./hosted-dispatch": {
+      "types": "./src/request/hosted-dispatch.ts",
+      "import": "./src/request/hosted-dispatch.ts",
+      "default": "./src/request/hosted-dispatch.ts"
+    },
     "./repos/memory-d1": null,
     "./repos/*": {
       "types": "./src/repos/*.ts",

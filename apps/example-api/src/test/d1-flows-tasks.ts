@@ -30,16 +30,16 @@ function withAuth(probe: Probe, headers: HeadersInit, variant?: string): Probe {
 async function measureFlows(db: KitDb, env: ApiEnv, probe: Probe) {
   await enableFlowsForOrgs(db, [ORG_ACME])
   const body = { yaml: approvalYaml }
-  await probe('POST /api/flows/plans/check', 11, { body })
-  const created = await probe('POST /api/flows/plans', 13, { body, status: 201 })
+  await probe('POST /api/flows/plans/check', 8, { body })
+  const created = await probe('POST /api/flows/plans', 10, { body, status: 201 })
   const { plan } = (await created.json()) as { plan: { id: string } }
-  const plans = await probe('GET /api/flows/plans', 6)
+  const plans = await probe('GET /api/flows/plans', 5)
   expect(await plans.json()).toMatchObject({ plans: expect.arrayContaining([plan]) })
   const planPath = `/api/flows/plans/${plan.id}`
   const detail = await probe('GET /api/flows/plans/:planId', 2, { path: planPath })
   expect(await detail.json()).toMatchObject({ plan })
 
-  const queued = await probe('POST /api/flows/plans/:planId/runs', 13, {
+  const queued = await probe('POST /api/flows/plans/:planId/runs', 10, {
     path: `${planPath}/runs`,
     body: {},
     status: 202,
@@ -79,7 +79,7 @@ async function measureFlows(db: KitDb, env: ApiEnv, probe: Probe) {
   const taskId = 'gate'
   await notices.opened({ orgId: ORG_ACME, runId, taskId })
 
-  const running = await probe('GET /api/flows/runs/:runId', 6, { path: runPath })
+  const running = await probe('GET /api/flows/runs/:runId', 5, { path: runPath })
   expect(await running.json()).toMatchObject({ run: { id: runId, status: 'running' } })
   const approval = await probe('POST /api/flows/runs/:runId/tasks/:taskId/approval', 4, {
     path: `${runPath}/tasks/${taskId}/approval`,
@@ -107,7 +107,7 @@ async function measureTasks(probe: Probe, anchorId: string) {
   expect(await stages.json()).toMatchObject({
     stages: expect.arrayContaining([expect.objectContaining({ boardKey, isDefault: true })]),
   })
-  const created = await probe('POST /api/tasks', 30, {
+  const created = await probe('POST /api/tasks', 29, {
     body: { title: 'Task budget', boardKey, visibility: 'shared', assigneeIds: [assignee] },
     status: 201,
   })
