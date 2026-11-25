@@ -138,7 +138,7 @@ reach the same decision. A policy keyed on route patterns admits a request only 
 registration Hono matched for it is allowed and every one is, so an overlap or a fall-through cannot reach an
 operation the policy refuses. Hono reports `.use` and `.all` registrations alike, so a matched `ALL` registration
 counts as terminal unless it is a Kit guard, or a middleware registration the App identifies to the authorization
-instance and that is matched before the first Kit guard; an operation handler is never identified as middleware.
+instance and that is matched before the first Kit guard; the App must never identify an operation handler as middleware.
 Hooks receive only the verified inputs they decide on and cannot read the admitted view (D5). The Impersonation hook
 runs once per request, with the delegation's Organization as a binding. A parsed Bearer never falls back to a cookie,
 an attached delegation refuses any Bearer scheme, and a stale fence cannot turn a lost session into key authority.

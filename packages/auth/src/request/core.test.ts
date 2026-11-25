@@ -499,6 +499,28 @@ describe('request authorization core', () => {
     expectUnprojected(f.onError)
   })
 
+  it('does not mistake the inner combinator index for the same guard registered next', async () => {
+    const audit = vi.fn(async () => {})
+    const f = setup({ modules: true, impersonation: impersonation({ audit }) })
+    const { app, authorization: auth, browser } = f
+    const before = vi.fn<MiddlewareHandler>((_c, next) => next())
+    const after = vi.fn(async () => new Response('wrapper entered'))
+    const entered = vi.fn(() => new Response('endpoint entered'))
+    f.attachDelegation()
+    // The inner guard is at index 1, the same index as the direct guard in the outer match.
+    app.use('/op/*', every(before, auth.requireAuth, after), auth.requireAuth)
+    app.get('/op/:orgId', auth.requireModule('calendar'), entered)
+    const response = await app.request('/op/chosen', {
+      headers: { ...browser, 'x-impersonation-id': 'delegation' },
+    })
+    expect(response.status).toBe(400)
+    expect(before).toHaveBeenCalledOnce()
+    expect(after).not.toHaveBeenCalled()
+    expect(entered).not.toHaveBeenCalled()
+    expect(audit).not.toHaveBeenCalled()
+    expectUnprojected(f.onError)
+  })
+
   it.each(['before', 'after'] as const)(
     'sends a terminal ALL %s the guard to keyScope',
     async (position) => {
