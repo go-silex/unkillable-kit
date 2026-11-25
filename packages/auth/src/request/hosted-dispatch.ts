@@ -1,17 +1,12 @@
 import { AppError, newRequestId } from '@kit/core'
 import type { Env, ExecutionContext, Hono } from 'hono'
 import { tryDecodeURIComponent } from 'hono/utils/url'
-import {
-  hostedClaims,
-  hostedRoutes,
-  inspectHostedRoutes,
-  type Routes,
-} from './request/hosted-routes'
-import { organizationHeader } from './request/organization-selection'
-import type { RequestAuthorization } from './request/request-authorization'
-import type { HostedAdmission } from './snapshot'
-import { isIdentifier, unavailable } from './snapshot/core-rows'
-import { isHostedPrincipal } from './snapshot/hosted-principal'
+import type { HostedAdmission } from '../snapshot'
+import { isIdentifier, unavailable } from '../snapshot/core-rows'
+import { isHostedPrincipal } from '../snapshot/hosted-principal'
+import { hostedClaims, hostedRoutes, inspectHostedRoutes, type Routes } from './hosted-routes'
+import { organizationHeader } from './organization-selection'
+import type { RequestAuthorization } from './request-authorization'
 
 export type HostedDispatchOperation = Readonly<{
   method: string

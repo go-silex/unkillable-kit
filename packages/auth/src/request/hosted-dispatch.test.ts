@@ -2,9 +2,9 @@ import type { MiddlewareHandler } from 'hono'
 import { Hono } from 'hono'
 import { validator } from 'hono/validator'
 import { describe, expect, it, vi } from 'vitest'
+import { authorizeHostedPrincipal, type HostedPrincipal } from '../snapshot'
+import { setup, type TestEnv } from './core.fixture'
 import { createHostedDispatch } from './hosted-dispatch'
-import { setup, type TestEnv } from './request/core.fixture'
-import { authorizeHostedPrincipal, type HostedPrincipal } from './snapshot'
 
 const OUTER = 'https://api.example.test/mcp'
 const GRANT = { userId: 'actor', grantId: 'grant-private', clientId: 'client-private' }
