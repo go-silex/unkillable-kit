@@ -69,12 +69,18 @@ From `@kit/auth/repos/keys`:
    also admits the Organization. Inventory every handler the removed global middleware covered and
    give each an explicit guard, or leave it public with no identity.
 4. Mount `authorization.betterAuthMount` before the Better Auth handler on `/api/auth/*`. It lets
-   anonymous requests through, refuses machine credentials, and applies the Impersonation fence.
+   anonymous requests and Better Auth's own Bearer tokens through, such as an OIDC access token at
+   `/oauth2/userinfo`. It refuses a Kit API key (any `sk_` Bearer: `401` unless valid, then `403`)
+   and a hosted dispatch, and applies the Impersonation fence, which still refuses any Bearer sent
+   with an attached delegation.
 5. The `keyScope` hook is synchronous and does no I/O. Without it, every API key is refused. Kit
    calls it for each terminal registration Hono matched and admits a key only when there is at
    least one and every call returns `true`. A throw or a non-boolean is a `503`. The hook receives
    the registration's method and path: Hono answers `HEAD` with a `GET` registration, so a key
-   allowed to read that route may also send `HEAD`.
+   allowed to read that route may also send `HEAD`. `requireSession` and `session(c)` never call
+   it: a key gets `403` (`This route requires a session cookie`) from `requireSession` and `null`
+   from `session(c)`. Every other guard calls it, even after `session(c)` in the same request;
+   `betterAuthMount` refuses every key without calling it.
 6. Register the App's global middleware on the served App, before any route guard, inside
    `authorization.middleware(app, () => { ... })`. Only the registrations made there count as
    middleware, and only before the first Kit guard. Hono reports `app.use` and `app.all` as `ALL`:
@@ -103,6 +109,9 @@ or the App's not-found handler, not a `503`.
   checks at the point of effect, including predicates inside write statements.
 - A Product check only narrows Kit authority. A Module entry in the view describes access; it does
   not admit an operation by itself.
+- `view(c)` is the snapshot admitted before the handler and does not observe the handler's writes.
+  To return authority after an effect, such as a receipt or an authority ETag, read it with Product
+  SQL after the commit.
 
 ### Preserve a visibility-based write precondition
 
@@ -131,7 +140,10 @@ meant to exist; no read or guard restores a missing grant.
 
 - **`503`:** a failed or unreadable authorization load, a duplicate required row, a hook that
   cannot decide or a failed attempt audit returns a generic response without dispatching the
-  handler. Treat it as service unavailability; do not clear the session.
+  handler. Treat it as service unavailability; do not clear the session. A required row the Kit
+  cannot decode, such as a Role–module grant whose `access` is not `write`, `read` or `disabled`,
+  refuses every request that loads that Organization's Modules, whichever Module the route names.
+  Repair the row: the Kit never admits on partial facts.
 - **`401`:** an API key is refused if its owner is inactive, is no longer a member of the key's
   Organization, or that Organization is inactive, even on routes without an Organization.
 - **`400` / `403` / `404`:** a repeated or malformed `X-Org-Id` gets `400`. A valid key targeting a
@@ -165,21 +177,47 @@ Root compares only the cookies the enrolled issuer emits on sign-in: each must a
 the same value and attributes. An App may add its own unrelated cookies to that response; a cookie
 whose name falls in an issuer cookie's family is refused.
 
+If the App guards direct writes to `user.disabled`, for example with a trigger that projects an
+account-state table, set `kitBetterAuthDisableUser` next to `kitBetterAuth`: one SQL statement,
+with no `;` inside and exactly one positional `?` for the fixture User ID, using the App's own
+disable mechanism. Root runs it in its isolated fixture databases and requires `user.disabled = 1`
+while the issued session keeps its row, token, User ID and expiry, so the refusal proves the
+disabled-User check. Without the field, Root runs `UPDATE user SET disabled = 1` and names the
+field when that fails. A configured `assets.directory` must be a non-empty path to a directory, or
+to nothing yet; Root replaces it with an empty scratch directory: do not build static assets to run
+the gate.
+
 ## Update hosted MCP tools, if used
 
 - Remove `facts`, `denyFact` and `authorization.forOrganization` from `createHostedMcpWorker`.
   Tools receive `register(server, { identity, env, dispatch })`. See the
   [hosted shell](../../../packages/mcp/README.md#hosted-shell).
 - Declare each operation a tool may call on the App the shell is composed with, with
-  `authorization.hosted(app, () => { /* register the route */ }, { platformRole: true })`.
+  `authorization.hosted(app, () => { /* register the route */ }, { platformRole: true, headers })`.
   Omit `platformRole` unless the operation needs the hosted principal's Platform Role. Mount its
   Kit guards on the route as usual. A dispatch reaching an undeclared, unguarded or mis-wired route
-  is refused before any handler runs.
+  is refused before any handler runs. Pass the same App object to `authorization.hosted` and to the
+  shell: a declaration never transfers to another Hono instance, even one sharing the router.
 - In each tool, map validated arguments to the declared method and path, and designate the
   Organization from the validated input or a server default: `dispatch.fetch({ method, path,
-  organizationId, body })`. An Organization-free dispatch never acquires an Organization. A nonempty
-  `X-Org-Id` on the outer `/mcp` request must equal the designation. Each `/mcp` request allows
-  eight dispatches.
+  organizationId, body, query, headers })`. An Organization-free dispatch never acquires an
+  Organization. A nonempty `X-Org-Id` on the outer `/mcp` request must equal the designation. A
+  Kit guard reads a path parameter named `orgId` on its own registration as the Organization
+  selection: an Organization-free dispatch reaching such a guard is refused, and with a designation
+  every matched `orgId` parameter must equal it. Name a Platform operation's target otherwise (for
+  example `:targetOrgId`). Each `/mcp` request allows eight dispatches.
+- `query` takes a string or an array per key: `{ tag: ['a', 'b'] }` sends `?tag=a&tag=b`.
+- `headers` carries Product headers such as `Idempotency-Key`, only when every matched
+  registration declares the name in `headers: ['Idempotency-Key']`; the Kit sets `X-Org-Id` and
+  the JSON `Content-Type` itself. An undeclared name is `403` before any handler runs; a repeated
+  or invalid name, or a value Fetch would rewrite, is `400`.
+  Credential, selection, framing, hop-by-hop and client-address names (`Authorization`, `Cookie`,
+  `X-Org-Id`, `Host`, `Content-Type`, `Origin`, `Forwarded`, `Sec-*`, `CF-*`, `X-Forwarded-*` and
+  similar) cannot be declared: `authorization.hosted` throws when the App is built. Take header
+  names from the tool code, never from tool input.
+- `/authorize` is the consent path, not a hosted request: the Product identity port does its own
+  I/O, then the Kit admits the live account in one batch. The D8 budget for hosted outer admission
+  applies to `/mcp` requests.
 - A refused dispatch returns its Kit status; an unavailable one returns `503`. Neither revokes the
   OAuth grant. Unavailable outer admission still returns `503` without revocation
   (`temporarily_unavailable` at `/token`).

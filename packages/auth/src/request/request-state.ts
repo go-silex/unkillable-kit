@@ -2,7 +2,7 @@ import { AppError } from '@kit/core'
 import type { Context, Env, MiddlewareHandler } from 'hono'
 import { matchedRoutes } from 'hono/route'
 import { BA_BASE_PATH } from '../better-auth-base-path'
-import { parseBearer } from '../keys'
+import { hasKitKeyBearer, parseBearer } from '../keys'
 import type { PlatformRole } from '../org-roles'
 import { type CoreSnapshot, loadCore } from '../snapshot/core-load'
 import { unavailable } from '../snapshot/core-rows'
@@ -95,45 +95,40 @@ export function createRequestState<E extends Env>(
     }
   }
 
-  async function policies(
+  /** Memoised per request: the Impersonation hook audits attempts and runs once. */
+  async function impersonationPolicy(
     c: Context<E>,
     state: State,
     snapshot: CoreSnapshot,
     mode: Invocation,
     runningGuard?: MiddlewareHandler<E>,
   ) {
-    if (state.claim) return
-    const matched =
-      options.impersonation || snapshot.identity?.method === 'api_key' ? matchedRoutes(c) : []
-    const mount = mode === 'mount'
-    const decision = options.impersonation
-      ? await admitImpersonation({
-          c,
-          policy: options.impersonation,
-          snapshot,
-          routes: terminalRoutes(matched, routes),
-          selection: state.initial.selection.id,
-          selectionError: state.initial.selection.error,
-          hasBearerScheme: /^\s*Bearer\b/i.test(state.authorization ?? ''),
-          hasParsedBearer: Boolean(parseBearer(state.authorization)),
-          signOut: isNativeSignOut(c),
-          nativeMount: mount || matched.some((route) => handlerOf(route) === betterAuthMount),
-          canDeferModules: () => {
-            const index = c.req.routeIndex
-            const current = matched[index]
-            if (mode !== 'guard' || !current) return false
-            const handler = handlerOf(current)
-            return (
-              handler === runningGuard &&
-              routes.guards.has(handler) &&
-              hasOrganizationGuardBeforeTerminal(matched, routes, index)
-            )
-          },
-        })
-      : undefined
-    if (!mount && snapshot.identity?.method === 'api_key')
-      admitKeyScope(options.keyScope, terminalRoutes(matched, routes), snapshot.identity.scopes)
-    return decision
+    if (state.claim || !options.impersonation) return
+    const matched = matchedRoutes(c)
+    return admitImpersonation({
+      c,
+      policy: options.impersonation,
+      snapshot,
+      routes: terminalRoutes(matched, routes),
+      selection: state.initial.selection.id,
+      selectionError: state.initial.selection.error,
+      hasBearerScheme: /^\s*Bearer\b/i.test(state.authorization ?? ''),
+      hasParsedBearer: Boolean(parseBearer(state.authorization)),
+      signOut: isNativeSignOut(c),
+      nativeMount:
+        mode === 'mount' || matched.some((route) => handlerOf(route) === betterAuthMount),
+      canDeferModules: () => {
+        const index = c.req.routeIndex
+        const current = matched[index]
+        if (mode !== 'guard' || !current) return false
+        const handler = handlerOf(current)
+        return (
+          handler === runningGuard &&
+          routes.guards.has(handler) &&
+          hasOrganizationGuardBeforeTerminal(matched, routes, index)
+        )
+      },
+    })
   }
 
   type Invocation = 'guard' | 'organization' | 'mount' | 'helper'
@@ -149,7 +144,11 @@ export function createRequestState<E extends Env>(
       claim.app,
       claim.organizationId !== undefined,
     )
-    if (!declaration || (claim.platformRole && !declaration.platformRole)) {
+    if (
+      !declaration ||
+      (claim.platformRole && !declaration.platformRole) ||
+      claim.headers.some((name) => !declaration.headers.has(name))
+    ) {
       throw AppError.forbidden('Hosted operation not declared')
     }
     return claim
@@ -178,7 +177,7 @@ export function createRequestState<E extends Env>(
     identity: CoreSnapshot['identity'],
     delegationMode: DelegationMode,
   ) {
-    if (parseBearer(state.authorization)) {
+    if (hasKitKeyBearer(state.authorization)) {
       if (!identity) throw AppError.unauthorized()
       throw AppError.forbidden()
     }
@@ -246,16 +245,28 @@ export function createRequestState<E extends Env>(
     return { state, claim, selection }
   }
 
-  async function authenticate(
-    c: Context<E>,
-    mode: Invocation,
-    choose?: OrgContextOpts<E>['organizationId'],
-    runningGuard?: MiddlewareHandler<E>,
-  ): Promise<Stage> {
+  type Authentication = Readonly<{
+    mode: Invocation
+    choose?: OrgContextOpts<E>['organizationId']
+    runningGuard?: MiddlewareHandler<E>
+    /** A session-only check judges no key scope: a key is refused or answered null as a non-session. */
+    sessionOnly?: true
+  }>
+
+  // Per invocation, not memoised with the Impersonation hook: a session-only call skips no guard.
+  function admitKeyRoute(c: Context<E>, first: CoreSnapshot, request: Authentication) {
+    if (request.mode === 'mount' || request.sessionOnly || first.identity?.method !== 'api_key')
+      return
+    admitKeyScope(options.keyScope, terminalRoutes(matchedRoutes(c), routes), first.identity.scopes)
+  }
+
+  async function authenticate(c: Context<E>, request: Authentication): Promise<Stage> {
+    const { mode, choose, runningGuard } = request
     const { state, claim, selection } = prepare(c, mode, choose)
     const first = await state.initial.promise
-    state.policy ??= policies(c, state, first, mode, runningGuard)
+    state.policy ??= impersonationPolicy(c, state, first, mode, runningGuard)
     const decision = await state.policy
+    admitKeyRoute(c, first, request)
     const delegationMode = typeof decision === 'function' ? 'business' : decision
     assertAdmission(mode, state, first, selection, delegationMode)
     const selected = selection.id ?? state.selected
@@ -274,9 +285,9 @@ export function createRequestState<E extends Env>(
     if (
       options.impersonation ||
       hostedClaims.has(c.req.raw) ||
-      parseBearer(c.req.header('authorization'))
+      hasKitKeyBearer(c.req.header('authorization'))
     )
-      await authenticate(c, 'mount')
+      await authenticate(c, { mode: 'mount' })
     await next()
   }
 

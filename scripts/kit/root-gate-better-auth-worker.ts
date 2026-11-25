@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, relative, resolve } from 'node:path'
 import {
@@ -26,12 +26,14 @@ export type WorkerTarget = {
   entry: string
   moduleRoot: string
   noBundle?: boolean
+  assets?: true
 }
 type WorkerConfig = {
   main?: unknown
   base_dir?: string
   no_bundle?: boolean
   build?: { command?: string }
+  assets?: { directory?: string }
 }
 function isLocalSource(app: string, file: string) {
   const path = relative(app, file)
@@ -57,6 +59,24 @@ function assertInspectableWorker(app: string, entry: string, label: string, comm
   )
 }
 
+function hasWorkerAssets(
+  assets: WorkerConfig['assets'],
+  config: string,
+  label: string,
+): true | undefined {
+  if (assets === undefined) return
+  const directory = assets?.directory
+  if (typeof directory !== 'string' || !directory) {
+    throw new Error(`${label}: assets.directory must be a non-empty string`)
+  }
+  const path = resolve(dirname(config), directory)
+  const stat = statSync(path, { throwIfNoEntry: false })
+  if (stat && !stat.isDirectory()) {
+    throw new Error(`${label}: assets.directory points to a non-directory path: ${path}`)
+  }
+  return true
+}
+
 function workerEntrypoints(app: string, required = true): WorkerTarget[] {
   // Nested Wrangler configs include test Workers. Only App-root configs describe its deploys.
   const configs = wranglerConfigs(app).filter((file) => dirname(file) === app)
@@ -65,15 +85,24 @@ function workerEntrypoints(app: string, required = true): WorkerTarget[] {
   const entries: WorkerTarget[] = []
   function addTarget(
     config: string,
-    { main, base_dir, no_bundle, build }: WorkerConfig,
+    { main, base_dir, no_bundle, build, assets }: WorkerConfig,
     env?: string,
   ) {
     if (!required && main === undefined) return
+    const label = `${config}${env ? ` --env ${env}` : ''}`
+    const configuredAssets = hasWorkerAssets(assets, config, label)
     const source = resolve(app, String(main))
-    assertInspectableWorker(app, source, `${config}${env ? ` --env ${env}` : ''}`, build?.command)
+    assertInspectableWorker(app, source, label, build?.command)
     const entry = required ? workerMainFile(app, config, main) : source
     const moduleRoot = base_dir === undefined ? dirname(entry) : resolve(app, base_dir)
-    entries.push({ config, env, entry, moduleRoot, noBundle: no_bundle })
+    entries.push({
+      config,
+      env,
+      entry,
+      moduleRoot,
+      noBundle: no_bundle,
+      assets: configuredAssets,
+    })
   }
   for (const file of configs) {
     const text = readFileSync(file, 'utf8')
@@ -89,6 +118,7 @@ function workerEntrypoints(app: string, required = true): WorkerTarget[] {
           base_dir: options.base_dir ?? config.base_dir,
           no_bundle: options.no_bundle ?? config.no_bundle,
           build: options.build ?? config.build,
+          assets: options.assets ?? config.assets,
         },
         env,
       )

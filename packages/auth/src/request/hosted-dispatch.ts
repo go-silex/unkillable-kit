@@ -13,7 +13,10 @@ export type HostedDispatchOperation = Readonly<{
   path: string
   organizationId?: string
   body?: unknown
-  query?: Record<string, string>
+  /** A repeated key carries each value in order. */
+  query?: Readonly<Record<string, string | readonly string[]>>
+  /** Only names the App declared for every matched handler of this operation. */
+  headers?: Readonly<Record<string, string>>
 }>
 
 export type HostedDispatch = Readonly<{
@@ -57,10 +60,44 @@ function designationHeaders(outer: Request, organizationId: string | undefined) 
   return headers
 }
 
+/** Lowercase name → exact value; a value Fetch would rewrite or a repeated name is refused. */
+function productHeaders(input: unknown): ReadonlyMap<string, string> {
+  const headers = new Map<string, string>()
+  if (input === undefined) return headers
+  if (typeof input !== 'object' || input === null || Array.isArray(input))
+    throw AppError.validation('Invalid hosted operation')
+  for (const [name, value] of Object.entries(input)) {
+    const lower = name.toLowerCase()
+    const probe = new Headers()
+    try {
+      if (typeof value !== 'string' || headers.has(lower)) throw new TypeError()
+      probe.set(name, value)
+    } catch {
+      throw AppError.validation('Invalid hosted operation')
+    }
+    if (probe.get(name) !== value) throw AppError.validation('Invalid hosted operation')
+    headers.set(lower, value)
+  }
+  return headers
+}
+
+/** Each value of a repeated key, in order; anything but a string or an array of strings throws. */
+function queryPairs(query: unknown): [string, string][] {
+  if (query === undefined) return []
+  if (typeof query !== 'object' || query === null || Array.isArray(query)) throw new TypeError()
+  return Object.entries(query).flatMap(([key, value]) => {
+    const values: unknown = typeof value === 'string' ? [value] : value
+    if (!Array.isArray(values) || values.some((item) => typeof item !== 'string'))
+      throw new TypeError()
+    return values.map((item: string): [string, string] => [key, item])
+  })
+}
+
 function syntheticRequest(
   origin: string,
   { path, method, body, query }: HostedDispatchOperation,
-  headers: Headers,
+  designation: Headers,
+  extra: ReadonlyMap<string, string>,
 ) {
   if (!path.startsWith('/') || path.startsWith('//') || /[?#\\]/u.test(path)) {
     throw AppError.forbidden('Hosted operation not declared')
@@ -68,7 +105,10 @@ function syntheticRequest(
   try {
     const url = new URL(path, origin)
     if (url.origin !== origin) throw AppError.forbidden()
-    for (const [key, value] of Object.entries(query ?? {})) url.searchParams.set(key, value)
+    for (const [key, value] of queryPairs(query)) url.searchParams.append(key, value)
+    // Kit-owned fields are set last; preflight refuses any name the App did not declare.
+    const headers = new Headers([...extra])
+    for (const [name, value] of designation) headers.set(name, value)
     if (body !== undefined) headers.set('Content-Type', 'application/json')
     return new Request(url, {
       method,
@@ -85,6 +125,7 @@ function preflight<E extends Env>(
   request: Request,
   policy: Routes | undefined,
   organizationId: string | undefined,
+  extra: ReadonlyMap<string, string>,
 ) {
   if (!policy) throw AppError.forbidden('Hosted operation not declared')
   let matched: ReturnType<Hono<E>['router']['match']>
@@ -102,6 +143,8 @@ function preflight<E extends Env>(
     organizationId !== undefined,
   )
   if (!declaration) throw AppError.forbidden('Hosted operation not declared')
+  if ([...extra.keys()].some((name) => !declaration.headers.has(name)))
+    throw AppError.forbidden('Hosted header not declared')
   if (organizationId !== undefined) {
     for (const [, indexes] of matches) {
       const param = params ? params[indexes.orgId as number] : indexes.orgId
@@ -110,7 +153,7 @@ function preflight<E extends Env>(
       }
     }
   }
-  return { policy, platformRole: declaration.platformRole }
+  return { policy, platformRole: declaration.platformRole, headers: [...extra.keys()] }
 }
 
 /**
@@ -142,8 +185,9 @@ export function createHostedDispatch<E extends Env>(
         // Take the slot synchronously, before any await, even if routing or admission subsequently refuses.
         if (used >= limit) throw AppError.rateLimited('Hosted dispatch limit exceeded')
         used++
-        const request = syntheticRequest(origin, op, headers)
-        const declaration = preflight(options, request, policy, organizationId)
+        const extra = productHeaders(op.headers)
+        const request = syntheticRequest(origin, op, headers, extra)
+        const declaration = preflight(options, request, policy, organizationId, extra)
         hostedClaims.set(request, {
           ...declaration,
           app,

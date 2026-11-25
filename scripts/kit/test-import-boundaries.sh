@@ -163,6 +163,31 @@ echo "${HOSTED_IMPORT}" >"${R6}/packages/auth/src/ok.ts"
 echo "${HOSTED_IMPORT}" >"${R6}/packages/mcp/src/hosted/ok.ts"
 echo "${HOSTED_IMPORT}" >"${R6}/apps/example-api/src/ok.test.ts"
 assert_case "R6 shell, auth internals and tests → 0" 0 "${R6}"
+echo "${HOSTED_IMPORT}" >"${R6}/packages/core/src/hosted.test-support.ts"
+echo "import './hosted.test-support'" >"${R6}/packages/core/src/consumer.test-support.ts"
+cat >"${R6}/packages/core/package.json" <<'EOF'
+{
+  "name": "@kit/core",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": {
+      "import": { "node": "./src/index.ts", "default": "./src/hosted.test-support.ts" },
+      "require": "./src/index.ts"
+    }
+  }
+}
+EOF
+echo "import '@kit/core/testing'" >"${R6}/packages/core/src/alias-consumer.test-support.ts"
+echo "import '@kit/core'" >"${R6}/apps/example-api/src/workspace-root.ts"
+assert_case "R6 shared test code outside MCP → 0" 0 "${R6}"
+echo "import './hosted.test-support'" >"${R6}/packages/core/src/bad-test-support.ts"
+assert_case "R6 production relative import of test support → 1" 1 "${R6}" "R6 packages/core/src/bad-test-support.ts"
+echo "import '@kit/core/src/hosted.test-support.ts'" >"${R6}/apps/example-api/src/bad-test-support.ts"
+assert_case "R6 production workspace import of test support → 1" 1 "${R6}" "R6 apps/example-api/src/bad-test-support.ts"
+echo "import '@kit/core/testing'" >"${R6}/apps/example-api/src/bad-test-support-export.ts"
+assert_case "R6 production import of conditional test support export → 1" 1 "${R6}" "R6 apps/example-api/src/bad-test-support-export.ts"
+echo '{ "name": "@kit/core", "exports": "./src/hosted.test-support.ts" }' >"${R6}/packages/core/package.json"
+assert_case "R6 production import of test support root export → 1" 1 "${R6}" "R6 apps/example-api/src/workspace-root.ts"
 echo "${HOSTED_IMPORT}" >"${R6}/packages/mcp/src/bad.ts"
 assert_case "R6 other MCP code → 1" 1 "${R6}" "R6 packages/mcp/src/bad.ts"
 echo "${HOSTED_IMPORT}" >"${R6}/apps/example-web/src/bad.ts"
@@ -180,6 +205,39 @@ for target in request/hosted-dispatch request/hosted-routes snapshot/hosted-prin
 done
 echo "import '../../../auth/src/request/hosted-dispatch'" >"${R6}/packages/mcp/src/hosted/bad-relative.ts"
 assert_case "R6 hosted shell must use the package subpath → 1" 1 "${R6}" "R6 packages/mcp/src/hosted/bad-relative.ts"
+
+# --- R6 resolves workspace export patterns, including shadowing and exclusions ---
+R6P="${TMP}/r6pattern"
+seed_workspace "${R6P}"
+cat >"${R6P}/packages/core/package.json" <<'EOF'
+{
+  "name": "@kit/core",
+  "exports": {
+    "./*": "./src/*.ts",
+    "./by-suffix/*.entry": "./src/*.ts",
+    "./tool/*": {
+      "import": { "node": "./src/index.ts", "default": "./src/*.test-support.ts" },
+      "require": "./src/index.ts"
+    },
+    "./tool/*-safe": "./src/index.ts",
+    "./tool/internal/*": null,
+    "./tool/exact": "./src/index.ts"
+  }
+}
+EOF
+echo "${HOSTED_IMPORT}" >"${R6P}/packages/core/src/hosted.test-support.ts"
+echo "import '@kit/core/tool/hosted'" >"${R6P}/packages/core/src/wildcard-consumer.test-support.ts"
+cat >"${R6P}/apps/example-api/src/ok-wildcard.ts" <<'EOF'
+import '@kit/core/index'
+import '@kit/core/tool/hosted-safe'
+import '@kit/core/tool/internal/hosted'
+import '@kit/core/tool/exact'
+EOF
+assert_case "R6 normal wildcard targets, exclusions and test-code imports → 0" 0 "${R6P}"
+echo "import '@kit/core/tool/hosted'" >"${R6P}/apps/example-api/src/bad-wildcard.ts"
+assert_case "R6 production import of wildcard test support export → 1" 1 "${R6P}" "R6 apps/example-api/src/bad-wildcard.ts"
+echo "import '@kit/core/by-suffix/hosted.test-support.entry'" >"${R6P}/apps/example-api/src/bad-wildcard-capture.ts"
+assert_case "R6 wildcard substitution can produce a test support name → 1" 1 "${R6P}" "R6 apps/example-api/src/bad-wildcard-capture.ts"
 
 # --- R1 via export … from (fromRe / re-export) ---
 R1E="${TMP}/r1export"

@@ -878,6 +878,13 @@ describe('V0 admin access', () => {
       canDecideFlowApproval({ orgRole: 'member', authMethod: 'session' }),
     )
   })
+
+  it.each(['owner', 'admin'])('denies hosted MCP writes even for %s', (orgRole) => {
+    const input = { orgRole, authMethod: 'mcp' } as const
+    expect(canCreateFlowRun(input)).toBe(false)
+    expect(canDecideFlowApproval(input)).toBe(false)
+    expect(canCancelFlowRun(input)).toBe(false)
+  })
 })
 
 describe('module id', () => {

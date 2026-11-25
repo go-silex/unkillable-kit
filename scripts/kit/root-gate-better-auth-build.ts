@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import type { WorkerTarget } from './root-gate-better-auth-worker'
 
 export type BundleInputs = Record<
@@ -33,7 +33,10 @@ export function bundleWorker(
   const upload = join(scratch, 'release.multipart')
   const metafile = join(scratch, 'bundle.json')
   const emptyEnv = join(scratch, 'empty.env')
+  // Static assets are not Worker modules and do not affect the bundle or metafile proof.
+  const assets = target.assets ? resolve(scratch, 'assets') : undefined
   mkdirSync(build)
+  if (assets) mkdirSync(assets)
   writeFileSync(emptyEnv, '')
   const bundled = spawnSync(
     node,
@@ -48,6 +51,7 @@ export function bundleWorker(
       '--env-file',
       emptyEnv,
       ...(target.env ? ['--env', target.env] : []),
+      ...(assets ? ['--assets', assets] : []),
       '--outdir',
       build,
       '--outfile',
@@ -76,10 +80,11 @@ export function bundleWorker(
     `Wrangler could not build release entrypoint ${label}:\n${bundled.stdout}${bundled.stderr}`,
   )
   assert.ok(existsSync(upload), `Wrangler did not emit the release upload for ${label}`)
-  if (target.noBundle) return { build, upload, emptyEnv, inputs: undefined, outputs: undefined }
+  if (target.noBundle)
+    return { build, upload, emptyEnv, assets, inputs: undefined, outputs: undefined }
   assert.ok(existsSync(metafile), `Wrangler did not report the release input graph for ${label}`)
   const { inputs, outputs }: { inputs: BundleInputs; outputs: BundleOutputs } = JSON.parse(
     readFileSync(metafile, 'utf8'),
   )
-  return { build, upload, emptyEnv, inputs, outputs }
+  return { build, upload, emptyEnv, assets, inputs, outputs }
 }

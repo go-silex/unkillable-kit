@@ -28,6 +28,7 @@ export type MountedProbe = {
 }
 
 type LocalConfig = {
+  assets?: { directory?: string }
   build: Record<string, unknown>
   name: string
   d1_databases: { binding: string; migrations_dir?: string }[]
@@ -312,7 +313,7 @@ function checkedMountedCookies(issuerFields: string[], mountedFields: string[]) 
 async function run(probe: MountedProbe) {
   const challenge = crypto.randomUUID()
   const { target } = probe
-  const { build, upload, emptyEnv, inputs, outputs } = bundleWorker(
+  const { build, upload, emptyEnv, assets, inputs, outputs } = bundleWorker(
     process.execPath,
     probe.wrangler,
     probe.dir,
@@ -331,6 +332,10 @@ async function run(probe: MountedProbe) {
   const requireFromWrangler = createRequire(probe.wrangler)
   const wrangler: Wrangler = requireFromWrangler(probe.wrangler)
   const config = wrangler.unstable_readConfig({ config: target.config, env: target.env })
+  if (config.assets) {
+    assert.ok(assets, 'Root did not stage an empty assets directory')
+    config.assets = { ...config.assets, directory: assets }
+  }
   const d1 = config.d1_databases.find(({ binding }) => binding === 'DB')
   assert.ok(d1, 'Release config does not declare the DB binding')
   const worker = await wrangler.unstable_startWorker({

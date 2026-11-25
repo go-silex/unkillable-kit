@@ -206,6 +206,7 @@ async function complete(
   })
   expect(userinfo.status).toBe(200)
   expect(await userinfo.json()).toMatchObject({ sub: expect.any(String), email })
+  return tokens
 }
 
 function googleBoundary(emailVerified: boolean) {

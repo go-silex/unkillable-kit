@@ -333,7 +333,12 @@ describe('request authorization core', () => {
       expect(
         (await app.request('/api/auth/session', { headers: { Authorization: 'Bearer invalid' } }))
           .status,
-      ).toBe(401)
+      ).toBe(200)
+      for (const key of ['sk_unknown_key_material', 'sk_x'])
+        expect(
+          (await app.request('/api/auth/session', { headers: { Authorization: `Bearer ${key}` } }))
+            .status,
+        ).toBe(401)
       expect(
         (await app.request('/api/auth/session', { headers: { 'x-impersonation-id': 'stale' } }))
           .status,
@@ -366,7 +371,7 @@ describe('request authorization core', () => {
         ).status,
       ).toBe(withOverlap ? 403 : 200)
       expect(overlap).not.toHaveBeenCalled()
-      expect(handler).toHaveBeenCalledTimes(withOverlap ? 1 : 3)
+      expect(handler).toHaveBeenCalledTimes(withOverlap ? 2 : 4)
       expect(
         await resolveRequestSession({ db, headers: new Headers(browser), auth: f.auth }),
       ).toMatchObject({ subject: 'actor' })
@@ -382,6 +387,49 @@ describe('request authorization core', () => {
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({})
     expect(db.batch).not.toHaveBeenCalled()
+  })
+
+  it('leaves non-Kit Bearer tokens to Better Auth and refuses Kit keys on the mount', async () => {
+    const f = setup()
+    const { app, authorization: auth, db } = f
+    const handler = vi.fn(() => new Response('entered'))
+    app.all('/api/auth/*', auth.betterAuthMount, handler)
+    const userinfo = (headers: HeadersInit) => app.request('/api/auth/oauth2/userinfo', { headers })
+    expect((await userinfo({ Authorization: 'Bearer invalid' })).status).toBe(200)
+    expect(db.batch).not.toHaveBeenCalled()
+    for (const key of ['sk_unknown_key_material', 'sk_x'])
+      expect((await userinfo({ Authorization: `Bearer ${key}` })).status).toBe(401)
+    expect((await userinfo((await f.apiKey()).headers)).status).toBe(403)
+    expect(handler).toHaveBeenCalledTimes(1)
+  })
+
+  it('judges key scope at each guard but not for session-only checks', async () => {
+    const keyScope = vi.fn(() => false)
+    const f = setup({ keyScope })
+    const { app, authorization: auth } = f
+    const { headers } = await f.apiKey()
+    app.get('/session-only', auth.requireSession, (c) => c.text('entered'))
+    app.get('/helper', async (c) => c.json({ session: await auth.session(c) }))
+    app.get(
+      '/helper-then-guard',
+      async (c, next) => {
+        await auth.session(c)
+        await next()
+      },
+      auth.requireAuth,
+      (c) => c.text('entered'),
+    )
+    const sessionOnly = await app.request('/session-only', { headers })
+    expect(sessionOnly.status).toBe(403)
+    expect(await sessionOnly.json()).toMatchObject({
+      error: { message: 'This route requires a session cookie' },
+    })
+    const helper = await app.request('/helper', { headers })
+    expect(helper.status).toBe(200)
+    expect(await helper.json()).toEqual({ session: null })
+    expect(keyScope).not.toHaveBeenCalled()
+    expect((await app.request('/helper-then-guard', { headers })).status).toBe(403)
+    expect(keyScope).toHaveBeenCalled()
   })
 
   it('projects only the admitted browser actor permissions without reloading them', async () => {

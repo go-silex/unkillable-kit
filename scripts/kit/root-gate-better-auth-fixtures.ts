@@ -165,7 +165,7 @@ type Fixture = {
   cookie?: string
   allowed: boolean
   secret?: string
-  change?: (db: Database) => void
+  change?: (db: Database, label: string) => void
 }
 
 function proveMountedIssuer(app: BetterAuthApp, snapshotPath: string, passwordHash: string) {
@@ -295,9 +295,51 @@ export async function runBetterAuthDifferential(app: BetterAuthApp) {
         name: 'disabled User',
         cookie,
         allowed: false,
-        change: (db) => {
-          db.query<unknown, [string]>('UPDATE user SET disabled = 1 WHERE id = ?').run(
-            identity.subject,
+        change: (db, label) => {
+          using sessionRow = db.prepare<
+            { token: string; user_id: string; expires_at: number },
+            [string]
+          >('SELECT token, user_id, expires_at FROM session WHERE id = ?')
+          const before = sessionRow.get(identity.sessionId)
+          assert.ok(before, `${label}: expected the issued session before disabling the User`)
+          if (app.disableUserSql !== undefined) {
+            assert.ok(
+              !app.disableUserSql.trim().replace(/;$/, '').includes(';'),
+              `${label}: kitBetterAuthDisableUser must be one SQL statement with no internal semicolons`,
+            )
+            using disable = db.prepare<unknown, [string]>(app.disableUserSql)
+            assert.equal(
+              disable.paramsCount,
+              1,
+              `${label}: kitBetterAuthDisableUser must be one SQL statement taking the User id`,
+            )
+            disable.run(identity.subject)
+          } else {
+            try {
+              db.query<unknown, [string]>('UPDATE user SET disabled = 1 WHERE id = ?').run(
+                identity.subject,
+              )
+            } catch (cause) {
+              throw new Error(
+                `${label}: declare kitBetterAuthDisableUser in the App's package.json to disable the User (${cause instanceof Error ? cause.message : String(cause)})`,
+              )
+            }
+          }
+          const user = db
+            .query<{ disabled: number }, [string]>('SELECT disabled FROM user WHERE id = ?')
+            .get(identity.subject)
+          assert.equal(
+            user?.disabled,
+            1,
+            `${label}: kitBetterAuthDisableUser must disable the User`,
+          )
+          const after = sessionRow.get(identity.sessionId)
+          assert.ok(
+            after &&
+              after.token === before.token &&
+              after.user_id === before.user_id &&
+              after.expires_at === before.expires_at,
+            `${label}: kitBetterAuthDisableUser must keep the session and leave its token, User id, and expiry unchanged so the refusal proves the account check`,
           )
         },
       },
@@ -356,8 +398,8 @@ export async function runBetterAuthDifferential(app: BetterAuthApp) {
       await atTime(now, async () => {
         if (test.change) {
           await assertBoth(identity, test.cookie, 'same cookie admitted before changing state')
-          test.change(referenceDb)
-          test.change(verifierDb)
+          test.change(referenceDb, label)
+          test.change(verifierDb, label)
         }
         if (test.name.startsWith('expired'))
           assert.equal(rowCount(verifierDb, identity.sessionId), 1)

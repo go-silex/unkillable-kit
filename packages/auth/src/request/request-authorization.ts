@@ -11,7 +11,7 @@ import {
   roleHasCapability,
 } from '../org-roles'
 import type { SessionIdentity } from '../snapshot/core-rows'
-import { handlerOf, hostedRoutes, type Routes } from './hosted-routes'
+import { declaredHeaderName, handlerOf, hostedRoutes, type Routes } from './hosted-routes'
 import {
   type AdmittedOrganization,
   admitOrganization,
@@ -45,11 +45,13 @@ export type RequestAuthorization<E extends Env> = Readonly<{
   session(c: Context<E>): Promise<SessionIdentity | null>
   view(c: Context<E>): AdmittedView
   middleware(app: Pick<Hono<E>, 'routes'>, register: () => void): void
-  hosted(
-    app: Pick<Hono<E>, 'routes'>,
-    register: () => void,
-    opts?: Readonly<{ platformRole?: true }>,
-  ): void
+  hosted(app: Pick<Hono<E>, 'routes'>, register: () => void, opts?: HostedOperationOptions): void
+}>
+
+type HostedOperationOptions = Readonly<{
+  platformRole?: true
+  /** Product header names a hosted dispatch may carry to these handlers; Kit-owned names are refused. */
+  headers?: readonly string[]
 }>
 
 /** The first Kit guard loads the fixed core for the current routing context. */
@@ -65,23 +67,25 @@ export function createRequestAuthorization<E extends Env>(
   const { authenticate, betterAuthMount, view } = createRequestState(options, routes)
 
   type Check = (c: Context<E>, stage: Stage) => AdmittedOrganization | null
-  function guard(
-    check?: Check,
-    orgOpts?: OrgContextOpts<E>,
-    organization = false,
-  ): MiddlewareHandler<E> {
+  type GuardOptions = Readonly<{
+    orgOpts?: OrgContextOpts<E>
+    organization?: true
+    sessionOnly?: true
+  }>
+  function guard(check?: Check, opts: GuardOptions = {}): MiddlewareHandler<E> {
+    const kind = opts.organization ? 'organization' : 'identity'
     const middleware: MiddlewareHandler<E> = async (c, next) => {
-      const stage = await authenticate(
-        c,
-        organization ? 'organization' : 'guard',
-        orgOpts?.organizationId,
-        middleware,
-      )
+      const stage = await authenticate(c, {
+        mode: opts.organization ? 'organization' : 'guard',
+        choose: opts.orgOpts?.organizationId,
+        runningGuard: middleware,
+        sessionOnly: opts.sessionOnly,
+      })
       const org = check?.(c, stage)
       if (!stage.pending) project(c, stage, org ?? undefined)
       await next()
     }
-    routes.guards.set(middleware, organization ? 'organization' : 'identity')
+    routes.guards.set(middleware, kind)
     return middleware
   }
 
@@ -110,14 +114,20 @@ export function createRequestAuthorization<E extends Env>(
 
   const authorization: RequestAuthorization<E> = Object.freeze({
     requireAuth: guard(),
-    requireSession: guard((_c, stage) => {
-      if (stage.snapshot.identity?.method !== 'session')
-        throw AppError.forbidden('This route requires a session cookie')
-      return null
-    }),
+    requireSession: guard(
+      (_c, stage) => {
+        if (stage.snapshot.identity?.method !== 'session')
+          throw AppError.forbidden('This route requires a session cookie')
+        return null
+      },
+      { sessionOnly: true },
+    ),
     requireOrgContext(opts: OrgContextOpts<E> = {}) {
       const policy = { ...opts }
-      return guard((c, stage) => organization(c, stage, policy), policy, true)
+      return guard((c, stage) => organization(c, stage, policy), {
+        orgOpts: policy,
+        organization: true,
+      })
     },
     requireOrgRole(minimum: OrgRoleKey) {
       return guard(
@@ -127,8 +137,7 @@ export function createRequestAuthorization<E extends Env>(
             throw AppError.forbidden('Insufficient organization role')
           return org
         },
-        undefined,
-        true,
+        { organization: true },
       )
     },
     requireOrgCapability(capability: OrgCapability) {
@@ -142,8 +151,7 @@ export function createRequestAuthorization<E extends Env>(
             throw AppError.forbidden('Insufficient organization capability')
           return org
         },
-        undefined,
-        true,
+        { organization: true },
       )
     },
     requirePlatformRole(...roles: PlatformRole[]) {
@@ -164,13 +172,16 @@ export function createRequestAuthorization<E extends Env>(
             throw AppError.forbidden(MODULE_DENIAL.insufficientGrant)
           return org
         },
-        undefined,
-        true,
+        { organization: true },
       )
     },
     betterAuthMount,
     async session(c: Context<E>) {
-      const { snapshot, delegationMode } = await authenticate(c, 'helper')
+      // A key is not a session: answer null without judging its route scope.
+      const { snapshot, delegationMode } = await authenticate(c, {
+        mode: 'helper',
+        sessionOnly: true,
+      })
       return !delegationMode && snapshot.identity?.method === 'session' ? snapshot.identity : null
     },
     view,
@@ -181,14 +192,16 @@ export function createRequestAuthorization<E extends Env>(
         if (!routes.guards.has(handlerOf(route))) routes.middleware.add(route)
       }
     },
-    hosted(
-      app: Pick<Hono<E>, 'routes'>,
-      register: () => void,
-      opts?: Readonly<{ platformRole?: true }>,
-    ) {
+    hosted(app: Pick<Hono<E>, 'routes'>, register: () => void, opts?: HostedOperationOptions) {
+      const names = opts?.headers ?? []
+      if (!Array.isArray(names)) throw new TypeError('Hosted headers must be an array of names')
+      const declaration = Object.freeze({
+        app,
+        platformRole: opts?.platformRole === true,
+        headers: new Set(names.map(declaredHeaderName)),
+      })
       const start = app.routes.length
       register()
-      const declaration = { app, platformRole: opts?.platformRole === true }
       for (const route of app.routes.slice(start)) {
         if (!routes.guards.has(handlerOf(route))) {
           routes.declared.set(route, declaration)

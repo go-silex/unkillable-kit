@@ -22,6 +22,7 @@ type BetterAuthComposition = {
   composition: string
   factoryCallee: { start: number; end: number; name: string; hash: string }
   targets: WorkerTarget[]
+  disableUserSql?: string
 }
 export type BetterAuthApp = BetterAuthComposition & {
   installation: { factoryPath: string; kitRoot: string; betterAuthRoot: string }
@@ -99,9 +100,20 @@ async function discoverComposition(
 ): Promise<BetterAuthComposition | undefined> {
   const workspace = dirname(path)
   const dir = join(root, workspace)
-  const manifest: { dependencies?: Record<string, string>; kitBetterAuth?: unknown } = JSON.parse(
-    readFileSync(join(root, path), 'utf8'),
-  )
+  const manifest: {
+    dependencies?: Record<string, string>
+    kitBetterAuth?: unknown
+    kitBetterAuthDisableUser?: unknown
+  } = JSON.parse(readFileSync(join(root, path), 'utf8'))
+  const disableUserSql = manifest.kitBetterAuthDisableUser
+  if (
+    disableUserSql !== undefined &&
+    (typeof disableUserSql !== 'string' || !disableUserSql.trim())
+  ) {
+    throw new Error(
+      `${workspace}: kitBetterAuthDisableUser must be one SQL statement taking the User id`,
+    )
+  }
   const runtime = [...runtimeSources.scanSync({ cwd: dir })].filter(shippingSource).sort()
   const factories = runtime.flatMap((file) => {
     const fullPath = join(dir, file)
@@ -153,6 +165,7 @@ async function discoverComposition(
       composition,
       factoryCallee: { ...factory.callee, hash: factory.hash },
       targets: verifyWorkerWiring(dir, composition),
+      disableUserSql,
     }
   } catch (cause) {
     throw new Error(`${workspace}: ${cause instanceof Error ? cause.message : String(cause)}`)
