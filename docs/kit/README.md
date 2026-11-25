@@ -67,7 +67,8 @@ This index locates the authoritative home for each rule and the operational guid
 - [ADR-0022 — minimal starter Apps](./architecture/adr/0022-minimal-starter-apps.md).
 - [ADR-0023 — CI coverage partitions for heavy Apps](./architecture/adr/0023-ci-coverage-partitions.md).
 - [ADR-0024 — Root is the single quality gate for Product Apps](./architecture/adr/0024-root-single-quality-gate.md).
-- [ADR-0025 — one authorization snapshot per request](./architecture/adr/0025-request-authorization-snapshot.md).
+- [ADR-0025 — Kit-verified session and API keys; Root proves the Better Auth version](./architecture/adr/0025-request-authorization-snapshot.md) (amended by ADR-0026).
+- [ADR-0026 — closed Kit authorization core at the route guard](./architecture/adr/0026-request-authorization-kit-core.md).
 - Non-normative design note: [ADR-0021 Slack](./architecture/design-notes/0021-slack.md).
 
 ## Processes, operations and security

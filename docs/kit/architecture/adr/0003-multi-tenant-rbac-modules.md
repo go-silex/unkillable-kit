@@ -3,7 +3,7 @@ title: 'ADR-0003 — Multi-tenant organization, platform RBAC, dual-level module
 status: accepted
 normative: true
 date: 2026-07-17
-amended: 2026-11-21
+amended: 2026-11-25
 axial: false
 consensus: (archived operator notes)
 supersedes_notes: >
@@ -20,6 +20,8 @@ supersedes_notes: >
   2026-11-21: body trimmed to decisions, rationale and limits; implementation detail now lives only in the cited code and tests.
   D7 amended: dropping `kit_modules` is no longer tied to the cutover; it is a separate
   contract migration once no consumer reads the table.
+  2026-11-25: D8 accepts an Organization chosen by the server for a route; a path or
+  X-Org-Id naming another one is still a 403 mismatch (ADR-0026 D2).
 summary: 'Organization tenancy, platform RBAC and dual-level modules'
 ---
 
