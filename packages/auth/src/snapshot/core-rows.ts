@@ -217,7 +217,7 @@ function readOnlyModules(map: Map<string, ModuleEntry>): ReadonlyMap<string, Mod
   return view
 }
 
-export const EMPTY_MODULES = readOnlyModules(new Map())
+const EMPTY_MODULES = readOnlyModules(new Map())
 
 export function decodeModules(rows: readonly Row[]): ReadonlyMap<string, ModuleEntry> {
   if (!rows.length) return EMPTY_MODULES

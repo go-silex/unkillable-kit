@@ -38,7 +38,7 @@ export const MODULE_DENIAL = {
   insufficientGrant: 'Insufficient module grant',
 } as const
 
-export const NEED_ORG = 'organization id required (path or X-Org-Id)'
+const NEED_ORG = 'organization id required (path or X-Org-Id)'
 
 export function admitKeyScope(
   policy: KeyScopePolicy | undefined,
