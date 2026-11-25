@@ -1,4 +1,5 @@
 import { Hono, type MiddlewareHandler } from 'hono'
+import { every } from 'hono/combine'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { originGuard } from '../origin-guard'
 import { resolveRequestSession } from '../snapshot'
@@ -475,6 +476,26 @@ describe('request authorization core', () => {
     expect(f.db.batch).toHaveBeenCalledTimes(loads)
     expect(audit).not.toHaveBeenCalled()
     expect(entered).not.toHaveBeenCalled()
+    expectUnprojected(f.onError)
+  })
+
+  it('refuses deferred delegated Modules when a combinator wraps the running identity guard', async () => {
+    const audit = vi.fn(async () => {})
+    const f = setup({ modules: true, impersonation: impersonation({ audit }) })
+    const { app, authorization: auth, browser } = f
+    const inner = vi.fn(async () => new Response('wrapper entered'))
+    const entered = vi.fn(() => new Response('endpoint entered'))
+    f.attachDelegation()
+    app.use('/op/*', every(auth.requireAuth, inner))
+    app.get('/op/:orgId', auth.requireModule('calendar'), entered)
+    const response = await app.request('/op/chosen', {
+      headers: { ...browser, 'x-impersonation-id': 'delegation' },
+    })
+    expect(response.status).toBe(400)
+    expect(f.db.batch).toHaveBeenCalledTimes(1)
+    expect(inner).not.toHaveBeenCalled()
+    expect(entered).not.toHaveBeenCalled()
+    expect(audit).not.toHaveBeenCalled()
     expectUnprojected(f.onError)
   })
 

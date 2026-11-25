@@ -1,5 +1,10 @@
 import { betterAuthBaseURL, corsAllowlist } from '@kit/auth'
-import { createRequestAuthorization, originGuard, securityHeaders } from '@kit/auth/hono'
+import {
+  createRequestAuthorization,
+  originGuard,
+  type RequestAuthorization,
+  securityHeaders,
+} from '@kit/auth/hono'
 import { newRequestId } from '@kit/core'
 import { createDb } from '@kit/db'
 import type { MiddlewareHandler } from 'hono'
@@ -37,7 +42,7 @@ export const platformMiddleware = [
   bindPlatform,
 ] as const
 
-export const authorization = createRequestAuthorization<AppEnv>({
+export const authorization: RequestAuthorization<AppEnv> = createRequestAuthorization<AppEnv>({
   db: (c) => c.env.DB,
   auth: (c) => c.get('betterAuth'),
   keyScope: ({ method, path }, scopes) =>

@@ -95,7 +95,13 @@ export function createRequestState<E extends Env>(
     }
   }
 
-  async function policies(c: Context<E>, state: State, snapshot: CoreSnapshot, mode: Invocation) {
+  async function policies(
+    c: Context<E>,
+    state: State,
+    snapshot: CoreSnapshot,
+    mode: Invocation,
+    runningGuard?: MiddlewareHandler<E>,
+  ) {
     if (state.claim) return
     const matched =
       options.impersonation || snapshot.identity?.method === 'api_key' ? matchedRoutes(c) : []
@@ -112,9 +118,17 @@ export function createRequestState<E extends Env>(
           hasParsedBearer: Boolean(parseBearer(state.authorization)),
           signOut: isNativeSignOut(c),
           nativeMount: mount || matched.some((route) => handlerOf(route) === betterAuthMount),
-          canDeferModules: () =>
-            mode === 'guard' &&
-            hasOrganizationGuardBeforeTerminal(matched, routes, c.req.routeIndex),
+          canDeferModules: () => {
+            const index = c.req.routeIndex
+            const current = matched[index]
+            if (mode !== 'guard' || !current) return false
+            const handler = handlerOf(current)
+            return (
+              handler === runningGuard &&
+              routes.guards.has(handler) &&
+              hasOrganizationGuardBeforeTerminal(matched, routes, index)
+            )
+          },
         })
       : undefined
     if (!mount && snapshot.identity?.method === 'api_key')
@@ -236,10 +250,11 @@ export function createRequestState<E extends Env>(
     c: Context<E>,
     mode: Invocation,
     choose?: OrgContextOpts<E>['organizationId'],
+    runningGuard?: MiddlewareHandler<E>,
   ): Promise<Stage> {
     const { state, claim, selection } = prepare(c, mode, choose)
     const first = await state.initial.promise
-    state.policy ??= policies(c, state, first, mode)
+    state.policy ??= policies(c, state, first, mode, runningGuard)
     const decision = await state.policy
     const delegationMode = typeof decision === 'function' ? 'business' : decision
     assertAdmission(mode, state, first, selection, delegationMode)

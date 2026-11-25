@@ -137,11 +137,11 @@ Hooks judge the request, its method and path, not the guard running them, so a p
 reach the same decision. A policy keyed on route patterns admits a request only when at least one terminal
 registration Hono matched for it is allowed and every one is, so an overlap or a fall-through cannot reach an
 operation the policy refuses. Hono reports `.use` and `.all` registrations alike, so a matched `ALL` registration
-counts as terminal unless it is a Kit guard or a middleware function the App identifies to the authorization
-instance; an operation handler is never identified as middleware. Hooks receive only the verified inputs they decide
-on and cannot read the admitted view (D5). The Impersonation hook runs once per request, with the delegation's
-Organization as a binding. A parsed Bearer never falls back to a cookie, an attached delegation refuses any Bearer
-scheme, and a stale fence cannot turn a lost session into key authority.
+counts as terminal unless it is a Kit guard, or a middleware registration the App identifies to the authorization
+instance and that is matched before the first Kit guard; an operation handler is never identified as middleware.
+Hooks receive only the verified inputs they decide on and cannot read the admitted view (D5). The Impersonation hook
+runs once per request, with the delegation's Organization as a binding. A parsed Bearer never falls back to a cookie,
+an attached delegation refuses any Bearer scheme, and a stale fence cannot turn a lost session into key authority.
 
 Every Kit guard and identity helper runs this authentication step, so a route can mount only its most specific guard.
 The App also mounts the Kit's guard on its Better Auth mount: it refuses machine credentials there and, when
@@ -204,12 +204,12 @@ never supplies an arbitrary method or destination.
 The App declares each hosted operation on its terminal handler, when it composes the App, optionally accepting the
 hosted principal in a Platform Role guard; everything else is denied. A guard mounted beside a handler, or a shared
 method and path, never declares it. Before dispatch, the capability matches the destination with the App's own router
-and refuses, without running anything, unless the registrations matched meet three conditions: ignoring middleware
-the App identifies, the first is a Kit guard; an Organization-bound dispatch meets a Kit Organization guard before any
-terminal registration; and at least one terminal registration is matched and every one is a declared hosted handler,
-with an unidentified `ALL` registration counted as terminal (D4). Kit guards check the declarations again for the
-registrations Hono actually matched, so a guard refusal stops the operation before its handler runs. Identified
-middleware causes no business effect before admission.
+and refuses, without running anything, unless the registrations matched meet three conditions: ignoring identified
+middleware registrations matched before it, the first is a Kit guard; an Organization-bound dispatch meets a Kit
+Organization guard before any terminal registration; and at least one terminal registration is matched and every one
+is a declared hosted handler, with any other `ALL` registration counted as terminal (D4). Kit guards check the
+declarations again for the registrations Hono actually matched, so a guard refusal stops the operation before its
+handler runs. Identified middleware causes no business effect before admission.
 
 The Kit creates each dispatched request itself, without cookie or `Authorization` header, and privately associates
 it with the principal and designation; there is no public way to mark a request. The receiving App claims that

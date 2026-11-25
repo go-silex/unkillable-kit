@@ -75,6 +75,7 @@ export function createRequestAuthorization<E extends Env>(
         c,
         organization ? 'organization' : 'guard',
         orgOpts?.organizationId,
+        middleware,
       )
       const org = check?.(c, stage)
       if (!stage.pending) project(c, stage, org ?? undefined)
