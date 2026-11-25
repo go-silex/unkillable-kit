@@ -1,6 +1,6 @@
 # `@kit/mcp-example`
 
-Kit dogfood MCP: **ping** / **whoami** only. One app, two transports.
+Kit dogfood MCP: **ping** and **whoami** over stdio and HTTP, plus **organization** over HTTP.
 
 ## Stdio (CI smoke)
 
@@ -12,7 +12,7 @@ bun run smoke:mcp
 
 ## Hosted Streamable HTTP + Worker MCP OAuth
 
-The authorization server is `createHostedMcpWorker` from `@kit/mcp/hosted`. This app registers ping / whoami and passes the dogfood consent exception. It does not own the provider wiring.
+The authorization server is `createHostedMcpWorker` from `@kit/mcp/hosted`. The hosted-only `organization` tool sends its input `organizationId` to a guarded Hono operation to read the caller's membership. The Worker uses the Kit provider wiring with the dogfood consent exception.
 
 ```bash
 bun run --filter @kit/mcp-example dev:http

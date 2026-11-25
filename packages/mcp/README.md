@@ -76,8 +76,10 @@ const hosted = createHostedMcpWorker({
   version: '0.0.1',
   identityPort: (env) => createProductIdentityPort(env),
   apiBaseUrl: (env) => env.API_BASE_URL,
-  register(server, { identity, authorization }) {
-    createProductCatalogue({ identity, authorization }).registerAll(server)
+  app, // Optional: the composed Hono App and its Kit authorization instance.
+  authorization,
+  register(server, { identity, dispatch }) {
+    createProductCatalogue({ identity, dispatch }).registerAll(server)
   },
   consentPresentation: {
     locale: 'en',
@@ -89,7 +91,7 @@ const hosted = createHostedMcpWorker({
       serifHeading: true,
     },
   },
-  // Optional deny-only policy outside the authorization D1 binding (ADR-0015 D2).
+  // Optional deny-only policy (ADR-0015 D2).
   // Throw when the answer is unknown; `false` denies, and a token-phase denial revokes.
   async grantAdmission({ userId, grantId }, env) {
     return !(await isProductGrantDenied(env, userId, grantId))
@@ -109,18 +111,18 @@ export default { ...productWorker, fetch: hosted.fetch }
 
 The hosted shell requires a `DB` D1 binding pointing at the Product's Better Auth database. It uses one live authorization batch on identity resolution, consent submission, each code or refresh exchange, and each verified MCP request. Missing or disabled users are denied; failed or unrecognized required reads return `503`.
 
-For `/mcp`, the shell fixes the optional `X-Org-Id` before the batch. The header grants no access. Register Product resource `facts` using `defineAuthorizationFact` from `@kit/auth/snapshot`. After grant admission, tools can read non-Organization facts with `authorization.fact(descriptor)`. An Organization-scoped tool must first call `authorization.forOrganization(validatedOperationOrgId)` and refuse `null` (missing or mismatched selection, inactive Organization or no membership), then apply its own access policy before reading scoped facts or dispatching. This never reloads authorization or revokes the OAuth grant. An Organization-free tool such as `whoami` need not select an Organization.
+`register(server, { identity, env, dispatch })` runs once per admitted `/mcp` request. `identity` is `{ userId, email? }`. Supply `app` and its `authorization` together, and declare each callable operation with `authorization.hosted(app, () => { /* register guarded routes */ })`. Without this pair, `dispatch` is absent.
 
-For a deny-only policy stored on the same D1 binding, pass `denyFact`, a `hosted-grant` descriptor. A row correlated to the verified User, grant and client denotes a decided denial. The Kit checks presence without decoding or returning its rows. This applies to both `/mcp` and code/refresh exchange; identity and consent are account-only.
+A tool maps validated arguments to a declared operation and calls `dispatch.fetch({ method, path, organizationId })`. Use an explicit input ID or a server default for Organization-bound operations; a nonempty outer `X-Org-Id` must match exactly and cannot select an Organization itself. Org-free operations omit `organizationId` and can discover the ID needed for a subsequent Org-bound call. Each dispatch loads live authority in at most one Kit D1 batch, up to eight dispatches shared by all tools in the outer request. Tools should map a refused response to a sanitized `toolRefusal(...)` and a 5xx to `PublicToolError('UNAVAILABLE')`, without forwarding the response's error details. Neither revokes the grant. The capability expires when the outer request ends.
 
-`register` runs on every admitted `/mcp` request because EdgeFastMCP is stateless. It receives token identity `{ userId, email? }` and request-local authorization accessors; tools close over them. Its env, the `identityPort` function env, the `apiBaseUrl(env, request)` env and the `grantAdmission` env have no `OAUTH_PROVIDER`; `apiBaseUrl` reaches `identityPort.resolve` unchanged. The identity port resolves who the user is. The authorization server mints. `userId` must be non-empty and contain no `:` or `/authorize` returns `500`. There is no AsyncLocalStorage and the shell needs no `nodejs_compat`. `register`, `fallthrough`, and catalogue annotations are trusted caller code, not a sandbox or authorization point. Omitting `fallthrough` returns `404`.
+The registration, identity-port, `apiBaseUrl` and `grantAdmission` environments exclude `OAUTH_PROVIDER`. The identity port resolves the user; the provider mints tokens. `userId` must be nonempty and contain no `:` or `/authorize` returns `500`. There is no AsyncLocalStorage and the shell needs no `nodejs_compat`. `register`, `fallthrough`, and catalogue annotations are trusted caller code, not authorization points. Omitting `fallthrough` returns `404`.
 
-`grantAdmission` is an optional extra deny-only policy outside the D1 binding ([ADR-0015](../../docs/kit/architecture/adr/0015-mcp-remote-oauth-worker.md) D2), evaluated after D1 admits the User and grant. Omitted (absent or `undefined`), no extra policy applies. Any other non-function value makes `createHostedMcpWorker` throw a `TypeError`. Set, the factory keeps the function it was given at creation, and the shell asks it:
+`grantAdmission` is an optional extra deny-only policy ([ADR-0015](../../docs/kit/architecture/adr/0015-mcp-remote-oauth-worker.md) D2), evaluated after the live User check and never per dispatch. Omitted (absent or `undefined`), no extra policy applies. Any other non-function value makes `createHostedMcpWorker` throw a `TypeError`. Set, the factory keeps the function it was given at creation, and the shell asks it:
 
 - `{ phase: 'request', userId, grantId, clientId }` on an authenticated `/mcp` request that passes D1, before `register`. The tuple comes from the public `unwrapToken` of the token the provider authenticated (`ctx.auth.token`); its `userId` must equal the token identity and `ctx.auth.userId`, and its client `ctx.auth.clientId`, or the shell denies the request without calling the callback.
 - `{ phase: 'token', grantType, userId, grantId, clientId }` on every `authorization_code` or `refresh_token` exchange at `/token`, as the provider's `tokenExchangeCallback`: after the provider's own client, code or refresh-token, PKCE, redirect, expiry, resource and scope checks, and before any OAuth grant or token write. The tuple is the callback's own.
 
-The input never comes from request headers, query, body or client metadata, and it carries no batch rows, token, props, scope or TTL. The predicate cannot mint or change them; its env still holds `OAUTH_KV`, so it is trusted code like the other hooks. The same allow, deny and unavailable outcomes below apply to D1 grant admission.
+The input never comes from request headers, query, body or client metadata, and it carries no batch rows, token, props, scope or TTL. The predicate cannot mint or change them; its env still holds `OAUTH_KV`, so it is trusted code like the other hooks.
 
 | Answer                          | `/mcp`                                                                                                                                                | `/token` (code or refresh)                                                                                                                                                                                                                                                                                                        |
 | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
