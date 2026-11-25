@@ -72,6 +72,16 @@ describe('hosted tool-input Organization selection', () => {
     },
   )
 
+  it('refuses an asynchronous designation without an unhandled rejection', async () => {
+    const f = fixture({ defaultOrg: ORG })
+    const { access_token: token } = await f.issue()
+    f.designate.mockImplementationOnce((() => Promise.reject(new Error(CAUSE))) as never)
+    await withoutUnhandledRejection(async () => {
+      expectRefusal(await f.dispatch(token, {}, 1), 'ORGANIZATION_SELECTION_INVALID')
+    })
+    expect(f.observedPolicy).not.toHaveBeenCalled()
+  })
+
   it('rejects a combined header even when it exactly matches the designation', async () => {
     const f = fixture()
     const { access_token: token } = await f.issue()
@@ -441,13 +451,20 @@ describe('scoped admission revocation and fact privacy', () => {
     ['resolving Promise', (): unknown => Promise.resolve(PRIVATE)],
     ['rejecting Promise', (): unknown => Promise.reject(new Error(CAUSE))],
     [
-      'late-rejecting thenable that returns undefined',
-      (): unknown => ({
-        // biome-ignore lint/suspicious/noThenProperty: intentionally simulates a non-Promise thenable
-        then(_resolve: unknown, reject: (cause: Error) => void): void {
+      'late-rejecting non-Promise thenable',
+      (): unknown => {
+        const lateReject = (_resolve: unknown, reject: (cause: Error) => void): void => {
           void setImmediate().then(() => reject(new Error(CAUSE)))
-        },
-      }),
+        }
+        // A Proxy models a foreign thenable without declaring a `then` member.
+        return new Proxy(
+          {},
+          {
+            has: (_target, key) => key === 'then',
+            get: (_target, key) => (key === 'then' ? lateReject : undefined),
+          },
+        )
+      },
     ],
   ] as const)('refuses a business decoder returning a %s', async (_kind, decode) => {
     const f = fixture({ defaultOrg: ORG })

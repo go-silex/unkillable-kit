@@ -46,12 +46,14 @@ export function isOrganizationFact(fact: Fact) {
   return fact.scope.kind === 'organization' || fact.scope.kind === 'organization-role'
 }
 
-function isThenable(value: unknown): value is PromiseLike<unknown> {
-  return (
+/** Observes a thenable's settlement so a late rejection never escapes the call. */
+function observeThenable(value: unknown): boolean {
+  const thenable =
     ((typeof value === 'object' && value !== null) || typeof value === 'function') &&
     'then' in value &&
     typeof value.then === 'function'
-  )
+  if (thenable) void Promise.resolve(value).then(undefined, () => {})
+  return thenable
 }
 
 function restrictedFact(
@@ -63,8 +65,7 @@ function restrictedFact(
     try {
       if (declared.has(descriptor)) {
         const value = read(descriptor)
-        if (!isThenable(value)) return value
-        void Promise.resolve(value).then(undefined, () => {})
+        if (!observeThenable(value)) return value
       }
     } catch {
       // Fall through to the same public error for rejected and unreadable facts.
@@ -117,7 +118,7 @@ function checkPolicy<Input>(
   let allowed: unknown
   try {
     allowed = allow({ input, organization, fact })
-    if (isThenable(allowed)) void Promise.resolve(allowed).then(undefined, () => {})
+    observeThenable(allowed)
   } catch {
     throw new PublicToolError('UNAVAILABLE')
   }
@@ -149,7 +150,9 @@ export function organizationToolForRequest(
       async execute(value) {
         // The catalogue has validated this exact schema and checked the input budget.
         const input = value as z.output<Input>
-        const id = organizationId(input)
+        const id: unknown = organizationId(input)
+        // Designation is synchronous; a Promise is refused, and its settlement observed.
+        observeThenable(id)
         if (!isCanonicalDesignation(id) || ambiguousHeader || (header && header !== id)) {
           return toolRefusal({ code: invalidSelection })
         }
