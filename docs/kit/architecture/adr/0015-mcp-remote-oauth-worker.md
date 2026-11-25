@@ -3,7 +3,7 @@ title: 'ADR-0015 — Remote MCP uses Streamable HTTP + Worker-issued OAuth token
 status: accepted
 normative: true
 date: 2026-09-16
-amended: 2026-11-21
+amended: 2026-11-25
 supersedes_notes: >
   The current decision incorporates the 2026-10-24 hosted-shell, consent-policy,
   provider 1.2 and configured-origin decisions, the 2026-11-07 static
@@ -15,6 +15,8 @@ supersedes_notes: >
   The 2026-11-14 amendment adds a mandatory live User-state check and DB binding.
   2026-11-21: body trimmed to decisions, rationale and limits; implementation
   detail now lives only in the cited code and tests. No decision changed.
+  2026-11-25: D8 admits a third owner exception, only for the opt-in tool-input
+  Organization selection seam of ADR-0025 D3. No OAuth policy changed.
 axial: false
 related:
   - docs/kit/architecture/adr/0001-primary-axis-packages-compose-apps.md
@@ -22,6 +24,7 @@ related:
   - docs/kit/architecture/adr/0003-multi-tenant-rbac-modules.md
   - docs/kit/standards/stack.md
   - docs/kit/testing.md
+  - docs/kit/architecture/adr/0025-request-authorization-snapshot.md
 summary: 'Hosted Streamable HTTP + Worker-issued MCP OAuth token'
 ---
 
@@ -203,6 +206,16 @@ Neither exception waives the second-consumer gate for another seam or policy,
 relaxes this ADR's controls, or authorizes publication, Product inheritance or
 deployment. Those retain their own authorizations. A new seam or policy still
 requires an ADR-0015 amendment and a second consumer.
+
+> **Amendment (2026-11-25) — hosted Organization dispatch** (go-silex/unkillable-kit#181).
+> A third owner exception covers only the opt-in
+> [ADR-0025 D3](./0025-request-authorization-snapshot.md#d3--credential-selection-and-verification)
+> tool-input Organization selection seam. Common MCP clients fix headers per server connection,
+> so serving several Organizations over one connection, or keeping tools that already name their
+> Organization, requires scoping each call in its arguments. One Product needs this today to keep
+> its tool contract; the Kit's tests prove behavior, not a second consumer. The exception adds no
+> OAuth grant or consent policy, and changes
+> no provider ownership, token claim or scope. The limits of the previous paragraph apply.
 
 A dedicated Worker is optional; trusted `fallthrough` may co-locate the shell.
 It is neither a sandbox nor an authorization point and never receives reserved

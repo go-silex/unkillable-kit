@@ -3,6 +3,11 @@ title: 'ADR-0025 — Load authentication and authorization facts once per reques
 status: accepted
 normative: true
 date: 2026-11-24
+amended: 2026-11-25
+supersedes_notes: >
+  2026-11-25: D3 adds an opt-in hosted MCP mode where validated tool input
+  designates the Organization, with one bounded D1 read per scoped dispatch
+  (go-silex/unkillable-kit#181). Header selection stays the default, unchanged.
 axial: false
 related:
   - docs/kit/architecture/adr/0002-session-hmac-interim-vs-better-auth.md
@@ -164,6 +169,48 @@ Kit-minted grant and Kit-built registry, not a client, plan, agent claim or snap
   only to reuse the shared read-only fact interface for hosted admission and tool scope; it does not add a second
   policy hook or waive the second-consumer gate for other seams. Tests cover both resource and token consumers of the
   loader, not external Product adoption. KV operations and delegated HTTP requests are outside the D1 budget.
+
+**Amendment (2026-11-25) — Organization selection at hosted tool dispatch** (go-silex/unkillable-kit#181).
+
+Common MCP clients fix headers per server connection. Header selection therefore needs one
+connection per Organization and changes the wire contract of tools that already name their
+Organization in their arguments. A hosted App may opt in to tool-input selection instead. Header
+selection stays the default and unchanged.
+
+- **Selection is not authority.** After catalogue validation and the input budget, the App
+  designates one Organization from the validated operation, or a server-defined default only when
+  the selector is omitted, without a read. A nonempty `X-Org-Id` may only agree. Missing,
+  ambiguous or conflicting selection refuses before any scoped read, and no refusal falls back to
+  another Organization.
+- **Outer admission stays unscoped.** `/mcp` keeps one primary D1 batch for the provider-verified
+  tuple, live User state, the D1 grant denial and unscoped facts, plus the external deny-only
+  policy. It loads no Organization facts.
+- **One bounded read per scoped dispatch.** Each dispatch reaching admission takes one primary D1
+  batch, bound to the original tuple and the designated ID: live User state, the D1 grant denial,
+  Organization status, membership and only that tool's declared Organization facts. An active
+  Organization and membership are required, without Platform Role bypass. This exempts the scoped
+  path from D1's fixed HTTP plan and single load: dispatches share only outer admission, and
+  scoped reads per HTTP request are bounded. The batch stays read-only.
+- **The operation is authorized in that Organization.** The App's operation policy sees the
+  validated operation, the admitted scope and only its declared policy facts. A core refusal runs
+  no policy or App fact decoder, and business facts are decoded only after an affirmative
+  decision, which also runs the handler on the admitted ID. No refusal exposes or logs private
+  rows. An assigned Organization Role key is not a verified Role; trusted App code is not
+  sandboxed (D2).
+- **Refusal never revokes.** Outer failure keeps D1's HTTP responses. A scoped denial or
+  unavailability fails only that call, as distinct sanitized tool errors, and revokes no OAuth.
+  Provider and external policy denials apply on the next HTTP request once visible to their
+  stores; D1 state is read again at each scoped dispatch. `/token`, identity and consent are
+  unchanged.
+- **The helper is an adapter, not a registry.** It returns a tool definition for the existing
+  catalogue and adds no grant class or authority source ([ADR-0005](0005-flows-platform-agentic-workflows.md)
+  D6). Organization admission stays distinct from grant authority. Whether tool-input selection
+  becomes the hosted default, and how registry ∩ grants relates to this helper, are open decisions
+  for the agents layer (invariant 7).
+
+Opting in changes the mode, scoped tools and fact declarations together; reverting to header
+selection drops headerless clients. Bounds, error codes, schema requirements and D1 counts live in
+[`packages/mcp/README.md`](../../../../packages/mcp/README.md) and its tests.
 
 The existing Impersonation fence rejects even a bare Bearer scheme when a delegation is attached, although the general credential parser does not select it as a key.
 
