@@ -59,6 +59,7 @@ export type HostedMcpWorkerOptions<
 > = {
   name: string
   version?: string
+  organizationSelection?: Selection
   /** Read-only facts for resource requests, visible only through admitted accessors. */
   facts?: readonly AuthorizationFact<unknown>[]
   /** Presence of a matching hosted-grant fact denies resource and token admission. */
@@ -153,6 +154,10 @@ function admissionResponse(outcome: 'denied' | 'unavailable', request: Request):
   })
 }
 
+export function createHostedMcpWorker<
+  Env extends HostedMcpEnv,
+  Selection extends OrganizationSelection = 'header',
+>(opts: HostedMcpWorkerOptions<Env, Selection>): HostedMcpWorker<Env>
 export function createHostedMcpWorker<Env extends HostedMcpEnv>(
   opts: HostedMcpWorkerOptions<Env, OrganizationSelection>,
 ): HostedMcpWorker<Env> {
@@ -164,7 +169,7 @@ export function createHostedMcpWorker<Env extends HostedMcpEnv>(
   }
   const denyFact = opts.denyFact
   const facts = opts.facts ? [...opts.facts] : undefined
-  const selection = opts.organizationSelection
+  const { organizationSelection: selection, register } = opts
   if (selection !== undefined && selection !== 'header' && selection !== 'tool-input') {
     throw new TypeError('organizationSelection must be header or tool-input')
   }
@@ -187,8 +192,8 @@ export function createHostedMcpWorker<Env extends HostedMcpEnv>(
       const verified = await requestPrincipal(identity, env, ctx)
       if (verified.status !== 'allowed') return admissionResponse(verified.status, request)
       const { principal } = verified
-      const header = request.headers.get('X-Org-Id')?.trim()
-      const organizationId = selection === 'tool-input' || !header ? undefined : header
+      const header = request.headers.get('X-Org-Id')
+      const organizationId = selection === 'tool-input' ? undefined : header?.trim() || undefined
       const callerEnv = stripOauthHelper(env)
       const outcome = await authorizeHostedPrincipal({
         db: env.DB,
@@ -207,23 +212,14 @@ export function createHostedMcpWorker<Env extends HostedMcpEnv>(
         mcpPath: MCP_PATH,
       })
       const { fact, forOrganization } = outcome
-      if (opts.organizationSelection === 'tool-input') {
-        const organizationTool = organizationToolForRequest(header, {
-          db: env.DB,
-          principal,
-          denyFact,
-        })
-        opts.register(server, {
-          identity,
-          env: callerEnv,
-          authorization: { fact, organizationTool },
-        })
+      if (selection === 'tool-input') {
+        const scope = { db: env.DB, principal, denyFact }
+        const organizationTool = organizationToolForRequest(header, scope)
+        const authorization = { fact, organizationTool }
+        register.call(opts, server, { identity, env: callerEnv, authorization })
       } else {
-        opts.register(server, {
-          identity,
-          env: callerEnv,
-          authorization: { fact, forOrganization },
-        })
+        const authorization = { fact, forOrganization }
+        register.call(opts, server, { identity, env: callerEnv, authorization })
       }
       return server.fetch(request)
     },

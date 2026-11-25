@@ -21,7 +21,19 @@ const input = z
   .object({ organizationId: z.string().min(1).optional(), values: z.array(z.number()).optional() })
   .strict()
 
-type Policy = 'accept' | 'refuse' | 'throw' | 'nonboolean' | 'read-business' | 'check-role'
+type Policy =
+  | 'accept'
+  | 'refuse'
+  | 'throw'
+  | 'nonboolean'
+  | 'read-business'
+  | 'check-role'
+  | 'reject-async'
+
+async function rejectingPolicy() {
+  throw new Error(CAUSE)
+}
+
 export type ToolOptions = HostedMcpWorkerOptions<HostedMcpEnv, 'tool-input'>
 
 export const workerOptions = {
@@ -79,14 +91,11 @@ export function fixture({
   const { sqlite, db } = createAuthFixture(USER)
   const { budget, batches, setDriverFailure } = observeOrganizationDb(db)
   let policy: Policy = 'accept'
-  let businessFailure = false
   let businessReadsPolicy = false
   let afterExecute: (() => void) | undefined
   const decodePolicy = vi.fn(text)
-  const decodeBusiness = vi.fn((rows: readonly AuthorizationRow[]) => {
-    if (businessFailure) throw new Error(CAUSE)
-    return text(rows)
-  })
+  const decodeBusiness =
+    vi.fn<(rows: readonly AuthorizationRow[]) => string | Promise<string>>(text)
   const decodeDeny = vi.fn(() => {
     throw new Error(CAUSE)
   })
@@ -96,7 +105,7 @@ export function fixture({
   const roleFact = defineAuthorizationFact({
     table: { name: 'organization_roles', columns: ['id', 'key'] },
     scope: { kind: 'organization-role', roleId: 'id' },
-    select: ['key'],
+    select: ['id', 'key'],
     decode: decodeRole,
   })
   const denyFact = defineAuthorizationFact({
@@ -133,14 +142,16 @@ export function fixture({
   const observedPolicy = vi.fn<(organization: { id: string; role: string }) => void>()
   const observedExecute = vi.fn<(id: string) => void>()
   const registerError = vi.fn<(error: unknown) => void>()
+  const observedRegister = vi.fn<() => void>()
   const grantAdmission = vi.fn<NonNullable<ToolOptions['grantAdmission']>>(async () => true)
-  const hosted = createHostedMcpWorker({
+  const options: ToolOptions = {
     ...workerOptions,
     organizationSelection: 'tool-input',
     facts: [accountFact],
     denyFact,
     grantAdmission,
     register(server, { authorization }) {
+      observedRegister()
       expect(authorization).not.toHaveProperty('forOrganization')
       const siblings = [
         {
@@ -175,20 +186,28 @@ export function fixture({
                 ? accountFact
                 : businessFact,
           ],
-          allow({ organization, fact }) {
-            observedPolicy(organization)
-            if (policy === 'read-business') fact(businessFact)
-            const visible = fact(policyFact) === `${POLICY}:${organization.id}`
-            if (policy === 'throw') throw new Error(CAUSE)
-            if (policy === 'nonboolean') return 'true' as unknown as boolean
-            if (policy === 'check-role')
-              return organization.role === 'reader' && fact(roleFact) === 'reader'
-            return policy === 'accept' && visible
-          },
+          allow:
+            policy === 'reject-async'
+              ? (rejectingPolicy as unknown as () => boolean)
+              : ({ organization, fact }) => {
+                  observedPolicy(organization)
+                  if (policy === 'read-business') fact(businessFact)
+                  const visible = fact(policyFact) === `${POLICY}:${organization.id}`
+                  switch (policy) {
+                    case 'throw':
+                      throw new Error(CAUSE)
+                    case 'nonboolean':
+                      return 'true' as unknown as boolean
+                    case 'check-role':
+                      return organization.role === 'reader' && fact(roleFact) === 'reader'
+                    default:
+                      return policy === 'accept' && visible
+                  }
+                },
           async execute(_arg, { organizationId, fact }) {
             observedExecute(organizationId)
             if (businessReadsPolicy) fact(policyFact)
-            const data = fact(businessFact)
+            const data = await fact(businessFact)
             afterExecute?.()
             return { organizationId, data }
           },
@@ -200,24 +219,19 @@ export function fixture({
         createToolCatalogue(siblings).registerAll(server)
       }
     },
-  })
+  }
+  const hosted = createHostedMcpWorker(options)
   const oauth = createOAuthFixture(hosted, budget.db as unknown as D1Database, budget)
-  async function fetchMcp(
-    token: string,
-    body: unknown,
-    count: number,
-    headers: Record<string, string> = {},
-  ) {
+  async function fetchMcp(token: string, body: unknown, count: number, extraHeaders?: HeadersInit) {
     const before = budget.count
+    const headers = new Headers(extraHeaders)
+    headers.set('authorization', `Bearer ${token}`)
+    headers.set('content-type', 'application/json')
+    headers.set('accept', 'application/json')
     const response = await oauth.fetch(
       new Request(`${ORIGIN}/mcp`, {
         method: 'POST',
-        headers: {
-          ...headers,
-          authorization: `Bearer ${token}`,
-          'content-type': 'application/json',
-          accept: 'application/json',
-        },
+        headers,
         body: JSON.stringify(body),
       }),
     )
@@ -248,6 +262,8 @@ export function fixture({
     ...oauth,
     sqlite,
     batches,
+    options,
+    observedRegister,
     fetchMcp,
     dispatch,
     batch,
@@ -264,9 +280,6 @@ export function fixture({
       policy = value
     },
     setDriverFailure,
-    setBusinessFailure: () => {
-      businessFailure = true
-    },
     setBusinessReadsPolicy: () => {
       businessReadsPolicy = true
     },

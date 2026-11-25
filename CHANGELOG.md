@@ -11,9 +11,17 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
   `X-Org-Id`. `authorization.organizationTool` admits each scoped call with one more D1 batch,
   at most eight per request, then runs the App's operation policy; no refusal revokes OAuth.
   Header selection stays the default and is unchanged. `PUBLIC_TOOL_ERROR_CODES` gains
-  `UNAVAILABLE`; code that maps every public error code must handle it.
+  `UNAVAILABLE`.
   See [Organization selection in tool input](packages/mcp/README.md#organization-selection-in-tool-input)
   and ADR-0025 D3 (go-silex/unkillable-kit#181).
+- **Product action:** If code switches over or maps every `PublicToolErrorCode`, handle the new
+  `UNAVAILABLE` code, even in header mode (go-silex/unkillable-kit#181).
+
+### Auth
+
+- Authorization fact scope anchors now compare exactly, whatever the Product column's collation:
+  a `COLLATE NOCASE` column no longer matches an Organization or User ID that differs only by
+  case (go-silex/unkillable-kit#181).
 
 ## unkillable-kit/v0.8.0 — 2026-11-24
 

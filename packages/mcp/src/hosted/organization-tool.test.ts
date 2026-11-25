@@ -1,6 +1,9 @@
-import { describe, expect, it, vi } from 'vitest'
+import { setImmediate } from 'node:timers/promises'
+import type { HostedAuthorization } from '@kit/auth/snapshot'
+import { describe, expect, expectTypeOf, it, vi } from 'vitest'
 import { PUBLIC_TOOL_ERROR_MESSAGES } from '../index'
-import { createHostedMcpWorker } from './index'
+import type { HostedMcpEnv } from './env'
+import { createHostedMcpWorker, type OrganizationToolAuthorization } from './index'
 import { USER } from './oauth-fixture.test-support'
 import { CAUSE, type Statement } from './organization-db.test-support'
 import {
@@ -58,7 +61,7 @@ describe('hosted tool-input Organization selection', () => {
     [{ organizationId: '   ' }, undefined],
     [{ organizationId: ` ${ORG} ` }, undefined],
     [{ organizationId: ORG }, OTHER],
-    [{ organizationId: ORG }, `${ORG}, ${ORG}`],
+    [{ organizationId: ORG }, `\u00a0${ORG}`],
   ] as const)(
     'rejects an absent, noncanonical, conflicting or ambiguous designation: %j, %s',
     async (args, header) => {
@@ -68,6 +71,23 @@ describe('hosted tool-input Organization selection', () => {
       expect(f.observedPolicy).not.toHaveBeenCalled()
     },
   )
+
+  it('rejects a combined header even when it exactly matches the designation', async () => {
+    const f = fixture()
+    const { access_token: token } = await f.issue()
+    const headers = new Headers()
+    headers.append('X-Org-Id', ORG)
+    headers.append('X-Org-Id', OTHER)
+    expect(headers.get('X-Org-Id')).toBe(`${ORG}, ${OTHER}`)
+    const response = await f.fetchMcp(
+      token,
+      call(1, { organizationId: `${ORG}, ${OTHER}` }),
+      1,
+      headers,
+    )
+    expect(response.status).toBe(200)
+    expectRefusal((await response.json()) as Reply, 'ORGANIZATION_SELECTION_INVALID')
+  })
 
   it.each([
     { organizationId: '' },
@@ -140,6 +160,9 @@ describe('hosted tool-input Organization selection', () => {
       },
     )
     expect(response.status).toBe(200)
+    const replies = new Map(((await response.json()) as Reply[]).map((reply) => [reply.id, reply]))
+    expectAllowed(replies.get(1)!, ORG)
+    expect(replies.get(2)?.result).toEqual({ content: [{ type: 'text', text: ORG }] })
     const [outer, scoped, sibling] = f.batches.slice(-3)
     const tuple = [summary.grantId, clientId, USER]
     for (const entry of outer!.slice(0, 3))
@@ -174,27 +197,72 @@ describe('hosted tool-input Organization selection', () => {
     expect(f.decodeDeny).not.toHaveBeenCalled()
   })
 
-  it('shares the cap across tools and failed reads, and resets it on the next HTTP request', async () => {
+  it('shares the cap across tools, Organizations and failed reads but not invalid or unscoped calls', async () => {
     const f = fixture()
     const { access_token: token } = await f.issue()
     f.setDriverFailure('throw')
+    const siblingCalls = Array.from({ length: 7 }, (_, i) =>
+      call(i + 4, { organizationId: i % 2 === 0 ? OTHER : ORG }, 'sibling'),
+    )
     const replies = await f.batch(
       token,
-      Array.from({ length: 9 }, (_, i) =>
-        call(i + 1, { organizationId: ORG }, i === 0 ? 'scoped' : 'sibling'),
-      ),
+      [
+        call(1),
+        call(2, {}, 'who'),
+        call(3, { organizationId: ORG }),
+        ...siblingCalls,
+        call(11, { organizationId: OTHER }),
+      ],
       9,
     )
-    expect(replies).toHaveLength(9)
-    expectUnavailable(replies[0]!)
-    for (const reply of replies.slice(1, 8)) expect(reply.result.content[0]?.text).toBe(ORG)
-    expectRefusal(replies[8]!, 'ORGANIZATION_CALL_LIMIT')
+    const byId = new Map(replies.map((reply) => [reply.id, reply]))
+    expect(byId.size).toBe(11)
+    expectRefusal(byId.get(1)!, 'ORGANIZATION_SELECTION_INVALID')
+    expect(byId.get(2)?.result).toEqual({ content: [{ type: 'text', text: USER }] })
+    expectUnavailable(byId.get(3)!)
+    for (const id of [4, 6, 8, 10]) {
+      expect(byId.get(id)?.result).toEqual({ content: [{ type: 'text', text: OTHER }] })
+    }
+    for (const id of [5, 7, 9]) {
+      expect(byId.get(id)?.result).toEqual({ content: [{ type: 'text', text: ORG }] })
+    }
+    expectRefusal(byId.get(11)!, 'ORGANIZATION_CALL_LIMIT')
+    expect(f.batches.slice(-8).map((batch) => batch[0]?.values[0])).toEqual([
+      ORG,
+      OTHER,
+      ORG,
+      OTHER,
+      ORG,
+      OTHER,
+      ORG,
+      OTHER,
+    ])
     f.setDriverFailure()
     expectAllowed(await f.dispatch(token, { organizationId: ORG }, 2), ORG)
   })
 })
 
 describe('scoped admission revocation and fact privacy', () => {
+  it('checks external grantAdmission on the next request without registering or revoking', async () => {
+    const f = fixture({ defaultOrg: ORG })
+    const { access_token: token } = await f.issue()
+    expectAllowed(await f.dispatch(token, {}, 2), ORG)
+    f.observedRegister.mockClear()
+    f.observedExecute.mockClear()
+    f.grantAdmission.mockResolvedValue(false)
+    expect((await f.fetchMcp(token, call(1), 1)).status).toBe(401)
+    expect(f.observedRegister).not.toHaveBeenCalled()
+    expect(f.observedExecute).not.toHaveBeenCalled()
+    expect(await f.helpers.unwrapToken(token)).not.toBeNull()
+  })
+
+  it('keeps the registration mode and callback captured at worker creation', async () => {
+    const f = fixture({ defaultOrg: ORG })
+    const { access_token: token } = await f.issue()
+    Object.assign(f.options, { organizationSelection: 'header', register: vi.fn() })
+    expectAllowed(await f.dispatch(token, {}, 2), ORG)
+  })
+
   it.each(['suspended', 'archived'])(
     'refuses an Organization when its status becomes %s',
     async (status) => {
@@ -262,7 +330,7 @@ describe('scoped admission revocation and fact privacy', () => {
       .run(ORG, USER)
     expectAllowed(await f.dispatch(grant.access_token, {}, 2), ORG)
     expect(f.observedPolicy).toHaveBeenLastCalledWith({ id: ORG, role: 'reader' })
-    expect(f.decodeRole).toHaveBeenCalledWith([{ key: 'reader' }])
+    expect(f.decodeRole).toHaveBeenCalledWith([{ id: `${ORG}_reader`, key: 'reader' }])
     await f.helpers.revokeGrant(grant.summary.grantId, USER)
     expect((await f.fetchMcp(grant.access_token, call(1, { organizationId: ORG }), 0)).status).toBe(
       401,
@@ -305,6 +373,53 @@ describe('scoped admission revocation and fact privacy', () => {
     expect(() => createHostedMcpWorker({ ...options, facts: [sampleOrgFact] })).toThrow(TypeError)
   })
 
+  it('defaults an Env-only generic worker to header registration', () => {
+    const register: Parameters<typeof createHostedMcpWorker<HostedMcpEnv>>[0]['register'] = (
+      _server,
+      { authorization },
+    ) => {
+      const header: HostedAuthorization = authorization
+      expect(typeof header.forOrganization).toBe('function')
+    }
+    expect(typeof createHostedMcpWorker<HostedMcpEnv>({ ...workerOptions, register }).fetch).toBe(
+      'function',
+    )
+    createHostedMcpWorker({
+      ...workerOptions,
+      organizationSelection: 'tool-input',
+      register(_server, { authorization }) {
+        expectTypeOf(authorization).toEqualTypeOf<OrganizationToolAuthorization>()
+      },
+    })
+  })
+
+  it('observes a rejecting async policy without an unhandled rejection', async () => {
+    const f = fixture({ defaultOrg: ORG })
+    const { access_token: token } = await f.issue()
+    const unhandled = vi.fn()
+    process.on('unhandledRejection', unhandled)
+    try {
+      f.setPolicy('reject-async')
+      await expectPrivateUnavailable(token, () => f.dispatch(token, {}, 2))
+      await setImmediate()
+      expect(unhandled).not.toHaveBeenCalled()
+    } finally {
+      process.off('unhandledRejection', unhandled)
+    }
+    expect(f.observedExecute).not.toHaveBeenCalled()
+  })
+
+  it('sanitizes a rejecting async business decoder after affirmative policy', async () => {
+    const f = fixture({ defaultOrg: ORG })
+    const { access_token: token } = await f.issue()
+    f.decodeBusiness.mockImplementationOnce(async () => {
+      throw new Error(CAUSE)
+    })
+    await expectPrivateUnavailable(token, () => f.dispatch(token, {}, 2))
+    expect(f.observedExecute).toHaveBeenCalledExactlyOnceWith(ORG)
+    expect(f.decodeBusiness).toHaveBeenCalledTimes(1)
+  })
+
   it.each(['throw', 'partial', 'malformed'] as const)(
     'fails closed on a %s batch before any policy or handler code',
     async (failure) => {
@@ -345,7 +460,9 @@ describe('scoped admission revocation and fact privacy', () => {
           f.setBusinessReadsPolicy()
           break
         case 'decoder':
-          f.setBusinessFailure()
+          f.decodeBusiness.mockImplementationOnce(() => {
+            throw new Error(CAUSE)
+          })
       }
       await expectPrivateUnavailable(grant.access_token, () =>
         f.dispatch(grant.access_token, {}, 2),

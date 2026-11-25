@@ -106,11 +106,12 @@ No public `@kit/mcp` or `@kit/mcp/hosted` exports were removed.
 
 ## Update hosted MCP tools, if used
 
-- On `/mcp`, the shell selects the optional `X-Org-Id` before it loads authorization. In each
-  Organization-scoped tool, call `authorization.forOrganization(validatedOperationOrgId)` and
-  refuse `null` (missing or mismatched selection, inactive Organization or no membership). Then
-  apply the tool's policy before reading scoped facts or dispatching. The header itself grants
-  no access. Organization-free tools such as `whoami` need no header.
+- In the default header mode, the shell selects the optional `X-Org-Id` on `/mcp` before it loads
+  authorization. In each Organization-scoped tool, call
+  `authorization.forOrganization(validatedOperationOrgId)` and refuse `null` (missing or
+  mismatched selection, inactive Organization or no membership). Then apply the tool's policy
+  before reading scoped facts or dispatching. The header itself grants no access.
+  Organization-free tools such as `whoami` need no header.
 - To let tools designate their Organization in validated input instead, with an optional server
   default when the selector is omitted, set `organizationSelection: 'tool-input'` and register each
   scoped tool through `authorization.organizationTool`, declaring its Organization facts on the
@@ -121,5 +122,7 @@ No public `@kit/mcp` or `@kit/mcp/hosted` exports were removed.
   whose matching row signals denial. Keep `grantAdmission` for additional policy outside that
   binding. This applies to request admission and code/refresh exchange.
 - On unavailable admission, expect `503` without revocation (`temporarily_unavailable` at
-  `/token`). Clients should rely on HTTP status and the OAuth error code where present, not the
-  error description. See [hosted shell](../../../packages/mcp/README.md#hosted-shell).
+  `/token`). In tool-input mode, a scoped call whose authorization is unavailable instead fails
+  alone with the `UNAVAILABLE` tool error, also without revocation. Clients should rely on HTTP
+  status and the OAuth error code where present, not the error description. See
+  [hosted shell](../../../packages/mcp/README.md#hosted-shell).

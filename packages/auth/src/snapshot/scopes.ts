@@ -154,7 +154,8 @@ export function compileScope(table: string, scope: AuthorizationFactScope, colum
   for (const [name, key] of anchors) {
     if (typeof name !== 'string' || used.has(name.toLowerCase())) return invalid()
     used.add(name.toLowerCase())
-    predicates.push([column(name), '=', key].join(' '))
+    // Product columns may declare NOCASE; correlation must use exact key equality.
+    predicates.push([column(name), '=', key, 'COLLATE BINARY'].join(' '))
   }
   return { joins, predicates }
 }

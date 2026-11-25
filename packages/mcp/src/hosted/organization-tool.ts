@@ -46,11 +46,24 @@ export function isOrganizationFact(fact: Fact) {
   return fact.scope.kind === 'organization' || fact.scope.kind === 'organization-role'
 }
 
+function isThenable(value: unknown): value is PromiseLike<unknown> {
+  return (
+    ((typeof value === 'object' && value !== null) || typeof value === 'function') &&
+    'then' in value &&
+    typeof value.then === 'function'
+  )
+}
+
 function restrictedFact(read: ReadFact, declared: ReadonlySet<Fact>): ReadFact {
-  return (descriptor) => {
+  return <T>(descriptor: AuthorizationFact<T>): T => {
     if (!declared.has(descriptor)) throw new PublicToolError('UNAVAILABLE')
     try {
-      return read(descriptor)
+      const value = read(descriptor)
+      if (!isThenable(value)) return value
+      // Keep the asynchronous decoder contract, but never propagate a private rejection.
+      return Promise.resolve(value).catch(() => {
+        throw new PublicToolError('UNAVAILABLE')
+      }) as T
     } catch {
       throw new PublicToolError('UNAVAILABLE')
     }
@@ -90,9 +103,10 @@ function checkPolicy<Input>(
   allow: (context: PolicyContext<Input>) => boolean,
   context: PolicyContext<Input>,
 ): boolean {
-  let allowed: boolean
+  let allowed: unknown
   try {
     allowed = allow(context)
+    if (isThenable(allowed)) void Promise.resolve(allowed).then(undefined, () => {})
   } catch {
     throw new PublicToolError('UNAVAILABLE')
   }
@@ -101,7 +115,7 @@ function checkPolicy<Input>(
 }
 
 export function organizationToolForRequest(
-  header: string | undefined,
+  header: string | null,
   principal: ScopedPrincipal,
 ): OrganizationToolAuthorization['organizationTool'] {
   const ambiguousHeader = header?.includes(',')
