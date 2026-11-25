@@ -422,6 +422,7 @@ describe('request authorization core', () => {
     const f = setup({ modules: true, impersonation: impersonation({ audit }) })
     const { app, authorization: auth, browser } = f
     f.attachDelegation()
+    app.use('/read/*', auth.requireAuth)
     app.get('/read/:orgId', auth.requireModule('calendar'), (c) => {
       const view = auth.view(c)
       expect(view.platformRole).toBeUndefined()
@@ -443,12 +444,53 @@ describe('request authorization core', () => {
       subject: 'target',
       role: 'reader',
     })
+    expect(audit).toHaveBeenCalledTimes(1)
+    expect(f.db.batch).toHaveBeenCalledTimes(2)
     expect((await app.request('/write/chosen', { headers: fenced })).status).toBe(403)
     expect(audit).toHaveBeenCalledTimes(2)
     expect(await (await app.request('/recover', { headers: browser })).json()).toMatchObject({
       session: null,
       view: { delegation: { recovery: true } },
     })
+  })
+
+  it.each([
+    ['missing Module', 403, 2],
+    ['no later Org guard', 400, 1],
+    ['terminal before Org guard', 400, 1],
+  ] as const)('refuses deferred delegation: %s', async (mode, status, loads) => {
+    const audit = vi.fn(async () => {})
+    const f = setup({ modules: true, impersonation: impersonation({ audit }) })
+    const { app, authorization: auth, browser } = f
+    const entered = vi.fn(() => new Response('entered'))
+    f.attachDelegation()
+    f.sqlite.exec("DELETE FROM organization_modules WHERE organization_id='chosen'")
+    app.use('/op/*', auth.requireAuth)
+    if (mode === 'terminal before Org guard') app.all('/op/:orgId', entered)
+    if (mode === 'no later Org guard') app.get('/op/:orgId', entered)
+    else app.get('/op/:orgId', auth.requireModule('calendar'), entered)
+    const response = await app.request('/op/chosen', {
+      headers: { ...browser, 'x-impersonation-id': 'delegation' },
+    })
+    expect(response.status).toBe(status)
+    expect(f.db.batch).toHaveBeenCalledTimes(loads)
+    expect(audit).not.toHaveBeenCalled()
+    expect(entered).not.toHaveBeenCalled()
+    expectUnprojected(f.onError)
+  })
+
+  it('sends identified ALL after the first guard to keyScope', async () => {
+    const entered = vi.fn(() => new Response('entered'))
+    const all: MiddlewareHandler<TestEnv> = async () => entered()
+    const keyScope = vi.fn(({ method }: { method: string }) => method === 'GET')
+    const f = setup({ keyScope, middleware: [all] })
+    const { headers } = await f.apiKey()
+    f.app.use('/op', f.authorization.requireAuth)
+    f.app.all('/op', all)
+    f.app.get('/op', entered)
+    expect((await f.app.request('/op', { headers })).status).toBe(403)
+    expect(keyScope.mock.calls.map(([route]) => route.method)).toEqual(['ALL', 'GET'])
+    expect(entered).not.toHaveBeenCalled()
   })
 })
 

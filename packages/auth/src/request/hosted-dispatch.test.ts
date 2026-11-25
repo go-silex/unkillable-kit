@@ -38,10 +38,11 @@ describe('hosted dispatch', () => {
     'shared path',
     'shared function',
     'identified terminal ALL',
+    'identified undeclared ALL before declared GET',
   ] as const)('%s preflight refusal enters no handler and does not load', async (mode) => {
     const entered = vi.fn(() => new Response('entered'))
     const fakeMiddleware: MiddlewareHandler<TestEnv> = async () => entered()
-    const f = setup({ middleware: mode === 'identified terminal ALL' ? [fakeMiddleware] : [] })
+    const f = setup({ middleware: mode.startsWith('identified') ? [fakeMiddleware] : [] })
     const { app, authorization: auth, db } = f
     const admission = await grant(f)
     switch (mode) {
@@ -67,6 +68,11 @@ describe('hosted dispatch', () => {
         break
       case 'identified terminal ALL':
         auth.hosted(app, () => app.all('/op', auth.requireAuth, fakeMiddleware))
+        break
+      case 'identified undeclared ALL before declared GET':
+        app.use('/op', auth.requireAuth)
+        app.all('/op', fakeMiddleware)
+        auth.hosted(app, () => app.get('/op', entered))
         break
     }
     const result = await invoke(f, admission).fetch({
@@ -158,6 +164,28 @@ describe('hosted dispatch', () => {
     expect(db.batch).toHaveBeenCalledTimes(2)
     expect(db.withSession).not.toHaveBeenCalled()
   })
+
+  it.each(['role', 'capability'] as const)(
+    'accepts an Org-bound route with only its Org %s guard',
+    async (kind) => {
+      const f = setup()
+      const { app, authorization: auth, db } = f
+      const admission = await grant(f)
+      const guard =
+        kind === 'role' ? auth.requireOrgRole('reader') : auth.requireOrgCapability('read')
+      auth.hosted(app, () =>
+        app.get('/org/:orgId', guard, (c) => c.json({ id: auth.view(c).organization?.id })),
+      )
+      const result = await invoke(f, admission).fetch({
+        method: 'GET',
+        path: '/org/chosen',
+        organizationId: 'chosen',
+      })
+      expect(result.status).toBe(200)
+      expect(await result.json()).toEqual({ id: 'chosen' })
+      expect(db.batch).toHaveBeenCalledTimes(1)
+    },
+  )
 
   it('requires declared Platform Role opt-in and never bypasses Organization membership', async () => {
     const f = setup()

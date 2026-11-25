@@ -20,11 +20,30 @@ export function handlerOf(route: RouterRoute): RouterRoute['handler'] {
   return handler
 }
 
+/** Only identified middleware preceding the first Kit guard is exempt. */
 export function terminalRoutes(routes: readonly RouterRoute[], policy: Routes): RouterRoute[] {
+  let guarded = false
   return routes.filter((route) => {
     const handler = handlerOf(route)
-    return !(policy.guards.has(handler) || policy.middleware.has(handler))
+    if (policy.guards.has(handler)) {
+      guarded = true
+      return false
+    }
+    return guarded || !policy.middleware.has(handler)
   })
+}
+
+export function hasOrganizationGuardBeforeTerminal(
+  routes: readonly RouterRoute[],
+  policy: Routes,
+  routeIndex: number,
+): boolean {
+  for (let i = routeIndex + 1; i < routes.length; i++) {
+    const guard = policy.guards.get(handlerOf(routes[i]!))
+    if (!guard) return false
+    if (guard === 'organization') return true
+  }
+  return false
 }
 
 export function inspectHostedRoutes(
@@ -33,16 +52,22 @@ export function inspectHostedRoutes(
   app: object,
   orgBound: boolean,
 ) {
-  const relevant = routes.filter((route) => !policy.middleware.has(handlerOf(route)))
-  const first = relevant[0]
-  if (!(first && policy.guards.has(handlerOf(first)))) return null
+  const start = routes.findIndex((route) => {
+    const handler = handlerOf(route)
+    return policy.guards.has(handler) || !policy.middleware.has(handler)
+  })
+  if (start === -1 || !policy.guards.has(handlerOf(routes[start]!))) return null
   let terminals = 0
   let orgGuard = !orgBound
   let platformRole = true
-  for (const route of relevant) {
-    const guard = policy.guards.get(handlerOf(route))
-    if (guard === 'organization') orgGuard = true
-    if (guard) continue
+  for (let i = start; i < routes.length; i++) {
+    const route = routes[i]!
+    const handler = handlerOf(route)
+    const guard = policy.guards.get(handler)
+    if (guard) {
+      if (guard === 'organization') orgGuard = true
+      continue
+    }
     const declaration = policy.declared.get(route)
     if (!orgGuard || declaration?.app !== app) return null
     if (!declaration.platformRole) platformRole = false

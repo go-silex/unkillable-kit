@@ -1,15 +1,21 @@
 import { OpenAPIHono } from '@hono/zod-openapi'
 import { hashApiKey } from '@kit/auth'
-import { deleteGrant, findRoleByKey } from '@kit/auth/repos/org-roles'
+import { MODULE_DENIAL } from '@kit/auth/hono'
+import { deleteGrant, findRoleByKey, listGrantsForRole } from '@kit/auth/repos/org-roles'
 import { apiKeys, baMember, baSession, baUser, impersonationSessions } from '@kit/auth/schema'
 import type { SqliteD1 } from '@kit/db/testing'
 import { countD1RoundTrips } from '@kit/db/testing'
+import { FLOWS_MODULE_ID } from '@kit/flows'
+import { listRunsForOrg } from '@kit/flows/repos'
 import { TASKS_MODULE_ID } from '@kit/tasks'
 import { eq } from 'drizzle-orm'
 import { expect, it, vi } from 'vitest'
 import { authorization, keyScopeRoutes } from '../middleware/authorization'
 import { withBetterAuth } from '../middleware/better-auth'
+import { withDb } from '../middleware/db'
 import { onError } from '../middleware/error-handler'
+import { requestIdMiddleware } from '../middleware/request-id'
+import { orgsRoutes } from '../routes/orgs'
 import { TENANCY_PASSWORD } from '../seed/tenancy-data'
 import { mintApiKey } from '../services/auth'
 import type { AppEnv } from '../types'
@@ -20,6 +26,7 @@ import {
   loginCookie,
   sessionHeaders,
 } from './api-fixture'
+import { enableFlowsForOrgs, expectError } from './flows-fixture'
 
 const ORG = 'org_acme'
 const OWNER = 'team-owner@kit.local'
@@ -279,8 +286,10 @@ it.each(['organization role', 'key scopes', 'delegation'] as const)(
     const key = await mintApiKey(db, 'user_staff', { organizationId: ORG, scopes: ['read'] })
     // Require identity in a prefix before the mounted Example endpoint can see :orgId.
     const edge = new OpenAPIHono<AppEnv>()
-    edge.use('/api/orgs/*', withBetterAuth, authorization.requireAuth)
-    edge.route('/', app)
+    edge.use('*', requestIdMiddleware, withDb, withBetterAuth)
+    edge.onError(onError)
+    edge.use('/api/orgs/*', authorization.requireAuth)
+    edge.route('/', orgsRoutes)
     const request = (DB = env.DB) =>
       edge.request(
         `/api/orgs/${ORG}${change === 'organization role' ? '/members' : ''}`,
@@ -328,6 +337,65 @@ it.each(['organization role', 'key scopes', 'delegation'] as const)(
     expect(refused.count).toBe(2)
   },
 )
+
+it('refuses to mint a Capability Grant after the Kit batch without repairing the Role–module grant or queuing a run', async () => {
+  const { app, env, db } = await setup()
+  await enableFlowsForOrgs(db, [ORG])
+  const cookie = await loginCookie(app, env, STAFF, TENANCY_PASSWORD)
+  const headers = sessionHeaders(cookie, ORG)
+  const published = await app.request(
+    '/api/flows/plans',
+    {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        yaml: `flows: v0
+plan:
+  id: grant-race
+permits:
+  tools: []
+tasks:
+  gate:
+    approve: {}
+`,
+      }),
+    },
+    env,
+  )
+  expect(published.status).toBe(201)
+  const { plan } = (await published.json()) as { plan: { id: string } }
+  const role = await findRoleByKey(db, ORG, 'admin')
+  expect(role).not.toBeNull()
+  const observed = observeRefusal(app)
+  const schedule = vi.fn(env.FLOW_RUN.create)
+  const batch = vi.fn(async (statements: object[]) => {
+    const result = await env.DB.batch(statements)
+    if (batch.mock.calls.length === 1) {
+      // The Kit snapshot still has the grant; the Product mint must read current policy.
+      expect(await deleteGrant(db, ORG, role!.id, FLOWS_MODULE_ID)).toBe(true)
+    }
+    return result
+  })
+
+  const refused = await app.request(
+    `/api/flows/plans/${plan.id}/runs`,
+    { method: 'POST', headers, body: '{}' },
+    {
+      ...env,
+      DB: instrumentBatch(env.DB, batch),
+      FLOW_RUN: { ...env.FLOW_RUN, create: schedule },
+    },
+  )
+  await expectError(refused, 403, 'FORBIDDEN', MODULE_DENIAL.insufficientGrant)
+  expect(batch).toHaveBeenCalledTimes(1)
+  const modules = observed.mock.calls[0]?.[0].organization?.modules
+  expect(modules?.get(FLOWS_MODULE_ID)).toMatchObject({ available: true, access: 'write' })
+  expect((await listGrantsForRole(db, role!.id)).map((grant) => grant.moduleId)).not.toContain(
+    FLOWS_MODULE_ID,
+  )
+  expect(await listRunsForOrg(db, ORG)).toEqual([])
+  expect(schedule).not.toHaveBeenCalled()
+})
 
 it('shares one failed primary load between two concurrent identity callers without projecting or dispatching', async () => {
   const { app, env } = await setup()

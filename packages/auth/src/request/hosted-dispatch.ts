@@ -113,7 +113,10 @@ function preflight<E extends Env>(
   return { policy, platformRole: declaration.platformRole }
 }
 
-/** In-process dispatch only. The capability dies when the serving shell closes it. */
+/**
+ * In-process dispatch only. The capability dies when the serving shell closes it.
+ * @internal — composed only by @kit/mcp/hosted.
+ */
 export function createHostedDispatch<E extends Env>(
   options: HostedDispatchOptions<E>,
 ): HostedDispatch {

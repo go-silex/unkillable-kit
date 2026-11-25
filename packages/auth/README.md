@@ -63,8 +63,9 @@ Configure `createRequestAuthorization` with `db`, `auth`, and an optional synchr
 Kit consults it for every matched terminal registration before any identity is projected.
 A key scope never substitutes for Organization or Role checks.
 
-List actual middleware functions in the factory's `middleware` option. Hono reports
-`app.use` and `app.all` as `ALL`; unidentified registrations count as terminal, even
+List actual middleware functions in the factory's `middleware` option and register them
+before any route guard. Hono reports `app.use` and `app.all` as `ALL`; unidentified
+registrations, and identified ones matched after a Kit guard, count as terminal, even
 when a handler can fall through. Never identify an operation handler as middleware.
 
 Mount the appropriate guard on each protected route and `betterAuthMount` on Better Auth.

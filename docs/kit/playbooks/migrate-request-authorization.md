@@ -17,8 +17,9 @@ From `@kit/auth`:
   `ResolveSessionInput`, `SessionPort`, `SessionPayload`: pass the shipping issuer directly.
   On Hono use `authorization.session(c)`; for a standalone read use
   `resolveRequestSession({ db, headers, auth })` from `@kit/auth/snapshot`. It returns `null` or
-  a session identity with `subject` (not `sub`), `sessionId` and `email`, not `exp`. It does not
-  write cookies or refresh the session.
+  a session identity with `subject` (not `sub`), `sessionId` and `email`, not `exp`. It throws a
+  `503` error when the database cannot be read, and an internal error when `auth` is not an issuer
+  from the Kit factory. It does not write cookies or refresh the session.
 - `createRequireAuth`, `DualAuthPorts`, `RequireAuthContext`, `resolveDualAuth`: use
   `createRequestAuthorization<AppEnv>` from `@kit/auth/hono` and mount its guards. Replace
   injected ports with the issuer and the primary D1 binding.
@@ -71,9 +72,12 @@ From `@kit/auth/repos/keys`:
    anonymous requests through, refuses machine credentials, and applies the Impersonation fence.
 5. The `keyScope` hook is synchronous and does no I/O. Without it, every API key is refused. Kit
    calls it for each terminal registration Hono matched and admits a key only when there is at
-   least one and every call returns `true`. A throw or a non-boolean is a `503`.
+   least one and every call returns `true`. A throw or a non-boolean is a `503`. The hook receives
+   the registration's method and path: Hono answers `HEAD` with a `GET` registration, so a key
+   allowed to read that route may also send `HEAD`.
 6. List each global `app.use` function in `middleware`; hoist inline middleware into constants
-   first. Hono reports `app.use` and `app.all` as `ALL`: an unidentified `ALL` registration counts as
+   first, and register them before any route guard. Hono reports `app.use` and `app.all` as `ALL`:
+   an unidentified `ALL` registration, or an identified one matched after a Kit guard, counts as
    terminal, so a key or a hosted dispatch reaching it is refused. Never list an operation handler.
 7. With Impersonation, pass `impersonation: { operation, fence, audit }`. `operation` classifies
    the request as `recovery`, `business` (Modules and `read`/`write`), `conflict` or `null`
@@ -129,10 +133,10 @@ meant to exist; no read or guard restores a missing grant.
   handler. Treat it as service unavailability; do not clear the session.
 - **`401`:** an API key is refused if its owner is inactive, is no longer a member of the key's
   Organization, or that Organization is inactive, even on routes without an Organization.
-- **`403` / `404`:** a valid key targeting a different Organization gets `403`, as does a
-  path/header conflict, a repeated `X-Org-Id` or a selection that differs from one already seen in
-  the request. Organization identifiers are compared exactly: the Kit no longer trims `X-Org-Id`,
-  so a client must send the exact ID. For session callers without an allowed bypass, a nonmember
+- **`400` / `403` / `404`:** a repeated or malformed `X-Org-Id` gets `400`. A valid key targeting a
+  different Organization gets `403`, as does a path/header conflict or a selection that differs from
+  one already seen in the request. Organization identifiers are compared exactly: the Kit no
+  longer trims `X-Org-Id`, so a client must send the exact ID. For session callers without an allowed bypass, a nonmember
   gets `404` and a member of a suspended Organization gets `403`. Super-admin bypass still requires
   an active Organization, is audited and needs explicit opt-in for writes. An unavailable Module
   returns `404` even with bypass.

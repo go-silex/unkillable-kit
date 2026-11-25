@@ -70,6 +70,7 @@ type ImpersonationAdmission<E extends Env> = {
   hasParsedBearer: boolean
   signOut: boolean
   nativeMount: boolean
+  canDeferModules: () => boolean
 }
 
 function isOperation(value: ImpersonationOperation | null): boolean {
@@ -131,9 +132,9 @@ function assertBusiness<E extends Env>(
   operation: ImpersonationOperation | null,
   fence: string | undefined,
   delegation: NonNullable<CoreSnapshot['delegation']>,
-) {
+): asserts operation is Extract<ImpersonationOperation, { kind: 'business' }> {
   const { row, eligible } = delegation
-  const { selection, selectionError, snapshot, nativeMount } = input
+  const { selection, selectionError, nativeMount } = input
   if (fence !== row.id) throw AppError.conflict('Impersonation context changed')
   if (operation?.kind === 'conflict') throw AppError.conflict('Impersonation already active')
   if (!eligible) throw AppError.forbidden('Impersonation is no longer eligible')
@@ -147,8 +148,9 @@ function assertBusiness<E extends Env>(
   if (selectionError) throw selectionError
   if (selection !== undefined && selection !== row.organizationId)
     throw AppError.forbidden('Organization mismatch')
-  assertDelegatedModules(snapshot.modules, operation, selection)
 }
+
+export type DeferredDelegation = (snapshot: CoreSnapshot, selection?: string) => Promise<'business'>
 
 export async function admitImpersonation<E extends Env>(input: ImpersonationAdmission<E>) {
   const { c, policy, snapshot, hasBearerScheme, hasParsedBearer, signOut } = input
@@ -174,12 +176,19 @@ export async function admitImpersonation<E extends Env>(input: ImpersonationAdmi
     return 'recovery' as const
   }
   assertBusiness(input, operation, fence, delegation)
-  try {
-    await policy.audit(c, Object.freeze({ row: delegation.row, method, path }))
-  } catch {
-    throw unavailable()
+  const admit: DeferredDelegation = async (scoped, selected) => {
+    assertDelegatedModules(scoped.modules, operation, selected)
+    try {
+      await policy.audit(c, Object.freeze({ row: delegation.row, method, path }))
+    } catch {
+      throw unavailable()
+    }
+    return 'business'
   }
-  return 'business' as const
+  if (input.selection === undefined && operation.modules.length && input.canDeferModules()) {
+    return admit
+  }
+  return admit(snapshot, input.selection)
 }
 
 export type AdmittedOrganization = Organization & Readonly<{ bypass: boolean; modules: Modules }>

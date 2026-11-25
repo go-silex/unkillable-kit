@@ -71,9 +71,13 @@ export function createRequestAuthorization<E extends Env>(
     organization = false,
   ): MiddlewareHandler<E> {
     const middleware: MiddlewareHandler<E> = async (c, next) => {
-      const stage = await authenticate(c, 'guard', orgOpts?.organizationId)
+      const stage = await authenticate(
+        c,
+        organization ? 'organization' : 'guard',
+        orgOpts?.organizationId,
+      )
       const org = check?.(c, stage)
-      project(c, stage, org ?? undefined)
+      if (!stage.pending) project(c, stage, org ?? undefined)
       await next()
     }
     routes.guards.set(middleware, organization ? 'organization' : 'identity')
@@ -115,23 +119,31 @@ export function createRequestAuthorization<E extends Env>(
       return guard((c, stage) => organization(c, stage, policy), policy, true)
     },
     requireOrgRole(minimum: OrgRoleKey) {
-      return guard((c, stage) => {
-        const org = stage.state.view.organization ?? organization(c, stage)
-        if (!(org.bypass || (org.role && roleAtLeast(org.role, minimum))))
-          throw AppError.forbidden('Insufficient organization role')
-        return org
-      })
+      return guard(
+        (c, stage) => {
+          const org = stage.state.view.organization ?? organization(c, stage)
+          if (!(org.bypass || (org.role && roleAtLeast(org.role, minimum))))
+            throw AppError.forbidden('Insufficient organization role')
+          return org
+        },
+        undefined,
+        true,
+      )
     },
     requireOrgCapability(capability: OrgCapability) {
-      return guard((c, stage) => {
-        const org = stage.state.view.organization ?? organization(c, stage)
-        if (org.bypass && capability === 'delete_org') {
-          throw AppError.forbidden('Super admin cannot delete organization via break-glass')
-        }
-        if (!(org.bypass || (org.role && roleHasCapability(org.role, capability))))
-          throw AppError.forbidden('Insufficient organization capability')
-        return org
-      })
+      return guard(
+        (c, stage) => {
+          const org = stage.state.view.organization ?? organization(c, stage)
+          if (org.bypass && capability === 'delete_org') {
+            throw AppError.forbidden('Super admin cannot delete organization via break-glass')
+          }
+          if (!(org.bypass || (org.role && roleHasCapability(org.role, capability))))
+            throw AppError.forbidden('Insufficient organization capability')
+          return org
+        },
+        undefined,
+        true,
+      )
     },
     requirePlatformRole(...roles: PlatformRole[]) {
       return guard((_c, stage) => {

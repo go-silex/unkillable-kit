@@ -5,22 +5,27 @@ import { BA_BASE_PATH } from '../better-auth-base-path'
 import { parseBearer } from '../keys'
 import type { PlatformRole } from '../org-roles'
 import { type CoreSnapshot, loadCore } from '../snapshot/core-load'
-import { isIdentifier, unavailable } from '../snapshot/core-rows'
+import { unavailable } from '../snapshot/core-rows'
 import { requestSessionCookie } from './effective-session-cookie'
 import {
   type HostedClaim,
   handlerOf,
+  hasOrganizationGuardBeforeTerminal,
   hostedClaims,
   inspectHostedRoutes,
   type Routes,
   terminalRoutes,
 } from './hosted-routes'
-import { organizationHeader } from './organization-selection'
+import { type Selection, selectOrganization } from './organization-selection'
 import type { RequestAuthorizationOptions } from './request-authorization'
-import { admitImpersonation, admitKeyScope, type OrgContextOpts } from './request-policy'
+import {
+  admitImpersonation,
+  admitKeyScope,
+  type DeferredDelegation,
+  type OrgContextOpts,
+} from './request-policy'
 import { type AdmittedView, EMPTY_VIEW } from './request-projection'
 
-type Selection = { id?: string; error?: AppError }
 type DelegationMode = 'recovery' | 'business' | undefined
 type State = {
   claim?: HostedClaim
@@ -29,7 +34,8 @@ type State = {
   selected?: string
   initial: { selection: Selection; promise: Promise<CoreSnapshot> }
   scoped?: Promise<CoreSnapshot>
-  policy?: Promise<DelegationMode>
+  policy?: Promise<DelegationMode | DeferredDelegation>
+  deferred?: Promise<'business'>
   view: AdmittedView
 }
 
@@ -38,41 +44,12 @@ export type Stage = {
   snapshot: CoreSnapshot
   selection: string | undefined
   delegationMode: DelegationMode
+  pending: boolean
   platformRole: PlatformRole | null | undefined
 }
 
 function isNativeSignOut<E extends Env>(c: Context<E>): boolean {
   return c.req.method === 'POST' && new URL(c.req.url).pathname === `${BA_BASE_PATH}/sign-out`
-}
-
-function select<E extends Env>(
-  c: Context<E>,
-  choose?: OrgContextOpts<E>['organizationId'],
-): Selection {
-  let header: string | undefined
-  try {
-    header = organizationHeader(c.req.raw.headers)
-  } catch (error) {
-    return { error: error instanceof AppError ? error : unavailable() }
-  }
-  const path = c.req.param('orgId')
-  if (path !== undefined && !isIdentifier(path))
-    return { error: AppError.validation('Invalid organization id') }
-  if (path !== undefined && header !== undefined && path !== header) {
-    return { error: AppError.forbidden('Organization mismatch') }
-  }
-  const supplied = path ?? header
-  if (!choose) return { id: supplied }
-  let chosen: unknown
-  try {
-    chosen = choose(c)
-  } catch {
-    return { error: unavailable() }
-  }
-  if (!isIdentifier(chosen)) return { error: AppError.validation('Invalid organization id') }
-  return supplied !== undefined && supplied !== chosen
-    ? { error: AppError.forbidden('Organization mismatch') }
-    : { id: chosen }
 }
 
 function assertReproduced(first: CoreSnapshot, second: CoreSnapshot) {
@@ -118,11 +95,12 @@ export function createRequestState<E extends Env>(
     }
   }
 
-  async function policies(c: Context<E>, state: State, snapshot: CoreSnapshot, mount: boolean) {
+  async function policies(c: Context<E>, state: State, snapshot: CoreSnapshot, mode: Invocation) {
     if (state.claim) return
     const matched =
       options.impersonation || snapshot.identity?.method === 'api_key' ? matchedRoutes(c) : []
-    const mode = options.impersonation
+    const mount = mode === 'mount'
+    const decision = options.impersonation
       ? await admitImpersonation({
           c,
           policy: options.impersonation,
@@ -134,14 +112,17 @@ export function createRequestState<E extends Env>(
           hasParsedBearer: Boolean(parseBearer(state.authorization)),
           signOut: isNativeSignOut(c),
           nativeMount: mount || matched.some((route) => handlerOf(route) === betterAuthMount),
+          canDeferModules: () =>
+            mode === 'guard' &&
+            hasOrganizationGuardBeforeTerminal(matched, routes, c.req.routeIndex),
         })
       : undefined
     if (!mount && snapshot.identity?.method === 'api_key')
       admitKeyScope(options.keyScope, terminalRoutes(matched, routes), snapshot.identity.scopes)
-    return mode
+    return decision
   }
 
-  type Invocation = 'guard' | 'mount' | 'helper'
+  type Invocation = 'guard' | 'organization' | 'mount' | 'helper'
   function hostedClaim(c: Context<E>, state: State | undefined, mode: Invocation) {
     const claim = state?.claim ?? hostedClaims.get(c.req.raw)
     if (!claim) return
@@ -166,7 +147,7 @@ export function createRequestState<E extends Env>(
     claim: HostedClaim | undefined,
     choose?: OrgContextOpts<E>['organizationId'],
   ): Selection {
-    const selection = select(c, choose)
+    const selection = selectOrganization(c, choose)
     if (selection.error) return selection
     const { id } = selection
     if (claim && id !== claim.organizationId && (!state || id !== undefined)) {
@@ -200,7 +181,8 @@ export function createRequestState<E extends Env>(
     const { claim } = state
     if (claim && !claim.lifetime.open) throw AppError.unauthorized()
     if (mode === 'mount') assertNativeMount(state, first.identity, delegationMode)
-    if (!first.identity && mode === 'guard') throw AppError.unauthorized()
+    if (!first.identity && (mode === 'guard' || mode === 'organization'))
+      throw AppError.unauthorized()
     const error = state.initial.selection.error ?? selection.error
     if (first.identity && error) throw error
   }
@@ -229,11 +211,7 @@ export function createRequestState<E extends Env>(
     return state.scoped
   }
 
-  async function authenticate(
-    c: Context<E>,
-    mode: Invocation,
-    choose?: OrgContextOpts<E>['organizationId'],
-  ): Promise<Stage> {
+  function prepare(c: Context<E>, mode: Invocation, choose?: OrgContextOpts<E>['organizationId']) {
     const authorization = c.req.header('authorization')
     const cookie = c.req.header('cookie')
     let state = requests.get(c)
@@ -251,16 +229,30 @@ export function createRequestState<E extends Env>(
       }
       requests.set(c, state)
     }
+    return { state, claim, selection }
+  }
+
+  async function authenticate(
+    c: Context<E>,
+    mode: Invocation,
+    choose?: OrgContextOpts<E>['organizationId'],
+  ): Promise<Stage> {
+    const { state, claim, selection } = prepare(c, mode, choose)
     const first = await state.initial.promise
-    state.policy ??= policies(c, state, first, mode === 'mount')
-    const delegationMode = await state.policy
+    state.policy ??= policies(c, state, first, mode)
+    const decision = await state.policy
+    const delegationMode = typeof decision === 'function' ? 'business' : decision
     assertAdmission(mode, state, first, selection, delegationMode)
     const selected = selection.id ?? state.selected
     assertBinding(first, selected, delegationMode)
-    const snapshot = await scoped(c, state, first, selected)
+    const pending = typeof decision === 'function' && mode !== 'organization' && !state.deferred
+    const snapshot = pending ? first : await scoped(c, state, first, selected)
+    if (typeof decision === 'function' && mode === 'organization')
+      state.deferred ??= decision(snapshot, selected)
+    if (state.deferred) await state.deferred
     const platformRole =
       delegationMode || (claim && !claim.platformRole) ? undefined : snapshot.platformRole
-    return { state, snapshot, selection: selected, delegationMode, platformRole }
+    return { state, snapshot, selection: selected, delegationMode, platformRole, pending }
   }
 
   const betterAuthMount: MiddlewareHandler<E> = async (c, next) => {
