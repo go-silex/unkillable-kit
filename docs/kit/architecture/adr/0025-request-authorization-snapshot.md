@@ -116,7 +116,9 @@ It returns one aggregate value, without a row cap inside the aggregate. D1 value
 limits still apply; an unreadable required result is unavailable, never a partial projection.
 The same statement reads Module policy once and skips aggregation if effective availability or
 the current read grant is absent; it reads Product rows only for an active Organization. The
-runtime guard still decides admission and reports errors.
+runtime guard still decides admission and reports errors. SQLite still resolves the projection's
+table and columns when it prepares the statement: a missing or incompatible projection schema
+fails the whole batch with `503`, even when the Module is unavailable or not granted.
 The Kit alone computes and compares the keyed fingerprint, bound to the view, Organization,
 User and current Module authority. The comparison releases neither the aggregate nor either
 fingerprint, does not call a Product decoder and does not admit other facts. Only the fully

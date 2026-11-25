@@ -118,7 +118,8 @@ app.patch('/orgs/:orgId/documents/:id',
   duplicates, and aggregates the complete matching set, not a count. The same statement skips
   the Product rows for an inactive Organization, an unavailable Module or no read grant. The
   bounded `defineAuthorizationFact` path is unchanged. D1 execution and result-size limits still
-  apply; there is no partial read or second query.
+  apply; there is no partial read or second query. A missing or incompatible projection table or
+  column fails the whole load with `503`, before the Module's `404` or `403`.
 - Send the opaque value back in `X-Authority-Fingerprint` (or configure the header name on the
   view). Credential and Organization refusals come first. An unavailable Module still yields
   `404`; no current read access yields `403` without comparison. With current read access, a

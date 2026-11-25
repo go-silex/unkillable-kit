@@ -56,6 +56,83 @@ async function expectRefusal(trace: Trace, status: number, message: string) {
   expect(await trace.response.json()).toEqual({ message })
 }
 
+const refusals = [
+  ['no session', 401, 'Unauthorized', 0],
+  ['unverified Bearer with a valid session cookie', 401, 'Unauthorized', 1],
+  ['Organization not admitted', 404, 'Organization not found', 1],
+  ['suspended Organization with JSONB in the projection', 403, 'Organization is not active', 1],
+  ['unavailable Module', 404, 'Module not available', 1],
+  ['no live read grant', 403, 'Insufficient module grant', 1],
+  ['missing fingerprint', 400, 'Invalid authority fingerprint', 1],
+  ['malformed fingerprint', 400, 'Invalid authority fingerprint', 1],
+  ['unreadable projection', 503, 'Authorization unavailable', 1],
+  ['unsupported JSONB projection value', 503, 'Authorization unavailable', 1],
+  ['D1 execution failure', 503, 'Authorization unavailable', 1],
+  ['D1 schema failure with an unavailable Module', 503, 'Authorization unavailable', 1],
+  ['failed sibling with a current fingerprint', 503, 'Authorization unavailable', 1],
+  ['failed sibling with a stale fingerprint', 503, 'Authorization unavailable', 1],
+  ['later Kit guard', 503, 'Authorization unavailable', 0],
+] as const
+
+function arrangeRefusal(
+  f: Awaited<ReturnType<typeof authorityFixture>>,
+  reason: (typeof refusals)[number][0],
+  fingerprint: string,
+  aggregate: string,
+) {
+  const headers = new Headers({ [header]: 'malformed' })
+  let location = path
+  switch (reason) {
+    case 'no session':
+      headers.set('cookie', '')
+      break
+    case 'unverified Bearer with a valid session cookie':
+      headers.set('authorization', `Bearer ${f.key}invalid`)
+      break
+    case 'Organization not admitted':
+      f.sqlite.exec('DELETE FROM member')
+      break
+    case 'suspended Organization with JSONB in the projection':
+      f.sqlite.exec("UPDATE organization SET status = 'suspended'")
+      f.sqlite.exec("UPDATE fixture_visibility SET label = jsonb(1) WHERE position = '01'")
+      break
+    case 'unavailable Module':
+      f.sqlite.exec('UPDATE platform_modules SET available = 0')
+      break
+    case 'no live read grant':
+      f.sqlite.exec('DELETE FROM organization_role_module_grants')
+      break
+    case 'missing fingerprint':
+      headers.delete(header)
+      break
+    case 'unreadable projection':
+      f.failure.value = aggregate
+      break
+    case 'unsupported JSONB projection value':
+      f.sqlite
+        .prepare("UPDATE fixture_visibility SET label = jsonb(?) WHERE position = '01'")
+        .run(JSON.stringify(privateLabel))
+      headers.set(header, fingerprint)
+      break
+    case 'D1 execution failure':
+    case 'D1 schema failure with an unavailable Module':
+      f.sqlite.exec('DROP TABLE fixture_visibility')
+      if (reason.includes('unavailable')) f.sqlite.exec('UPDATE platform_modules SET available = 0')
+      headers.set(header, fingerprint)
+      break
+    case 'failed sibling with a current fingerprint':
+    case 'failed sibling with a stale fingerprint':
+      f.failure.value = siblingLabel
+      headers.set(header, reason.includes('stale') ? '0'.repeat(64) : fingerprint)
+      break
+    case 'later Kit guard':
+      headers.set(header, fingerprint)
+      location += '/misplaced'
+      break
+  }
+  return { headers, location }
+}
+
 describe('HTTP Module authority fingerprint', () => {
   it('admits all 128 and 129 ordered tuples and detects change and removal of the final tuple', async () => {
     const f = await authorityFixture()
@@ -177,22 +254,7 @@ describe('HTTP Module authority fingerprint', () => {
     },
   )
 
-  it.each([
-    ['no session', 401, 'Unauthorized', 0],
-    ['unverified Bearer with a valid session cookie', 401, 'Unauthorized', 1],
-    ['Organization not admitted', 404, 'Organization not found', 1],
-    ['suspended Organization with JSONB in the projection', 403, 'Organization is not active', 1],
-    ['unavailable Module', 404, 'Module not available', 1],
-    ['no live read grant', 403, 'Insufficient module grant', 1],
-    ['missing fingerprint', 400, 'Invalid authority fingerprint', 1],
-    ['malformed fingerprint', 400, 'Invalid authority fingerprint', 1],
-    ['unreadable projection', 503, 'Authorization unavailable', 1],
-    ['unsupported JSONB projection value', 503, 'Authorization unavailable', 1],
-    ['D1 execution failure', 503, 'Authorization unavailable', 1],
-    ['failed sibling with a current fingerprint', 503, 'Authorization unavailable', 1],
-    ['failed sibling with a stale fingerprint', 503, 'Authorization unavailable', 1],
-    ['later Kit guard', 503, 'Authorization unavailable', 0],
-  ] as const)(
+  it.each(refusals)(
     'preserves the refusal for %s without exposing facts or running an effect',
     async (reason, status, message, trips) => {
       const f = await authorityFixture()
@@ -202,56 +264,9 @@ describe('HTTP Module authority fingerprint', () => {
       f.decode.mockClear()
       const noLoggedSecrets = watchLogs()
       const aggregate = JSON.stringify([['01', privateLabel]])
-      const headers = new Headers({ [header]: 'malformed' })
-      let location = path
-      switch (reason) {
-        case 'no session':
-          headers.set('cookie', '')
-          break
-        case 'unverified Bearer with a valid session cookie':
-          headers.set('authorization', `Bearer ${f.key}invalid`)
-          break
-        case 'Organization not admitted':
-          f.sqlite.exec('DELETE FROM member')
-          break
-        case 'suspended Organization with JSONB in the projection':
-          f.sqlite.exec("UPDATE organization SET status = 'suspended'")
-          f.sqlite.exec("UPDATE fixture_visibility SET label = jsonb(1) WHERE position = '01'")
-          break
-        case 'unavailable Module':
-          f.sqlite.exec('UPDATE platform_modules SET available = 0')
-          break
-        case 'no live read grant':
-          f.sqlite.exec('DELETE FROM organization_role_module_grants')
-          break
-        case 'missing fingerprint':
-          headers.delete(header)
-          break
-        case 'unreadable projection':
-          f.failure.value = aggregate
-          break
-        case 'unsupported JSONB projection value':
-          f.sqlite
-            .prepare("UPDATE fixture_visibility SET label = jsonb(?) WHERE position = '01'")
-            .run(JSON.stringify(privateLabel))
-          headers.set(header, fingerprint)
-          break
-        case 'D1 execution failure':
-          f.sqlite.exec('DROP TABLE fixture_visibility')
-          headers.set(header, fingerprint)
-          break
-        case 'failed sibling with a current fingerprint':
-        case 'failed sibling with a stale fingerprint':
-          f.failure.value = siblingLabel
-          headers.set(header, reason.includes('stale') ? '0'.repeat(64) : fingerprint)
-          break
-        case 'later Kit guard':
-          headers.set(header, fingerprint)
-          location += '/misplaced'
-          break
-      }
+      const { headers, location } = arrangeRefusal(f, reason, fingerprint, aggregate)
       const refused = await f.request({ method: 'POST', headers }, location)
-      if (reason === 'D1 execution failure') {
+      if (reason.startsWith('D1')) {
         expect(refused.trips).toBe(1)
         expect(refused.batches).toEqual([])
         expect(refused.prepared).not.toContain(effectSql)
