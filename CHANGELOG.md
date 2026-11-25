@@ -33,11 +33,27 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
   `This route requires a session cookie` or `null`. Every other guard calls it, even after
   `session(c)` in the same request; `betterAuthMount` refuses every key
   (go-silex/unkillable-kit#195).
+- **Product action:** Update clients and tests that pin refusal statuses. A valid key gets `403`
+  (`This route requires a session cookie`) from `requireSession`. `keyScope` judges a `HEAD` request
+  on the `GET` registration Hono matches, so a key allowed to read a route may also send `HEAD`. A
+  route that reads only `session(c)` gets `null` for a key and answers with its own refusal: the
+  Example MCP identity ticket route now returns `401` where the removed global key gate returned
+  `403`. Product code owns the order of a write precondition: unavailable Module `404`, stale write
+  `409`, then insufficient grant `403`. See [Handle admission responses](docs/kit/playbooks/migrate-request-authorization.md#handle-admission-responses)
+  and [Preserve a visibility-based write precondition](docs/kit/playbooks/migrate-request-authorization.md#preserve-a-visibility-based-write-precondition)
+  (go-silex/unkillable-kit#191, go-silex/unkillable-kit#195).
 
 ### Flows
 
 - Flows access predicates accept `authMethod: 'mcp'` and still deny hosted MCP principals run
   creation, approval decisions and cancellation (go-silex/unkillable-kit#195).
+
+### MCP
+
+- **Product action:** `PublicToolErrorCode` gains `UNAVAILABLE`
+  (`Authorization is temporarily unavailable.`), which a hosted tool returns when a dispatch answers
+  `5xx`. Code that switches exhaustively over the codes or keys a `Record` by them handles it
+  (go-silex/unkillable-kit#191).
 
 ### Root
 
@@ -59,6 +75,16 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
   through a package export, now fails R6: move that import into test code
   (go-silex/unkillable-kit#195).
 
+### Dependencies
+
+- Refresh the Kit dependency group and Bun lockfile. Update Wrangler to 4.166.0
+  with regenerated Worker declarations for every Kit Worker (go-silex/unkillable-kit#187).
+
+### CI
+
+- The inherited PR-title workflow pins `amannn/action-semantic-pull-request` 6.1.3
+  (go-silex/unkillable-kit#189).
+
 ## unkillable-kit/v0.8.1 — 2026-11-25
 
 ### Auth
@@ -67,11 +93,6 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
   and distinguish a stale write precondition (`409`) from a current write denial (`403`) in
   the same request authorization batch. See the [migration guide](docs/kit/playbooks/migrate-request-authorization.md#preserve-a-visibility-based-write-precondition)
   (go-silex/unkillable-kit#182).
-
-### Dependencies
-
-- Refresh the Kit dependency group and Bun lockfile. Update Wrangler to 4.166.0
-  with regenerated Worker declarations for every Kit Worker.
 
 ## unkillable-kit/v0.8.0 — 2026-11-24
 

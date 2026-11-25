@@ -146,6 +146,8 @@ meant to exist; no read or guard restores a missing grant.
   Repair the row: the Kit never admits on partial facts.
 - **`401`:** an API key is refused if its owner is inactive, is no longer a member of the key's
   Organization, or that Organization is inactive, even on routes without an Organization.
+- A route that reads only `session(c)` gets `null` for a key, so its own refusal applies: the
+  Example MCP identity ticket route answers `401`, where the removed global key gate answered `403`.
 - **`400` / `403` / `404`:** a repeated or malformed `X-Org-Id` gets `400`. A valid key targeting a
   different Organization gets `403`, as does a path/header conflict or a selection that differs from
   one already seen in the request. Organization identifiers are compared exactly: the Kit no
@@ -201,11 +203,12 @@ the gate.
 - In each tool, map validated arguments to the declared method and path, and designate the
   Organization from the validated input or a server default: `dispatch.fetch({ method, path,
   organizationId, body, query, headers })`. An Organization-free dispatch never acquires an
-  Organization. A nonempty `X-Org-Id` on the outer `/mcp` request must equal the designation. A
-  Kit guard reads a path parameter named `orgId` on its own registration as the Organization
-  selection: an Organization-free dispatch reaching such a guard is refused, and with a designation
-  every matched `orgId` parameter must equal it. Name a Platform operation's target otherwise (for
-  example `:targetOrgId`). Each `/mcp` request allows eight dispatches.
+  Organization, and the outer `X-Org-Id` does not constrain it. For an Organization-bound dispatch,
+  a nonempty `X-Org-Id` on the outer `/mcp` request must equal the designation. A Kit guard reads a
+  path parameter named `orgId` on its own registration as the Organization selection: an
+  Organization-free dispatch reaching such a guard is refused, and with a designation every matched
+  `orgId` parameter must equal it. Name a Platform operation's target otherwise (for example
+  `:targetOrgId`). Each `/mcp` request allows eight dispatches.
 - `query` takes a string or an array per key: `{ tag: ['a', 'b'] }` sends `?tag=a&tag=b`.
 - `headers` carries Product headers such as `Idempotency-Key`, only when every matched
   registration declares the name in `headers: ['Idempotency-Key']`; the Kit sets `X-Org-Id` and
@@ -234,10 +237,21 @@ the gate.
 | `defineAuthorizationProjection`, `moduleAuthority`, `X-Authority-Fingerprint`                                               | Product precondition after `requireOrgContext()` ([pattern](#preserve-a-visibility-based-write-precondition)) |
 | hosted `facts`, `authorization.fact`, `forOrganization`                                                                     | `dispatch` capability with a designated Organization                                                          |
 | hosted `denyFact`                                                                                                           | `grantAdmission`                                                                                              |
+| `ModuleAuthorizationFacts` (`@kit/auth/hono`)                                                                               | `modules: true`; read `view(c).organization.modules`                                                          |
+| `AuthorizationFact`, `AuthorizationProjection`, `AuthorizationRow` (`@kit/auth/snapshot`)                                   | Remove; type Product query results in Product code                                                            |
+| `HostedAuthorization`; `authorizeHostedPrincipal` options `organizationId`, `facts`, `denyFact`, `admit`                    | `authorizeHostedPrincipal({ db, principal })` returning `HostedAdmission` (below)                             |
 
 - Move a `denyFact` barrier into `grantAdmission` before upgrading, so the denial stays in force
   without a gap. `grantAdmission` runs on resource requests and code/refresh exchanges, may perform
   its own I/O, and must return `true` to allow.
+- `authorizeHostedPrincipal({ db, principal })` from `@kit/auth/snapshot` takes only the
+  provider-verified principal and returns a `HostedAdmission`: `{ status: 'allowed', principal }`
+  with a sealed `HostedPrincipal`, `{ status: 'denied' }` or `{ status: 'unavailable' }`. It no
+  longer returns `organization`, `fact` or `forOrganization`: a tool designates the Organization at
+  each dispatch. Move an `admit` policy into `grantAdmission`, like a `denyFact` barrier.
+- `PublicToolErrorCode` from `@kit/mcp` gains `UNAVAILABLE`; map a `5xx` dispatch to
+  `PublicToolError('UNAVAILABLE')`. Code that switches exhaustively over the codes or keys a
+  `Record` by them must handle it.
 - A hosted client that selected its Organization only through the outer `X-Org-Id` header must now
   designate it from tool input or a server default.
 - Fingerprints issued under `v0.8.1` stop matching. A client holding one gets the Product's new
