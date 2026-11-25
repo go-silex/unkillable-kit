@@ -11,7 +11,7 @@ import {
   siblingLabel,
   type Trace,
   watchLogs,
-} from './request/authority-http.fixture'
+} from './authority-http.fixture'
 
 type DatabaseFixture = { sqlite: Database.Database }
 
