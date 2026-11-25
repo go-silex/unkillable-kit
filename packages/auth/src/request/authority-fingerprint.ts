@@ -88,7 +88,10 @@ function fingerprintPayload(
   try {
     const canonicalProjection = readAuthorizationProjection(projection, snapshot.rows(projection))
     // JSON escapes newlines within the scope, so the separator uniquely frames the projection.
-    return encoder.encode(`${JSON.stringify(scope)}\n${canonicalProjection}`)
+    // TextEncoder creates a fresh ArrayBuffer; older Worker declarations omit that guarantee.
+    return encoder.encode(
+      `${JSON.stringify(scope)}\n${canonicalProjection}`,
+    ) as Uint8Array<ArrayBuffer>
   } catch {
     throw authUnavailable()
   }
