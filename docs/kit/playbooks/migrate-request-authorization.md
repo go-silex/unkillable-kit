@@ -111,6 +111,12 @@ No public `@kit/mcp` or `@kit/mcp/hosted` exports were removed.
   refuse `null` (missing or mismatched selection, inactive Organization or no membership). Then
   apply the tool's policy before reading scoped facts or dispatching. The header itself grants
   no access. Organization-free tools such as `whoami` need no header.
+- To let tools designate their Organization in validated input instead, with an optional server
+  default when the selector is omitted, set `organizationSelection: 'tool-input'` and register each
+  scoped tool through `authorization.organizationTool`, declaring its Organization facts on the
+  tool. Change the mode, the scoped tools and their fact declarations together; reverting drops
+  clients that send no header. Each scoped call adds one D1 batch. See
+  [Organization selection in tool input](../../../packages/mcp/README.md#organization-selection-in-tool-input).
 - Pass `denyFact` for deny-only policy on the same D1 binding: use a `hosted-grant` descriptor
   whose matching row signals denial. Keep `grantAdmission` for additional policy outside that
   binding. This applies to request admission and code/refresh exchange.

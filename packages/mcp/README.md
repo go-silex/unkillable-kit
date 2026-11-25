@@ -66,7 +66,7 @@ Import budgets, env key names, whoami status enum, and public error codes from `
 
 ## Hosted shell
 
-`@kit/mcp/hosted` is the optional Worker authorization-server shell ([ADR-0015](../../docs/kit/architecture/adr/0015-mcp-remote-oauth-worker.md) D8). Its only exports are `createHostedMcpWorker`, `createProductClient`, `HostedMcpWorker`, `HostedMcpWorkerOptions`, `ConsentPolicy`, `ConsentPresentation`, `Fallthrough`, `HostedMcpEnv`, `IdentitySource`, and `ACCESS_TOKEN_TTL_SECONDS`. Declare `@cloudflare/workers-oauth-provider` and `fastmcp` in the App that imports this subpath. Root `@kit/mcp` loads neither peer.
+`@kit/mcp/hosted` is the optional Worker authorization-server shell ([ADR-0015](../../docs/kit/architecture/adr/0015-mcp-remote-oauth-worker.md) D8). Its only exports are `createHostedMcpWorker`, `createProductClient`, `isReservedPath`, `HostedMcpWorker`, `HostedMcpWorkerOptions`, `OrganizationSelection`, `OrganizationToolAuthorization`, `OrganizationToolDefinition`, `ConsentPolicy`, `ConsentPresentation`, `Fallthrough`, `HostedMcpEnv`, `IdentitySource`, and `ACCESS_TOKEN_TTL_SECONDS`. Declare `@cloudflare/workers-oauth-provider` and `fastmcp` in the App that imports this subpath. Root `@kit/mcp` loads neither peer.
 
 ```ts
 import { createHostedMcpWorker } from '@kit/mcp/hosted'
@@ -109,7 +109,47 @@ export default { ...productWorker, fetch: hosted.fetch }
 
 The hosted shell requires a `DB` D1 binding pointing at the Product's Better Auth database. It uses one live authorization batch on identity resolution, consent submission, each code or refresh exchange, and each verified MCP request. Missing or disabled users are denied; failed or unrecognized required reads return `503`.
 
-For `/mcp`, the shell fixes the optional `X-Org-Id` before the batch. The header grants no access. Register Product resource `facts` using `defineAuthorizationFact` from `@kit/auth/snapshot`. After grant admission, tools can read non-Organization facts with `authorization.fact(descriptor)`. An Organization-scoped tool must first call `authorization.forOrganization(validatedOperationOrgId)` and refuse `null` (missing or mismatched selection, inactive Organization or no membership), then apply its own access policy before reading scoped facts or dispatching. This never reloads authorization or revokes the OAuth grant. An Organization-free tool such as `whoami` need not select an Organization.
+In the default header mode, the shell fixes the optional `X-Org-Id` for `/mcp` before the batch. The header grants no access. Register Product resource `facts` using `defineAuthorizationFact` from `@kit/auth/snapshot`. After grant admission, tools can read non-Organization facts with `authorization.fact(descriptor)`. An Organization-scoped tool must first call `authorization.forOrganization(validatedOperationOrgId)` and refuse `null` (missing or mismatched selection, inactive Organization or no membership), then apply its own access policy before reading scoped facts or dispatching. This never reloads authorization or revokes the OAuth grant. An Organization-free tool such as `whoami` need not select an Organization.
+
+### Organization selection in tool input
+
+Header selection is the default. An App whose tools name their Organization in their arguments sets `organizationSelection: 'tool-input'` ([ADR-0025](../../docs/kit/architecture/adr/0025-request-authorization-snapshot.md) D3). Outer `/mcp` admission then loads no Organization facts, `authorization.forOrganization` is absent, and `register` receives `authorization.organizationTool(definition)`, which returns a `ToolDef` for the usual catalogue. Change the mode, the scoped tools and their fact declarations together; reverting to header selection drops clients that send no `X-Org-Id`.
+
+```ts
+register(server, { env, authorization }) {
+  createToolCatalogue([
+    authorization.organizationTool({
+      name: 'list_contacts',
+      description: 'List contacts in an Organization.',
+      input: z.object({ organizationId: z.string().min(1).optional() }).strict(),
+      organizationId: (input) => input.organizationId ?? env.DEFAULT_ORGANIZATION_ID,
+      policyFacts: [contactAccess],
+      allow: ({ fact }) => fact(contactAccess).length > 0,
+      facts: [contacts],
+      async execute(input, { organizationId, fact }) {
+        return { organizationId, contacts: fact(contacts) }
+      },
+    }),
+  ]).registerAll(server)
+}
+```
+
+- **Designation.** `organizationId` runs after the catalogue's schema and input budget. It is synchronous, performs no I/O and returns the validated selector, or the server default only when the selector is omitted; anything but a nonempty string without surrounding whitespace is missing. FastMCP validates arguments and the catalogue validates them again, so the schema must keep an omitted selector absent, reject an invalid supplied one instead of erasing it, and give the same result when parsed twice. A nonempty `X-Org-Id` must equal the designation; a comma makes it ambiguous. The header never selects.
+- **Scoped batch.** Each dispatch past designation runs one primary D1 batch bound to the verified User, grant and client and to the designated ID: live User state, `denyFact`, Organization status, membership, and the tool's `policyFacts` and `facts`. It requires an active Organization and membership, with no Platform Role bypass. At most eight scoped batches run per HTTP request, failures included; tools without an Organization, such as `whoami`, do not count.
+- **Policy, then handler.** Every required result is validated before any is released. A refused core check runs no fact decoder or `allow`. `allow` sees the validated input, `organization: { id, role }` and only `policyFacts`. `role` is the membership's assigned Organization Role key; to rely on a Role record or its grants, declare an Organization-correlated fact for it and check it in `allow`. `facts` are decoded only after a literal `true`, which also calls `execute` with the admitted `organizationId`; act on that ID, never on a second input field. `policyFacts` and `facts` must be Organization-scoped and disjoint, or `organizationTool` throws at registration.
+- **Results.** Each call returns its own result; siblings in a JSON-RPC batch are unaffected. Nothing revokes OAuth. D1 is read again at each scoped dispatch; provider and `grantAdmission` denials apply from the next HTTP request once visible to their stores.
+
+| Case                                                                                 | Result                                                     | Scoped D1 batches |
+| ------------------------------------------------------------------------------------ | ---------------------------------------------------------- | ----------------- |
+| No selector and no default, ambiguous or conflicting `X-Org-Id`                      | refusal `{ code: 'ORGANIZATION_SELECTION_INVALID' }`       | 0                 |
+| Ninth or later scoped dispatch in the HTTP request                                   | refusal `{ code: 'ORGANIZATION_CALL_LIMIT' }`              | 0                 |
+| User, grant, Organization or membership denied, or `allow` returns `false`           | refusal `{ code: 'ORGANIZATION_REFUSED' }`, with no reason | 1                 |
+| Failed or unreadable batch, decoder failure, `allow` throws or returns a non-boolean | public error `UNAVAILABLE`                                 | 1                 |
+| `allow` returns `true`                                                               | `execute` result                                           | 1                 |
+
+`@kit/mcp` exports the refusal codes as `ORGANIZATION_REFUSAL_CODES` and the limit as `MAX_SCOPED_DISPATCHES_PER_REQUEST`. As for every public error, EdgeFastMCP returns `UNAVAILABLE` as error text carrying its fixed message, while refusals keep their structured payload. Input that fails the schema gets EdgeFastMCP's validation error and never reaches designation.
+
+Per HTTP request, the shell makes 0 authorization D1 calls when the provider rejects the token; 1 for `tools/list`, `whoami` or a refusal before the scoped batch; 2 for one scoped dispatch, even a failed one; and 1 + min(N, 8) for a JSON-RPC batch, where N counts dispatches that pass designation. Provider KV, `grantAdmission` and business operations are not counted. Header mode stays at 1.
 
 For a deny-only policy stored on the same D1 binding, pass `denyFact`, a `hosted-grant` descriptor. A row correlated to the verified User, grant and client denotes a decided denial. The Kit checks presence without decoding or returning its rows. This applies to both `/mcp` and code/refresh exchange; identity and consent are account-only.
 

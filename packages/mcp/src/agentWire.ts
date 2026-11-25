@@ -37,6 +37,7 @@ export const PUBLIC_TOOL_ERROR_CODES = [
   'UNAUTHORIZED',
   'BAD_CONFIG',
   'UNREACHABLE',
+  'UNAVAILABLE',
   'INTERNAL_ERROR',
 ] as const
 
@@ -48,8 +49,18 @@ export const PUBLIC_TOOL_ERROR_MESSAGES: Record<PublicToolErrorCode, string> = {
   UNAUTHORIZED: 'Missing or invalid API credentials for this tool.',
   BAD_CONFIG: 'Server configuration is incomplete or invalid for this tool.',
   UNREACHABLE: 'Upstream service was unreachable.',
+  UNAVAILABLE: 'Authorization is temporarily unavailable; retry later.',
   INTERNAL_ERROR: 'Internal tool error.',
 }
+
+/** Hosted tool-input Organization refusals, separate from infrastructure errors. */
+export const ORGANIZATION_REFUSAL_CODES = [
+  'ORGANIZATION_SELECTION_INVALID',
+  'ORGANIZATION_CALL_LIMIT',
+  'ORGANIZATION_REFUSED',
+] as const
+
+export const MAX_SCOPED_DISPATCHES_PER_REQUEST = 8
 
 /** Input budget defaults (fail-closed before handler body). */
 export const INPUT_BUDGET = {

@@ -29,6 +29,11 @@ import {
   TOKEN_PATH,
 } from './host-policy'
 import { normalizeIdentity } from './identity-props'
+import {
+  isOrganizationFact,
+  type OrganizationToolAuthorization,
+  organizationToolForRequest,
+} from './organization-tool'
 import { snapshotPresentation } from './presentation'
 import { type GrantAdmission, type GrantPrincipal, tokenAdmission } from './token-admission'
 
@@ -40,18 +45,20 @@ export type HostedMcpWorker<Env extends HostedMcpEnv> = {
   fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response>
 }
 
-export type HostedMcpWorkerOptions<Env extends HostedMcpEnv> = {
+export type OrganizationSelection = 'header' | 'tool-input'
+
+/** Called after grant admission. `env` has no `OAUTH_PROVIDER`. */
+type HostedRegistration<Env, Authorization> = (
+  server: EdgeFastMCP,
+  call: { identity: McpIdentity; env: Env; authorization: Authorization },
+) => void
+
+export type HostedMcpWorkerOptions<
+  Env extends HostedMcpEnv,
+  Selection extends OrganizationSelection = 'header',
+> = {
   name: string
   version?: string
-  /**
-   * Called after grant admission. `env` has no `OAUTH_PROVIDER`. Tools needing an
-   * organization must first call `authorization.forOrganization` with their validated
-   * operation organization ID, then apply their own narrower access policy.
-   */
-  register: (
-    server: EdgeFastMCP,
-    call: { identity: McpIdentity; env: Env; authorization: HostedAuthorization },
-  ) => void
   /** Read-only facts for resource requests, visible only through admitted accessors. */
   facts?: readonly AuthorizationFact<unknown>[]
   /** Presence of a matching hosted-grant fact denies resource and token admission. */
@@ -72,7 +79,16 @@ export type HostedMcpWorkerOptions<Env extends HostedMcpEnv> = {
   refreshTokenTTL?: number
   /** Product routes when the shell fronts the product Worker. Omitted: 404. */
   fallthrough?: Fallthrough<Env>
-}
+} & (Selection extends 'tool-input'
+  ? {
+      organizationSelection: 'tool-input'
+      register: HostedRegistration<Env, OrganizationToolAuthorization>
+    }
+  : {
+      organizationSelection?: 'header'
+      /** Bind to the validated operation Organization with `authorization.forOrganization`. */
+      register: HostedRegistration<Env, HostedAuthorization>
+    })
 
 const REGISTER_DENIED = JSON.stringify({ error: 'access_denied' })
 /** Cloudflare KV's minimum expiration window; the provider refuses a shorter refresh TTL. */
@@ -138,7 +154,7 @@ function admissionResponse(outcome: 'denied' | 'unavailable', request: Request):
 }
 
 export function createHostedMcpWorker<Env extends HostedMcpEnv>(
-  opts: HostedMcpWorkerOptions<Env>,
+  opts: HostedMcpWorkerOptions<Env, OrganizationSelection>,
 ): HostedMcpWorker<Env> {
   const consent = opts.consent ?? 'always'
   const consentPresentation = snapshotPresentation(opts.consentPresentation)
@@ -148,6 +164,13 @@ export function createHostedMcpWorker<Env extends HostedMcpEnv>(
   }
   const denyFact = opts.denyFact
   const facts = opts.facts ? [...opts.facts] : undefined
+  const selection = opts.organizationSelection
+  if (selection !== undefined && selection !== 'header' && selection !== 'tool-input') {
+    throw new TypeError('organizationSelection must be header or tool-input')
+  }
+  if (selection === 'tool-input' && facts?.some(isOrganizationFact)) {
+    throw new TypeError('Tool-input Organization facts must be declared on individual tools')
+  }
   const tokenExchangeCallback = tokenAdmission(grantAdmission, denyFact)
   const ttl = opts.refreshTokenTTL
   // The provider checks this when built, per request, where a bad value would fail every route.
@@ -164,17 +187,18 @@ export function createHostedMcpWorker<Env extends HostedMcpEnv>(
       const verified = await requestPrincipal(identity, env, ctx)
       if (verified.status !== 'allowed') return admissionResponse(verified.status, request)
       const { principal } = verified
-      const organizationId = request.headers.get('X-Org-Id')?.trim()
+      const header = request.headers.get('X-Org-Id')?.trim()
+      const organizationId = selection === 'tool-input' || !header ? undefined : header
       const callerEnv = stripOauthHelper(env)
       const outcome = await authorizeHostedPrincipal({
         db: env.DB,
         principal,
-        ...(organizationId ? { organizationId } : {}),
-        ...(facts ? { facts } : {}),
-        ...(denyFact ? { denyFact } : {}),
-        ...(grantAdmission
-          ? { admit: () => grantAdmission({ phase: 'request', ...principal }, callerEnv) }
-          : {}),
+        organizationId,
+        facts,
+        denyFact,
+        admit: grantAdmission
+          ? () => grantAdmission({ phase: 'request', ...principal }, callerEnv)
+          : undefined,
       })
       if (outcome.status !== 'allowed') return admissionResponse(outcome.status, request)
       const server = new EdgeFastMCP({
@@ -183,7 +207,24 @@ export function createHostedMcpWorker<Env extends HostedMcpEnv>(
         mcpPath: MCP_PATH,
       })
       const { fact, forOrganization } = outcome
-      opts.register(server, { identity, env: callerEnv, authorization: { fact, forOrganization } })
+      if (opts.organizationSelection === 'tool-input') {
+        const organizationTool = organizationToolForRequest(header, {
+          db: env.DB,
+          principal,
+          denyFact,
+        })
+        opts.register(server, {
+          identity,
+          env: callerEnv,
+          authorization: { fact, organizationTool },
+        })
+      } else {
+        opts.register(server, {
+          identity,
+          env: callerEnv,
+          authorization: { fact, forOrganization },
+        })
+      }
       return server.fetch(request)
     },
   }
