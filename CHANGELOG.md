@@ -13,6 +13,11 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
   the same request authorization batch. See the [migration guide](docs/kit/playbooks/migrate-request-authorization.md#preserve-a-visibility-based-write-precondition)
   (go-silex/unkillable-kit#182).
 
+### Dependencies
+
+- Refresh the Kit dependency group and Bun lockfile. Update Wrangler to 4.166.0
+  with regenerated Worker declarations for every Kit Worker.
+
 ## unkillable-kit/v0.8.0 — 2026-11-24
 
 ### Auth
