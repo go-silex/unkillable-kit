@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { defineAuthorizationFact } from './facts'
+import {
+  defineAuthorizationFact,
+  defineAuthorizationProjection,
+  isAuthorizationProjection,
+} from './facts'
 
 const productFact = {
   table: { name: 'product_preferences', columns: ['user_id', 'flag'] },
@@ -98,5 +102,72 @@ describe('authorization fact declarations', () => {
         scope: { kind: 'hosted-grant', userId: 'user_id', grantId: 'user_id', clientId: 'flag' },
       }),
     ).toThrow()
+  })
+})
+
+const productProjection = {
+  table: { name: 'product_shares', columns: ['organization_id', 'user_id', 'visible_id'] },
+  scope: { kind: 'organization-role', organizationId: 'organization_id', userId: 'user_id' },
+  select: ['visible_id'],
+} as const
+
+function registerProjection(input: unknown) {
+  return defineAuthorizationProjection(input as typeof productProjection)
+}
+
+describe('authorization projection declarations', () => {
+  it('rejects caller-controlled decoding, SQL, ordering, operators and source caps', () => {
+    for (const options of [
+      { decode: () => '[]' },
+      { sql: 'SELECT 1' },
+      { orderBy: ['visible_id'] },
+      { limit: 1 },
+      { maxRows: 128 },
+      { where: { visible_id: { eq: 'visible' } } },
+      { where: { missing: null } },
+      { select: ['lower(visible_id)'] },
+      { select: ['visible_id', 'VISIBLE_ID'] },
+    ]) {
+      expect(() => registerProjection({ ...productProjection, ...options })).toThrow(
+        'Invalid authorization fact declaration',
+      )
+    }
+  })
+
+  it('requires both distinct registered anchors in an exact member scope', () => {
+    const { scope } = productProjection
+    for (const invalidScope of [
+      { kind: scope.kind, organizationId: scope.organizationId },
+      { kind: scope.kind, userId: scope.userId },
+      { ...scope, userId: undefined },
+      { ...scope, userId: 'missing' },
+      { ...scope, userId: 'ORGANIZATION_ID' },
+      { ...scope, roleId: undefined },
+      { ...scope, kind: 'delegated-role' },
+      { ...scope, kind: 'organization' },
+    ]) {
+      expect(() => registerProjection({ ...productProjection, scope: invalidScope })).toThrow(
+        'Invalid authorization fact declaration',
+      )
+    }
+  })
+
+  it('rejects Kit tables and secret-bearing registered columns', () => {
+    for (const table of [
+      { name: 'member', columns: ['organization_id', 'user_id', 'role'] },
+      { name: 'session', columns: [...productProjection.table.columns] },
+      { ...productProjection.table, columns: [...productProjection.table.columns, 'secret'] },
+    ]) {
+      expect(() =>
+        registerProjection({ ...productProjection, table, select: ['user_id'] }),
+      ).toThrow('Invalid authorization fact declaration')
+    }
+  })
+
+  it('brands only the registered descriptor, not copies or ordinary facts', () => {
+    const projection = defineAuthorizationProjection(productProjection)
+    expect(isAuthorizationProjection(projection)).toBe(true)
+    expect(isAuthorizationProjection({ ...projection })).toBe(false)
+    expect(isAuthorizationProjection(defineAuthorizationFact(productFact))).toBe(false)
   })
 })

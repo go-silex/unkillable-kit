@@ -64,6 +64,13 @@ unreadable required result is not confirmed absence. It stops dispatch with a ge
 implicit allow. Decided denials retain their status and ordering; `503` can precede a denial which depends on a failed
 load.
 
+An opted-in Module authority precondition has one additional decision between current read
+admission and enforcement of the Module's write grant. After the credential, Impersonation fence,
+Organization and other planned Kit checks, an ordinary member session must have current read
+access to the available Module even to compare. Only this comparison may return `409` before
+the write grant is enforced. A match does not satisfy the write grant or any check at the point of
+effect. Unavailable Modules and callers without read access retain their existing denials.
+
 Before the first load, fix one plan for the matched endpoint, including its credential mode, Organization selection
 and registered facts. Global and wildcard middleware use the same endpoint plan as the later guards: Hono matches more
 than one registration, and a global middleware's own `c.req.param('orgId')` need not see the endpoint's parameter.
@@ -102,6 +109,15 @@ through a typed accessor only after the credential, applicable key-scope or MCP 
 Kit guards for the dispatch scope have succeeded. A Product guard can then use those facts to narrow its admitted
 scope before the handler; no fact adds Kit authority. Sanitize failures without logging raw SQL, bind values or
 returned rows.
+
+For this precondition, the Kit compiles a complete ordered projection of declared scalar fields
+from a real Product table, with both the Organization and member User correlated to the candidate.
+It returns one aggregate value, without a row cap inside the aggregate. D1 value and execution
+limits still apply; an unreadable result is unavailable, never a partial projection. The Kit alone
+computes and compares the keyed fingerprint, bound to the view, Organization, User and current
+Module authority. The comparison releases neither the aggregate nor either fingerprint, does not
+call a Product decoder and does not admit other facts. Only the fully admitted read route can
+obtain the fingerprint through the accessor for that view.
 
 The App owns its Module registry and supplies two facts separately: effective availability (available on the
 Deployment and enabled in the Organization) and the current Role–module grant. The Kit decides `404` for an

@@ -1,8 +1,10 @@
 import { AppError } from '@kit/core'
 import type { Context, Env } from 'hono'
+import type { BetterAuthLike } from '../better-auth-port'
 import { accessAllows, isModuleAccess } from '../module-grants'
 import type { PlatformRole } from '../org-roles'
 import type { ApiKeyScope, AuthIdentity } from '../require-auth'
+import type { SessionCookieInput } from '../snapshot/cookie'
 import type { AuthorizationFact } from '../snapshot/facts'
 import type { RequestSnapshot } from '../snapshot/load'
 import {
@@ -11,6 +13,7 @@ import {
   type ModuleAuthorizationFacts,
   selectedOrganization,
 } from './authorization-plan'
+import { requestSessionCookie } from './effective-session-cookie'
 
 export type OrgContextOpts = Readonly<{
   allowSuperAdmin?: boolean
@@ -41,12 +44,34 @@ export const MODULE_DENIAL = {
 export type GuardState<E extends Env> = {
   plan: AuthorizationPlan<E>
   load: Promise<RequestSnapshot>
+  authority?: { secret?: string; fingerprint?: string }
   factsAdmitted: boolean
   authenticated: boolean
   keyScope: boolean
   fence: boolean
   delegated: 'recovery' | 'business' | null
   org: Readonly<{ role: string | null; bypass: boolean }> | undefined
+}
+
+export function resolveRequestSessionCookie<E extends Env>(
+  c: Context<E>,
+  options: Readonly<{ auth: (c: Context<E>) => BetterAuthLike | undefined }>,
+  allowCookie: boolean,
+  authority: GuardState<E>['authority'],
+): SessionCookieInput | undefined {
+  if (!allowCookie) return
+  const header = c.req.header('cookie')
+  if (!header) return
+  try {
+    const auth = options.auth(c)
+    if (!auth) return
+    const cookie = requestSessionCookie(auth, header)
+    if (authority) authority.secret = cookie.secret
+    return cookie
+  } catch (error) {
+    if (authority) throw authUnavailable()
+    throw error
+  }
 }
 
 export function contextVariables<E extends Env>(c: Context<E>) {
@@ -69,6 +94,7 @@ export function snapshotFacts<E extends Env>(
   plan: AuthorizationPlan<E>,
 ): AuthorizationFact<unknown>[] {
   const facts = new Set(plan.facts)
+  if (plan.authority) facts.add(plan.authority.projection)
   for (const policy of plan.modules.values()) {
     if (
       policy.availability.scope.kind !== 'organization' ||
@@ -132,11 +158,13 @@ export function assertModule(
   const fact = mode === 'delegated' ? policy.delegatedGrant : policy.grant
   const [grant, extraGrant] = fact ? snapshot.rows(fact) : []
   if (extraGrant) throw authUnavailable()
-  const access = grant?.access
-  if (grant && !(typeof access === 'string' && isModuleAccess(access))) throw authUnavailable()
-  if (typeof access !== 'string' || !isModuleAccess(access) || !accessAllows(access, op)) {
+  if (!grant) throw AppError.forbidden(MODULE_DENIAL.insufficientGrant)
+  const { access } = grant
+  if (typeof access !== 'string' || !isModuleAccess(access)) throw authUnavailable()
+  if (!accessAllows(access, op)) {
     throw AppError.forbidden(MODULE_DENIAL.insufficientGrant)
   }
+  return access
 }
 
 export function directIdentity(snapshot: RequestSnapshot, keyScope: boolean) {

@@ -3,6 +3,7 @@ import { isPlatformRole, type OrgContextRecord, type PlatformRole } from '../org
 import type { ImpersonationSession } from '../repos/impersonation'
 import type { AuthIdentity, SessionAuthIdentity } from '../require-auth'
 import type { AuthorizationFact, AuthorizationRow, CompiledFact } from './facts'
+import { validProjectionRows } from './projection'
 
 type Profile = Readonly<{ name: string; email: string }>
 type SessionIdentity = Readonly<SessionAuthIdentity & { email: string }>
@@ -254,6 +255,11 @@ export function productRows(
         if (!registered.has(compiled.table)) throw unavailable()
       }
       const rows = readFact(batch[index], compiled.columns, compiled.maxRows)
+      if (
+        compiled.projectionArity !== undefined &&
+        !validProjectionRows(rows, compiled.projectionArity)
+      )
+        throw unavailable()
       values.set(fact, rows)
       return rows
     } catch {

@@ -1,7 +1,7 @@
 import { AppError } from '@kit/core'
 import type { Context, Env, MiddlewareHandler } from 'hono'
 import { matchedRoutes } from 'hono/route'
-import type { AuthorizationFact } from '../snapshot/facts'
+import type { AuthorizationFact, AuthorizationProjection } from '../snapshot/facts'
 
 export type ModuleAuthorizationFacts = Readonly<{
   availability: AuthorizationFact<unknown>
@@ -14,6 +14,7 @@ export type AuthorizationUse = Readonly<{
   allEndpoint?: true
   sessionOnly?: true
   module?: string
+  authority?: AuthorizationProjection
   facts?: readonly AuthorizationFact<unknown>[]
 }>
 
@@ -26,6 +27,12 @@ export type AuthorizationPlan<E extends Env> = Readonly<{
   end: number
   sessionOnly: boolean
   pending: Set<MiddlewareHandler<E>>
+  authority?: Readonly<{
+    index: number
+    guard: MiddlewareHandler<E>
+    projection: AuthorizationProjection
+    pending: Map<number, MiddlewareHandler<E>>
+  }>
   facts: ReadonlySet<AuthorizationFact<unknown>>
   modules: ReadonlyMap<string, ModuleAuthorizationFacts>
 }>
@@ -110,6 +117,37 @@ function includeModule(
   if (policy) modules.set(moduleId, policy)
 }
 
+function authorityIndices<E extends Env>(
+  routes: readonly Match[],
+  window: RouteWindow,
+  index: number,
+  method: string,
+  uses: WeakMap<MiddlewareHandler<E>, AuthorizationUse>,
+  module: string | undefined,
+) {
+  const route = routes[index]!
+  // `ALL` also denotes .use in Hono, so only a concrete endpoint registration is unambiguous.
+  if (route.method !== method || route.path !== window.endpoint) throw authUnavailable()
+  const hasHandler = routes.some(
+    (candidate, following) =>
+      following > index &&
+      following < window.end &&
+      candidate.method === method &&
+      candidate.path === window.endpoint,
+  )
+  if (!hasHandler) throw authUnavailable()
+  const indices = new Map<number, MiddlewareHandler<E>>()
+  for (let prior = 0; prior < index; prior++) {
+    const handler = routes[prior]!.handler as MiddlewareHandler<E>
+    const use = uses.get(handler)
+    if (!use) continue
+    if (use.authority || use.module === module) throw authUnavailable()
+    indices.set(prior, handler)
+  }
+  indices.set(index, route.handler as MiddlewareHandler<E>)
+  return indices
+}
+
 export function planAuthorization<E extends Env>(
   c: Context<E>,
   uses: WeakMap<MiddlewareHandler<E>, AuthorizationUse>,
@@ -122,22 +160,33 @@ export function planAuthorization<E extends Env>(
   const modules = new Map<string, ModuleAuthorizationFacts>()
   let org = false
   let sessionOnly = false
+  let authority: AuthorizationPlan<E>['authority']
+  let lastGuard = -1
   for (let index = 0; index < window.end; index++) {
-    const handler = routes[index]!.handler as MiddlewareHandler<E>
+    const route = routes[index]!
+    const handler = route.handler as MiddlewareHandler<E>
     const use = uses.get(handler)
     if (!use) continue
+    lastGuard = index
+    if (use.authority) {
+      const method = selectedMethod(c.req.method, routes)
+      const indices = authorityIndices(routes, window, index, method, uses, use.module)
+      authority = { index, guard: handler, projection: use.authority, pending: indices }
+    }
     pending.add(handler)
-    if (use.org) org = true
-    if (use.sessionOnly) sessionOnly = true
+    org ||= use.org === true
+    sessionOnly ||= use.sessionOnly === true
     for (const fact of use.facts ?? []) facts.add(fact)
     includeModule(modules, use.module, moduleFacts)
   }
   if (org && !window.endpoint) throw authUnavailable()
+  if (authority && authority.index !== lastGuard) throw authUnavailable()
   return {
     selection: org ? readSelection(c, routes, window) : { kind: 'unused' },
     end: window.end,
     sessionOnly,
     pending,
+    authority,
     facts,
     modules,
   }

@@ -1,4 +1,11 @@
 import {
+  PROJECTION_COLUMN,
+  type ProjectionScope,
+  projectionQuery,
+  projectionScope,
+  projectionText,
+} from './projection'
+import {
   type AuthorizationFactScope,
   compileScope,
   fields,
@@ -11,23 +18,32 @@ export type AuthorizationRow = Readonly<Record<string, string | number | null>>
 
 type Value = string | number | boolean | null
 
-type Declaration<T> = {
+type ReadDeclaration = {
   /** The SQL table name and the closed set of columns registered for authorization reads. */
   table: { name: string; columns: readonly string[] }
   scope: AuthorizationFactScope
   select: readonly string[]
   where?: Readonly<Record<string, Value>>
+}
+
+type Declaration<T> = ReadDeclaration & {
   maxRows?: number
   decode: (rows: readonly AuthorizationRow[]) => T
 }
 
+type ProjectionDeclaration = Omit<ReadDeclaration, 'scope'> & { scope: ProjectionScope }
+
 declare const authorizationFact: unique symbol
+declare const authorizationProjection: unique symbol
 
 export type AuthorizationFact<T> = Readonly<{
   [authorizationFact]: true
   scope: Readonly<AuthorizationFactScope>
   decode: (rows: readonly AuthorizationRow[]) => T
 }>
+
+export type AuthorizationProjection = AuthorizationFact<string> &
+  Readonly<{ [authorizationProjection]: true; scope: Readonly<ProjectionScope> }>
 
 export const MAX_FACTS = 24
 const MAX_COLUMNS = 24
@@ -91,6 +107,7 @@ export type CompiledFact = Readonly<{
   values: readonly Value[]
   columns: readonly string[]
   maxRows: number
+  projectionArity?: number
 }>
 
 const declarations = new WeakMap<AuthorizationFact<unknown>, CompiledFact>()
@@ -99,11 +116,25 @@ export function compiledAuthorizationFact(fact: AuthorizationFact<unknown>): Com
   return declarations.get(fact) ?? invalid()
 }
 
-function compileTable(input: Declaration<unknown>['table']) {
+export function isAuthorizationProjection(value: unknown): value is AuthorizationProjection {
+  return declarations.get(value as AuthorizationFact<unknown>)?.projectionArity !== undefined
+}
+
+/** Internal: reads a projection already validated by the loader, without running Product code. */
+export function readAuthorizationProjection(
+  descriptor: AuthorizationProjection,
+  rows: readonly AuthorizationRow[],
+): string {
+  if (!isAuthorizationProjection(descriptor)) return invalid()
+  return projectionText(rows)
+}
+
+function compileTable(input: ReadDeclaration['table']) {
   if (!record(input)) return invalid()
-  if (typeof input.name !== 'string' || !fields(input, ['name', 'columns'])) return invalid()
-  const quoted = quotedIdentifier(input.name)
-  const table = input.name.toLowerCase()
+  const { name } = input
+  if (typeof name !== 'string' || !fields(input, ['name', 'columns'])) return invalid()
+  const quoted = quotedIdentifier(name)
+  const table = name.toLowerCase()
   if (privateTables.test(table) || internalTable.test(table)) return invalid()
   const kitProjection = Object.hasOwn(kitColumns, table) ? kitColumns[table] : undefined
   const registered = new Set(
@@ -142,7 +173,7 @@ function sqliteParameter(value: unknown): number | string {
 }
 
 function compileFilters(
-  where: Declaration<unknown>['where'],
+  where: ReadDeclaration['where'],
   column: ProjectColumn,
   predicates: string[],
   values: Value[],
@@ -162,6 +193,46 @@ function compileFilters(
   }
 }
 
+function compileRead(input: ReadDeclaration, exactScope?: ProjectionScope) {
+  const { table, productTable, from, column } = compileTable(input.table)
+  if (exactScope && !productTable) return invalid()
+  const { joins, predicates } = compileScope(
+    table,
+    exactScope ?? input.scope,
+    exactScope ? (name) => [column(name), 'COLLATE BINARY'].join(' ') : column,
+  )
+  if (exactScope) {
+    // A Product's column collation or numeric affinity must not alias distinct Kit IDs.
+    for (const anchor of [exactScope.organizationId, exactScope.userId])
+      predicates.push(['typeof(', column(anchor), ") = 'text'"].join(''))
+  }
+  const columns = columnNames(input.select, MAX_COLUMNS)
+  const selected = columns.map(column)
+  const values: Value[] = productTable ? [table] : []
+  compileFilters(input.where, column, predicates, values)
+  const source = [
+    'FROM',
+    from,
+    'JOIN kit_candidate AS candidate',
+    ...joins,
+    'WHERE',
+    predicates.join(' AND '),
+  ].join(' ')
+  return { table, productTable, source, columns, selected, values }
+}
+
+function registerFact<T>(
+  scope: AuthorizationFactScope,
+  decode: AuthorizationFact<T>['decode'],
+  compiled: CompiledFact,
+): AuthorizationFact<T> {
+  const fact = Object.freeze({ scope: Object.freeze(scope), decode }) as AuthorizationFact<T>
+  Object.freeze(compiled.values)
+  Object.freeze(compiled.columns)
+  declarations.set(fact, Object.freeze(compiled))
+  return fact
+}
+
 /** Compile a bounded, correlated SELECT. No caller-controlled SQL, ordering or operators. */
 export function defineAuthorizationFact<T>(input: Declaration<T>): AuthorizationFact<T> {
   if (!record(input)) return invalid()
@@ -170,43 +241,38 @@ export function defineAuthorizationFact<T>(input: Declaration<T>): Authorization
     !fields(input, ['table', 'scope', 'select', 'where', 'maxRows', 'decode'])
   )
     return invalid()
-  const { table, productTable, from, column } = compileTable(input.table)
-  const { joins, predicates } = compileScope(table, input.scope, column)
-  const columns = columnNames(input.select, MAX_COLUMNS)
+  const { table, productTable, source, columns, selected, values } = compileRead(input)
   const projection = columns
-    .map((name) => [column(name), 'AS', quotedIdentifier(name)].join(' '))
+    .map((name, index) => [selected[index], 'AS', quotedIdentifier(name)].join(' '))
     .join(', ')
-  const values: Value[] = productTable ? [table] : []
-  compileFilters(input.where, column, predicates, values)
   const maxRows = input.maxRows === undefined ? 16 : input.maxRows
   if (!Number.isInteger(maxRows) || maxRows < 1 || maxRows > MAX_ROWS) return invalid()
   // The extra row is an overflow indicator. The loader rejects rather than truncating.
   values.push(maxRows + 1)
-  const sql = [
-    'SELECT',
-    projection,
-    'FROM',
-    from,
-    'JOIN kit_candidate AS candidate',
-    ...joins,
-    'WHERE',
-    predicates.join(' AND '),
-    'LIMIT ?',
-  ].join(' ')
-  const fact = Object.freeze({
-    scope: Object.freeze({ ...input.scope }),
-    decode: input.decode,
-  }) as AuthorizationFact<T>
-  declarations.set(
-    fact,
-    Object.freeze({
-      table,
-      productTable,
-      sql,
-      values: Object.freeze(values),
-      columns: Object.freeze(columns),
-      maxRows,
-    }),
-  )
-  return fact
+  return registerFact({ ...input.scope }, input.decode, {
+    table,
+    productTable,
+    sql: ['SELECT', projection, source, 'LIMIT ?'].join(' '),
+    values,
+    columns,
+    maxRows,
+  })
+}
+
+/** Compile all matching Product rows into a sorted JSON array of tuples in select order. */
+export function defineAuthorizationProjection(
+  input: ProjectionDeclaration,
+): AuthorizationProjection {
+  if (!(record(input) && fields(input, ['table', 'scope', 'select', 'where']))) return invalid()
+  const scope = projectionScope(input.scope)
+  const { table, productTable, source, selected, values } = compileRead(input, scope)
+  return registerFact(scope, projectionText, {
+    table,
+    productTable,
+    sql: projectionQuery(source, selected),
+    values,
+    columns: [PROJECTION_COLUMN],
+    maxRows: 1,
+    projectionArity: selected.length,
+  }) as AuthorizationProjection
 }

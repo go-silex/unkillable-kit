@@ -8,8 +8,10 @@ import { loadRequestSnapshot, type RequestSnapshot } from './snapshot/load'
 
 export {
   type AuthorizationFact,
+  type AuthorizationProjection,
   type AuthorizationRow,
   defineAuthorizationFact,
+  defineAuthorizationProjection,
 } from './snapshot/facts'
 
 /** Probe the actual issuer's read-only session path without a refresh or cookie write. */
