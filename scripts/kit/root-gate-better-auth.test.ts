@@ -84,7 +84,7 @@ function runCore(expectedFailure?: RegExp, name?: string) {
     expectedFailure ? 1 : 0,
     name ? `${name}\n${result.output}` : result.output,
   )
-  if (expectedFailure) assert.match(result.output, expectedFailure, name)
+  if (expectedFailure) assert.match(result.output, expectedFailure, name ?? 'expected core failure')
   const receipt = JSON.parse(readFileSync(join(root, 'root-core.json'), 'utf8'))
   assert.deepEqual(receipt.tasks, ['better-auth:check'])
   assert.equal(receipt.complete, !expectedFailure)
