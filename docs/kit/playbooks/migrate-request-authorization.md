@@ -249,8 +249,10 @@ the gate.
   only the provider-verified principal and gets a `HostedAdmission`:
   `{ status: 'allowed', principal }` with a sealed `HostedPrincipal`, `{ status: 'denied' }` or
   `{ status: 'unavailable' }`. It no longer returns `organization`, `fact` or `forOrganization`: a
-  tool designates the Organization for each Organization-bound dispatch. Move an `admit` policy into
-  `grantAdmission`, like a `denyFact` barrier.
+  tool designates the Organization for each Organization-bound dispatch. The helper no longer runs
+  an `admit` policy or a `denyFact` barrier: with `createHostedMcpWorker`, move them into
+  `grantAdmission`; outside the shell, enforce the same deny policy after an `allowed` result and
+  before granting access.
 - `PublicToolErrorCode` from `@kit/mcp` gains `UNAVAILABLE`; map a `5xx` dispatch to
   `PublicToolError('UNAVAILABLE')`. Code that switches exhaustively over the codes or keys a
   `Record` by them must handle it.
