@@ -11,7 +11,7 @@ import {
   assertModule,
   type GuardState,
   MODULE_DENIAL,
-  validateAdmittedFacts,
+  validateAdmittedFactRows,
 } from './authorization-admission'
 import { type AuthorizationUse, authUnavailable, selectedOrganization } from './authorization-plan'
 
@@ -148,6 +148,7 @@ async function admitFingerprint<E extends Env>(
   const snapshot = await state.load
   const { subject, role, access } = admitAuthorityModule(state, snapshot, moduleId)
   if (!authority.secret) throw authUnavailable()
+  validateAdmittedFactRows(state, snapshot)
   const payload = fingerprintPayload(snapshot, projection, [
     subject,
     selectedOrganization(state.plan),
@@ -164,8 +165,7 @@ async function admitFingerprint<E extends Env>(
   }
   plan.pending.delete(plan.index)
   state.plan.pending.delete(middleware)
-  validateAdmittedFacts(state, snapshot)
-  if (!state.factsAdmitted) throw authUnavailable()
+  state.factsAdmitted = true
   if (typeof result === 'string') authority.fingerprint = result
   return authority
 }

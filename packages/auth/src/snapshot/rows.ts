@@ -2,6 +2,13 @@ import { AppError } from '@kit/core'
 import { isPlatformRole, type OrgContextRecord, type PlatformRole } from '../org-roles'
 import type { ImpersonationSession } from '../repos/impersonation'
 import type { AuthIdentity, SessionAuthIdentity } from '../require-auth'
+import {
+  type AuthorityRows,
+  type AuthoritySection,
+  authorityColumn,
+  PROJECTION_SECTION,
+  splitAuthorityRows,
+} from './authority'
 import type { AuthorizationFact, AuthorizationRow, CompiledFact } from './facts'
 import { validProjectionRows } from './projection'
 
@@ -203,18 +210,20 @@ export function singleResult(entry: unknown): AuthorizationRow | null {
 }
 
 function readFact(
-  entry: unknown,
+  rows: readonly AuthorizationRow[],
   columns: readonly string[],
   maxRows: number,
+  section?: AuthoritySection,
 ): readonly AuthorizationRow[] {
-  const rows = results(entry)
   if (rows.length > maxRows) throw unavailable()
+  const bundledPolicy = section !== undefined && section !== PROJECTION_SECTION
   return Object.freeze(
     rows.map((row) => {
       const fact: Record<string, string | number | null> = {}
-      for (const key of columns) {
-        if (!Object.hasOwn(row, key)) throw unavailable()
-        const value = row[key]
+      for (const [index, key] of columns.entries()) {
+        const slot = bundledPolicy ? authorityColumn(index) : key
+        if (!Object.hasOwn(row, slot)) throw unavailable()
+        const value = row[slot]
         if (
           value !== null &&
           typeof value !== 'string' &&
@@ -230,7 +239,7 @@ function readFact(
 
 export const EMPTY_ROWS: readonly AuthorizationRow[] = Object.freeze([])
 type Fact = AuthorizationFact<unknown>
-export type FactResult = { compiled: CompiledFact; index: number }
+export type FactResult = { compiled: CompiledFact; index: number; section?: AuthoritySection }
 
 export function productRows(
   batch: readonly unknown[],
@@ -239,13 +248,23 @@ export function productRows(
 ): (fact: Fact) => readonly AuthorizationRow[] {
   const values = new Map<Fact, readonly AuthorizationRow[]>()
   let registered: Set<string> | undefined
+  let bundled: { index: number; sections: AuthorityRows } | undefined
+  function resultRows(index: number, section: AuthoritySection | undefined) {
+    if (section === undefined) return results(batch[index])
+    if (bundled?.index !== index) {
+      const sections = splitAuthorityRows(results(batch[index]))
+      if (!sections) throw unavailable()
+      bundled = { index, sections }
+    }
+    return bundled.sections[section]
+  }
   return (fact) => {
     const pending = facts.get(fact)
     if (!pending) return EMPTY_ROWS
     const cached = values.get(fact)
     if (cached) return cached
     try {
-      const { compiled, index } = pending
+      const { compiled, index, section } = pending
       if (compiled.productTable) {
         registered ??= new Set(
           resultValues(batch[registrationIndex]).flatMap((row) =>
@@ -254,7 +273,8 @@ export function productRows(
         )
         if (!registered.has(compiled.table)) throw unavailable()
       }
-      const rows = readFact(batch[index], compiled.columns, compiled.maxRows)
+      const raw = resultRows(index, section)
+      const rows = readFact(raw, compiled.columns, compiled.maxRows, section)
       if (
         compiled.projectionArity !== undefined &&
         !validProjectionRows(rows, compiled.projectionArity)

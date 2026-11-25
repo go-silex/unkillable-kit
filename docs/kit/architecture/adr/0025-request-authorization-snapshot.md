@@ -113,11 +113,14 @@ returned rows.
 For this precondition, the Kit compiles a complete ordered projection of declared scalar fields
 from a real Product table, with both the Organization and member User correlated to the candidate.
 It returns one aggregate value, without a row cap inside the aggregate. D1 value and execution
-limits still apply; an unreadable result is unavailable, never a partial projection. The Kit alone
-computes and compares the keyed fingerprint, bound to the view, Organization, User and current
-Module authority. The comparison releases neither the aggregate nor either fingerprint, does not
-call a Product decoder and does not admit other facts. Only the fully admitted read route can
-obtain the fingerprint through the accessor for that view.
+limits still apply; an unreadable required result is unavailable, never a partial projection.
+The same statement reads Module policy once and skips aggregation if effective availability or
+the current read grant is absent; it reads Product rows only for an active Organization. The
+runtime guard still decides admission and reports errors.
+The Kit alone computes and compares the keyed fingerprint, bound to the view, Organization,
+User and current Module authority. The comparison releases neither the aggregate nor either
+fingerprint, does not call a Product decoder and does not admit other facts. Only the fully
+admitted read route can obtain the fingerprint through the accessor for that view.
 
 The App owns its Module registry and supplies two facts separately: effective availability (available on the
 Deployment and enabled in the Organization) and the current Role–module grant. The Kit decides `404` for an

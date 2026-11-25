@@ -42,7 +42,9 @@ export const projection = {
   maxRows: 1,
 }
 
-export async function authorizationDatabase(): Promise<{
+export async function authorizationDatabase(
+  issuerBinding?: (database: SqliteD1) => KitD1Database,
+): Promise<{
   auth: BetterAuthLike
   availability: AuthorizationFact<unknown>
   cookie: string
@@ -75,7 +77,7 @@ export async function authorizationDatabase(): Promise<{
   }
   const realDb = createSqliteD1(sqlite)
   const auth = createBetterAuth({
-    database: realDb,
+    database: issuerBinding ? issuerBinding(realDb) : realDb,
     secret: crypto.randomUUID() + crypto.randomUUID(),
     baseURL: origin,
     trustedOrigins: [origin],

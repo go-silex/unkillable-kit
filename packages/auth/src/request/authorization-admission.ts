@@ -94,7 +94,11 @@ export function snapshotFacts<E extends Env>(
   plan: AuthorizationPlan<E>,
 ): AuthorizationFact<unknown>[] {
   const facts = new Set(plan.facts)
-  if (plan.authority) facts.add(plan.authority.projection)
+  if (plan.authority) {
+    const { moduleId, projection } = plan.authority
+    if (plan.modules.has(moduleId)) facts.add(projection)
+    else facts.delete(projection)
+  }
   for (const policy of plan.modules.values()) {
     if (
       policy.availability.scope.kind !== 'organization' ||
@@ -227,10 +231,18 @@ export function validateAdmittedFacts<E extends Env>(
 ) {
   if (!(state.authenticated && state.fence) || state.plan.pending.size) return
   if (snapshot.identity?.method === 'api_key' && !state.keyScope) return
+  validateAdmittedFactRows(state, snapshot)
+  state.factsAdmitted = true
+}
+
+/** Check snapshot readability without granting access or invoking a fact decoder. */
+export function validateAdmittedFactRows<E extends Env>(
+  state: GuardState<E>,
+  snapshot: RequestSnapshot,
+) {
   for (const descriptor of state.plan.facts) {
     if (isAdmittedFactScope(state, descriptor.scope.kind)) snapshot.rows(descriptor)
   }
-  state.factsAdmitted = true
 }
 
 export function admitOrganization<E extends Env>(

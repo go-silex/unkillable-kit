@@ -64,6 +64,7 @@ export function createRequestAuthorization<E extends Env>(options: Options<E>) {
       options.delegation === true || !bearer,
       authority,
     )
+    const modulePolicy = plan.authority && plan.modules.get(plan.authority.moduleId)
     try {
       return await loadRequestSnapshot({
         db: options.db(c),
@@ -72,6 +73,14 @@ export function createRequestAuthorization<E extends Env>(options: Options<E>) {
         organizationId: plan.selection.kind === 'selected' ? plan.selection.id : undefined,
         delegation: options.delegation,
         facts: plan.sessionOnly && bearer ? [] : snapshotFacts(plan),
+        authority:
+          !bearer && plan.authority && modulePolicy
+            ? {
+                projection: plan.authority.projection,
+                availability: modulePolicy.availability,
+                grant: modulePolicy.grant,
+              }
+            : undefined,
       })
     } catch {
       throw authUnavailable()

@@ -13,10 +13,12 @@ export type AuthorizationUse = Readonly<{
   org?: true
   allEndpoint?: true
   sessionOnly?: true
-  module?: string
-  authority?: AuthorizationProjection
   facts?: readonly AuthorizationFact<unknown>[]
-}>
+}> &
+  Readonly<
+    | { module?: string; authority?: undefined }
+    | { module: string; authority: AuthorizationProjection }
+  >
 
 type OrganizationSelection =
   | { kind: 'selected'; id: string }
@@ -30,6 +32,7 @@ export type AuthorizationPlan<E extends Env> = Readonly<{
   authority?: Readonly<{
     index: number
     guard: MiddlewareHandler<E>
+    moduleId: string
     projection: AuthorizationProjection
     pending: Map<number, MiddlewareHandler<E>>
   }>
@@ -171,7 +174,13 @@ export function planAuthorization<E extends Env>(
     if (use.authority) {
       const method = selectedMethod(c.req.method, routes)
       const indices = authorityIndices(routes, window, index, method, uses, use.module)
-      authority = { index, guard: handler, projection: use.authority, pending: indices }
+      authority = {
+        index,
+        guard: handler,
+        moduleId: use.module,
+        projection: use.authority,
+        pending: indices,
+      }
     }
     pending.add(handler)
     org ||= use.org === true

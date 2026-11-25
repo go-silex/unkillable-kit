@@ -33,15 +33,31 @@ export function projectionScope(input: unknown): ProjectionScope {
 }
 
 export function projectionQuery(source: string, selected: readonly string[]): string {
-  const order = selected.map((column) => [column, 'COLLATE BINARY'].join(' ')).join(', ')
+  const sortAliases = selected.map((_column, index) => `sort_${index}`)
+  const sortColumns = selected.map((column, index) => [column, 'AS', sortAliases[index]].join(' '))
+  const order = [...sortAliases, 'projection_tuple']
+    .map((column) => [column, 'COLLATE BINARY'].join(' '))
+    .join(', ')
   // Pass the sorted JSON tuples as text. The final tie-breaker fixes the byte order even when
   // SQLite compares different encodings (such as integer 1 and real 1.0) as equal.
-  const inner = ['SELECT json_array(', selected.join(', '), ') AS projection_tuple'].join('')
+  // SQLite can normalize JSONB BLOBs to scalars. Keep every invalid row as a JSON null
+  // sentinel instead, so shape validation fails without the aggregate dropping it.
+  const hasBlob = selected.map((column) => ['typeof(', column, ") = 'blob'"].join(''))
+  const inner = [
+    'SELECT CASE WHEN',
+    hasBlob.join(' OR '),
+    "THEN 'null' ELSE",
+    ['json_array(', selected.join(', '), ')'].join(''),
+    'END AS projection_tuple,',
+    sortColumns.join(', '),
+  ].join(' ')
   return [
-    "SELECT '[' || coalesce(group_concat(projection_tuple, ','), '') || ']' AS",
+    "SELECT '[' || coalesce(group_concat(projection_tuple, ',' ORDER BY",
+    order,
+    "), '') || ']' AS",
     PROJECTION_COLUMN,
     'FROM',
-    ['(', inner, ' ', source, ' ORDER BY ', order, ', projection_tuple COLLATE BINARY)'].join(''),
+    ['(', inner, ' ', source, ')'].join(''),
   ].join(' ')
 }
 

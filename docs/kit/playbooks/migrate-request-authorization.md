@@ -112,11 +112,13 @@ app.patch('/orgs/:orgId/documents/:id',
   Reuse the same registration and a stable view identifier for the read and write. The
   precondition is for ordinary member sessions; it does not replace Bearer scope, Impersonation or
   break-glass policy.
-- The declaration selects the actual rows of the visibility projection, not a count. Declare
-  every column whose change must invalidate the fingerprint. The Kit orders the selected tuples
-  deterministically, keeps duplicates, and aggregates the complete matching set in the same
-  batch. The bounded `defineAuthorizationFact` path is unchanged. D1 execution and result-size
-  limits still apply; there is no partial read or second query.
+- Use columns storing the exact Organization and User IDs as SQLite `TEXT`. Correlation is
+  case-sensitive regardless of the Product columns' collations. Select every scalar field whose
+  change must invalidate the fingerprint. The Kit orders the tuples deterministically, keeps
+  duplicates, and aggregates the complete matching set, not a count. The same statement skips
+  the Product rows for an inactive Organization, an unavailable Module or no read grant. The
+  bounded `defineAuthorizationFact` path is unchanged. D1 execution and result-size limits still
+  apply; there is no partial read or second query.
 - Send the opaque value back in `X-Authority-Fingerprint` (or configure the header name on the
   view). Credential and Organization refusals come first. An unavailable Module still yields
   `404`; no current read access yields `403` without comparison. With current read access, a

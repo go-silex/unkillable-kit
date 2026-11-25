@@ -1,29 +1,33 @@
-import { inspect } from 'node:util'
 import type Database from 'better-sqlite3'
-import { describe, expect, it, onTestFinished, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import {
   authorityFixture,
   containsValue,
   effectSql,
+  expectNoEffect,
   header,
   path,
   privateLabel,
   siblingLabel,
   type Trace,
+  watchLogs,
 } from './request/authority-http.fixture'
 
 type DatabaseFixture = { sqlite: Database.Database }
 
-function expectReadOnly(fixture: DatabaseFixture, trace: Trace, trips = 1, returned = trips) {
+function expectReadOnly(fixture: DatabaseFixture, trace: Trace, trips = 1) {
   expect(trace.trips).toBe(trips)
-  expect(trace.batches).toHaveLength(returned)
+  expect(trace.batches).toHaveLength(trips)
   if (trips === 0) expect(trace.prepared).toEqual([])
   for (const sql of trace.prepared) expect(fixture.sqlite.prepare(sql).readonly).toBe(true)
 }
 
-function expectNoEffect(fixture: DatabaseFixture & { write: unknown }) {
-  expect(fixture.write).not.toHaveBeenCalled()
-  expect(fixture.sqlite.prepare('SELECT id FROM fixture_effects').all()).toEqual([])
+function observedProjection(trace: Trace) {
+  return trace.batches.flatMap((batch) =>
+    batch.flatMap(({ results }) =>
+      results.flatMap((row) => (typeof row.projection === 'string' ? [row.projection] : [])),
+    ),
+  )
 }
 
 async function readAuthority(fixture: DatabaseFixture & { request(): Promise<Trace> }) {
@@ -37,11 +41,7 @@ async function readAuthority(fixture: DatabaseFixture & { request(): Promise<Tra
   expect(result).toEqual({ fingerprint: expect.any(String), sibling: siblingLabel })
   expect(result.fingerprint).not.toBe('')
   // The projection is private even when admitted; read the exact aggregate at the D1 seam.
-  const aggregates = trace.batches.flatMap((batch) =>
-    batch.flatMap(({ results }) =>
-      results.flatMap((row) => (typeof row.projection === 'string' ? [row.projection] : [])),
-    ),
-  )
+  const aggregates = observedProjection(trace)
   expect(aggregates).toHaveLength(1)
   return { ...result, tuples: JSON.parse(aggregates[0] as string) as [string, string][] }
 }
@@ -54,23 +54,6 @@ async function expectRefusal(trace: Trace, status: number, message: string) {
   expect(trace.response.status).toBe(status)
   expect(trace.response.headers.has(header)).toBe(false)
   expect(await trace.response.json()).toEqual({ message })
-}
-
-function watchLogs() {
-  const spies = (['debug', 'error', 'info', 'log', 'warn'] as const).map((level) =>
-    vi.spyOn(console, level).mockImplementation(() => {}),
-  )
-  onTestFinished(() => {
-    for (const spy of spies) spy.mockRestore()
-  })
-  return (...secrets: string[]) => {
-    const logged = inspect(
-      spies.flatMap((spy) => spy.mock.calls),
-      { depth: null },
-    )
-    for (const secret of [privateLabel, siblingLabel, ...secrets])
-      expect(logged).not.toContain(secret)
-  }
 }
 
 describe('HTTP Module authority fingerprint', () => {
@@ -198,13 +181,16 @@ describe('HTTP Module authority fingerprint', () => {
     ['no session', 401, 'Unauthorized', 0],
     ['unverified Bearer with a valid session cookie', 401, 'Unauthorized', 1],
     ['Organization not admitted', 404, 'Organization not found', 1],
+    ['suspended Organization with JSONB in the projection', 403, 'Organization is not active', 1],
     ['unavailable Module', 404, 'Module not available', 1],
     ['no live read grant', 403, 'Insufficient module grant', 1],
     ['missing fingerprint', 400, 'Invalid authority fingerprint', 1],
     ['malformed fingerprint', 400, 'Invalid authority fingerprint', 1],
     ['unreadable projection', 503, 'Authorization unavailable', 1],
+    ['unsupported JSONB projection value', 503, 'Authorization unavailable', 1],
     ['D1 execution failure', 503, 'Authorization unavailable', 1],
-    ['failed sibling with a returned projection', 503, 'Authorization unavailable', 1],
+    ['failed sibling with a current fingerprint', 503, 'Authorization unavailable', 1],
+    ['failed sibling with a stale fingerprint', 503, 'Authorization unavailable', 1],
     ['later Kit guard', 503, 'Authorization unavailable', 0],
   ] as const)(
     'preserves the refusal for %s without exposing facts or running an effect',
@@ -228,6 +214,10 @@ describe('HTTP Module authority fingerprint', () => {
         case 'Organization not admitted':
           f.sqlite.exec('DELETE FROM member')
           break
+        case 'suspended Organization with JSONB in the projection':
+          f.sqlite.exec("UPDATE organization SET status = 'suspended'")
+          f.sqlite.exec("UPDATE fixture_visibility SET label = jsonb(1) WHERE position = '01'")
+          break
         case 'unavailable Module':
           f.sqlite.exec('UPDATE platform_modules SET available = 0')
           break
@@ -240,12 +230,20 @@ describe('HTTP Module authority fingerprint', () => {
         case 'unreadable projection':
           f.failure.value = aggregate
           break
-        case 'D1 execution failure':
-          f.sqlite.exec("UPDATE fixture_visibility SET label = x'0102' WHERE position = '01'")
-          break
-        case 'failed sibling with a returned projection':
-          f.failure.value = siblingLabel
+        case 'unsupported JSONB projection value':
+          f.sqlite
+            .prepare("UPDATE fixture_visibility SET label = jsonb(?) WHERE position = '01'")
+            .run(JSON.stringify(privateLabel))
           headers.set(header, fingerprint)
+          break
+        case 'D1 execution failure':
+          f.sqlite.exec('DROP TABLE fixture_visibility')
+          headers.set(header, fingerprint)
+          break
+        case 'failed sibling with a current fingerprint':
+        case 'failed sibling with a stale fingerprint':
+          f.failure.value = siblingLabel
+          headers.set(header, reason.includes('stale') ? '0'.repeat(64) : fingerprint)
           break
         case 'later Kit guard':
           headers.set(header, fingerprint)
@@ -253,29 +251,31 @@ describe('HTTP Module authority fingerprint', () => {
           break
       }
       const refused = await f.request({ method: 'POST', headers }, location)
-      expectReadOnly(f, refused, trips, reason === 'D1 execution failure' ? 0 : trips)
-      await expectRefusal(refused, status, message)
-      if (
-        reason === 'unavailable Module' ||
-        reason === 'no live read grant' ||
-        reason === 'failed sibling with a returned projection'
-      ) {
-        expect(
-          refused.batches[0]?.some((result) => result.success && containsValue(result, aggregate)),
-        ).toBe(true)
+      if (reason === 'D1 execution failure') {
+        expect(refused.trips).toBe(1)
+        expect(refused.batches).toEqual([])
+        expect(refused.prepared).not.toContain(effectSql)
+      } else {
+        expectReadOnly(f, refused, trips)
       }
-      if (f.failure.value !== undefined) {
+      await expectRefusal(refused, status, message)
+      const projection = observedProjection(refused)
+      if (reason === 'unsupported JSONB projection value') expect(projection).toHaveLength(1)
+      if (reason === 'unavailable Module' || reason === 'no live read grant') {
+        expect(projection).toEqual([])
+      }
+      if (reason.startsWith('suspended')) expect(projection).toEqual(['[]'])
+      if (reason.startsWith('failed sibling')) {
+        expect(projection).toEqual([aggregate])
         expect(refused.batches[0]).toContainEqual({ success: false, results: [] })
-        expect(
-          refused.batches[0]?.some(
-            (result) => result.success && containsValue(result, siblingLabel),
-          ),
-        ).toBe(reason === 'unreadable projection')
+      }
+      if (reason === 'unreadable projection') {
+        expect(refused.batches[0]?.some((result) => containsValue(result, siblingLabel))).toBe(true)
       }
       expect(f.read).not.toHaveBeenCalled()
       expect(f.decode).not.toHaveBeenCalled()
       expectNoEffect(f)
-      noLoggedSecrets(fingerprint)
+      noLoggedSecrets(fingerprint, 'fixture_visibility', 'no such table')
     },
   )
 

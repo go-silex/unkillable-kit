@@ -202,6 +202,7 @@ function compileRead(input: ReadDeclaration, exactScope?: ProjectionScope) {
     exactScope ? (name) => [column(name), 'COLLATE BINARY'].join(' ') : column,
   )
   if (exactScope) {
+    predicates.push("org.status = 'active'")
     // A Product's column collation or numeric affinity must not alias distinct Kit IDs.
     for (const anchor of [exactScope.organizationId, exactScope.userId])
       predicates.push(['typeof(', column(anchor), ") = 'text'"].join(''))

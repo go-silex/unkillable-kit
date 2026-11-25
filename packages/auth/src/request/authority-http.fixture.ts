@@ -1,10 +1,11 @@
+import { inspect } from 'node:util'
 import { AppError } from '@kit/core'
 import type { KitD1Database } from '@kit/db'
 import { countD1RoundTrips } from '@kit/db/testing'
 import type Database from 'better-sqlite3'
 import { type Context, Hono } from 'hono'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
-import { type Mock, vi } from 'vitest'
+import { expect, type Mock, onTestFinished, vi } from 'vitest'
 import { createRequestAuthorization } from '../hono'
 import {
   type AuthorizationRow,
@@ -38,6 +39,28 @@ export type Trace = {
 export const containsValue = (result: BatchResult, value: string) =>
   result.results.some((row) => Object.values(row).includes(value))
 
+export function expectNoEffect(fixture: { sqlite: Database.Database; write: unknown }) {
+  expect(fixture.write).not.toHaveBeenCalled()
+  expect(fixture.sqlite.prepare('SELECT id FROM fixture_effects').all()).toEqual([])
+}
+
+export function watchLogs() {
+  const spies = (['debug', 'error', 'info', 'log', 'warn'] as const).map((level) =>
+    vi.spyOn(console, level).mockImplementation(() => {}),
+  )
+  onTestFinished(() => {
+    for (const spy of spies) spy.mockRestore()
+  })
+  return (...secrets: string[]) => {
+    const logged = inspect(
+      spies.flatMap((spy) => spy.mock.calls),
+      { depth: null },
+    )
+    for (const secret of [privateLabel, siblingLabel, ...secrets])
+      expect(logged).not.toContain(secret)
+  }
+}
+
 export async function authorityFixture(customHeader?: string): Promise<{
   decode: Mock<(rows: readonly AuthorizationRow[]) => string | number | null | undefined>
   failure: { value: string | undefined }
@@ -49,8 +72,23 @@ export async function authorityFixture(customHeader?: string): Promise<{
   userId: string
   write: Mock<(c: Context) => Promise<Response>>
 }> {
+  let binding: KitD1Database
+  // Better Auth and the snapshot adapter must share the counter for the entire dispatch.
+  // Signup runs before a measured binding exists and uses the original SQLite binding.
   const { auth, availability, cookie, grant, key, realDb, sqlite, userId } =
-    await authorizationDatabase()
+    await authorizationDatabase(
+      (raw) =>
+        new Proxy(raw, {
+          get(target, key) {
+            const value = Reflect.get(target, key, target)
+            if (typeof value !== 'function') return value
+            return (...args: unknown[]) => {
+              const active = binding ?? target
+              return Reflect.apply(Reflect.get(active, key, active), active, args)
+            }
+          },
+        }),
+    )
   sqlite.exec(
     [
       "UPDATE organization_role_module_grants SET access = 'write'",
@@ -89,13 +127,15 @@ export async function authorityFixture(customHeader?: string): Promise<{
       if (failure.value !== undefined) {
         const value = failure.value
         const index = results.findIndex((result) => containsValue(result, value))
-        if (index !== -1) results[index] = { success: false, results: [] }
+        const projectionRow = results[index]?.results.find((row) => row.projection === value)
+        if (projectionRow) projectionRow.projection = null
+        else if (index !== -1) results[index] = { success: false, results: [] }
       }
       batches.push(results)
       return results
     },
   }
-  let binding = decorated
+  binding = realDb
   const authorization = createRequestAuthorization({
     auth: () => auth,
     db: () => binding,
@@ -168,7 +208,7 @@ export async function authorityFixture(customHeader?: string): Promise<{
       const response = await app.request(location, { ...init, headers })
       return { response, trips: measured.count, prepared: [...prepared], batches: [...batches] }
     } finally {
-      binding = decorated
+      binding = realDb
     }
   }
   return { decode, failure, key, read, request, seed, sqlite, userId, write }
