@@ -4,6 +4,8 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ## Unreleased
 
+## unkillable-kit/v0.8.1 — 2026-11-25
+
 ### Auth
 
 - Products can preserve a complete Organization- and principal-scoped visibility projection
