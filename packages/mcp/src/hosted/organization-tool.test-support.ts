@@ -8,7 +8,12 @@ import { z } from 'zod'
 import { createToolCatalogue } from '../catalogue'
 import { createAuthFixture } from './auth-fixture.test-support'
 import type { HostedMcpEnv } from './env'
-import { createHostedMcpWorker, type HostedMcpWorkerOptions } from './index'
+import {
+  createHostedMcpWorker,
+  type HostedMcpWorkerOptions,
+  type OrganizationToolAuthorization,
+  type OrganizationToolDefinition,
+} from './index'
 import { createOAuthFixture, ORIGIN, USER } from './oauth-fixture.test-support'
 import { CAUSE, observeOrganizationDb } from './organization-db.test-support'
 
@@ -20,18 +25,7 @@ const text = (rows: readonly AuthorizationRow[]) => z.string().parse(rows[0]?.la
 const input = z
   .object({ organizationId: z.string().min(1).optional(), values: z.array(z.number()).optional() })
   .strict()
-type Policy =
-  | 'accept'
-  | 'refuse'
-  | 'throw'
-  | 'nonboolean'
-  | 'read-business'
-  | 'check-role'
-  | 'reject-async'
-  | 'ignore-policy'
-async function rejectingPolicy() {
-  throw new Error(CAUSE)
-}
+type Policy = 'accept' | 'refuse' | 'throw' | 'nonboolean' | 'read-business' | 'check-role'
 export type ToolOptions = HostedMcpWorkerOptions<HostedMcpEnv, 'tool-input'>
 
 export const workerOptions = {
@@ -93,12 +87,13 @@ export function fixture({
   let policy: Policy = 'accept'
   let businessReadsPolicy = false
   let afterExecute: (() => void) | undefined
-  type DecodeText = (rows: readonly AuthorizationRow[]) => string | Promise<string>
+  type DecodeText = (rows: readonly AuthorizationRow[]) => unknown
   const decodePolicy = vi.fn<DecodeText>(text)
   const decodeBusiness = vi.fn<DecodeText>(text)
+  const overridePolicy = vi.fn<OrganizationToolDefinition<typeof input>['allow']>()
   const decodeDeny = vi.fn(() => CAUSE)
   const decodeRole = vi.fn((rows: readonly AuthorizationRow[]) => rows[0]?.key)
-  const policyFact = orgFact('product_policy', decodePolicy)
+  const policyFact: AuthorizationFact<unknown> = orgFact('product_policy', decodePolicy)
   const businessFact = orgFact('product_business', decodeBusiness)
   const siblingFacts = oversizedPlan
     ? Array.from({ length: 24 }, () => orgFact('product_policy', text))
@@ -189,29 +184,26 @@ export function fixture({
                 : businessFact,
           ],
           allow:
-            policy === 'reject-async'
-              ? (rejectingPolicy as unknown as () => boolean)
-              : ({ organization, fact }) => {
-                  observedPolicy(organization)
-                  if (policy === 'read-business') fact(businessFact)
-                  const visible = fact(policyFact) === `${POLICY}:${organization.id}`
-                  switch (policy) {
-                    case 'throw':
-                      throw new Error(CAUSE)
-                    case 'nonboolean':
-                      return 'true' as unknown as boolean
-                    case 'check-role':
-                      return organization.role === 'reader' && fact(roleFact) === 'reader'
-                    case 'ignore-policy':
-                      return true
-                    default:
-                      return policy === 'accept' && visible
-                  }
-                },
+            overridePolicy.getMockImplementation() ??
+            (({ organization, fact }) => {
+              observedPolicy(organization)
+              if (policy === 'read-business') fact(businessFact)
+              const visible = fact(policyFact) === `${POLICY}:${organization.id}`
+              switch (policy) {
+                case 'throw':
+                  throw new Error(CAUSE)
+                case 'nonboolean':
+                  return 'true' as unknown as boolean
+                case 'check-role':
+                  return organization.role === 'reader' && fact(roleFact) === 'reader'
+                default:
+                  return policy === 'accept' && visible
+              }
+            }),
           async execute(_arg, { organizationId, fact }) {
             observedExecute(organizationId)
             if (businessReadsPolicy) fact(policyFact)
-            const data = await fact(businessFact)
+            const data = fact(businessFact)
             afterExecute?.()
             return { organizationId, data }
           },
@@ -275,6 +267,8 @@ export function fixture({
     observedExecute,
     registerError,
     designate,
+    overridePolicy,
+    readPolicy: (fact: OrganizationToolAuthorization['fact']) => fact(policyFact),
     decodePolicy,
     decodeBusiness,
     decodeDeny,

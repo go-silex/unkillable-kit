@@ -404,46 +404,58 @@ describe('scoped admission revocation and fact privacy', () => {
   it('observes a rejecting async policy without an unhandled rejection', async () => {
     const f = fixture({ defaultOrg: ORG })
     const { access_token: token } = await f.issue()
-    const unhandled = vi.fn()
-    process.on('unhandledRejection', unhandled)
-    try {
-      f.setPolicy('reject-async')
-      await expectPrivateUnavailable(token, () => f.dispatch(token, {}, 2))
-      await setImmediate()
-      expect(unhandled).not.toHaveBeenCalled()
-    } finally {
-      process.off('unhandledRejection', unhandled)
+    const reject = async () => {
+      throw new Error(CAUSE)
     }
+    f.overridePolicy.mockImplementation(reject as unknown as () => boolean)
+    await withoutUnhandledRejection(() =>
+      expectPrivateUnavailable(token, () => f.dispatch(token, {}, 2)),
+    )
     expect(f.observedExecute).not.toHaveBeenCalled()
   })
 
-  it('refuses a rejecting async policy fact even when allow would ignore it and return true', async () => {
+  it('refuses an async policy fact even when allow catches the error and returns true', async () => {
     const f = fixture({ defaultOrg: ORG })
     const { access_token: token } = await f.issue()
-    f.setPolicy('ignore-policy')
+    const caught = vi.fn()
+    f.overridePolicy.mockImplementation(({ fact }) => {
+      try {
+        f.readPolicy(fact)
+      } catch (error) {
+        caught(error)
+      }
+      return true
+    })
     f.decodePolicy.mockImplementationOnce(async () => {
       throw new Error(CAUSE)
     })
-    const unhandled = vi.fn()
-    process.on('unhandledRejection', unhandled)
-    try {
-      await expectPrivateUnavailable(token, () => f.dispatch(token, {}, 2))
-      await setImmediate()
-      expect(unhandled).not.toHaveBeenCalled()
-    } finally {
-      process.off('unhandledRejection', unhandled)
-    }
+    await withoutUnhandledRejection(() =>
+      expectPrivateUnavailable(token, () => f.dispatch(token, {}, 2)),
+    )
+    expect(caught).toHaveBeenCalledWith(expect.objectContaining({ code: 'UNAVAILABLE' }))
     expect(f.decodePolicy).toHaveBeenCalledTimes(1)
     expect(f.observedExecute).not.toHaveBeenCalled()
   })
 
-  it('sanitizes a rejecting async business decoder after affirmative policy', async () => {
+  it.each([
+    ['resolving Promise', (): unknown => Promise.resolve(PRIVATE)],
+    ['rejecting Promise', (): unknown => Promise.reject(new Error(CAUSE))],
+    [
+      'late-rejecting thenable that returns undefined',
+      (): unknown => ({
+        // biome-ignore lint/suspicious/noThenProperty: intentionally simulates a non-Promise thenable
+        then(_resolve: unknown, reject: (cause: Error) => void): void {
+          void setImmediate().then(() => reject(new Error(CAUSE)))
+        },
+      }),
+    ],
+  ] as const)('refuses a business decoder returning a %s', async (_kind, decode) => {
     const f = fixture({ defaultOrg: ORG })
     const { access_token: token } = await f.issue()
-    f.decodeBusiness.mockImplementationOnce(async () => {
-      throw new Error(CAUSE)
-    })
-    await expectPrivateUnavailable(token, () => f.dispatch(token, {}, 2))
+    f.decodeBusiness.mockImplementationOnce(decode)
+    await withoutUnhandledRejection(() =>
+      expectPrivateUnavailable(token, () => f.dispatch(token, {}, 2)),
+    )
     expect(f.observedExecute).toHaveBeenCalledExactlyOnceWith(ORG)
     expect(f.decodeBusiness).toHaveBeenCalledTimes(1)
   })
@@ -502,6 +514,18 @@ describe('scoped admission revocation and fact privacy', () => {
     },
   )
 })
+
+async function withoutUnhandledRejection(run: () => Promise<void>) {
+  const unhandled = vi.fn()
+  process.on('unhandledRejection', unhandled)
+  try {
+    await run()
+    await setImmediate()
+    expect(unhandled).not.toHaveBeenCalled()
+  } finally {
+    process.off('unhandledRejection', unhandled)
+  }
+}
 
 async function expectPrivateUnavailable(token: string, dispatch: () => Promise<Reply>) {
   const logs = (['log', 'warn', 'error', 'info', 'debug'] as const).map((method) =>

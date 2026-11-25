@@ -64,15 +64,7 @@ function restrictedFact(
       if (declared.has(descriptor)) {
         const value = read(descriptor)
         if (!isThenable(value)) return value
-        if (refusePolicyRead) void value.then(undefined, () => {})
-        else {
-          return value.then(
-            (resolved) => resolved,
-            () => {
-              throw new PublicToolError('UNAVAILABLE')
-            },
-          ) as T
-        }
+        void Promise.resolve(value).then(undefined, () => {})
       }
     } catch {
       // Fall through to the same public error for rejected and unreadable facts.
