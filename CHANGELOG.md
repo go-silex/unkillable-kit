@@ -20,11 +20,40 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
   `facts`, `forOrganization` and `denyFact` are removed; move a `denyFact` barrier into
   `grantAdmission` before upgrading. See [Update hosted MCP tools](docs/kit/playbooks/migrate-request-authorization.md#update-hosted-mcp-tools-if-used)
   (go-silex/unkillable-kit#181).
+- Hosted dispatch carries Product headers, such as `Idempotency-Key`, that every matched handler
+  declares with `authorization.hosted(app, register, { headers })`; an undeclared name is refused
+  before any handler runs, and credential, selection, framing, hop-by-hop and client-address names
+  cannot be declared. `query` accepts an array for a repeated key. See [Update hosted MCP tools](docs/kit/playbooks/migrate-request-authorization.md#update-hosted-mcp-tools-if-used)
+  (go-silex/unkillable-kit#195).
+- `betterAuthMount` refuses only the Kit's machine credentials among Bearer tokens (API keys and
+  hosted dispatches), so Better Auth authenticates its own tokens, such as an OIDC access token at
+  `/oauth2/userinfo`. The Impersonation fence still refuses any Bearer with an attached delegation
+  (go-silex/unkillable-kit#195).
+- `requireSession` and `authorization.session(c)` no longer call `keyScope`: a key gets
+  `This route requires a session cookie` or `null`. Every other guard calls it, even after
+  `session(c)` in the same request (go-silex/unkillable-kit#195).
+
+### Flows
+
+- Flows access predicates accept `authMethod: 'mcp'` and still deny hosted MCP principals run
+  creation, approval decisions and cancellation (go-silex/unkillable-kit#195).
 
 ### Root
 
 - Root's Better Auth differential compares only the cookies the enrolled issuer sets on sign-in.
   An App may add an unrelated cookie to that response (go-silex/unkillable-kit#188).
+- Root's Better Auth check no longer requires built static assets: Wrangler and the local probe use
+  an empty scratch directory for `assets.directory` (go-silex/unkillable-kit#195).
+- **Product action:** An App that guards direct writes to `user.disabled` declares
+  `kitBetterAuthDisableUser` in its `package.json`: SQL that disables the fixture User through the
+  App's own mechanism without deleting its session. See [Enroll shipping Better Auth Apps in Root](docs/kit/playbooks/migrate-request-authorization.md#enroll-shipping-better-auth-apps-in-root)
+  (go-silex/unkillable-kit#195).
+
+### Import boundaries
+
+- R6 treats `*.test-support.*` modules as test code, so shared test helpers may import
+  `@kit/auth/hosted-dispatch`. Production code that imports a `*.test-support.*` module now fails R6
+  (go-silex/unkillable-kit#195).
 
 ## unkillable-kit/v0.8.1 — 2026-11-25
 

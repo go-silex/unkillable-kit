@@ -213,7 +213,8 @@ describe('API key scopes over HTTP', () => {
         },
         env,
       )
-      expect(response.status, route).toBe(403)
+      // A route that reads only `session(c)` answers a key as a non-session (401), never admits it.
+      expect([401, 403], route).toContain(response.status)
     }
   })
 })

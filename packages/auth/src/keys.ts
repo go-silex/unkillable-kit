@@ -49,6 +49,11 @@ export function parseBearer(header: string | null | undefined): string | null {
   return m?.[1]?.trim() || null
 }
 
+/** A Bearer in the Kit's key namespace; any other Bearer token is not a Kit credential. */
+export function hasKitKeyBearer(header: string | null | undefined): boolean {
+  return parseBearer(header)?.startsWith('sk_') === true
+}
+
 /**
  * Verify a presented `sk_` against its stored hash.
  *

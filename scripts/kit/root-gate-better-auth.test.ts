@@ -136,7 +136,10 @@ main = "src/worker.ts"
 compatibility_date = "2026-07-01"
 compatibility_flags = ["nodejs_compat"]
 [[d1_databases]]
-${database}`
+${database}
+[assets]
+directory = "./public"
+`
   put(`${app}/wrangler.toml`, workerConfig)
   put(
     `${app}/${wrapper}`,
@@ -194,11 +197,12 @@ export function fetch(req, env) { return issueAuth(env, env.BETTER_AUTH_URL).han
     kitBetterAuth: 'src/separate.test.ts',
   })
   runCore(/kitBetterAuth must name the sole shipping createBetterAuth export.*src\/better-auth\.ts/)
-  json(`${app}/package.json`, {
+  const enrolledManifest = {
     ...productManifest,
     dependencies: { 'better-auth': '*' },
     kitBetterAuth: wrapper,
-  })
+  }
+  json(`${app}/package.json`, enrolledManifest)
   const unwired = /Wrangler main src\/worker\.ts does not reach a runtime call to createBetterAuth/
   runCore(unwired) // The only call is in an orphan source file.
   put(
@@ -220,12 +224,50 @@ export default {
 `,
   )
   put(`${app}/src/edge.ts`, `export { fetch } from './auth-consumer'\n`)
-  const withRelease = `${workerConfig}\n[[env.release.d1_databases]]\n${database}`
+  const withRelease = `${workerConfig}\n[[env.release.d1_databases]]\n${database}
+[env.release.assets]
+directory = "../web/dist"
+`
   put(`${app}/wrangler.toml`, withRelease)
   for (const localFile of ['.dev.vars', '.dev.vars.release', '.env']) {
     put(`${app}/${localFile}`, 'ROOT_GATE_LOCAL_ONLY=fixture-canary\n')
   }
+  put(
+    `${app}/migrations/9999_account_disabled.sql`,
+    `CREATE TABLE account_disabled (user_id TEXT PRIMARY KEY REFERENCES "user"(id));
+CREATE TRIGGER guard_disabled_insert BEFORE INSERT ON "user"
+WHEN NEW.disabled IS NOT 0
+BEGIN
+  SELECT RAISE(ABORT, 'projected');
+END;
+CREATE TRIGGER guard_disabled_update BEFORE UPDATE OF disabled ON "user"
+WHEN NEW.disabled IS NOT EXISTS (SELECT 1 FROM account_disabled WHERE user_id = NEW.id)
+BEGIN
+  SELECT RAISE(ABORT, 'projected');
+END;
+CREATE TRIGGER project_disabled AFTER INSERT ON account_disabled
+BEGIN
+  UPDATE "user" SET disabled = 1 WHERE id = NEW.user_id;
+END;
+`,
+  )
+  const projectedManifest = {
+    ...enrolledManifest,
+    kitBetterAuthDisableUser: 'INSERT INTO account_disabled (user_id) VALUES (?)',
+  }
+  json(`${app}/package.json`, projectedManifest)
   assert.match(runCore(), /apps\/product-fixture differential fixtures passed/)
+
+  // Only the default target is needed to prove the two disabled-User failures.
+  put(`${app}/wrangler.toml`, workerConfig)
+  json(`${app}/package.json`, enrolledManifest)
+  runCore(/disabled User: declare kitBetterAuthDisableUser .*projected/)
+  json(`${app}/package.json`, {
+    ...enrolledManifest,
+    kitBetterAuthDisableUser: 'DELETE FROM account_disabled WHERE user_id = ?',
+  })
+  runCore(/disabled User: kitBetterAuthDisableUser must disable the User/)
+  json(`${app}/package.json`, projectedManifest)
 
   const consumer = `${app}/src/auth-consumer.ts`
   const enrolledConsumer = readFileSync(join(root, consumer), 'utf8')

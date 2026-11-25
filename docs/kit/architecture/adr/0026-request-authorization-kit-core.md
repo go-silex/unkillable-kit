@@ -144,7 +144,9 @@ runs once per request, with the delegation's Organization as a binding. A parsed
 an attached delegation refuses any Bearer scheme, and a stale fence cannot turn a lost session into key authority.
 
 Every Kit guard and identity helper runs this authentication step, so a route can mount only its most specific guard.
-The App also mounts the Kit's guard on its Better Auth mount: it refuses machine credentials there and, when
+A session-only check (`requireSession`, `session(c)`) does not judge key route scope: a key is no session there, so it
+is refused or answered `null`. The App also mounts the Kit's guard on its Better Auth mount: it refuses the Kit's
+machine credentials there (API keys and hosted dispatches), leaves Better Auth's own Bearer tokens to it, and, when
 Impersonation is enabled, applies the fence and delegation policy before Better Auth runs and admits sign-out as
 recovery, without granting business or Platform authority; anonymous requests pass. Stop keeps its own route, under
 the real actor's session. Public routes stay unguarded and carry no identity. The cutover inventories every handler
@@ -199,23 +201,26 @@ and the D1 deny fact are removed.
 After outer admission, registration receives a capability for the verified principal. Only the shell creates it, and
 it is valid only while that outer request is served. A tool dispatches through it, in process, to the App the shell is
 composed with. Trusted tool code maps validated arguments to a declared operation and its route parameters; input
-never supplies an arbitrary method or destination.
+never supplies an arbitrary method, destination or header.
 
 The App declares each hosted operation on its terminal handler, when it composes the App, optionally accepting the
-hosted principal in a Platform Role guard; everything else is denied. A guard mounted beside a handler, or a shared
-method and path, never declares it. Before dispatch, the capability matches the destination with the App's own router
-and refuses, without running anything, unless the registrations matched meet three conditions: ignoring identified
-middleware registrations matched before it, the first is a Kit guard; an Organization-bound dispatch meets a Kit
-Organization guard before any terminal registration; and at least one terminal registration is matched and every one
-is a declared hosted handler, with any other `ALL` registration counted as terminal (D4). Kit guards check the
-declarations again for the registrations Hono actually matched, so a guard refusal stops the operation before its
-handler runs. Identified middleware causes no business effect before admission.
+hosted principal in a Platform Role guard and naming the Product headers a dispatch may carry; everything else is
+denied. A guard mounted beside a handler, or a shared method and path, never declares it. Before dispatch, the
+capability matches the destination with the App's own router and refuses, without running anything, unless the
+registrations matched meet three conditions: ignoring identified middleware registrations matched before it, the first
+is a Kit guard; an Organization-bound dispatch meets a Kit Organization guard before any terminal registration; and at
+least one terminal registration is matched and every one is a declared hosted handler, with any other `ALL`
+registration counted as terminal (D4). Kit guards check the declarations again for the registrations Hono actually
+matched, so a guard refusal stops the operation before its handler runs. Identified middleware causes no business
+effect before admission.
 
-The Kit creates each dispatched request itself, without cookie or `Authorization` header, and privately associates
-it with the principal and designation; there is no public way to mark a request. The receiving App claims that
-association once. A reused, cloned, forwarded or reconstructed request, a network fetch or a dispatch after the outer
-request ends carries no hosted identity, and a guard refuses it as unauthenticated. Kit guards authenticate a claimed
-request as the hosted principal, with no fallback to other credentials and without super-admin bypass.
+The Kit creates each dispatched request itself, without cookie, `Authorization` or any header that every matched
+handler did not declare; credential, Organization selection, framing, hop-by-hop and client-address headers cannot be
+declared. It privately associates the request with the principal and designation; there is no public way to mark a
+request. The receiving App claims that association once. A reused, cloned, forwarded or reconstructed request, a
+network fetch or a dispatch after the outer request ends carries no hosted identity, and a guard refuses it as
+unauthenticated. Kit guards authenticate a claimed request as the hosted principal, with no fallback to other
+credentials and without super-admin bypass.
 
 An Organization-scoped tool designates its Organization when it runs, from its validated input or from a server
 default when the selector is omitted. A nonempty outer `X-Org-Id` constrains only Organization-bound dispatches: it is

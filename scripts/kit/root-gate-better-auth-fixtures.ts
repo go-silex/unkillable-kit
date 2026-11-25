@@ -165,7 +165,7 @@ type Fixture = {
   cookie?: string
   allowed: boolean
   secret?: string
-  change?: (db: Database) => void
+  change?: (db: Database, label: string) => void
 }
 
 function proveMountedIssuer(app: BetterAuthApp, snapshotPath: string, passwordHash: string) {
@@ -295,9 +295,38 @@ export async function runBetterAuthDifferential(app: BetterAuthApp) {
         name: 'disabled User',
         cookie,
         allowed: false,
-        change: (db) => {
-          db.query<unknown, [string]>('UPDATE user SET disabled = 1 WHERE id = ?').run(
-            identity.subject,
+        change: (db, label) => {
+          if (app.disableUserSql !== undefined) {
+            using disable = db.prepare<unknown, [string]>(app.disableUserSql)
+            assert.equal(
+              disable.paramsCount,
+              1,
+              `${label}: kitBetterAuthDisableUser must be one SQL statement taking the User id`,
+            )
+            disable.run(identity.subject)
+          } else {
+            try {
+              db.query<unknown, [string]>('UPDATE user SET disabled = 1 WHERE id = ?').run(
+                identity.subject,
+              )
+            } catch (cause) {
+              throw new Error(
+                `${label}: declare kitBetterAuthDisableUser in the App's package.json to disable the User (${cause instanceof Error ? cause.message : String(cause)})`,
+              )
+            }
+          }
+          const user = db
+            .query<{ disabled: number }, [string]>('SELECT disabled FROM user WHERE id = ?')
+            .get(identity.subject)
+          assert.equal(
+            user?.disabled,
+            1,
+            `${label}: kitBetterAuthDisableUser must disable the User`,
+          )
+          assert.equal(
+            rowCount(db, identity.sessionId),
+            1,
+            `${label}: kitBetterAuthDisableUser must keep the session so the refusal proves the account check`,
           )
         },
       },
@@ -356,8 +385,8 @@ export async function runBetterAuthDifferential(app: BetterAuthApp) {
       await atTime(now, async () => {
         if (test.change) {
           await assertBoth(identity, test.cookie, 'same cookie admitted before changing state')
-          test.change(referenceDb)
-          test.change(verifierDb)
+          test.change(referenceDb, label)
+          test.change(verifierDb, label)
         }
         if (test.name.startsWith('expired'))
           assert.equal(rowCount(verifierDb, identity.sessionId), 1)

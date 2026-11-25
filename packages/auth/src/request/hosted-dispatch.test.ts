@@ -358,4 +358,187 @@ describe('hosted dispatch', () => {
       spy.mockRestore()
     }
   })
+
+  it('rechecks declared Product headers against the registrations inside the guard', async () => {
+    const f = setup()
+    const { app, authorization: auth, db } = f
+    const admission = await grant(f)
+    const entered = vi.fn(() => new Response('entered'))
+    auth.hosted(app, () => app.get('/declared', auth.requireAuth, entered), {
+      headers: ['Idempotency-Key'],
+    })
+    auth.hosted(app, () => app.get('/other', auth.requireAuth, entered))
+    const real = app.router.match('GET', '/declared')
+    const different = app.router.match('GET', '/other')
+    const spy = vi
+      .spyOn(app.router, 'match')
+      .mockReturnValueOnce(real)
+      .mockReturnValueOnce(different)
+    try {
+      const result = await invoke(f, admission).fetch({
+        method: 'GET',
+        path: '/declared',
+        headers: { 'Idempotency-Key': 'once' },
+      })
+      expect(result.status).toBe(403)
+      expect(db.batch).not.toHaveBeenCalled()
+      expect(entered).not.toHaveBeenCalled()
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('carries exactly the Product headers every matched handler declares', async () => {
+    const f = setup()
+    const { app, authorization: auth, db } = f
+    const admission = await grant(f)
+    const entered = vi.fn(() => new Response('entered'))
+    auth.hosted(
+      app,
+      () =>
+        app.post('/notes', auth.requireAuth, (c) =>
+          c.json({
+            key: c.req.header('idempotency-key'),
+            subject: c.req.header('x-expected-subject'),
+            cookie: c.req.header('cookie') ?? null,
+            authorization: c.req.header('authorization') ?? null,
+            org: c.req.header('x-org-id') ?? null,
+            type: c.req.header('content-type'),
+          }),
+        ),
+      { headers: ['Idempotency-Key', 'x-expected-subject'] },
+    )
+    auth.hosted(app, () => app.post('/shared', auth.requireAuth, async (_c, next) => next()), {
+      headers: ['Idempotency-Key'],
+    })
+    auth.hosted(app, () => app.post('/shared', entered))
+    const dispatch = invoke(f, admission, { Cookie: 'outer-cookie' })
+    const accepted = await dispatch.fetch({
+      method: 'POST',
+      path: '/notes',
+      body: {},
+      headers: { 'IDEMPOTENCY-KEY': 'k 1', 'X-Expected-Subject': 'actor' },
+    })
+    expect(accepted.status).toBe(200)
+    expect(await accepted.json()).toEqual({
+      key: 'k 1',
+      subject: 'actor',
+      cookie: null,
+      authorization: null,
+      org: null,
+      type: 'application/json',
+    })
+    expect(db.batch).toHaveBeenCalledTimes(1)
+    for (const headers of [
+      { 'X-Other': 'value' },
+      { Cookie: 'chosen-cookie' },
+      { Authorization: 'Bearer chosen-token' },
+      { 'X-Org-Id': 'chosen' },
+      { Host: 'elsewhere.example.test' },
+      { 'Content-Type': 'text/plain' },
+    ] as Record<string, string>[]) {
+      const refused = await dispatch.fetch({ method: 'POST', path: '/notes', body: {}, headers })
+      expect(refused.status).toBe(403)
+      expect(await refused.json()).toMatchObject({
+        error: { message: 'Hosted header not declared' },
+      })
+    }
+    // A capability has eight slots; the dispatches above took seven.
+    const fresh = invoke(f, admission)
+    const shared = { method: 'POST', path: '/shared' }
+    expect((await fresh.fetch(shared)).status).toBe(200)
+    const narrowed = await fresh.fetch({ ...shared, headers: { 'Idempotency-Key': 'k' } })
+    expect(narrowed.status).toBe(403)
+    expect(await narrowed.json()).toMatchObject({
+      error: { message: 'Hosted header not declared' },
+    })
+    expect(entered).toHaveBeenCalledTimes(1)
+    expect(db.batch).toHaveBeenCalledTimes(2)
+  })
+
+  it.each([
+    ['a non-string value', { 'Idempotency-Key': 1 }],
+    ['a repeated name', { 'Idempotency-Key': 'a', 'idempotency-key': 'b' }],
+    ['a line break', { 'Idempotency-Key': 'a\r\nCookie: chosen' }],
+    ['a value Fetch would trim', { 'Idempotency-Key': ' a' }],
+    ['an invalid name', { 'Idempotency Key': 'a' }],
+    ['a non-object', ['Idempotency-Key', 'a']],
+  ])('refuses %s as an invalid operation without taking a slot', async (_name, headers) => {
+    const f = setup()
+    const { app, authorization: auth, db } = f
+    const admission = await grant(f)
+    const entered = vi.fn(() => new Response('entered'))
+    auth.hosted(app, () => app.get('/op', auth.requireAuth, entered), {
+      headers: ['Idempotency-Key'],
+    })
+    const dispatch = createHostedDispatch({
+      app,
+      authorization: auth,
+      outer: new Request(OUTER),
+      admission,
+      limit: 1,
+    })
+    const op = { method: 'GET', path: '/op' }
+    const refused = await dispatch.fetch({
+      ...op,
+      headers: headers as unknown as Record<string, string>,
+    })
+    expect(refused.status).toBe(400)
+    expect(entered).not.toHaveBeenCalled()
+    expect((await dispatch.fetch(op)).status).toBe(200)
+    expect(db.batch).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([
+    'Authorization',
+    'cookie',
+    'X-Org-Id',
+    'Host',
+    'Connection',
+    'Transfer-Encoding',
+    'Content-Type',
+    'Origin',
+    'Proxy-Authorization',
+    'Sec-Fetch-Site',
+    'CF-Connecting-IP',
+    'X-Forwarded-For',
+    'Idempotency Key',
+    '',
+  ])('refuses to declare %j for a hosted operation', (name) => {
+    const { app, authorization: auth } = setup()
+    const register = vi.fn()
+    expect(() => auth.hosted(app, register, { headers: [name] })).toThrow(TypeError)
+    expect(register).not.toHaveBeenCalled()
+  })
+
+  it('appends every value of a repeated query key in order', async () => {
+    const f = setup()
+    const { app, authorization: auth } = f
+    const admission = await grant(f)
+    auth.hosted(app, () =>
+      app.get('/search', auth.requireAuth, (c) =>
+        c.json({
+          tags: c.req.queries('tag'),
+          one: c.req.query('one'),
+          none: c.req.queries('none') ?? null,
+        }),
+      ),
+    )
+    const dispatch = invoke(f, admission)
+    const result = await dispatch.fetch({
+      method: 'GET',
+      path: '/search',
+      query: { tag: ['b', 'a', 'b'], one: 'x', none: [] },
+    })
+    expect(result.status).toBe(200)
+    expect(await result.json()).toEqual({ tags: ['b', 'a', 'b'], one: 'x', none: null })
+    for (const query of [{ tag: [1] }, { tag: { a: 'b' } }, 'tag=a']) {
+      const refused = await dispatch.fetch({
+        method: 'GET',
+        path: '/search',
+        query: query as unknown as Record<string, string>,
+      })
+      expect(refused.status).toBe(400)
+    }
+  })
 })

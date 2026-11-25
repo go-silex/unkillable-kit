@@ -26,12 +26,14 @@ export type WorkerTarget = {
   entry: string
   moduleRoot: string
   noBundle?: boolean
+  assets?: true
 }
 type WorkerConfig = {
   main?: unknown
   base_dir?: string
   no_bundle?: boolean
   build?: { command?: string }
+  assets?: { directory?: string }
 }
 function isLocalSource(app: string, file: string) {
   const path = relative(app, file)
@@ -65,7 +67,7 @@ function workerEntrypoints(app: string, required = true): WorkerTarget[] {
   const entries: WorkerTarget[] = []
   function addTarget(
     config: string,
-    { main, base_dir, no_bundle, build }: WorkerConfig,
+    { main, base_dir, no_bundle, build, assets }: WorkerConfig,
     env?: string,
   ) {
     if (!required && main === undefined) return
@@ -73,7 +75,14 @@ function workerEntrypoints(app: string, required = true): WorkerTarget[] {
     assertInspectableWorker(app, source, `${config}${env ? ` --env ${env}` : ''}`, build?.command)
     const entry = required ? workerMainFile(app, config, main) : source
     const moduleRoot = base_dir === undefined ? dirname(entry) : resolve(app, base_dir)
-    entries.push({ config, env, entry, moduleRoot, noBundle: no_bundle })
+    entries.push({
+      config,
+      env,
+      entry,
+      moduleRoot,
+      noBundle: no_bundle,
+      assets: typeof assets?.directory === 'string' ? true : undefined,
+    })
   }
   for (const file of configs) {
     const text = readFileSync(file, 'utf8')
@@ -89,6 +98,7 @@ function workerEntrypoints(app: string, required = true): WorkerTarget[] {
           base_dir: options.base_dir ?? config.base_dir,
           no_bundle: options.no_bundle ?? config.no_bundle,
           build: options.build ?? config.build,
+          assets: options.assets ?? config.assets,
         },
         env,
       )

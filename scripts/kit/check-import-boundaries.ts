@@ -9,6 +9,8 @@
  *   R5 non-SPA apps (example-api and apps/* except *-web) ↛ @kit/auth/react
  *       (SPA password forms: example-web and apps/*-web may import)
  *   R6 hosted authority internals are private; the MCP shell imports the dispatch subpath only
+ *      test code (*.test.*, *.spec.*, *.test-support.*) may import hosted authority;
+ *      production code cannot import *.test-support.* (even with an exemption)
  *   exemptions require reason; invalid config → exit 2
  *
  * Does NOT prove: runtime/DI purity, non-literal dynamic imports,
@@ -429,6 +431,9 @@ function resolvedAbsTarget(resolved: ResolveResult): string | null {
   return null
 }
 
+const R6_TEST_IMPORTER = /\.(?:test|spec|test-support)\.[cm]?[jt]sx?$/
+const R6_TEST_SUPPORT_TARGET = /\.test-support(?:\.[cm]?[jt]sx?)?$/
+
 function hostedAuthorityViolation(
   hit: ImportHit,
   specBare: string,
@@ -438,6 +443,8 @@ function hostedAuthorityViolation(
   const dispatchPackage =
     specBare === '@kit/auth/hosted-dispatch' || specBare.startsWith('@kit/auth/hosted-dispatch/')
   const target = absTarget && stripSpecifierSuffix(relPosix(root, absTarget))
+  if (R6_TEST_IMPORTER.test(hit.file)) return null
+  if (target && R6_TEST_SUPPORT_TARGET.test(target)) return { ...hit, rule: 'R6' }
   const internal =
     target &&
     /^packages\/auth\/src\/(?:request\/(?:hosted-dispatch|hosted-routes|request-authorization)|snapshot(?:\/hosted-principal)?)(?:\.[cm]?[jt]s)?$/.test(
@@ -446,8 +453,7 @@ function hostedAuthorityViolation(
   if (!(dispatchPackage || internal)) return null
   if (
     hit.file.startsWith('packages/auth/src/') ||
-    (dispatchPackage && hit.file.startsWith('packages/mcp/src/hosted/')) ||
-    /\.(?:test|spec)\.[cm]?[jt]sx?$/.test(hit.file)
+    (dispatchPackage && hit.file.startsWith('packages/mcp/src/hosted/'))
   )
     return null
   return { ...hit, rule: 'R6' }
