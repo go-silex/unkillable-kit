@@ -38,8 +38,9 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
   on the `GET` registration Hono matches, so a key allowed to read a route may also send `HEAD`. A
   route that reads only `session(c)` gets `null` for a key and answers with its own refusal: the
   Example MCP identity ticket route now returns `401` where the removed global key gate returned
-  `403`. Product code owns the order of a write precondition: unavailable Module `404`, stale write
-  `409`, then insufficient grant `403`. See [Handle admission responses](docs/kit/playbooks/migrate-request-authorization.md#handle-admission-responses)
+  `403`. For an ordinary member session whose visibility-based write precondition must report a
+  stale write before a Module access denial, Product code owns the order: unavailable Module `404`,
+  stale write `409`, then insufficient grant `403`. See [Handle admission responses](docs/kit/playbooks/migrate-request-authorization.md#handle-admission-responses)
   and [Preserve a visibility-based write precondition](docs/kit/playbooks/migrate-request-authorization.md#preserve-a-visibility-based-write-precondition)
   (go-silex/unkillable-kit#191, go-silex/unkillable-kit#195).
 
@@ -51,9 +52,9 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 ### MCP
 
 - **Product action:** `PublicToolErrorCode` gains `UNAVAILABLE`
-  (`Authorization is temporarily unavailable.`), which a hosted tool returns when a dispatch answers
-  `5xx`. Code that switches exhaustively over the codes or keys a `Record` by them handles it
-  (go-silex/unkillable-kit#191).
+  (`Authorization is temporarily unavailable.`). `dispatch.fetch()` returns the HTTP response: a
+  hosted tool maps a `5xx` to `PublicToolError('UNAVAILABLE')` itself. Code that switches
+  exhaustively over the codes or keys a `Record` by them handles it (go-silex/unkillable-kit#191).
 
 ### Root
 

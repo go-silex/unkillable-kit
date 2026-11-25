@@ -239,16 +239,18 @@ the gate.
 | hosted `denyFact`                                                                                                           | `grantAdmission`                                                                                              |
 | `ModuleAuthorizationFacts` (`@kit/auth/hono`)                                                                               | `modules: true`; read `view(c).organization.modules`                                                          |
 | `AuthorizationFact`, `AuthorizationProjection`, `AuthorizationRow` (`@kit/auth/snapshot`)                                   | Remove; type Product query results in Product code                                                            |
-| `HostedAuthorization`; `authorizeHostedPrincipal` options `organizationId`, `facts`, `denyFact`, `admit`                    | `authorizeHostedPrincipal({ db, principal })` returning `HostedAdmission` (below)                             |
+| `HostedAuthorization` (the `authorization` argument of `register`)                                                          | `dispatch: HostedToolDispatch` from `@kit/mcp/hosted`, absent without `app` and `authorization`               |
+| `authorizeHostedPrincipal` options `organizationId`, `facts`, `denyFact`, `admit`                                           | `authorizeHostedPrincipal({ db, principal })` returning `HostedAdmission` (below)                             |
 
 - Move a `denyFact` barrier into `grantAdmission` before upgrading, so the denial stays in force
   without a gap. `grantAdmission` runs on resource requests and code/refresh exchanges, may perform
   its own I/O, and must return `true` to allow.
-- `authorizeHostedPrincipal({ db, principal })` from `@kit/auth/snapshot` takes only the
-  provider-verified principal and returns a `HostedAdmission`: `{ status: 'allowed', principal }`
-  with a sealed `HostedPrincipal`, `{ status: 'denied' }` or `{ status: 'unavailable' }`. It no
-  longer returns `organization`, `fact` or `forOrganization`: a tool designates the Organization at
-  each dispatch. Move an `admit` policy into `grantAdmission`, like a `denyFact` barrier.
+- A direct caller of `authorizeHostedPrincipal({ db, principal })` from `@kit/auth/snapshot` passes
+  only the provider-verified principal and gets a `HostedAdmission`:
+  `{ status: 'allowed', principal }` with a sealed `HostedPrincipal`, `{ status: 'denied' }` or
+  `{ status: 'unavailable' }`. It no longer returns `organization`, `fact` or `forOrganization`: a
+  tool designates the Organization for each Organization-bound dispatch. Move an `admit` policy into
+  `grantAdmission`, like a `denyFact` barrier.
 - `PublicToolErrorCode` from `@kit/mcp` gains `UNAVAILABLE`; map a `5xx` dispatch to
   `PublicToolError('UNAVAILABLE')`. Code that switches exhaustively over the codes or keys a
   `Record` by them must handle it.
