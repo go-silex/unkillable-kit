@@ -46,7 +46,7 @@
     "@types/better-sqlite3": "^9.6.0",
     "better-sqlite3": "^13.2.0",
     "fastmcp": "^4.28.4",
-    "hono": "^4.13.19",
+    "hono": "^4.13.20",
     "vitest": "^5.1.1"
   }
 }
