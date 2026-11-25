@@ -160,10 +160,10 @@ The Kit projects the verified Better Auth `sessionId`, never the cookie token. I
 should issue real cookies through the shipping Better Auth composition. The shared `/api/me` parser
 requires `impersonation` (nullable) and `impersonationPermissions` (independent read/write booleans).
 
-An App composing Impersonation opts into delegation facts and gates every request before dispatch,
-including raw Better Auth, MCP and other paths outside `requireAuth`. It marks the fence admitted
-only after its explicit default-deny operation policy and any required audit. Both identities must
-belong to the pinned Organization; the represented User's live Module grants apply without operator
+An App composing Impersonation gives the `impersonation` hook to its instance, not a global gate.
+Kit guards on each protected route and `betterAuthMount` apply its `fence` and delegation policy;
+`operation` is default-deny and `audit` records each business attempt. Both identities must belong
+to the pinned Organization; the represented User's live Module grants apply without operator
 bypass. Permission to administer Users does not imply permission to impersonate.
 
 Clients send `X-Impersonation-Id` with the exact public delegation id, or `none` for ordinary requests. It never authenticates a request. A stale fence must fail before any Bearer fallback can select another identity. `/api/me` remains available for recovery; `impersonation.active: false` means no business access, not an automatic return to the operator. The stop operation uses the real session and expected delegation id; refetch `/api/me` before assuming which identity is current.
