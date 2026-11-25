@@ -3,7 +3,7 @@ title: 'ADR-0015 — Remote MCP uses Streamable HTTP + Worker-issued OAuth token
 status: accepted
 normative: true
 date: 2026-09-16
-amended: 2026-11-21
+amended: 2026-11-25
 supersedes_notes: >
   The current decision incorporates the 2026-10-24 hosted-shell, consent-policy,
   provider 1.2 and configured-origin decisions, the 2026-11-07 static
@@ -15,6 +15,9 @@ supersedes_notes: >
   The 2026-11-14 amendment adds a mandatory live User-state check and DB binding.
   2026-11-21: body trimmed to decisions, rationale and limits; implementation
   detail now lives only in the cited code and tests. No decision changed.
+  2026-11-25: D8 gains the in-process dispatch seam of ADR-0026 D6, on two observed
+  Product compositions; the shared-fact reuse granted by ADR-0025 D3 ends. No OAuth
+  grant, consent policy, token claim or scope changed.
 axial: false
 related:
   - docs/kit/architecture/adr/0001-primary-axis-packages-compose-apps.md
@@ -22,6 +25,7 @@ related:
   - docs/kit/architecture/adr/0003-multi-tenant-rbac-modules.md
   - docs/kit/standards/stack.md
   - docs/kit/testing.md
+  - docs/kit/architecture/adr/0026-request-authorization-kit-core.md
 summary: 'Hosted Streamable HTTP + Worker-issued MCP OAuth token'
 ---
 
@@ -203,6 +207,14 @@ Neither exception waives the second-consumer gate for another seam or policy,
 relaxes this ADR's controls, or authorizes publication, Product inheritance or
 deployment. Those retain their own authorizations. A new seam or policy still
 requires an ADR-0015 amendment and a second consumer.
+
+> **Amendment (2026-11-25) — in-process dispatch** (go-silex/unkillable-kit#191). Tool registration receives the
+> dispatch capability of [ADR-0026 D6](./0026-request-authorization-kit-core.md#d6--hosted-mcp-selects-the-organization-at-dispatch):
+> a tool designates its Organization at dispatch and calls the composed App's declared operations in process, where
+> Kit guards verify the principal and Organization. Two Products already dispatch tools in process to their own routes
+> with a verified principal and a designated Organization; this cites those compositions, not adoption of the seam.
+> The shell no longer reuses a shared fact interface for tool scope. No OAuth grant, consent policy, token claim or
+> scope changes, and the limits of the previous paragraph apply.
 
 A dedicated Worker is optional; trusted `fallthrough` may co-locate the shell.
 It is neither a sandbox nor an authorization point and never receives reserved

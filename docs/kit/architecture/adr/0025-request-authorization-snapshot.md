@@ -3,6 +3,11 @@ title: 'ADR-0025 — Load authentication and authorization facts once per reques
 status: accepted
 normative: true
 date: 2026-11-24
+amended: 2026-11-25
+supersedes_notes: >
+  2026-11-25: ADR-0026 replaces D1, D2 and D5, except the D2 rules on Module ownership and 404/403 semantics, the
+  ADR-0003 D7 bypass amendment, no grant repair, Impersonation and Capability Grant provenance. It replaces the D3
+  hosted MCP bullet and amends the D4 mounted-cookie comparison (go-silex/unkillable-kit#191).
 axial: false
 related:
   - docs/kit/architecture/adr/0002-session-hmac-interim-vs-better-auth.md
@@ -11,11 +16,16 @@ related:
   - docs/kit/architecture/adr/0012-kernel-persistence-request-context.md
   - docs/kit/architecture/adr/0015-mcp-remote-oauth-worker.md
   - docs/kit/architecture/adr/0024-root-single-quality-gate.md
+  - docs/kit/architecture/adr/0026-request-authorization-kit-core.md
   - 'go-silex/unkillable-kit#162'
-summary: 'One authorization snapshot per request; one D1 batch for its facts'
+summary: 'Kit-verified session cookie and API keys; Root proves the Better Auth version'
 ---
 
 # ADR-0025 — Load authentication and authorization facts once per request
+
+> **Amended 2026-11-25 by [ADR-0026](./0026-request-authorization-kit-core.md).** D1, D2 and D5 are replaced except
+> the D2 rules listed in ADR-0026; the D3 hosted MCP bullet is replaced by ADR-0026 D6; the D4 mounted-cookie
+> comparison is amended by ADR-0026 D7. The rest of this record stays in force.
 
 ## Context
 
