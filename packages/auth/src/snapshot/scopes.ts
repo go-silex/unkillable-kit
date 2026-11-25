@@ -154,8 +154,11 @@ export function compileScope(table: string, scope: AuthorizationFactScope, colum
   for (const [name, key] of anchors) {
     if (typeof name !== 'string' || used.has(name.toLowerCase())) return invalid()
     used.add(name.toLowerCase())
-    // Product columns may declare NOCASE; correlation must use exact key equality.
-    predicates.push([column(name), '=', key, 'COLLATE BINARY'].join(' '))
+    // Require a TEXT key and override the Product column's implicit collation.
+    const anchor = column(name)
+    predicates.push(
+      [`typeof(${anchor})`, "= 'text' AND", anchor, '=', key, 'COLLATE BINARY'].join(' '),
+    )
   }
   return { joins, predicates }
 }

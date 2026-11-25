@@ -154,10 +154,12 @@ function admissionResponse(outcome: 'denied' | 'unavailable', request: Request):
   })
 }
 
-export function createHostedMcpWorker<
-  Env extends HostedMcpEnv,
-  Selection extends OrganizationSelection = 'header',
->(opts: HostedMcpWorkerOptions<Env, Selection>): HostedMcpWorker<Env>
+export function createHostedMcpWorker<Env extends HostedMcpEnv>(
+  opts: HostedMcpWorkerOptions<Env, 'tool-input'>,
+): HostedMcpWorker<Env>
+export function createHostedMcpWorker<Env extends HostedMcpEnv>(
+  opts: HostedMcpWorkerOptions<Env>,
+): HostedMcpWorker<Env>
 export function createHostedMcpWorker<Env extends HostedMcpEnv>(
   opts: HostedMcpWorkerOptions<Env, OrganizationSelection>,
 ): HostedMcpWorker<Env> {

@@ -20,7 +20,6 @@ const text = (rows: readonly AuthorizationRow[]) => z.string().parse(rows[0]?.la
 const input = z
   .object({ organizationId: z.string().min(1).optional(), values: z.array(z.number()).optional() })
   .strict()
-
 type Policy =
   | 'accept'
   | 'refuse'
@@ -29,11 +28,10 @@ type Policy =
   | 'read-business'
   | 'check-role'
   | 'reject-async'
-
+  | 'ignore-policy'
 async function rejectingPolicy() {
   throw new Error(CAUSE)
 }
-
 export type ToolOptions = HostedMcpWorkerOptions<HostedMcpEnv, 'tool-input'>
 
 export const workerOptions = {
@@ -84,24 +82,27 @@ export type Reply = {
 export function fixture({
   defaultOrg,
   invalidRegistration,
+  oversizedPlan,
 }: {
   defaultOrg?: string
   invalidRegistration?: 'overlap' | 'policy-scope' | 'business-scope'
+  oversizedPlan?: boolean
 } = {}) {
   const { sqlite, db } = createAuthFixture(USER)
   const { budget, batches, setDriverFailure } = observeOrganizationDb(db)
   let policy: Policy = 'accept'
   let businessReadsPolicy = false
   let afterExecute: (() => void) | undefined
-  const decodePolicy = vi.fn(text)
-  const decodeBusiness =
-    vi.fn<(rows: readonly AuthorizationRow[]) => string | Promise<string>>(text)
-  const decodeDeny = vi.fn(() => {
-    throw new Error(CAUSE)
-  })
+  type DecodeText = (rows: readonly AuthorizationRow[]) => string | Promise<string>
+  const decodePolicy = vi.fn<DecodeText>(text)
+  const decodeBusiness = vi.fn<DecodeText>(text)
+  const decodeDeny = vi.fn(() => CAUSE)
   const decodeRole = vi.fn((rows: readonly AuthorizationRow[]) => rows[0]?.key)
   const policyFact = orgFact('product_policy', decodePolicy)
   const businessFact = orgFact('product_business', decodeBusiness)
+  const siblingFacts = oversizedPlan
+    ? Array.from({ length: 24 }, () => orgFact('product_policy', text))
+    : []
   const roleFact = defineAuthorizationFact({
     table: { name: 'organization_roles', columns: ['id', 'key'] },
     scope: { kind: 'organization-role', roleId: 'id' },
@@ -165,6 +166,7 @@ export function fixture({
           description: 'Independent scope',
           input,
           organizationId: (arg) => arg.organizationId,
+          facts: siblingFacts,
           allow: () => true,
           execute: async (_arg, { organizationId }) => organizationId,
         }),
@@ -200,6 +202,8 @@ export function fixture({
                       return 'true' as unknown as boolean
                     case 'check-role':
                       return organization.role === 'reader' && fact(roleFact) === 'reader'
+                    case 'ignore-policy':
+                      return true
                     default:
                       return policy === 'accept' && visible
                   }

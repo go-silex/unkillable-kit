@@ -19,9 +19,10 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ### Auth
 
-- Authorization fact scope anchors now compare exactly, whatever the Product column's collation:
-  a `COLLATE NOCASE` column no longer matches an Organization or User ID that differs only by
-  case (go-silex/unkillable-kit#181).
+- Authorization fact scope anchors now match only text values compared byte for byte, whatever
+  the Product column's collation or affinity: a `NOCASE` or numeric column no longer matches an
+  Organization or User ID that differs by case or numeric form, and a non-text value never
+  matches (go-silex/unkillable-kit#181).
 
 ## unkillable-kit/v0.8.0 — 2026-11-24
 

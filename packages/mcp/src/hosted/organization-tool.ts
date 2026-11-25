@@ -54,19 +54,31 @@ function isThenable(value: unknown): value is PromiseLike<unknown> {
   )
 }
 
-function restrictedFact(read: ReadFact, declared: ReadonlySet<Fact>): ReadFact {
+function restrictedFact(
+  read: ReadFact,
+  declared: ReadonlySet<Fact>,
+  refusePolicyRead?: () => void,
+): ReadFact {
   return <T>(descriptor: AuthorizationFact<T>): T => {
-    if (!declared.has(descriptor)) throw new PublicToolError('UNAVAILABLE')
     try {
-      const value = read(descriptor)
-      if (!isThenable(value)) return value
-      // Keep the asynchronous decoder contract, but never propagate a private rejection.
-      return Promise.resolve(value).catch(() => {
-        throw new PublicToolError('UNAVAILABLE')
-      }) as T
+      if (declared.has(descriptor)) {
+        const value = read(descriptor)
+        if (!isThenable(value)) return value
+        if (refusePolicyRead) void value.then(undefined, () => {})
+        else {
+          return value.then(
+            (resolved) => resolved,
+            () => {
+              throw new PublicToolError('UNAVAILABLE')
+            },
+          ) as T
+        }
+      }
     } catch {
-      throw new PublicToolError('UNAVAILABLE')
+      // Fall through to the same public error for rejected and unreadable facts.
     }
+    refusePolicyRead?.()
+    throw new PublicToolError('UNAVAILABLE')
   }
 }
 
@@ -101,16 +113,25 @@ async function admitOrganization(
 
 function checkPolicy<Input>(
   allow: (context: PolicyContext<Input>) => boolean,
-  context: PolicyContext<Input>,
+  input: Input,
+  organization: PolicyContext<Input>['organization'],
+  read: ReadFact,
+  declared: ReadonlySet<Fact>,
 ): boolean {
+  let failedRead = false
+  const fact = restrictedFact(read, declared, () => {
+    failedRead = true
+  })
   let allowed: unknown
   try {
-    allowed = allow(context)
+    allowed = allow({ input, organization, fact })
     if (isThenable(allowed)) void Promise.resolve(allowed).then(undefined, () => {})
   } catch {
     throw new PublicToolError('UNAVAILABLE')
   }
-  if (allowed !== true && allowed !== false) throw new PublicToolError('UNAVAILABLE')
+  if (failedRead || (allowed !== true && allowed !== false)) {
+    throw new PublicToolError('UNAVAILABLE')
+  }
   return allowed
 }
 
@@ -145,11 +166,7 @@ export function organizationToolForRequest(
 
         const scope = await admitOrganization(principal, id, descriptors)
         if (!scope) return toolRefusal({ code: refused })
-        const allowed = checkPolicy(allow, {
-          input,
-          organization: { id, role: scope.role },
-          fact: restrictedFact(scope.fact, policy),
-        })
+        const allowed = checkPolicy(allow, input, { id, role: scope.role }, scope.fact, policy)
         if (!allowed) return toolRefusal({ code: refused })
         return execute(input, { organizationId: id, fact: restrictedFact(scope.fact, business) })
       },

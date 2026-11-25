@@ -240,6 +240,19 @@ describe('hosted tool-input Organization selection', () => {
     f.setDriverFailure()
     expectAllowed(await f.dispatch(token, { organizationId: ORG }, 2), ORG)
   })
+
+  it('charges an oversized plan to the cap without taking a D1 round trip', async () => {
+    const f = fixture({ oversizedPlan: true })
+    const { access_token: token } = await f.issue()
+    const valid = Array.from({ length: 8 }, (_, index) => call(index + 2, { organizationId: ORG }))
+    const replies = await f.batch(token, [call(1, { organizationId: ORG }, 'sibling'), ...valid], 8)
+    const byId = new Map(replies.map((reply) => [reply.id, reply]))
+    expect(byId.size).toBe(9)
+    expectUnavailable(byId.get(1)!)
+    for (const { id } of valid.slice(0, 7)) expectAllowed(byId.get(id)!, ORG)
+    expectRefusal(byId.get(9)!, 'ORGANIZATION_CALL_LIMIT')
+    expect(f.observedExecute).toHaveBeenCalledTimes(7)
+  })
 })
 
 describe('scoped admission revocation and fact privacy', () => {
@@ -373,17 +386,12 @@ describe('scoped admission revocation and fact privacy', () => {
     expect(() => createHostedMcpWorker({ ...options, facts: [sampleOrgFact] })).toThrow(TypeError)
   })
 
-  it('defaults an Env-only generic worker to header registration', () => {
-    const register: Parameters<typeof createHostedMcpWorker<HostedMcpEnv>>[0]['register'] = (
-      _server,
-      { authorization },
-    ) => {
-      const header: HostedAuthorization = authorization
-      expect(typeof header.forOrganization).toBe('function')
-    }
-    expect(typeof createHostedMcpWorker<HostedMcpEnv>({ ...workerOptions, register }).fetch).toBe(
-      'function',
-    )
+  it('preserves both Parameters forms of header registration and infers tool-input registration', () => {
+    type Header = HostedAuthorization
+    type Register = Parameters<typeof createHostedMcpWorker>[0]['register']
+    type RegisterForEnv = Parameters<typeof createHostedMcpWorker<HostedMcpEnv>>[0]['register']
+    expectTypeOf<Parameters<Register>[1]['authorization']>().toEqualTypeOf<Header>()
+    expectTypeOf<Parameters<RegisterForEnv>[1]['authorization']>().toEqualTypeOf<Header>()
     createHostedMcpWorker({
       ...workerOptions,
       organizationSelection: 'tool-input',
@@ -406,6 +414,26 @@ describe('scoped admission revocation and fact privacy', () => {
     } finally {
       process.off('unhandledRejection', unhandled)
     }
+    expect(f.observedExecute).not.toHaveBeenCalled()
+  })
+
+  it('refuses a rejecting async policy fact even when allow would ignore it and return true', async () => {
+    const f = fixture({ defaultOrg: ORG })
+    const { access_token: token } = await f.issue()
+    f.setPolicy('ignore-policy')
+    f.decodePolicy.mockImplementationOnce(async () => {
+      throw new Error(CAUSE)
+    })
+    const unhandled = vi.fn()
+    process.on('unhandledRejection', unhandled)
+    try {
+      await expectPrivateUnavailable(token, () => f.dispatch(token, {}, 2))
+      await setImmediate()
+      expect(unhandled).not.toHaveBeenCalled()
+    } finally {
+      process.off('unhandledRejection', unhandled)
+    }
+    expect(f.decodePolicy).toHaveBeenCalledTimes(1)
     expect(f.observedExecute).not.toHaveBeenCalled()
   })
 
