@@ -286,7 +286,7 @@ it.each(['organization role', 'key scopes', 'delegation'] as const)(
     const key = await mintApiKey(db, 'user_staff', { organizationId: ORG, scopes: ['read'] })
     // Require identity in a prefix before the mounted Example endpoint can see :orgId.
     const edge = new OpenAPIHono<AppEnv>()
-    edge.use('*', requestIdMiddleware, withDb, withBetterAuth)
+    authorization.middleware(edge, () => edge.use('*', requestIdMiddleware, withDb, withBetterAuth))
     edge.onError(onError)
     edge.use('/api/orgs/*', authorization.requireAuth)
     edge.route('/', orgsRoutes)

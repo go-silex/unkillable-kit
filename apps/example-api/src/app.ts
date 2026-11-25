@@ -3,6 +3,7 @@ import { applySecurityHeaders, originGuard, securityHeaders } from '@kit/auth/ho
 import { AppError, toApiErrorBody } from '@kit/core'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import { defaultHook, securitySchemes } from './lib/openapi'
+import { authorization } from './middleware/authorization'
 import { withBetterAuth } from './middleware/better-auth'
 import { corsMiddleware } from './middleware/cors'
 import { withDb } from './middleware/db'
@@ -36,12 +37,14 @@ export type { AppEnv }
 export function createApp() {
   const app = new OpenAPIHono<AppEnv>({ defaultHook })
 
-  app.use('*', requestIdMiddleware)
-  app.use('*', securityHeaders)
-  app.use('*', corsMiddleware)
-  app.use('*', originGuard)
-  app.use('*', withDb)
-  app.use('*', withBetterAuth)
+  authorization.middleware(app, () => {
+    app.use('*', requestIdMiddleware)
+    app.use('*', securityHeaders)
+    app.use('*', corsMiddleware)
+    app.use('*', originGuard)
+    app.use('*', withDb)
+    app.use('*', withBetterAuth)
+  })
   app.onError((err, c) => onError(err, c))
   app.notFound((c) => {
     const requestId = c.get('requestId') || 'req_unknown'

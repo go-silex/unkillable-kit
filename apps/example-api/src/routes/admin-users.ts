@@ -10,7 +10,6 @@ import {
   sessionOnlySecurity,
   validationErrorResponse,
 } from '../lib/openapi'
-import { requireBaAdapter } from '../lib/require-ba-adapter'
 import { corsAllowlist } from '../lib/session-env'
 import { requirePlatformRole } from '../middleware/org-context'
 import { requireAuth } from '../middleware/require-auth'
@@ -55,8 +54,8 @@ const adminUserSchema = z
 
 export const adminUsersRoutes = new OpenAPIHono<AppEnv>()
 
-adminUsersRoutes.use('/api/admin/users', requireBaAdapter, requireAuth)
-adminUsersRoutes.use('/api/admin/users/*', requireBaAdapter, requireAuth)
+adminUsersRoutes.use('/api/admin/users', requireAuth)
+adminUsersRoutes.use('/api/admin/users/*', requireAuth)
 
 const platformStaff = requirePlatformRole('super_admin', 'staff')
 

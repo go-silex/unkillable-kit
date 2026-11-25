@@ -55,8 +55,8 @@ From `@kit/auth/repos/keys`:
        const entry = keyScopeRoutes.find((r) => r.method === route.method && r.path === route.path)
        return Boolean(entry && scopes.includes(entry.scope))
      },
-     middleware: [requestId, cors, bindPlatform], // global middleware functions, by identity
    })
+   authorization.middleware(app, () => app.use('*', requestId, cors, bindPlatform))
    ```
 
    See the [Example API wiring](../../../apps/example-api/src/middleware/authorization.ts) and the
@@ -75,10 +75,11 @@ From `@kit/auth/repos/keys`:
    least one and every call returns `true`. A throw or a non-boolean is a `503`. The hook receives
    the registration's method and path: Hono answers `HEAD` with a `GET` registration, so a key
    allowed to read that route may also send `HEAD`.
-6. List each global `app.use` function in `middleware`; hoist inline middleware into constants
-   first, and register them before any route guard. Hono reports `app.use` and `app.all` as `ALL`:
-   an unidentified `ALL` registration, or an identified one matched after a Kit guard, counts as
-   terminal, so a key or a hosted dispatch reaching it is refused. Never list an operation handler.
+6. Register the App's global middleware on the served App, before any route guard, inside
+   `authorization.middleware(app, () => { ... })`. Only the registrations made there count as
+   middleware, and only before the first Kit guard. Hono reports `app.use` and `app.all` as `ALL`:
+   any other `ALL` registration, even of the same function, counts as terminal, so a key or a hosted
+   dispatch reaching it is refused. Never register an operation handler there.
 7. With Impersonation, pass `impersonation: { operation, fence, audit }`. `operation` classifies
    the request as `recovery`, `business` (Modules and `read`/`write`), `conflict` or `null`
    (unavailable during Impersonation), synchronously. `fence` reads the App's context header, and
@@ -189,7 +190,7 @@ whose name falls in an issuer cookie's family is refused.
 | --------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
 | `authenticateKey`, `admitKeyScope`, global key gate                                                                         | `keyScope` hook on the instance                                                                               |
 | `delegation`, `admitFence`, `admitDelegation`, `assertDelegationModule`, `organizationSelection`, global Impersonation gate | `impersonation` hook on the instance; `view(c).delegation`                                                    |
-| `allEndpoint`                                                                                                               | Remove; list global middleware in `middleware`                                                                |
+| `allEndpoint`                                                                                                               | Remove; register global middleware with `authorization.middleware(app, …)`                                    |
 | `moduleFacts` descriptors                                                                                                   | `modules: true`                                                                                               |
 | `defineAuthorizationFact`, `includeFacts`, `authorization.fact`                                                             | Product query in the handler, after the guards; `view(c)` for admitted facts                                  |
 | `defineAuthorizationProjection`, `moduleAuthority`, `X-Authority-Fingerprint`                                               | Product precondition after `requireOrgContext()` ([pattern](#preserve-a-visibility-based-write-precondition)) |

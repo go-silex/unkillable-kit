@@ -172,8 +172,14 @@ assert_case "R6 product app → 1" 1 "${R6}" "R6 apps/acme-api/src/bad.ts"
 mkdir -p "${R6}/config/product"
 echo "apps/acme-api/src/bad.ts  # cannot exempt hosted dispatch" >"${R6}/config/product/import-boundary-exemptions.txt"
 assert_case "R6 product exemption cannot bypass → 1" 1 "${R6}" "R6 apps/acme-api/src/bad.ts"
-echo "export { createHostedDispatch } from '../../auth/src/request/hosted-dispatch'" >"${R6}/packages/core/src/bad-relative.ts"
-assert_case "R6 relative re-export → 1" 1 "${R6}" "R6 packages/core/src/bad-relative.ts"
+for target in request/hosted-dispatch request/hosted-routes snapshot/hosted-principal request/request-authorization snapshot; do
+  echo "import '../../auth/src/${target}'" >"${R6}/packages/core/src/bad-relative.ts"
+  assert_case "R6 package imports ${target} by relative path → 1" 1 "${R6}" "R6 packages/core/src/bad-relative.ts"
+  echo "import '../../../packages/auth/src/${target}.ts'" >"${R6}/apps/acme-api/src/bad-relative.ts"
+  assert_case "R6 app imports ${target}.ts by relative path → 1" 1 "${R6}" "R6 apps/acme-api/src/bad-relative.ts"
+done
+echo "import '../../../auth/src/request/hosted-dispatch'" >"${R6}/packages/mcp/src/hosted/bad-relative.ts"
+assert_case "R6 hosted shell must use the package subpath → 1" 1 "${R6}" "R6 packages/mcp/src/hosted/bad-relative.ts"
 
 # --- R1 via export … from (fromRe / re-export) ---
 R1E="${TMP}/r1export"

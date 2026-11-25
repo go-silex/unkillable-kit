@@ -37,10 +37,9 @@ export const platformMiddleware = [
   bindPlatform,
 ] as const
 
-const authorization = createRequestAuthorization<AppEnv>({
+export const authorization = createRequestAuthorization<AppEnv>({
   db: (c) => c.env.DB,
   auth: (c) => c.get('betterAuth'),
-  middleware: platformMiddleware,
   keyScope: ({ method, path }, scopes) =>
     method === 'GET' &&
     (path === '/api/me' || path === '/api/orgs/:orgId/members') &&

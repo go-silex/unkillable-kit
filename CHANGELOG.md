@@ -8,12 +8,12 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 - **Product action:** Kit guards now load a fixed Kit authorization core after routing
   ([ADR-0026](docs/kit/architecture/adr/0026-request-authorization-kit-core.md)). Replace the global
-  key and Impersonation gates with the `keyScope` and `impersonation` hooks, list global middleware
-  in `middleware`, mount `betterAuthMount` on Better Auth and give every protected route its own
-  guard. Replace `moduleFacts` with `modules: true`. Replace Product facts, projections and
-  fingerprints with Product queries after the guards, and read admitted facts from `view(c)`. Remove
-  `allEndpoint`. `X-Org-Id` is no longer trimmed. Existing cookies stay valid; no D1 migration is
-  needed. See the [migration guide](docs/kit/playbooks/migrate-request-authorization.md)
+  key and Impersonation gates with the `keyScope` and `impersonation` hooks, register global
+  middleware with `authorization.middleware`, mount `betterAuthMount` on Better Auth and give every
+  protected route its own guard. Replace `moduleFacts` with `modules: true`. Replace Product facts,
+  projections and fingerprints with Product queries after the guards, and read admitted facts from
+  `view(c)`. Remove `allEndpoint`. `X-Org-Id` is no longer trimmed. Existing cookies stay valid; no
+  D1 migration is needed. See the [migration guide](docs/kit/playbooks/migrate-request-authorization.md)
   (go-silex/unkillable-kit#191).
 - **Product action:** Hosted MCP tools call declared App operations in process through the
   `dispatch` capability and designate the Organization from validated input or a server default.

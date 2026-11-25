@@ -3,13 +3,13 @@ import { AppError, toApiErrorBody } from '@kit/core'
 import { Hono } from 'hono'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import { members } from './modules/members/routes'
-import { betterAuthMount, platformMiddleware } from './platform/auth'
+import { authorization, betterAuthMount, platformMiddleware } from './platform/auth'
 import { me } from './platform/me'
 import type { AppEnv } from './platform/types'
 
 export function createApp() {
   const app = new Hono<AppEnv>()
-  app.use('*', ...platformMiddleware)
+  authorization.middleware(app, () => app.use('*', ...platformMiddleware))
   app.onError((err, c) => {
     const { body, status } = toApiErrorBody(err, c.get('requestId'))
     return c.json(body, status as ContentfulStatusCode)

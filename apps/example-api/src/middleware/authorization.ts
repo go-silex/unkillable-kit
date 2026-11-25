@@ -1,19 +1,9 @@
 import type { ApiKeyScope } from '@kit/auth'
-import {
-  createRequestAuthorization,
-  originGuard,
-  type RequestAuthorization,
-  securityHeaders,
-} from '@kit/auth/hono'
+import { createRequestAuthorization, type RequestAuthorization } from '@kit/auth/hono'
 import { recordImpersonationRequest } from '@kit/auth/repos/impersonation'
 import { COMMENTS_MODULE_ID } from '@kit/comments'
 import { TASKS_MODULE_ID } from '@kit/tasks'
-import { requireBaAdapter } from '../lib/require-ba-adapter'
 import type { AppEnv } from '../types'
-import { withBetterAuth } from './better-auth'
-import { corsMiddleware } from './cors'
-import { withDb } from './db'
-import { requestIdMiddleware } from './request-id'
 
 // An exact method and path declaration is required before a key can reach a handler.
 export const keyScopeRoutes: ReadonlyArray<{ method: string; path: string; scope: ApiKeyScope }> = [
@@ -93,15 +83,6 @@ export const authorization: RequestAuthorization<AppEnv> = createRequestAuthoriz
   db: (c) => c.env.DB,
   auth: (c) => c.get('betterAuth'),
   modules: true,
-  middleware: [
-    requestIdMiddleware,
-    securityHeaders,
-    corsMiddleware,
-    originGuard,
-    withDb,
-    withBetterAuth,
-    requireBaAdapter,
-  ],
   keyScope: ({ method, path }, scopes) =>
     keyScopeRoutes.some(
       (entry) => entry.method === method && entry.path === path && scopes.includes(entry.scope),

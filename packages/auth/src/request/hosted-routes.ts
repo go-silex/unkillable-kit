@@ -2,12 +2,10 @@ import type { RouterRoute } from 'hono/types'
 import type { HostedPrincipal } from '../snapshot/hosted-principal'
 
 export type Route = Readonly<{ method: string; path: string }>
-// Registered middleware is compared by reference, never invoked by Kit.
-export type MiddlewareIdentity = (...args: never[]) => unknown
 
 export type Routes = Readonly<{
   guards: WeakMap<RouterRoute['handler'], 'identity' | 'organization'>
-  middleware: WeakSet<MiddlewareIdentity>
+  middleware: WeakSet<RouterRoute>
   declared: WeakMap<RouterRoute, Readonly<{ app: object; platformRole: boolean }>>
 }>
 
@@ -29,7 +27,7 @@ export function terminalRoutes(routes: readonly RouterRoute[], policy: Routes): 
       guarded = true
       return false
     }
-    return guarded || !policy.middleware.has(handler)
+    return guarded || !policy.middleware.has(route)
   })
 }
 
@@ -52,10 +50,7 @@ export function inspectHostedRoutes(
   app: object,
   orgBound: boolean,
 ) {
-  const start = routes.findIndex((route) => {
-    const handler = handlerOf(route)
-    return policy.guards.has(handler) || !policy.middleware.has(handler)
-  })
+  const start = routes.findIndex((route) => !policy.middleware.has(route))
   if (start === -1 || !policy.guards.has(handlerOf(routes[start]!))) return null
   let terminals = 0
   let orgGuard = !orgBound

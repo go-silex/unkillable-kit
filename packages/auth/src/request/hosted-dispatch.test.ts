@@ -39,10 +39,11 @@ describe('hosted dispatch', () => {
     'shared function',
     'identified terminal ALL',
     'identified undeclared ALL before declared GET',
+    'reused function in undeclared ALL before guard',
   ] as const)('%s preflight refusal enters no handler and does not load', async (mode) => {
     const entered = vi.fn(() => new Response('entered'))
     const fakeMiddleware: MiddlewareHandler<TestEnv> = async () => entered()
-    const f = setup({ middleware: mode.startsWith('identified') ? [fakeMiddleware] : [] })
+    const f = setup()
     const { app, authorization: auth, db } = f
     const admission = await grant(f)
     switch (mode) {
@@ -67,18 +68,26 @@ describe('hosted dispatch', () => {
         app.get('/op', auth.requireAuth, entered)
         break
       case 'identified terminal ALL':
-        auth.hosted(app, () => app.all('/op', auth.requireAuth, fakeMiddleware))
+        app.use('/op', auth.requireAuth)
+        auth.middleware(app, () => app.all('/op', fakeMiddleware))
         break
       case 'identified undeclared ALL before declared GET':
         app.use('/op', auth.requireAuth)
         app.all('/op', fakeMiddleware)
         auth.hosted(app, () => app.get('/op', entered))
         break
+      case 'reused function in undeclared ALL before guard':
+        auth.middleware(app, () => app.use('/elsewhere', fakeMiddleware))
+        app.all('/op', fakeMiddleware)
+        auth.hosted(app, () => app.get('/op', auth.requireOrgContext(), entered))
+        break
     }
     const result = await invoke(f, admission).fetch({
       method: 'GET',
       path: '/op',
-      ...(mode === 'mis-wired' ? { organizationId: 'chosen' } : {}),
+      ...(mode === 'mis-wired' || mode === 'reused function in undeclared ALL before guard'
+        ? { organizationId: 'chosen' }
+        : {}),
     })
     expect(result.status).toBe(403)
     expect(await result.text()).not.toContain(GRANT.grantId)
@@ -106,10 +115,10 @@ describe('hosted dispatch', () => {
 
   it('dispatches Org-free then Org-bound to a mounted guarded route, once per dispatch', async () => {
     const identified: MiddlewareHandler<TestEnv> = (_c, next) => next()
-    const f = setup({ modules: true, middleware: [identified] })
+    const f = setup({ modules: true })
     const { app, authorization: auth, db } = f
     const admission = await grant(f)
-    app.use('*', identified)
+    auth.middleware(app, () => app.use('*', identified))
     auth.hosted(app, () =>
       app.get('/which-org', auth.requireAuth, (c) => {
         expect(c.req.header('authorization')).toBeUndefined()

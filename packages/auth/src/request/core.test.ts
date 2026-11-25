@@ -125,7 +125,6 @@ describe('request authorization core', () => {
         onError,
       } = setup({
         keyScope: () => true,
-        middleware: [change],
         ...(changes === 'delegation'
           ? {
               impersonation: impersonation({
@@ -479,19 +478,26 @@ describe('request authorization core', () => {
     expectUnprojected(f.onError)
   })
 
-  it('sends identified ALL after the first guard to keyScope', async () => {
-    const entered = vi.fn(() => new Response('entered'))
-    const all: MiddlewareHandler<TestEnv> = async () => entered()
-    const keyScope = vi.fn(({ method }: { method: string }) => method === 'GET')
-    const f = setup({ keyScope, middleware: [all] })
-    const { headers } = await f.apiKey()
-    f.app.use('/op', f.authorization.requireAuth)
-    f.app.all('/op', all)
-    f.app.get('/op', entered)
-    expect((await f.app.request('/op', { headers })).status).toBe(403)
-    expect(keyScope.mock.calls.map(([route]) => route.method)).toEqual(['ALL', 'GET'])
-    expect(entered).not.toHaveBeenCalled()
-  })
+  it.each(['before', 'after'] as const)(
+    'sends a terminal ALL %s the guard to keyScope',
+    async (position) => {
+      const entered = vi.fn(() => new Response('entered'))
+      const all = vi.fn<MiddlewareHandler<TestEnv>>((_c, next) => next())
+      const keyScope = vi.fn(({ method }: { method: string }) => method === 'GET')
+      const f = setup({ keyScope })
+      const { app, authorization: auth } = f
+      const { headers } = await f.apiKey()
+      auth.middleware(app, () => app.use('/elsewhere', all))
+      if (position === 'before') app.all('/op', all)
+      app.use('/op', auth.requireAuth)
+      if (position === 'after') auth.middleware(app, () => app.all('/op', all))
+      app.get('/op', entered)
+      expect((await f.app.request('/op', { headers })).status).toBe(403)
+      expect(keyScope.mock.calls.map(([route]) => route.method)).toEqual(['ALL', 'GET'])
+      expect(entered).not.toHaveBeenCalled()
+      expect(all).toHaveBeenCalledTimes(position === 'before' ? 1 : 0)
+    },
+  )
 })
 
 describe('operation hooks', () => {
@@ -503,11 +509,11 @@ describe('operation hooks', () => {
           route.method === 'GET' && scopes.includes('read'),
       )
       const identified: MiddlewareHandler<TestEnv> = (_c, next) => next()
-      const f = setup({ keyScope: allow, middleware: [identified, originGuard] })
+      const f = setup({ keyScope: allow })
       const { app, authorization: auth } = f
       const key = await f.apiKey()
       const fallThrough = vi.fn<MiddlewareHandler<TestEnv>>((_c, next) => next())
-      app.use('*', identified)
+      auth.middleware(app, () => app.use('*', identified, originGuard))
       if (prefix) app.use('/scope/*', auth.requireAuth)
       const child = new Hono<TestEnv>()
       if (prefix) {

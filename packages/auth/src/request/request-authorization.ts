@@ -11,7 +11,7 @@ import {
   roleHasCapability,
 } from '../org-roles'
 import type { SessionIdentity } from '../snapshot/core-rows'
-import { handlerOf, hostedRoutes, type MiddlewareIdentity, type Routes } from './hosted-routes'
+import { handlerOf, hostedRoutes, type Routes } from './hosted-routes'
 import {
   type AdmittedOrganization,
   admitOrganization,
@@ -31,7 +31,6 @@ export type RequestAuthorizationOptions<E extends Env> = Readonly<{
   modules?: true
   keyScope?: KeyScopePolicy
   impersonation?: ImpersonationPolicy<E>
-  middleware?: readonly MiddlewareIdentity[]
 }>
 
 export type RequestAuthorization<E extends Env> = Readonly<{
@@ -45,6 +44,7 @@ export type RequestAuthorization<E extends Env> = Readonly<{
   betterAuthMount: MiddlewareHandler<E>
   session(c: Context<E>): Promise<SessionIdentity | null>
   view(c: Context<E>): AdmittedView
+  middleware(app: Pick<Hono<E>, 'routes'>, register: () => void): void
   hosted(
     app: Pick<Hono<E>, 'routes'>,
     register: () => void,
@@ -58,7 +58,7 @@ export function createRequestAuthorization<E extends Env>(
 ): RequestAuthorization<E> {
   const routes: Routes = {
     guards: new WeakMap(),
-    middleware: new WeakSet(options.middleware),
+    middleware: new WeakSet(),
     declared: new WeakMap(),
   }
 
@@ -173,6 +173,13 @@ export function createRequestAuthorization<E extends Env>(
       return !delegationMode && snapshot.identity?.method === 'session' ? snapshot.identity : null
     },
     view,
+    middleware(app: Pick<Hono<E>, 'routes'>, register: () => void) {
+      const start = app.routes.length
+      register()
+      for (const route of app.routes.slice(start)) {
+        if (!routes.guards.has(handlerOf(route))) routes.middleware.add(route)
+      }
+    },
     hosted(
       app: Pick<Hono<E>, 'routes'>,
       register: () => void,
@@ -182,8 +189,7 @@ export function createRequestAuthorization<E extends Env>(
       register()
       const declaration = { app, platformRole: opts?.platformRole === true }
       for (const route of app.routes.slice(start)) {
-        const handler = handlerOf(route)
-        if (!(routes.guards.has(handler) || routes.middleware.has(handler))) {
+        if (!routes.guards.has(handlerOf(route))) {
           routes.declared.set(route, declaration)
         }
       }
