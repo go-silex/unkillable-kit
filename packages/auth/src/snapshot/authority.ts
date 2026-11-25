@@ -1,7 +1,7 @@
 import type { AuthorizationRow, CompiledFact } from './facts'
 import { PROJECTION_COLUMN } from './projection'
 
-export const AUTHORITY_SECTION = 'section'
+const AUTHORITY_SECTION = 'section'
 export const AVAILABILITY_SECTION = 0
 export const GRANT_SECTION = 1
 export const PROJECTION_SECTION = 2
