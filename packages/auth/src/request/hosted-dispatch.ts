@@ -182,10 +182,10 @@ export function createHostedDispatch<E extends Env>(
         }
         const { organizationId } = op
         const headers = designationHeaders(outer, organizationId)
-        const extra = productHeaders(op.headers)
         // Take the slot synchronously, before any await, even if routing or admission subsequently refuses.
         if (used >= limit) throw AppError.rateLimited('Hosted dispatch limit exceeded')
         used++
+        const extra = productHeaders(op.headers)
         const request = syntheticRequest(origin, op, headers, extra)
         const declaration = preflight(options, request, policy, organizationId, extra)
         hostedClaims.set(request, {

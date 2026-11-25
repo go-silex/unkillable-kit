@@ -258,7 +258,10 @@ END;
   json(`${app}/package.json`, projectedManifest)
   assert.match(runCore(), /apps\/product-fixture differential fixtures passed/)
 
-  // Only the default target is needed to prove the two disabled-User failures.
+  put(`${app}/wrangler.toml`, withRelease.replace('directory = "../web/dist"', 'directory = ""'))
+  runCore(/wrangler\.toml --env release: assets\.directory must be a non-empty string/)
+
+  // Only the default target is needed to prove the disabled-User failures.
   put(`${app}/wrangler.toml`, workerConfig)
   json(`${app}/package.json`, enrolledManifest)
   runCore(/disabled User: declare kitBetterAuthDisableUser .*projected/)
@@ -267,7 +270,23 @@ END;
     kitBetterAuthDisableUser: 'DELETE FROM account_disabled WHERE user_id = ?',
   })
   runCore(/disabled User: kitBetterAuthDisableUser must disable the User/)
+  json(`${app}/package.json`, {
+    ...projectedManifest,
+    kitBetterAuthDisableUser: `${projectedManifest.kitBetterAuthDisableUser}; SELECT 1;`,
+  })
+  runCore(/disabled User: kitBetterAuthDisableUser must be one SQL statement/)
   json(`${app}/package.json`, projectedManifest)
+  const expiresSession = `${app}/migrations/9999_expire_disabled_session.sql`
+  put(
+    expiresSession,
+    `CREATE TRIGGER expire_disabled_session AFTER INSERT ON account_disabled
+BEGIN
+  UPDATE session SET expires_at = 0 WHERE user_id = NEW.user_id;
+END;
+`,
+  )
+  runCore(/disabled User: kitBetterAuthDisableUser must keep the session and leave its token/)
+  rmSync(join(root, expiresSession))
 
   const consumer = `${app}/src/auth-consumer.ts`
   const enrolledConsumer = readFileSync(join(root, consumer), 'utf8')

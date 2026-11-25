@@ -463,7 +463,7 @@ describe('hosted dispatch', () => {
     ['a value Fetch would trim', { 'Idempotency-Key': ' a' }],
     ['an invalid name', { 'Idempotency Key': 'a' }],
     ['a non-object', ['Idempotency-Key', 'a']],
-  ])('refuses %s as an invalid operation without taking a slot', async (_name, headers) => {
+  ])('refuses %s as an invalid operation that keeps its slot', async (_name, headers) => {
     const f = setup()
     const { app, authorization: auth, db } = f
     const admission = await grant(f)
@@ -485,8 +485,8 @@ describe('hosted dispatch', () => {
     })
     expect(refused.status).toBe(400)
     expect(entered).not.toHaveBeenCalled()
-    expect((await dispatch.fetch(op)).status).toBe(200)
-    expect(db.batch).toHaveBeenCalledTimes(1)
+    expect((await dispatch.fetch(op)).status).toBe(429)
+    expect(db.batch).not.toHaveBeenCalled()
   })
 
   it.each([

@@ -11,10 +11,11 @@
  *   R6 hosted authority internals are private; the MCP shell imports the dispatch subpath only
  *      test code (*.test.*, *.spec.*, *.test-support.*) may import hosted authority;
  *      production code cannot import *.test-support.* (even with an exemption)
+ *      R6 follows exact workspace package.json exports for test-support targets
  *   exemptions require reason; invalid config → exit 2
  *
  * Does NOT prove: runtime/DI purity, non-literal dynamic imports,
- * full tsconfig alias graph, product-owned graphs, R5 routes↛repos.
+ * full tsconfig alias graph, wildcard package exports, product-owned graphs, R5 routes↛repos.
  *
  * Env: IMPORT_BOUNDARY_ROOT — override monorepo root (self-test harness).
  * Exit: 0 clean · 1 violations · 2 bad exemptions config
@@ -44,7 +45,7 @@ const PRODUCT_EXEMPTIONS_REL = join('config', 'product', 'import-boundary-exempt
 
 type Zone = 'package' | 'example-web' | 'example-api' | 'other-app' | 'outside'
 
-type WorkspaceEntry = { name: string; absDir: string; zone: Zone }
+type WorkspaceEntry = { name: string; absDir: string; zone: Zone; exports: unknown }
 
 type ImportHit = {
   file: string
@@ -84,10 +85,15 @@ function walkSources(dir: string, out: string[]): void {
   }
 }
 
-function loadPackageName(pkgJsonPath: string): string | null {
+function loadPackageManifest(pkgJsonPath: string): { name: string; exports: unknown } | null {
   try {
-    const raw = JSON.parse(readFileSync(pkgJsonPath, 'utf8')) as { name?: string }
-    return typeof raw.name === 'string' && raw.name.length > 0 ? raw.name : null
+    const raw = JSON.parse(readFileSync(pkgJsonPath, 'utf8')) as {
+      name?: unknown
+      exports?: unknown
+    }
+    return typeof raw?.name === 'string' && raw.name.length > 0
+      ? { name: raw.name, exports: raw.exports }
+      : null
   } catch {
     return null
   }
@@ -107,8 +113,8 @@ function pushWorkspaceDirs(
   for (const dir of readdirSync(parent)) {
     const absDir = join(parent, dir)
     if (!statSync(absDir).isDirectory()) continue
-    const name = loadPackageName(join(absDir, 'package.json'))
-    if (name) entries.push({ name, absDir, zone: zoneOf(dir) })
+    const manifest = loadPackageManifest(join(absDir, 'package.json'))
+    if (manifest) entries.push({ ...manifest, absDir, zone: zoneOf(dir) })
   }
 }
 
@@ -434,17 +440,40 @@ function resolvedAbsTarget(resolved: ResolveResult): string | null {
 const R6_TEST_IMPORTER = /\.(?:test|spec|test-support)\.[cm]?[jt]sx?$/
 const R6_TEST_SUPPORT_TARGET = /\.test-support(?:\.[cm]?[jt]sx?)?$/
 
+function hasTestSupportTarget(target: unknown): boolean {
+  if (typeof target === 'string') return R6_TEST_SUPPORT_TARGET.test(target)
+  if (target === null || typeof target !== 'object') return false
+  return Object.values(target).some(hasTestSupportTarget)
+}
+
+function workspaceExportsTestSupport(entry: WorkspaceEntry, specBare: string): boolean {
+  const subpath = `.${specBare.slice(entry.name.length)}`
+  const exports = entry.exports
+  if (exports !== null && typeof exports === 'object' && !Array.isArray(exports)) {
+    const map = exports as Record<string, unknown>
+    if (Object.hasOwn(map, subpath)) return hasTestSupportTarget(map[subpath])
+    if (Object.keys(map).some((key) => key.startsWith('.'))) return false
+  }
+  // A string or a condition-only object is shorthand for the root export.
+  return subpath === '.' && hasTestSupportTarget(exports)
+}
+
 function hostedAuthorityViolation(
   hit: ImportHit,
   specBare: string,
-  absTarget: string | null,
+  resolved: ResolveResult,
   root: string,
 ): Violation | null {
+  if (R6_TEST_IMPORTER.test(hit.file)) return null
+  const absTarget = resolvedAbsTarget(resolved)
   const dispatchPackage =
     specBare === '@kit/auth/hosted-dispatch' || specBare.startsWith('@kit/auth/hosted-dispatch/')
   const target = absTarget && stripSpecifierSuffix(relPosix(root, absTarget))
-  if (R6_TEST_IMPORTER.test(hit.file)) return null
-  if (target && R6_TEST_SUPPORT_TARGET.test(target)) return { ...hit, rule: 'R6' }
+  if (
+    (target && R6_TEST_SUPPORT_TARGET.test(target)) ||
+    (resolved.kind === 'workspace' && workspaceExportsTestSupport(resolved.entry, specBare))
+  )
+    return { ...hit, rule: 'R6' }
   const internal =
     target &&
     /^packages\/auth\/src\/(?:request\/(?:hosted-dispatch|hosted-routes|request-authorization)|snapshot(?:\/hosted-principal)?)(?:\.[cm]?[jt]s)?$/.test(
@@ -467,7 +496,7 @@ function classify(
   workspace: WorkspaceEntry[],
 ): Violation | null {
   const specBare = stripSpecifierSuffix(hit.specifier)
-  const hosted = hostedAuthorityViolation(hit, specBare, resolvedAbsTarget(resolved), root)
+  const hosted = hostedAuthorityViolation(hit, specBare, resolved, root)
   if (hosted) return hosted
   if (importerZone === 'example-web' && WORKER_BAR_IMPORTS.has(specBare)) {
     return { ...hit, rule: 'R4' }

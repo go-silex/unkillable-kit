@@ -296,7 +296,17 @@ export async function runBetterAuthDifferential(app: BetterAuthApp) {
         cookie,
         allowed: false,
         change: (db, label) => {
+          using sessionRow = db.prepare<
+            { token: string; user_id: string; expires_at: number },
+            [string]
+          >('SELECT token, user_id, expires_at FROM session WHERE id = ?')
+          const before = sessionRow.get(identity.sessionId)
+          assert.ok(before, `${label}: expected the issued session before disabling the User`)
           if (app.disableUserSql !== undefined) {
+            assert.ok(
+              !app.disableUserSql.trim().replace(/;$/, '').includes(';'),
+              `${label}: kitBetterAuthDisableUser must be one SQL statement with no internal semicolons`,
+            )
             using disable = db.prepare<unknown, [string]>(app.disableUserSql)
             assert.equal(
               disable.paramsCount,
@@ -323,10 +333,13 @@ export async function runBetterAuthDifferential(app: BetterAuthApp) {
             1,
             `${label}: kitBetterAuthDisableUser must disable the User`,
           )
-          assert.equal(
-            rowCount(db, identity.sessionId),
-            1,
-            `${label}: kitBetterAuthDisableUser must keep the session so the refusal proves the account check`,
+          const after = sessionRow.get(identity.sessionId)
+          assert.ok(
+            after &&
+              after.token === before.token &&
+              after.user_id === before.user_id &&
+              after.expires_at === before.expires_at,
+            `${label}: kitBetterAuthDisableUser must keep the session and leave its token, User id, and expiry unchanged so the refusal proves the account check`,
           )
         },
       },

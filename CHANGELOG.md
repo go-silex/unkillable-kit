@@ -31,7 +31,8 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
   (go-silex/unkillable-kit#195).
 - `requireSession` and `authorization.session(c)` no longer call `keyScope`: a key gets
   `This route requires a session cookie` or `null`. Every other guard calls it, even after
-  `session(c)` in the same request (go-silex/unkillable-kit#195).
+  `session(c)` in the same request; `betterAuthMount` refuses every key
+  (go-silex/unkillable-kit#195).
 
 ### Flows
 
@@ -43,16 +44,19 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 - Root's Better Auth differential compares only the cookies the enrolled issuer sets on sign-in.
   An App may add an unrelated cookie to that response (go-silex/unkillable-kit#188).
 - Root's Better Auth check no longer requires built static assets: Wrangler and the local probe use
-  an empty scratch directory for `assets.directory` (go-silex/unkillable-kit#195).
+  an empty scratch directory for a configured `assets.directory`, which must still be a non-empty
+  path (go-silex/unkillable-kit#195).
 - **Product action:** An App that guards direct writes to `user.disabled` declares
-  `kitBetterAuthDisableUser` in its `package.json`: SQL that disables the fixture User through the
-  App's own mechanism without deleting its session. See [Enroll shipping Better Auth Apps in Root](docs/kit/playbooks/migrate-request-authorization.md#enroll-shipping-better-auth-apps-in-root)
+  `kitBetterAuthDisableUser` in its `package.json`: one SQL statement that disables the fixture User
+  through the App's own mechanism and leaves its session valid. See [Enroll shipping Better Auth Apps in Root](docs/kit/playbooks/migrate-request-authorization.md#enroll-shipping-better-auth-apps-in-root)
   (go-silex/unkillable-kit#195).
 
 ### Import boundaries
 
 - R6 treats `*.test-support.*` modules as test code, so shared test helpers may import
-  `@kit/auth/hosted-dispatch`. Production code that imports a `*.test-support.*` module now fails R6
+  `@kit/auth/hosted-dispatch` (go-silex/unkillable-kit#195).
+- **Product action:** Production code that imports a `*.test-support.*` module, by path or
+  through a package export, now fails R6: move that import into test code
   (go-silex/unkillable-kit#195).
 
 ## unkillable-kit/v0.8.1 — 2026-11-25

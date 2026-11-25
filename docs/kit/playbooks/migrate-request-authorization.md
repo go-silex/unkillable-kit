@@ -79,7 +79,8 @@ From `@kit/auth/repos/keys`:
    the registration's method and path: Hono answers `HEAD` with a `GET` registration, so a key
    allowed to read that route may also send `HEAD`. `requireSession` and `session(c)` never call
    it: a key gets `403` (`This route requires a session cookie`) from `requireSession` and `null`
-   from `session(c)`. Every other guard calls it, even after `session(c)` in the same request.
+   from `session(c)`. Every other guard calls it, even after `session(c)` in the same request;
+   `betterAuthMount` refuses every key without calling it.
 6. Register the App's global middleware on the served App, before any route guard, inside
    `authorization.middleware(app, () => { ... })`. Only the registrations made there count as
    middleware, and only before the first Kit guard. Hono reports `app.use` and `app.all` as `ALL`:
@@ -177,12 +178,13 @@ the same value and attributes. An App may add its own unrelated cookies to that 
 whose name falls in an issuer cookie's family is refused.
 
 If the App guards direct writes to `user.disabled`, for example with a trigger that projects an
-account-state table, set `kitBetterAuthDisableUser` next to `kitBetterAuth`: one SQL statement with
-exactly one positional `?` for the fixture User ID, using the App's own disable mechanism. Root runs
-it in its isolated fixture databases and requires `user.disabled = 1` while the issued session row
-remains, so the refusal proves the disabled-User check. Without the field, Root runs
-`UPDATE user SET disabled = 1` and names the field when that fails. Root replaces
-`assets.directory` with an empty scratch directory: do not build static assets to run the gate.
+account-state table, set `kitBetterAuthDisableUser` next to `kitBetterAuth`: one SQL statement,
+with no `;` inside and exactly one positional `?` for the fixture User ID, using the App's own
+disable mechanism. Root runs it in its isolated fixture databases and requires `user.disabled = 1`
+while the issued session keeps its row, token, User ID and expiry, so the refusal proves the
+disabled-User check. Without the field, Root runs `UPDATE user SET disabled = 1` and names the
+field when that fails. A configured `assets.directory` must be a non-empty path, but Root replaces
+it with an empty scratch directory: do not build static assets to run the gate.
 
 ## Update hosted MCP tools, if used
 
@@ -199,13 +201,15 @@ remains, so the refusal proves the disabled-User check. Without the field, Root 
   Organization from the validated input or a server default: `dispatch.fetch({ method, path,
   organizationId, body, query, headers })`. An Organization-free dispatch never acquires an
   Organization. A nonempty `X-Org-Id` on the outer `/mcp` request must equal the designation. A
-  path parameter named `orgId` selects the Organization: it must equal the designation, and an
-  Organization-free dispatch cannot reach it. Name a Platform operation's target otherwise (for
+  Kit guard reads a path parameter named `orgId` on its own registration as the Organization
+  selection: an Organization-free dispatch reaching such a guard is refused, and with a designation
+  every matched `orgId` parameter must equal it. Name a Platform operation's target otherwise (for
   example `:targetOrgId`). Each `/mcp` request allows eight dispatches.
 - `query` takes a string or an array per key: `{ tag: ['a', 'b'] }` sends `?tag=a&tag=b`.
 - `headers` carries Product headers such as `Idempotency-Key`, only when every matched
-  registration declares the name in `headers: ['Idempotency-Key']`. An undeclared name is `403`
-  before any handler runs; a repeated or invalid name, or a value Fetch would rewrite, is `400`.
+  registration declares the name in `headers: ['Idempotency-Key']`; the Kit sets `X-Org-Id` and
+  the JSON `Content-Type` itself. An undeclared name is `403` before any handler runs; a repeated
+  or invalid name, or a value Fetch would rewrite, is `400`.
   Credential, selection, framing, hop-by-hop and client-address names (`Authorization`, `Cookie`,
   `X-Org-Id`, `Host`, `Content-Type`, `Origin`, `Forwarded`, `Sec-*`, `CF-*`, `X-Forwarded-*` and
   similar) cannot be declared: `authorization.hosted` throws when the App is built. Take header

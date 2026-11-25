@@ -71,8 +71,12 @@ function workerEntrypoints(app: string, required = true): WorkerTarget[] {
     env?: string,
   ) {
     if (!required && main === undefined) return
+    const label = `${config}${env ? ` --env ${env}` : ''}`
+    if (assets !== undefined && (typeof assets?.directory !== 'string' || !assets.directory)) {
+      throw new Error(`${label}: assets.directory must be a non-empty string`)
+    }
     const source = resolve(app, String(main))
-    assertInspectableWorker(app, source, `${config}${env ? ` --env ${env}` : ''}`, build?.command)
+    assertInspectableWorker(app, source, label, build?.command)
     const entry = required ? workerMainFile(app, config, main) : source
     const moduleRoot = base_dir === undefined ? dirname(entry) : resolve(app, base_dir)
     entries.push({
@@ -81,7 +85,7 @@ function workerEntrypoints(app: string, required = true): WorkerTarget[] {
       entry,
       moduleRoot,
       noBundle: no_bundle,
-      assets: typeof assets?.directory === 'string' ? true : undefined,
+      assets: assets === undefined ? undefined : true,
     })
   }
   for (const file of configs) {

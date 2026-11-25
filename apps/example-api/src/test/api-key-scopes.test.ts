@@ -213,8 +213,10 @@ describe('API key scopes over HTTP', () => {
         },
         env,
       )
-      // A route that reads only `session(c)` answers a key as a non-session (401), never admits it.
-      expect([401, 403], route).toContain(response.status)
+      // The ticket route reads only `session(c)`, which answers a key as a non-session; the
+      // App then refuses the Bearer as unauthenticated.
+      const status = route === 'GET /api/mcp-identity/ticket' ? 401 : 403
+      expect(response.status, route).toBe(status)
     }
   })
 })

@@ -214,9 +214,10 @@ registration counted as terminal (D4). Kit guards check the declarations again f
 matched, so a guard refusal stops the operation before its handler runs. Identified middleware causes no business
 effect before admission.
 
-The Kit creates each dispatched request itself, without cookie, `Authorization` or any header that every matched
-handler did not declare; credential, Organization selection, framing, hop-by-hop and client-address headers cannot be
-declared. It privately associates the request with the principal and designation; there is no public way to mark a
+The Kit creates each dispatched request itself, without cookie or `Authorization`. Besides its own designation and JSON
+`Content-Type`, the request carries only Product headers that every matched handler declared; credential, Organization
+selection, framing, hop-by-hop and client-address headers cannot be declared. It privately associates the request with
+the principal and designation; there is no public way to mark a
 request. The receiving App claims that association once. A reused, cloned, forwarded or reconstructed request, a
 network fetch or a dispatch after the outer request ends carries no hosted identity, and a guard refuses it as
 unauthenticated. Kit guards authenticate a claimed request as the hosted principal, with no fallback to other
