@@ -7,8 +7,8 @@
 # Never resolve a *new* version younger than 3 days (= Dependabot cooldown, seconds).
 # Applies to every install path, including an agent's `bun add`.
 #
-# Versions already in bun.lock: the pinned Bun 1.4.4 installs them without re-checking their age
-# (measured 2026-11-20 with an empty cache: plain install, `--frozen-lockfile` and `bun add` in
+# Versions already in bun.lock: the pinned Bun 1.4.5 installs them without re-checking their age
+# (measured 2026-11-26 with an empty cache: plain install, `--frozen-lockfile` and `bun add` in
 # the same workspace). Bun 1.4.0 re-checked them and failed with "blocked by minimum-release-age".
 # Installs that reproduce a reviewed lock keep `--minimum-release-age 0` as a guard against such a
 # Bun: ci.yml, scripts/kit/cf-builds/install-monorepo.sh, worktree-setup.sh.

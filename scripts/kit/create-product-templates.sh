@@ -99,7 +99,7 @@ EOF
     "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@types/bun": "^1.4.4",
+    "@types/bun": "^1.4.5",
     "@types/node": "^26.6.6",
     "vitest": "^5.1.0"
   }
