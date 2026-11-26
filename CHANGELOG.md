@@ -4,6 +4,13 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ## Unreleased
 
+### CI
+
+- Tooling CI shards balance by measured task duration instead of recipe position, and the Root
+  Better Auth self-test runs as four `test:root-gate-better-auth:*` scenario groups. The slowest
+  tooling shard no longer reaches the five-minute job timeout: its estimate drops from about 300 s
+  to about 200 s on Product runners (go-silex/unkillable-kit#198).
+
 ## unkillable-kit/v0.9.0 — 2026-11-25
 
 ### Auth
