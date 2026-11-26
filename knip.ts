@@ -12,6 +12,11 @@ const config: KnipConfig = {
   // The hint "Remove from ignoreDependencies" fires only if NO workspace imports a
   // Workers module (today apps/example-api does).
   ignoreDependencies: ['cloudflare'],
+  // App stylesheets served unchanged from public/ (a licence notice must survive, and the
+  // build strips every comment from bundled CSS) are loaded by an index.html <link>. Knip's
+  // Vite plugin reads only <script> tags there, so it would report them as unused files.
+  // ignoreFiles drops only that report; other issues found in such a file still surface.
+  ignoreFiles: ['apps/*/public/**/*.css'],
   workspaces: {
     '.': {
       // Shell, workflow and spawn entrypoints Knip's script parser cannot see.
