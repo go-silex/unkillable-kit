@@ -93,7 +93,7 @@ Both are in the tree, so they bind every install path (CI, Workers Builds, workt
   pairs outside the gate. Older versions and exact exemptions pass.
 - **Install-script lockdown:** `package.json` `trustedDependencies: []` blocks dependency `preinstall`, `install` and `postinstall`. The field **replaces** Bun's [built-in allow list](https://bun.com/docs/pm/lifecycle#behavior-of-the-trustedDependencies-field); `[]` means none. It does not block code run by importing or executing a package.
 
-Pinned Bun 1.4.4 does not re-check locked versions (1.4.0 did). Lock reproduction keeps
+Pinned Bun 1.4.5 does not re-check locked versions (1.4.0 did). Lock reproduction keeps
 `--minimum-release-age 0` as a guard, not for new resolutions. `bun audit fix` can install a young
 fix: review the resulting lock. Add native dependencies requiring install scripts to
 `trustedDependencies` in the kit `package.json`, with the reason in the same PR; products
