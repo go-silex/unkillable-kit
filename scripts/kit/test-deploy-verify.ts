@@ -22,6 +22,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
+  type AlertContext,
   alertText,
   DEFAULT_TIMEOUT_MINUTES,
   describe,
@@ -206,14 +207,18 @@ await check('every target serves the expected SHA: served at once, no wait', asy
   assert.equal(fake.tipReads(), 0)
 })
 
-await check('a target that serves it is not asked again while another catches up', async () => {
-  const fake = fakeIo({ [API]: served, [WEB]: (round) => (round < 3 ? stale : served) })
+await check('served only when one round sees every target serve it', async () => {
+  // API serves it in round 1, regresses in rounds 2–3; WEB catches up in round 3.
+  const fake = fakeIo({
+    [API]: (round) => (round === 1 || round > 3 ? served : stale),
+    [WEB]: (round) => (round < 3 ? stale : served),
+  })
   const outcome = await verify(
     { expected: SHA, targets: [API, WEB], deadline: timeout, followTip: true },
     fake.io,
   )
-  assert.deepEqual(outcome, { kind: 'served', rounds: 3 })
-  assert.deepEqual(fake.probes, { [API]: 1, [WEB]: 3 })
+  assert.deepEqual(outcome, { kind: 'served', rounds: 4 })
+  assert.deepEqual(fake.probes, { [API]: 4, [WEB]: 4 })
 })
 
 await check('a target that never serves it fails at the deadline, polled until then', async () => {
@@ -310,10 +315,11 @@ await check('a pinned SHA never reads the deploy branch', async () => {
 })
 
 await check('the alert text escapes what health answers and the config bring', () => {
-  const text = alertText({
+  const context: AlertContext = {
     repository: 'example/product',
     branch: 'main',
     expected: SHA,
+    pinned: false,
     promotedAt: '2026-01-01T00:00:00.000Z',
     timeoutMinutes: 20,
     gateRunUrl: 'https://github.com/example/product/actions/runs/1',
@@ -322,21 +328,30 @@ await check('the alert text escapes what health answers and the config bring', (
       { url: API, observation: served },
       {
         url: 'https://www.example.com/h?a=1&b=<2>',
-        observation: { kind: 'tag', tag: '<!channel>' },
+        observation: { kind: 'tag', tag: '<!channel> https://evil.example' },
       },
       { url: WEB, observation: { kind: 'unreachable', detail: 'HTTP 503' } },
     ],
-  })
+  }
+  const text = alertText(context)
+  assert.ok(text.startsWith(':rotating_light: *Deploy verify* — `example/product`'))
   assert.ok(text.includes(`*Branch:* \`main\` · *Expected:* \`${SHA}\``))
   assert.ok(text.includes(`• \`${API}\` serves it`))
   assert.ok(text.includes('&amp;b=&lt;2&gt;'))
-  assert.ok(text.includes('serves the tag "&lt;!channel&gt;"'))
+  // What a target answers stays inside a code span: no mention, no link.
+  assert.ok(text.includes('` `serves the tag "&lt;!channel&gt; https://evil.example"`'))
   assert.ok(!text.includes('<!channel>'))
-  assert.ok(text.includes(`• \`${WEB}\` unreachable: HTTP 503`))
+  assert.ok(text.includes(`• \`${WEB}\` \`unreachable: HTTP 503\``))
   assert.ok(text.includes('<https://github.com/example/product/actions/runs/1|Deploy gate run>'))
   assert.ok(text.includes('<https://github.com/example/product/actions/runs/2|Deploy verify run>'))
   assert.ok(text.includes('Waited 20 min from promotion at 2026-01-01T00:00:00.000Z.'))
-  assert.equal(markerName('staging', SHA), `deploy-verify-alert-staging-${SHA}`)
+  assert.ok(
+    alertText({ ...context, pinned: true }).startsWith(
+      ':test_tube: *Deploy verify, pinned check* — `example/product`',
+    ),
+  )
+  assert.equal(markerName('staging', SHA, false), `deploy-verify-alert-staging-${SHA}`)
+  assert.equal(markerName('staging', SHA, true), `deploy-verify-pinned-alert-staging-${SHA}`)
 })
 
 // ── The CLI, hermetic ───────────────────────────────────────────────────────────────────────────
@@ -344,9 +359,11 @@ const TMP = mkdtempSync(join(tmpdir(), 'deploy-verify-'))
 process.on('exit', () => rmSync(TMP, { recursive: true, force: true }))
 const BIN = join(TMP, 'bin')
 const HEALTH = join(TMP, 'health')
+const RUNS = join(TMP, 'runs')
 mkdirSync(BIN)
 mkdirSync(HEALTH)
-// gh: only the three reads the script may make; every call is logged.
+mkdirSync(RUNS)
+// gh: only the reads the script may make; every call is logged. A run is read from $STUB_RUNS/<id>.json.
 writeFileSync(
   join(BIN, 'gh'),
   `#!/usr/bin/env bash
@@ -354,13 +371,32 @@ printf '%s\\n' "$*" >>"$STUB_LOG"
 case "$*" in
   "api repos/example/product/branches/deploy%2Fmain") printf '{"commit":{"sha":"%s"}}' "$STUB_TIP" ;;
   "api repos/example/product/activity?ref=refs/heads/deploy/main&per_page=1") printf '%s' "$STUB_ACTIVITY" ;;
-  "api repos/example/product/actions/artifacts?name=deploy-verify-alert-main-"*"&per_page=100")
+  "api repos/example/product/actions/artifacts?name=deploy-verify-"*"-main-"*"&per_page=100")
     [ -z "\${STUB_ARTIFACTS_FAIL:-}" ] || { echo "HTTP 502" >&2; exit 1; }
     printf '%s' "$STUB_ARTIFACTS" ;;
+  "api repos/example/product/actions/runs/"*)
+    run="$STUB_RUNS/\${2##*/}.json"
+    [ -f "$run" ] || { echo "HTTP 404" >&2; exit 1; }
+    cat "$run" ;;
   *) echo "gh stub: unexpected call: $*" >&2; exit 1 ;;
 esac
 `,
 )
+// Workflow runs as the API reports them: this Deploy verify run (42), an earlier one (40), a fork
+// pull request's CI run (39) and a fork pull request that edits deploy-verify.yml (38).
+const deployVerifyRun = {
+  workflow_id: 7,
+  event: 'workflow_run',
+  head_repository: { full_name: 'example/product' },
+}
+const runs: Record<string, unknown> = {
+  42: deployVerifyRun,
+  40: { ...deployVerifyRun, event: 'workflow_dispatch' },
+  39: { workflow_id: 3, event: 'pull_request', head_repository: { full_name: 'fork/product' } },
+  38: { workflow_id: 7, event: 'pull_request', head_repository: { full_name: 'fork/product' } },
+}
+for (const [id, run] of Object.entries(runs))
+  writeFileSync(join(RUNS, `${id}.json`), JSON.stringify(run))
 // curl: the answer for the --url value, from files named by its md5; the argv is logged.
 writeFileSync(
   join(BIN, 'curl'),
@@ -427,6 +463,7 @@ function runCli(config: unknown, env: Record<string, string> = {}): Run {
       GITHUB_OUTPUT: outputs,
       STUB_LOG: log,
       STUB_HEALTH: HEALTH,
+      STUB_RUNS: RUNS,
       STUB_TIP: SHA,
       STUB_ACTIVITY: JSON.stringify([{ after: SHA, timestamp: longAgo }]),
       STUB_ARTIFACTS: JSON.stringify({ total_count: 0, artifacts: [] }),
@@ -443,7 +480,16 @@ function runCli(config: unknown, env: Record<string, string> = {}): Run {
   }
 }
 const config = { targets: { main: [API, WEB] } }
-const marker = markerName('main', SHA)
+const marker = markerName('main', SHA, false)
+/** The artifact list for `name`, each entry uploaded by the given run. */
+function artifactsOf(name: string, ...from: Array<{ run: number; expired?: boolean }>): string {
+  const artifacts = from.map(({ run, expired }) => ({
+    name,
+    expired: expired ?? false,
+    workflow_run: { id: run },
+  }))
+  return JSON.stringify({ total_count: artifacts.length, artifacts })
+}
 
 await check('CLI: no config — a notice, nothing verified, no request', () => {
   const r = runCli(undefined)
@@ -481,9 +527,21 @@ await check('CLI: every target serves the promoted SHA — success, no alert', (
   assert.ok(
     r.stdout.includes(`::notice title=Deploy verify::2 target(s) serve ${SHA} (deploy/main).`),
   )
-  // https only, no redirect, no curlrc: the probe's own guards.
-  assert.match(r.calls, /^curl --disable --silent --show-error --proto =https --max-time 10 /m)
+  // https only, no redirect, no URL globbing, no curlrc: the probe's own guards.
+  assert.match(
+    r.calls,
+    /^curl --disable --globoff --silent --show-error --proto =https --max-time 10 /m,
+  )
   assert.doesNotMatch(r.calls, /--location|-L /)
+})
+
+await check('CLI: a URL with brackets in its query is requested literally', () => {
+  const bracketed = 'https://api.example.com/health?check[]=db'
+  health(bracketed, { body: { versionTag: SHA } })
+  const r = runCli({ targets: { main: [bracketed] } })
+  assert.equal(r.code, 0, r.stderr)
+  assert.ok(r.calls.includes(`--globoff `))
+  assert.ok(r.calls.includes(`--url ${bracketed}\n`))
 })
 
 await check('CLI: a target that never serves it — failure past the deadline, one alert', () => {
@@ -495,7 +553,7 @@ await check('CLI: a target that never serves it — failure past the deadline, o
     r.stdout.includes('::error title=Deploy verify: not served::1 of 2 target(s) do not serve'),
   )
   assert.ok(r.alert?.includes(`• \`${API}\` serves it`))
-  assert.ok(r.alert?.includes(`• \`${WEB}\` serves ${OLD}`))
+  assert.ok(r.alert?.includes(`• \`${WEB}\` \`serves ${OLD}\``))
   assert.ok(r.alert?.includes(`from promotion at ${longAgo.replace('Z', '.000Z')}`))
   assert.ok(
     r.alert?.includes('<https://github.com/example/product/actions/runs/41|Deploy gate run>'),
@@ -506,19 +564,27 @@ await check('CLI: a target that never serves it — failure past the deadline, o
 })
 
 await check('CLI: another run for the same branch and SHA does not alert again', () => {
-  const recorded = JSON.stringify({
-    total_count: 1,
-    artifacts: [{ name: marker, expired: false }],
-  })
-  const r = runCli(config, { STUB_ARTIFACTS: recorded })
+  const r = runCli(config, { STUB_ARTIFACTS: artifactsOf(marker, { run: 40 }) })
   assert.equal(r.code, 1)
   assert.equal(r.outputs, `verdict=unserved\nalert=false\nmarker=${marker}\n`)
   assert.equal(r.alert, null)
   assert.ok(r.stdout.includes('was already alerted'))
   // An expired marker no longer counts; an unreadable one alerts rather than stay silent.
-  const expired = JSON.stringify({ total_count: 1, artifacts: [{ name: marker, expired: true }] })
+  const expired = artifactsOf(marker, { run: 40, expired: true })
   assert.ok(runCli(config, { STUB_ARTIFACTS: expired }).outputs.includes('alert=true'))
   assert.ok(runCli(config, { STUB_ARTIFACTS_FAIL: '1' }).outputs.includes('alert=true'))
+})
+
+await check('CLI: a marker that Deploy verify did not record does not silence the alert', () => {
+  // Another workflow's artifact, a fork pull request editing deploy-verify.yml, an unknown run.
+  for (const run of [39, 38, 99]) {
+    const r = runCli(config, { STUB_ARTIFACTS: artifactsOf(marker, { run }) })
+    assert.equal(r.code, 1)
+    assert.ok(r.outputs.includes('alert=true'), `run ${run}`)
+  }
+  // A trusted marker among untrusted ones still counts.
+  const mixed = artifactsOf(marker, { run: 39 }, { run: 40 })
+  assert.ok(runCli(config, { STUB_ARTIFACTS: mixed }).outputs.includes('alert=false'))
 })
 
 await check('CLI: unreachable and invalid targets are reported as such', () => {
@@ -526,8 +592,10 @@ await check('CLI: unreachable and invalid targets are reported as such', () => {
   health(WEB, { status: 200, body: '<html>' })
   const r = runCli(config)
   assert.equal(r.code, 1)
-  assert.ok(r.alert?.includes(`• \`${API}\` unreachable: curl exit 7: curl: (7) Failed to connect`))
-  assert.ok(r.alert?.includes(`• \`${WEB}\` invalid body: the body is not a JSON object`))
+  assert.ok(
+    r.alert?.includes(`• \`${API}\` \`unreachable: curl exit 7: curl: (7) Failed to connect\``),
+  )
+  assert.ok(r.alert?.includes(`• \`${WEB}\` \`invalid body: the body is not a JSON object\``))
 })
 
 await check('CLI: a moved deploy branch is superseded, not alerted', () => {

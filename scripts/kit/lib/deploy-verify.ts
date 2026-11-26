@@ -71,6 +71,8 @@ export type AlertContext = {
   repository: string
   branch: SourceBranch
   expected: string
+  /** A dispatch pinned to `expected`: a check, not the verification of a promotion. */
+  pinned: boolean
   /** ISO time deploy/<branch> moved to `expected`, when known. */
   promotedAt: string | null
   timeoutMinutes: number
@@ -218,62 +220,55 @@ export function describe(observation: Observation): string {
   }
 }
 
-/**
- * One round over the pending targets, in config order: each answer is kept in `last`, and a target
- * that serves `expected` leaves `pending`. A probe that throws counts as unreachable.
- */
-async function runRound(
-  rounds: number,
-  expected: string,
-  io: VerifyIo,
-  pending: Set<string>,
-  last: Map<string, Observation>,
-): Promise<void> {
-  const seen = await Promise.all(
-    [...pending].map(
-      async (url): Promise<[string, Observation]> => [
+/** The one match rule: the round loop, the error annotation and the alert all count with it. */
+export function serves(observation: Observation, expected: string): boolean {
+  return observation.kind === 'tag' && observation.tag === expected
+}
+
+/** One round over every target, in config order. A probe that throws counts as unreachable. */
+async function runRound(rounds: number, plan: VerifyPlan, io: VerifyIo): Promise<TargetResult[]> {
+  const results = await Promise.all(
+    plan.targets.map(
+      async (url): Promise<TargetResult> => ({
         url,
-        await io
+        observation: await io
           .probe(url)
           .catch((error: unknown): Observation => ({ kind: 'unreachable', detail: String(error) })),
-      ],
+      }),
     ),
   )
-  for (const [url, observation] of seen) {
-    last.set(url, observation)
-    if (observation.kind === 'tag' && observation.tag === expected) pending.delete(url)
+  for (const { url, observation } of results)
     io.log(`deploy-verify: round ${rounds} — ${url} ${describe(observation)}`)
-  }
+  return results
 }
 
 /**
- * Polls until every target serves `expected`. A target that serves it is not asked again. Between
- * rounds, a followed deploy/<branch> that moved ends the run as superseded: the Deploy gate run
- * that moved it starts the verification of the new SHA.
+ * Polls until one round sees every target serve `expected`: a target that served it earlier and
+ * then regressed does not count. Between rounds, a followed deploy/<branch> that moved ends the
+ * run as superseded: the Deploy gate run that moved it starts the verification of the new SHA. A
+ * round that starts before the deadline counts.
  */
 export async function verify(plan: VerifyPlan, io: VerifyIo): Promise<VerifyOutcome> {
-  const last = new Map<string, Observation>()
-  const pending = new Set(plan.targets)
   for (let rounds = 1; ; rounds++) {
-    await runRound(rounds, plan.expected, io, pending, last)
-    if (pending.size === 0) return { kind: 'served', rounds }
+    const last = await runRound(rounds, plan, io)
+    if (last.every(({ observation }) => serves(observation, plan.expected)))
+      return { kind: 'served', rounds }
     if (plan.followTip) {
       const tip = await io.readTip()
       if (tip !== null && tip !== plan.expected) return { kind: 'superseded', tip, rounds }
     }
     const left = plan.deadline - io.now()
-    if (left <= 0) {
-      // Every target was probed in round 1, in config order; a Map keeps that first insertion order.
-      const results = [...last].map(([url, observation]) => ({ url, observation }))
-      return { kind: 'unserved', rounds, last: results }
-    }
+    if (left <= 0) return { kind: 'unserved', rounds, last }
     await io.sleep(Math.min(POLL_MS, left))
   }
 }
 
-/** Artifact name recording that the alert for this branch and SHA was posted. */
-export function markerName(branch: SourceBranch, sha: string): string {
-  return `deploy-verify-alert-${branch}-${sha}`
+/**
+ * Artifact name recording that the alert for this branch and SHA was posted. A pinned check has
+ * its own namespace: its alert never silences the verification of a promotion.
+ */
+export function markerName(branch: SourceBranch, sha: string, pinned: boolean): string {
+  return `deploy-verify-${pinned ? 'pinned-alert' : 'alert'}-${branch}-${sha}`
 }
 
 function slackEscape(text: string): string {
@@ -284,14 +279,15 @@ function slackEscape(text: string): string {
 export function alertText(context: AlertContext): string {
   const { repository, branch, expected } = context
   const lines = [
-    `:rotating_light: *Deploy verify* — \`${slackEscape(repository)}\`: production does not serve the commit promoted to \`deploy/${branch}\``,
+    context.pinned
+      ? `:test_tube: *Deploy verify, pinned check* — \`${slackEscape(repository)}\`: the targets of \`deploy/${branch}\` do not serve the pinned commit`
+      : `:rotating_light: *Deploy verify* — \`${slackEscape(repository)}\`: the targets of \`deploy/${branch}\` do not serve its promoted commit`,
     `*Branch:* \`${branch}\` · *Expected:* \`${expected}\``,
   ]
+  // Observations stay in code spans: Slack links no URL there, and printable() drops backticks.
   for (const { url, observation } of context.last) {
-    const served = observation.kind === 'tag' && observation.tag === expected
-    lines.push(
-      `• \`${slackEscape(printable(url, 200))}\` ${slackEscape(served ? 'serves it' : describe(observation))}`,
-    )
+    const seen = serves(observation, expected) ? 'serves it' : `\`${describe(observation)}\``
+    lines.push(`• \`${slackEscape(printable(url, 200))}\` ${slackEscape(seen)}`)
   }
   const since = context.promotedAt ? `promotion at ${context.promotedAt}` : 'the start of the run'
   lines.push(`Waited ${context.timeoutMinutes} min from ${since}.`)

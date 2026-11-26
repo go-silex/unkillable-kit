@@ -5,13 +5,14 @@
  * Cloudflare credential, that every health URL listed for `<branch>` in
  * `config/product/deploy-verify.json` serves the promoted commit in its `versionTag` field.
  *
- * It polls until each target serves the expected SHA, until `deploy/<branch>` moves on (superseded:
- * the gate run that moved it starts the next verification), or until the deadline: promotion time,
- * read from the branch activity, plus the config timeout (the run start when that time is unknown or
- * a SHA is pinned). At the deadline it writes the Slack alert text to `$ALERT_FILE` and
- * `alert=true` to `$GITHUB_OUTPUT`, unless the `marker` artifact of an earlier run shows that this
- * branch and SHA were already alerted. The workflow posts the alert, then uploads that marker; this
- * script never holds the Slack token.
+ * It polls until one round sees every target serve the expected SHA, until `deploy/<branch>` moves
+ * on (superseded: the gate run that moved it starts the next verification), or until the deadline:
+ * promotion time, read from the branch activity, plus the config timeout (the run start when that
+ * time is unknown or a SHA is pinned). At the deadline it writes the Slack alert text to
+ * `$ALERT_FILE` and `alert=true` to `$GITHUB_OUTPUT`, unless a `marker` artifact uploaded by an
+ * earlier Deploy verify run of this repository shows that this branch and SHA were already
+ * alerted. A pinned SHA has its own marker namespace. The workflow posts the alert, then uploads
+ * that marker; this script never holds the Slack token.
  *
  * Trust: the workflow runs this from a checkout of `deploy/<branch>` at the verified SHA, so the
  * code, the config and the Bun runtime are that reviewed, green revision. Health answers, the config
@@ -36,6 +37,7 @@ import {
   parseConfig,
   readHealth,
   type SourceBranch,
+  serves,
   type VerifyIo,
   verify,
 } from './lib/deploy-verify'
@@ -49,6 +51,7 @@ type Inputs = {
   deploySha: string
   pinned: string | null
   gateRunUrl: string | null
+  runId: string
   runUrl: string
   alertFile: string
 }
@@ -120,6 +123,7 @@ function readInputs(): Inputs {
     deploySha,
     pinned: pinned || null,
     gateRunUrl: gateRunId ? `${server}/${repo}/actions/runs/${gateRunId}` : null,
+    runId,
     runUrl: `${server}/${repo}/actions/runs/${runId}`,
     alertFile,
   }
@@ -160,12 +164,13 @@ function field(value: unknown, key: string): unknown {
     : undefined
 }
 
-/** One health request: https only, no redirect, no ~/.curlrc, bounded time and size. */
+/** One health request: https only, no redirect, no URL globbing, no ~/.curlrc, bounded time and size. */
 async function probe(url: string): Promise<Observation> {
   const r = await exec(
     'curl',
     [
       '--disable',
+      '--globoff',
       '--silent',
       '--show-error',
       '--proto',
@@ -228,15 +233,52 @@ async function promotedAt(repo: string, branch: SourceBranch, sha: string): Prom
   }
 }
 
-/** True when an unexpired marker exists, null when that cannot be read (alert rather than miss). */
-async function alreadyAlerted(repo: string, marker: string): Promise<boolean | null> {
+/**
+ * True when a Deploy verify run of this repository recorded the marker: same workflow as this run,
+ * started by `workflow_run` or `workflow_dispatch`, from this repository and not a fork. Another
+ * workflow, or a fork pull request that edits this one, can upload an artifact of that name.
+ */
+async function recordedByDeployVerify(
+  repo: string,
+  artifact: unknown,
+  workflowId: number,
+): Promise<boolean> {
+  const runId = field(field(artifact, 'workflow_run'), 'id')
+  if (typeof runId !== 'number' || !Number.isSafeInteger(runId)) return false
+  const run = await ghJson(`repos/${repo}/actions/runs/${runId}`)
+  const event = field(run, 'event')
+  return (
+    field(run, 'workflow_id') === workflowId &&
+    (event === 'workflow_run' || event === 'workflow_dispatch') &&
+    field(field(run, 'head_repository'), 'full_name') === repo
+  )
+}
+
+/**
+ * True when an unexpired marker recorded by Deploy verify exists; null when that cannot be read
+ * (alert rather than miss). A marker of unknown origin does not count.
+ */
+async function alreadyAlerted(
+  repo: string,
+  marker: string,
+  runId: string,
+): Promise<boolean | null> {
   try {
     const artifacts = field(
       await ghJson(`repos/${repo}/actions/artifacts?name=${marker}&per_page=100`),
       'artifacts',
     )
     if (!Array.isArray(artifacts)) throw new Error('no artifacts list')
-    return artifacts.some((a) => field(a, 'name') === marker && field(a, 'expired') === false)
+    const live = artifacts.filter(
+      (a) => field(a, 'name') === marker && field(a, 'expired') === false,
+    )
+    if (live.length === 0) return false
+    const workflowId = field(await ghJson(`repos/${repo}/actions/runs/${runId}`), 'workflow_id')
+    if (typeof workflowId !== 'number') throw new Error('this run has no workflow id')
+    for (const artifact of live)
+      if (await recordedByDeployVerify(repo, artifact, workflowId)) return true
+    logLine(`deploy-verify: artifact ${marker} was not recorded by Deploy verify; alerting`)
+    return false
   } catch (error) {
     logLine(`deploy-verify: cannot read earlier alerts (${String(error)}); alerting`)
     return null
@@ -328,16 +370,14 @@ async function main(): Promise<void> {
     return
   }
 
-  const missing = outcome.last.filter(
-    (r) => !(r.observation.kind === 'tag' && r.observation.tag === expected),
-  ).length
+  const missing = outcome.last.filter((r) => !serves(r.observation, expected)).length
   annotate(
     'error',
     'Deploy verify: not served',
     `${missing} of ${targets.length} target(s) do not serve ${expected} (deploy/${branch}) ${timeoutMinutes} min after ${promoted ? 'promotion' : 'the start'}; details in the log.`,
   )
-  const marker = markerName(branch, expected)
-  const seen = await alreadyAlerted(repo, marker)
+  const marker = markerName(branch, expected, !followTip)
+  const seen = await alreadyAlerted(repo, marker, inputs.runId)
   if (seen === true) {
     logLine(
       `deploy-verify: ${branch} ${expected} was already alerted (artifact ${marker}); no new alert`,
@@ -351,6 +391,7 @@ async function main(): Promise<void> {
       repository: repo,
       branch,
       expected,
+      pinned: !followTip,
       promotedAt: promoted ? promoted.toISOString() : null,
       timeoutMinutes,
       gateRunUrl: inputs.gateRunUrl,

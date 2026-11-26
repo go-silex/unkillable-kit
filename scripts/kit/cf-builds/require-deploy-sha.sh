@@ -7,9 +7,10 @@
 # Usage: require_deploy_sha <ROOT>   prints the 40-hex SHA on stdout, or refuses
 #   Workers Builds (WORKERS_CI=1): WORKERS_CI_COMMIT_SHA must be a full lowercase SHA equal to the
 #     checkout HEAD.
-#   Elsewhere (a break-glass laptop deploy): WORKERS_CI_COMMIT_SHA, when set, must equal HEAD; the
-#     SHA is HEAD of a worktree with no uncommitted change, untracked files included (ignored ones
-#     are not), since other bytes would ship under that name.
+#   Elsewhere (a break-glass laptop deploy): WORKERS_CI_COMMIT_SHA, when set, must equal HEAD, and
+#     the worktree must hold no uncommitted change, untracked files included whatever
+#     status.showUntrackedFiles says, since other bytes would ship under that name. Ignored files
+#     (.wrangler/, build output) are not checked: deploy from a fresh checkout.
 # Run, not sourced, it prints the SHA of the repository it lives in: a product deploy script runs
 # `sha="$(bash scripts/kit/cf-builds/require-deploy-sha.sh)"` as its own assignment under `set -e`
 # (inline in the wrangler arguments, a refusal would go unnoticed), then `wrangler deploy --tag "$sha"`.
@@ -32,7 +33,8 @@ require_deploy_sha() {
       echo "error: refusing — WORKERS_CI_COMMIT_SHA ${ci_sha} is not the checkout HEAD ${head}." >&2
       exit 1
     fi
-  elif [[ -n "$(git -C "${root}" status --porcelain 2>/dev/null || echo unreadable)" ]]; then
+  fi
+  if [[ -z "${WORKERS_CI:-}" && -n "$(git -C "${root}" status --porcelain --untracked-files=all 2>/dev/null || echo unreadable)" ]]; then
     echo "error: refusing — the worktree has uncommitted changes (or git status failed): HEAD ${head} would not name the deployed code." >&2
     echo "  Deploy from a clean checkout of deploy/<branch>. docs/kit/deploy-verify.md § Version tag." >&2
     exit 1

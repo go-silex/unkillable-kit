@@ -7,12 +7,15 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 ### Deploy
 
 - Deploy verify (`.github/workflows/deploy-verify.yml`) checks after each Deploy gate run that
-  every Worker listed in `config/product/deploy-verify.json` serves the commit of
-  `deploy/<branch>`, and posts one Slack alert per branch and commit when one does not by the
-  deadline: the promotion time plus 20 minutes by default, derived from observed Workers Builds
-  durations. Opt-in: without the file, a notice and nothing verified. It holds no Cloudflare
-  credential and only reads the repository. Runbook: `docs/kit/deploy-verify.md`
+  evaluated a branch that every Worker listed in `config/product/deploy-verify.json` serves the
+  commit of `deploy/<branch>`, and posts one Slack alert per branch and commit when one does not
+  by the deadline: the promotion time plus 20 minutes by default, derived from observed Workers
+  Builds durations. Opt-in: without the file, a notice and nothing verified. It holds no
+  Cloudflare credential and only reads the repository. Runbook: `docs/kit/deploy-verify.md`
   (go-silex/unkillable-kit#215).
+- Outside Workers Builds, `require-deploy-sha.sh` refuses any uncommitted or untracked file, even
+  when `WORKERS_CI_COMMIT_SHA` names `HEAD`. Deploy break-glass from a fresh checkout: ignored
+  files are not checked.
 - The showcase `api-deploy.sh` tags each Worker version with its verified commit
   (`wrangler deploy --tag`) and refuses before migrate when it cannot verify it. The Example API
   declares the `version_metadata` binding and its health response gains `versionTag`.
@@ -20,15 +23,17 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
   `sha="$(bash scripts/kit/cf-builds/require-deploy-sha.sh)"` as its own assignment under
   `set -e`, after the branch guard and before migrate, then `wrangler deploy --tag "$sha"`.
 - **Product action:** In each Wrangler environment a verified Worker deploys, declare the
-  `version_metadata` binding `CF_VERSION_METADATA` (`[env.<name>.version_metadata]`; bindings
-  are not inherited), and return its `tag` as the top-level `versionTag` field of the public
-  health response, `null` without it.
+  `version_metadata` binding `CF_VERSION_METADATA` (`[version_metadata]` at top level,
+  `[env.<name>.version_metadata]` in a named environment; bindings are not inherited), and return
+  its `tag` as the top-level `versionTag` field of the public health response, `null` without it.
 - **Product action:** Once every target reports its commit, add
   `config/product/deploy-verify.json`: per source branch (`main`, `staging`), the health URLs to
-  check, and optionally `timeoutMinutes`. It applies once promoted to `deploy/<branch>`.
-- **Product action:** For the Slack alert, set the repository secret `SLACK_FLINT_BOT_TOKEN` and
-  the repository variable `SLACK_CHANNEL_BUGS_ALERT` (a Slack channel ID). Without them the run
-  still fails and warns.
+  check, and optionally `timeoutMinutes`. It applies once promoted to `deploy/<branch>`. Then run
+  Deploy verify by hand from the default branch for each configured branch and expect the notice
+  `Deploy verify: N target(s) serve <sha> (deploy/<branch>)`, not only a green run.
+- **Product action:** For the Slack alert, set the repository secret `SLACK_FLINT_BOT_TOKEN` (a
+  bot token with `chat:write` that can post to the Slack channel) and the repository variable
+  `SLACK_CHANNEL_BUGS_ALERT` (a Slack channel ID). Without them the run still fails and warns.
 
 ## unkillable-kit/v0.10.0 — 2026-11-26
 

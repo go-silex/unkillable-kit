@@ -14,7 +14,8 @@ A verified Worker meets three conditions.
 1. **Version tag.** Its deploy runs `wrangler deploy --tag <sha>`, where `<sha>` is the full commit
    SHA its Workers Build deploys, printed by `scripts/kit/cf-builds/require-deploy-sha.sh`.
 2. **Binding.** Each Wrangler environment it deploys declares the `version_metadata` binding
-   `CF_VERSION_METADATA`. A binding is not inherited: repeat `[env.<name>.version_metadata]` in
+   `CF_VERSION_METADATA`: `[version_metadata]` for the top-level environment and
+   `[env.<name>.version_metadata]` for each named one. A binding is not inherited: repeat it in
    every deployed Wrangler environment.
 3. **Health field.** Each health URL listed for it answers a 2xx JSON object whose top-level
    `versionTag` field is `CF_VERSION_METADATA.tag`, or `null` without that binding or tag.
@@ -30,9 +31,13 @@ It refuses, before migrate or deploy, whenever the tag could name other code:
 
 - in Workers Builds (`WORKERS_CI` set), `WORKERS_CI_COMMIT_SHA` must be 40 lowercase hex
   characters equal to the checkout `HEAD`;
-- elsewhere, a break-glass laptop deploy, the worktree must be clean, untracked files included,
-  and the tag is `HEAD`;
+- elsewhere, a break-glass laptop deploy, the tag is `HEAD`, `WORKERS_CI_COMMIT_SHA` must equal it
+  when set, and the worktree must be clean, untracked files included whatever
+  `status.showUntrackedFiles` says;
 - a directory that is not a git checkout with a `HEAD` commit is refused.
+
+Ignored files, such as `.wrangler/` or build output, are not checked: deploy break-glass from a
+fresh checkout of `deploy/<branch>`.
 
 Call it as its own assignment under `set -e`. Inside the wrangler arguments, a refusal would go
 unnoticed:
@@ -69,45 +74,56 @@ Without the file, the run posts a notice and verifies nothing.
 
 ## When it runs
 
-- **After each Deploy gate run.** A gate run triggered by `workflow_run` always runs on the default
-  branch, so it does not say which source branch it evaluated. Every gate run whose job ran
-  verifies both `deploy/main` and `deploy/staging`; a branch already served passes on the first
-  round. A gate run whose jobs were all skipped, such as one for a pull-request CI run, verifies
-  nothing. When the gate jobs cannot be read, both branches are verified anyway.
-- **By hand.** `workflow_dispatch` verifies one branch. The optional `expected_sha` input pins the
-  commit to expect instead of the `deploy/<branch>` tip, for a test or after a break-glass push.
+- **After each Deploy gate run that evaluated a branch.** A gate run triggered by `workflow_run`
+  always runs on the default branch, so it does not say which source branch it evaluated. Every
+  gate run of which one job ran verifies both `deploy/main` and `deploy/staging`; a branch already
+  served passes on the first round. The workflow reads the jobs of the gate run attempt that
+  triggered it: a non-empty list of skipped jobs, such as for a pull-request CI run, verifies
+  nothing. An empty list, a read error or a read past 60 seconds verifies both branches anyway.
+  This YAML is the default branch's.
+- **By hand.** `workflow_dispatch` verifies one branch with the YAML of the ref it selects: select
+  the default branch. The optional `expected_sha` input pins the commit to expect instead of the
+  `deploy/<branch>` tip, for a test or after a break-glass push.
 - Runs for one branch are serialized. A running one is never cancelled; a newer queued run
-  replaces an older queued one, and each run resolves `deploy/<branch>` when it starts.
+  replaces an older queued one, and each run resolves `deploy/<branch>` when it starts. A pinned
+  run has its own queue: it never replaces the verification of a promotion.
 
 ## Decision
 
 The workflow resolves `deploy/<branch>`; a missing branch gets a notice, any other read error
 fails. It checks out that commit and runs `scripts/kit/deploy-verify.ts` from it.
 
-- Each round requests every target that does not serve the expected SHA yet. A target that
-  serves it is not requested again.
-- Rounds repeat every 15 seconds. Each request has a 10-second limit, a 64 KiB body limit, no
-  redirect and `https` only.
+- Each round requests every target. The run succeeds when one round sees every target serve the
+  expected SHA; a target that served it and then regressed does not count.
+- Rounds repeat 15 seconds after the previous one ends. Each request has a 10-second limit, a
+  64 KiB body limit, no redirect, no URL globbing and `https` only.
 - The deadline is the promotion time plus `timeoutMinutes`. The promotion time comes from the
   repository activity of `deploy/<branch>` when its last event moved it to this SHA. Otherwise,
-  and with `expected_sha`, the run start replaces it.
-- Every target serves the SHA: the run succeeds.
+  and with `expected_sha`, the start of the verification replaces it.
+- `timeoutMinutes` bounds the polling window: a round that starts before the deadline counts. The
+  job itself stops after 75 minutes.
 - `deploy/<branch>` moves on: the run ends as superseded, without an alert. The gate run that moved
   it starts the verification of the new SHA.
-- A target still serves another tag, `null`, a non-2xx status, an invalid body or no answer at the
-  deadline: the run fails and the alert is posted.
+- A target still serves another tag, `null`, a non-2xx status, an invalid body or no answer in the
+  last round: the run fails and the alert is posted.
 
 ## Slack alert
 
 One alert per branch and SHA. It names the repository, the branch, the expected SHA and what each
-target served last, with links to the Deploy verify run and, when there is one, the Deploy gate
-run.
+target served last, in code spans that Slack does not link, with links to the Deploy verify run
+and, when there is one, the Deploy gate run.
 
 - The workflow posts it with the repository secret `SLACK_FLINT_BOT_TOKEN` to the Slack channel
   whose ID is the repository variable `SLACK_CHANNEL_BUGS_ALERT`. There is no default Slack
-  channel.
+  channel. The bot token needs the `chat:write` scope and the bot must be able to post to that
+  Slack channel, as a member for a private one.
 - After a successful post, an artifact named `deploy-verify-alert-<branch>-<sha>` records it for
   90 days. A later run that finds it fails without posting again.
+- A marker counts only when a Deploy verify run of this repository uploaded it: same workflow,
+  started by `workflow_run` or `workflow_dispatch`, not from a fork. Any other artifact of that
+  name, such as one from a fork pull request, is logged and ignored.
+- A pinned run labels its alert as a pinned check and records it under
+  `deploy-verify-pinned-alert-<branch>-<sha>`: it never silences the alert of a promotion.
 - When the earlier alerts cannot be read, the run posts anyway: a duplicate beats a miss.
 - A missing secret or variable, or a Slack error, gives a warning; the failed run remains the
   alert.
@@ -116,10 +132,16 @@ run.
 ## Trust
 
 - The script, its Bun version and the config come from the already-promoted `deploy/<branch>`,
-  never from an untested tip. The workflow YAML itself is the default branch's, as for the gate.
+  never from an untested tip. Bun is downloaded on each run, never restored from a cache that
+  unpromoted code may have written.
+- On `workflow_run`, the workflow YAML is the default branch's, as for the gate; a dispatch runs
+  the YAML of the selected ref.
 - The workflow holds no Cloudflare credential and no App token. `GITHUB_TOKEN` has `contents: read`
   and `actions: read`, and the checkout keeps no credential: nothing in it can write to `deploy/*`.
-- Only the posting step reads the Slack token, and it passes the token to `curl` on stdin.
+- Only the posting step reads the Slack token, and it passes the token to `curl` on stdin. That
+  step runs after the promoted script in the same job, as the Deploy gate mints its App token
+  after `promote-deploy.ts`. The token is kept from untrusted input, not from promoted code:
+  whoever can get code promoted can already read repository secrets from a push workflow.
 - Health answers, the config and API answers are untrusted. Log lines are made inert as workflow
   commands, annotations carry no value read from them, and the alert text escapes them.
 - The dispatch branch input selects a fixed matrix value and is never interpolated into a script;
@@ -136,22 +158,25 @@ from creation to finish, which includes the queue:
 | Last 30 days            | 204    | 56 s   | —    | —    | 132 s | 160 s  |
 
 The 1040-second maximum includes 983 seconds of queue; without that build, the maximum is
-160 seconds. Twenty minutes clears the slowest observed build with margin, and a run never waits
-more than 60 minutes.
+160 seconds. Twenty minutes clears the slowest observed build with margin; the polling window
+never exceeds 60 minutes.
 
 ## Adopt in a Product
 
 1. In each Product deploy script, after the branch guard and before migrate, take the tag with
    `sha="$(bash scripts/kit/cf-builds/require-deploy-sha.sh)"` as its own assignment, then deploy
    with `wrangler deploy --tag "$sha"`.
-2. In each deployed Wrangler environment of each verified Worker, declare
-   `[env.<name>.version_metadata]` with `binding = "CF_VERSION_METADATA"`.
+2. In each deployed Wrangler environment of each verified Worker, declare the binding
+   `CF_VERSION_METADATA`: `[version_metadata]` at top level, `[env.<name>.version_metadata]` in
+   each named environment.
 3. Return `versionTag` from the public health response, as the Example API does.
-4. Set the repository secret `SLACK_FLINT_BOT_TOKEN` and the repository variable
-   `SLACK_CHANNEL_BUGS_ALERT`.
+4. Set the repository secret `SLACK_FLINT_BOT_TOKEN`, a bot token with `chat:write` that can post
+   to the Slack channel, and the repository variable `SLACK_CHANNEL_BUGS_ALERT`.
 5. Once every target reports its commit, add `config/product/deploy-verify.json` and let the
    Deploy gate promote it.
-6. Check one Deployment by hand: run Deploy verify with `workflow_dispatch` and expect a green run.
+6. Check each configured branch by hand: run Deploy verify with `workflow_dispatch` from the
+   default branch. A green run is not enough: expect the notice
+   `Deploy verify: N target(s) serve <sha> (deploy/<branch>)` with the promoted SHA.
 
 ## Failure modes
 
@@ -176,18 +201,23 @@ more than 60 minutes.
 - Gradual deployments split traffic between versions; a target may answer either one.
 - A rule that challenges GitHub runners, such as bot protection, makes a target unreachable.
 - A break-glass push to `deploy/*` is verified at the next gate run, or by hand.
+- A break-glass laptop deploy can ship ignored files, such as a stale `.wrangler/` generated
+  config, under a clean `HEAD`.
 - Duplicate keys in the JSON config are not detected; the last one wins.
+- A lost Slack response or a failed marker upload can post the alert again. Only the first 100
+  artifacts named after the marker are read.
 - A served tag proves the version Cloudflare serves, not the behaviour of that version.
 
 ## Proof (CP-DEPLOY-VERIFY)
 
 - `bun run test:deploy-verify` (`scripts/kit/test-deploy-verify.ts`, in `validate:tooling`): the
-  config contract, health answers, the polling loop on a fake clock (served, not served by the
-  deadline, recovery, superseded, pinned SHA) and the CLI with stubbed `gh` and `curl` (no config,
-  no target, invalid config, success, one alert, no second alert, refusals, inert output).
+  config contract, health answers, the polling loop on a fake clock (served, served only on a full
+  round, not served by the deadline, recovery, superseded, pinned SHA), the alert text and markers
+  and the CLI with stubbed `gh` and `curl` (no config, no target, invalid config, success, a
+  bracketed URL, one alert, no second alert, a marker of other origin, refusals, inert output).
 - `bun run test:cf-builds`: `api-deploy.sh` deploys with `--tag` and the tested commit, and
   `require-deploy-sha.sh` refuses a missing, malformed or different CI SHA and a dirty laptop
-  worktree.
+  worktree, also with the HEAD SHA given or untracked files hidden from `git status`.
 - The Example API tests: `/health` reports the tag, and `null` without one.
 - `bun run actions-pin:check` (in `validate:full`) checks that every action is pinned by SHA.
 

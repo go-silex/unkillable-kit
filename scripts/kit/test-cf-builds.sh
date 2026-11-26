@@ -383,9 +383,15 @@ assert_sha_refused "an uppercase SHA" "is not a full lowercase commit SHA" WORKE
 assert_sha_refused "a short SHA" "is not a full lowercase commit SHA" WORKERS_CI=1 \
   "WORKERS_CI_COMMIT_SHA=${FIXTURE_SHA:0:12}"
 # Outside Workers Builds, other bytes than HEAD's would ship under its name: an untracked or a
-# modified file refuses. Workers Builds checks out the commit it names and is not held to that.
+# modified file refuses, even when WORKERS_CI_COMMIT_SHA names HEAD and whatever
+# status.showUntrackedFiles hides. Workers Builds checks out the commit it names and is not held to that.
 touch "${FIXTURE}/apps/example-api/stray.ts"
 assert_sha_refused "an untracked file" "uncommitted changes"
+assert_sha_refused "an untracked file and the HEAD SHA outside Workers Builds" "uncommitted changes" \
+  "WORKERS_CI_COMMIT_SHA=${FIXTURE_SHA}"
+git -C "${FIXTURE}" config status.showUntrackedFiles no
+assert_sha_refused "an untracked file git status is told to hide" "uncommitted changes"
+git -C "${FIXTURE}" config --unset status.showUntrackedFiles
 run_entrypoint api-deploy.sh WORKERS_CI_BRANCH=deploy/main WORKERS_CI=1 "WORKERS_CI_COMMIT_SHA=${FIXTURE_SHA}"
 assert_calls "${INSTALL_CALLS}
 ${LIST_CALL}

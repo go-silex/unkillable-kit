@@ -8,19 +8,25 @@ name: Deploy verify
 # Runbook: docs/kit/deploy-verify.md.
 #
 # Which branch: a Deploy gate run started by workflow_run always runs on the default branch, so its
-# run does not say which source branch it evaluated. Every gate run that evaluated one (its job ran)
-# verifies both deploy/main and deploy/staging; a gate run of a pull-request CI run evaluates none
-# and verifies nothing. A branch already served passes at once.
+# run does not say which source branch it evaluated. Every gate run that evaluated one (one of its
+# jobs ran) verifies both deploy/main and deploy/staging; a gate run of a pull-request CI run
+# evaluates none and verifies nothing. A branch already served passes on the first round.
 #
 # Trust: the same as the Deploy gate's. The script, its Bun version and the config come from a
-# checkout of the already-promoted deploy/<branch>, never from an untested tip. Residual by design:
-# this YAML itself is always the default branch's. Read-only: no Cloudflare credential, no App
-# token, GITHUB_TOKEN limited to contents + actions read, the checkout keeps no credential; nothing
-# here can write to deploy/*. The Slack token never reaches the script: only the posting step reads
-# it, and hands it to curl on stdin.
+# checkout of the already-promoted deploy/<branch>, never from an untested tip; Bun is downloaded,
+# never restored from a cache that unpromoted code may have written. On workflow_run this YAML is
+# the default branch's; a dispatch runs the YAML of the ref it selects. Read-only: no Cloudflare
+# credential, no App token, GITHUB_TOKEN limited to contents + actions read, the checkout keeps no
+# credential; nothing here can write to deploy/*. The Slack token never reaches the script: only
+# the posting step reads it, and hands it to curl on stdin. That step runs after the promoted code
+# in the same job, as the Deploy gate mints its App token after promote-deploy.ts: the token is
+# kept from untrusted input, not from promoted code, since whoever can get code promoted can
+# already read repository secrets from a push workflow.
 #
 # One alert per branch and SHA: after a successful post, an artifact named after them is uploaded,
-# and a later run that finds it does not post again (retention 90 days). Runs for one branch are
+# and a later run that finds it, uploaded by a Deploy verify run of this repository, does not post
+# again (retention 90 days). A pinned dispatch has its own concurrency group and marker namespace,
+# so it never displaces or silences the verification of a promotion. Runs for one branch are
 # serialized. No token, no Slack channel variable or a Slack error: a warning, and the failed run
 # stays the alert of last resort.
 
@@ -60,23 +66,27 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           EVENT_NAME: ${{ github.event_name }}
           GATE_RUN_ID: ${{ github.event.workflow_run.id }}
+          GATE_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
         run: |
           set -euo pipefail
           if [ "$EVENT_NAME" != workflow_run ]; then
             echo "evaluated=true" >>"$GITHUB_OUTPUT"
             exit 0
           fi
-          if [[ ! "$GATE_RUN_ID" =~ ^[0-9]+$ ]]; then
-            echo "::error title=Deploy verify::the triggering Deploy gate run has no id"
+          if [[ ! "$GATE_RUN_ID" =~ ^[0-9]+$ || ! "$GATE_RUN_ATTEMPT" =~ ^[0-9]+$ ]]; then
+            echo "::error title=Deploy verify::the triggering Deploy gate run has no id or attempt"
             exit 1
           fi
-          # A lookup failure verifies anyway: a needless check beats a missed one.
-          if ! ran="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GATE_RUN_ID}/jobs?per_page=100" \
-            --jq '[.jobs[] | select(.conclusion != "skipped")] | length' 2>/dev/null)"; then
+          # The jobs of the attempt whose completion triggered this run. Only a non-empty list of
+          # skipped jobs skips; a lookup failure or a timeout verifies anyway: a needless check
+          # beats a missed one.
+          if ! counts="$(timeout 60 gh api \
+            "repos/${GITHUB_REPOSITORY}/actions/runs/${GATE_RUN_ID}/attempts/${GATE_RUN_ATTEMPT}/jobs?per_page=100" \
+            --jq '"\(.jobs | length) \([.jobs[] | select(.conclusion != "skipped")] | length)"' 2>/dev/null)"; then
             echo "::warning title=Deploy verify::the jobs of Deploy gate run ${GATE_RUN_ID} could not be read; verifying anyway."
-            ran=unknown
+            counts=unknown
           fi
-          if [ "$ran" = 0 ]; then
+          if [[ "$counts" =~ ^[1-9][0-9]*\ 0$ ]]; then
             echo "::notice title=Deploy verify::Deploy gate run ${GATE_RUN_ID} evaluated no branch; nothing to verify."
             echo "evaluated=false" >>"$GITHUB_OUTPUT"
           else
@@ -95,8 +105,9 @@ jobs:
       matrix:
         # Fixed literals only: the dispatch input picks one, it is never interpolated.
         branch: ${{ fromJSON(github.event_name == 'workflow_dispatch' && (inputs.branch == 'staging' && '["staging"]' || '["main"]') || '["main","staging"]') }}
+    # A pinned dispatch gets its own group: it never replaces the queued verification of a promotion.
     concurrency:
-      group: deploy-verify-${{ matrix.branch }}
+      group: deploy-verify-${{ matrix.branch }}${{ inputs.expected_sha && '-pinned' || '' }}
       cancel-in-progress: false
     env:
       SOURCE_BRANCH: ${{ matrix.branch }}
@@ -145,10 +156,12 @@ jobs:
           fi
           echo "configured=true" >>"$GITHUB_OUTPUT"
 
+      # no-cache: a cached Bun may have been written by code that was never promoted.
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         if: steps.cfg.outputs.configured == 'true'
         with:
           bun-version-file: package.json
+          no-cache: true
 
       - name: Verify deploy/${{ matrix.branch }} is served
         id: verify
