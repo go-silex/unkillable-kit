@@ -245,8 +245,8 @@ async function runRound(rounds: number, plan: VerifyPlan, io: VerifyIo): Promise
 /**
  * Polls until one round sees every target serve `expected`: a target that served it earlier and
  * then regressed does not count. Between rounds, a followed deploy/<branch> that moved ends the
- * run as superseded: the Deploy gate run that moved it starts the verification of the new SHA. A
- * round that starts before the deadline counts.
+ * run as superseded: the Deploy gate run that moved it starts the verification of the new SHA.
+ * The first round always runs, even past the deadline; a follow-up round starts only before it.
  */
 export async function verify(plan: VerifyPlan, io: VerifyIo): Promise<VerifyOutcome> {
   for (let rounds = 1; ; rounds++) {
@@ -257,18 +257,33 @@ export async function verify(plan: VerifyPlan, io: VerifyIo): Promise<VerifyOutc
       const tip = await io.readTip()
       if (tip !== null && tip !== plan.expected) return { kind: 'superseded', tip, rounds }
     }
-    const left = plan.deadline - io.now()
-    if (left <= 0) return { kind: 'unserved', rounds, last }
-    await io.sleep(Math.min(POLL_MS, left))
+    if (plan.deadline - io.now() <= POLL_MS) return { kind: 'unserved', rounds, last }
+    await io.sleep(POLL_MS)
   }
 }
 
 /**
- * Artifact name recording that the alert for this branch and SHA was posted. A pinned check has
- * its own namespace: its alert never silences the verification of a promotion.
+ * Whether an earlier alert is on record, within one time budget: true once `recorded` confirms a
+ * candidate, false when none does, null when `deadline` passes first (alert rather than miss).
+ * `recorded` gets the time left, to bound its own request.
  */
-export function markerName(branch: SourceBranch, sha: string, pinned: boolean): string {
-  return `deploy-verify-${pinned ? 'pinned-alert' : 'alert'}-${branch}-${sha}`
+export async function recordedWithin<T>(
+  candidates: T[],
+  recorded: (candidate: T, msLeft: number) => Promise<boolean>,
+  deadline: number,
+  now: () => number,
+): Promise<boolean | null> {
+  for (const candidate of candidates) {
+    const left = deadline - now()
+    if (left <= 0) return null
+    if (await recorded(candidate, left)) return true
+  }
+  return false
+}
+
+/** Artifact name recording that the alert for the promotion of this SHA to this branch was posted. */
+export function markerName(branch: SourceBranch, sha: string): string {
+  return `deploy-verify-alert-${branch}-${sha}`
 }
 
 function slackEscape(text: string): string {

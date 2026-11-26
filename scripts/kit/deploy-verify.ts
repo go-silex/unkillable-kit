@@ -10,9 +10,9 @@
  * promotion time, read from the branch activity, plus the config timeout (the run start when that
  * time is unknown or a SHA is pinned). At the deadline it writes the Slack alert text to
  * `$ALERT_FILE` and `alert=true` to `$GITHUB_OUTPUT`, unless a `marker` artifact uploaded by an
- * earlier Deploy verify run of this repository shows that this branch and SHA were already
- * alerted. A pinned SHA has its own marker namespace. The workflow posts the alert, then uploads
- * that marker; this script never holds the Slack token.
+ * earlier Deploy verify run started by `workflow_run` shows that this branch and SHA were already
+ * alerted; a pinned check reads no marker. The workflow posts the alert, then, on `workflow_run`
+ * only, uploads that marker; this script never holds the Slack token.
  *
  * Trust: the workflow runs this from a checkout of `deploy/<branch>` at the verified SHA, so the
  * code, the config and the Bun runtime are that reviewed, green revision. Health answers, the config
@@ -28,6 +28,7 @@
 import { execFile } from 'node:child_process'
 import { appendFileSync, lstatSync, readFileSync, type Stats, writeFileSync } from 'node:fs'
 import {
+  type AlertContext,
   alertText,
   CONFIG_PATH,
   isSha,
@@ -36,6 +37,7 @@ import {
   type Observation,
   parseConfig,
   readHealth,
+  recordedWithin,
   type SourceBranch,
   serves,
   type VerifyIo,
@@ -44,6 +46,8 @@ import {
 
 const MAX_CONFIG_BYTES = 64 * 1024
 const MAX_BODY_BYTES = 64 * 1024
+/** Budget of the earlier-alert lookup: past it the run alerts, well inside the job time limit. */
+const DEDUP_MS = 60_000
 
 type Inputs = {
   repo: string
@@ -151,8 +155,8 @@ function sleep(ms: number): Promise<void> {
   return promise
 }
 
-async function ghJson(path: string): Promise<unknown> {
-  const r = await exec('gh', ['api', path], 30_000)
+async function ghJson(path: string, timeoutMs = 30_000): Promise<unknown> {
+  const r = await exec('gh', ['api', path], timeoutMs)
   if (r.code !== 0) throw new Error(`gh api ${path} failed: ${r.err.trim() || r.out.trim()}`)
   return JSON.parse(r.out)
 }
@@ -234,38 +238,42 @@ async function promotedAt(repo: string, branch: SourceBranch, sha: string): Prom
 }
 
 /**
- * True when a Deploy verify run of this repository recorded the marker: same workflow as this run,
- * started by `workflow_run` or `workflow_dispatch`, from this repository and not a fork. Another
- * workflow, or a fork pull request that edits this one, can upload an artifact of that name.
+ * True when a Deploy verify run started by `workflow_run` recorded the marker: such a run uses the
+ * default branch's YAML. Another workflow, a dispatch from any ref or a fork pull request can upload
+ * an artifact of that name. A run that cannot be read does not count.
  */
 async function recordedByDeployVerify(
   repo: string,
   artifact: unknown,
   workflowId: number,
+  msLeft: number,
 ): Promise<boolean> {
   const runId = field(field(artifact, 'workflow_run'), 'id')
   if (typeof runId !== 'number' || !Number.isSafeInteger(runId)) return false
-  const run = await ghJson(`repos/${repo}/actions/runs/${runId}`)
-  const event = field(run, 'event')
-  return (
-    field(run, 'workflow_id') === workflowId &&
-    (event === 'workflow_run' || event === 'workflow_dispatch') &&
-    field(field(run, 'head_repository'), 'full_name') === repo
-  )
+  try {
+    const run = await ghJson(`repos/${repo}/actions/runs/${runId}`, msLeft)
+    return field(run, 'workflow_id') === workflowId && field(run, 'event') === 'workflow_run'
+  } catch (error) {
+    logLine(
+      `deploy-verify: cannot read run ${runId} (${String(error)}); its artifact does not count`,
+    )
+    return false
+  }
 }
 
 /**
- * True when an unexpired marker recorded by Deploy verify exists; null when that cannot be read
- * (alert rather than miss). A marker of unknown origin does not count.
+ * True when an unexpired marker recorded by Deploy verify exists; false or null (unreadable, or
+ * not settled within DEDUP_MS) both alert: a duplicate beats a miss.
  */
 async function alreadyAlerted(
   repo: string,
   marker: string,
   runId: string,
 ): Promise<boolean | null> {
+  const deadline = Date.now() + DEDUP_MS
   try {
     const artifacts = field(
-      await ghJson(`repos/${repo}/actions/artifacts?name=${marker}&per_page=100`),
+      await ghJson(`repos/${repo}/actions/artifacts?name=${marker}&per_page=100`, DEDUP_MS),
       'artifacts',
     )
     if (!Array.isArray(artifacts)) throw new Error('no artifacts list')
@@ -273,12 +281,24 @@ async function alreadyAlerted(
       (a) => field(a, 'name') === marker && field(a, 'expired') === false,
     )
     if (live.length === 0) return false
-    const workflowId = field(await ghJson(`repos/${repo}/actions/runs/${runId}`), 'workflow_id')
+    const workflowId = field(
+      await ghJson(`repos/${repo}/actions/runs/${runId}`, Math.max(1, deadline - Date.now())),
+      'workflow_id',
+    )
     if (typeof workflowId !== 'number') throw new Error('this run has no workflow id')
-    for (const artifact of live)
-      if (await recordedByDeployVerify(repo, artifact, workflowId)) return true
-    logLine(`deploy-verify: artifact ${marker} was not recorded by Deploy verify; alerting`)
-    return false
+    const seen = await recordedWithin(
+      live,
+      (artifact, left) => recordedByDeployVerify(repo, artifact, workflowId, left),
+      deadline,
+      Date.now,
+    )
+    if (seen === null)
+      logLine(`deploy-verify: earlier alerts not settled in ${DEDUP_MS / 1000} s; alerting`)
+    if (seen === false)
+      logLine(
+        `deploy-verify: no Deploy verify run after a Deploy gate run recorded ${marker}; alerting`,
+      )
+    return seen
   } catch (error) {
     logLine(`deploy-verify: cannot read earlier alerts (${String(error)}); alerting`)
     return null
@@ -297,6 +317,29 @@ function readConfigText(): string | null {
   if (stat.size > MAX_CONFIG_BYTES)
     refuse(`${CONFIG_PATH} is larger than ${MAX_CONFIG_BYTES} bytes`)
   return readFileSync(CONFIG_PATH, 'utf8')
+}
+
+/** Annotates an unserved verification, then hands the alert to the workflow unless already posted. */
+async function reportUnserved(context: AlertContext, inputs: Inputs): Promise<never> {
+  const { repository, branch, expected, last } = context
+  const missing = last.filter((r) => !serves(r.observation, expected)).length
+  annotate(
+    'error',
+    'Deploy verify: not served',
+    `${missing} of ${last.length} target(s) do not serve ${expected} (deploy/${branch}) ${context.timeoutMinutes} min after ${context.promotedAt ? 'promotion' : 'the start'}; details in the log.`,
+  )
+  // A pinned check never reads markers: dispatches record none, and it always reports.
+  const marker = markerName(branch, expected)
+  if (!context.pinned && (await alreadyAlerted(repository, marker, inputs.runId)) === true) {
+    logLine(
+      `deploy-verify: ${branch} ${expected} was already alerted (artifact ${marker}); no new alert`,
+    )
+    output({ verdict: 'unserved', alert: 'false', marker })
+    process.exit(1)
+  }
+  writeFileSync(inputs.alertFile, alertText(context))
+  output({ verdict: 'unserved', alert: 'true', marker })
+  process.exit(1)
 }
 
 async function main(): Promise<void> {
@@ -370,24 +413,8 @@ async function main(): Promise<void> {
     return
   }
 
-  const missing = outcome.last.filter((r) => !serves(r.observation, expected)).length
-  annotate(
-    'error',
-    'Deploy verify: not served',
-    `${missing} of ${targets.length} target(s) do not serve ${expected} (deploy/${branch}) ${timeoutMinutes} min after ${promoted ? 'promotion' : 'the start'}; details in the log.`,
-  )
-  const marker = markerName(branch, expected, !followTip)
-  const seen = await alreadyAlerted(repo, marker, inputs.runId)
-  if (seen === true) {
-    logLine(
-      `deploy-verify: ${branch} ${expected} was already alerted (artifact ${marker}); no new alert`,
-    )
-    output({ verdict: 'unserved', alert: 'false', marker })
-    process.exit(1)
-  }
-  writeFileSync(
-    inputs.alertFile,
-    alertText({
+  await reportUnserved(
+    {
       repository: repo,
       branch,
       expected,
@@ -397,10 +424,9 @@ async function main(): Promise<void> {
       gateRunUrl: inputs.gateRunUrl,
       runUrl: inputs.runUrl,
       last: outcome.last,
-    }),
+    },
+    inputs,
   )
-  output({ verdict: 'unserved', alert: 'true', marker })
-  process.exit(1)
 }
 
 await main()

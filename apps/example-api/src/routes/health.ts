@@ -72,5 +72,7 @@ healthRoutes.openapi(getHealth, (c) => {
     }
   }
 
+  // Never cached: Deploy verify must read the version that serves this request.
+  c.header('Cache-Control', 'no-store')
   return c.json(body)
 })

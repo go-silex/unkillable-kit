@@ -23,12 +23,13 @@ name: Deploy verify
 # kept from untrusted input, not from promoted code, since whoever can get code promoted can
 # already read repository secrets from a push workflow.
 #
-# One alert per branch and SHA: after a successful post, an artifact named after them is uploaded,
-# and a later run that finds it, uploaded by a Deploy verify run of this repository, does not post
-# again (retention 90 days). A pinned dispatch has its own concurrency group and marker namespace,
-# so it never displaces or silences the verification of a promotion. Runs for one branch are
-# serialized. No token, no Slack channel variable or a Slack error: a warning, and the failed run
-# stays the alert of last resort.
+# One alert per branch and SHA: after a successful post, a run started by workflow_run uploads an
+# artifact named after them, and a later run that finds one uploaded by such a run, whose YAML is
+# the default branch's, does not post again (retention 90 days). A dispatch records no marker, and
+# a pinned one reads none and always reports; it also has its own concurrency group, so it never
+# displaces the verification of a promotion. Runs for one branch are serialized. No token, no
+# Slack channel variable or a Slack error: a warning, and the failed run stays the alert of last
+# resort.
 
 on:
   workflow_run:
@@ -204,8 +205,9 @@ jobs:
           fi
           echo "posted=true" >>"$GITHUB_OUTPUT"
 
+      # Only a run whose YAML is the default branch's records a marker that later runs trust.
       - name: Record the alert for this branch and SHA
-        if: failure() && steps.slack.outputs.posted == 'true'
+        if: failure() && github.event_name == 'workflow_run' && steps.slack.outputs.posted == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ steps.verify.outputs.marker }}

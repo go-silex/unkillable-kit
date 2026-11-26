@@ -31,6 +31,7 @@ import {
   POLL_MS,
   parseConfig,
   readHealth,
+  recordedWithin,
   type VerifyIo,
   verify,
 } from './lib/deploy-verify'
@@ -194,7 +195,8 @@ function fakeIo(answers: Record<string, Answer>, tips: Array<string | null> = []
 const served: Observation = { kind: 'tag', tag: SHA }
 const stale: Observation = { kind: 'tag', tag: OLD }
 const timeout = 20 * 60_000
-const allRounds = timeout / POLL_MS + 1
+// Rounds start at 0, 15 s, … up to the last start before the deadline.
+const allRounds = timeout / POLL_MS
 
 await check('every target serves the expected SHA: served at once, no wait', async () => {
   const fake = fakeIo({ [API]: served, [WEB]: served })
@@ -238,18 +240,37 @@ await check('a target that never serves it fails at the deadline, polled until t
   assert.equal(fake.probes[WEB], allRounds)
   assert.equal(
     fake.sleeps.reduce((a, b) => a + b, 0),
-    timeout,
+    timeout - POLL_MS,
   )
 })
 
-await check('the last wait is cut to the deadline', async () => {
+await check('no follow-up round starts at or after the deadline', async () => {
   const fake = fakeIo({ [API]: stale })
   const outcome = await verify(
     { expected: SHA, targets: [API], deadline: POLL_MS + 4000, followTip: false },
     fake.io,
   )
+  // Round 2 at 15 s; a round 3 would start at 30 s, past the 19 s deadline.
   assert.equal(outcome.kind, 'unserved')
-  assert.deepEqual(fake.sleeps, [POLL_MS, 4000])
+  assert.deepEqual(fake.sleeps, [POLL_MS])
+  assert.equal(fake.probes[API], 2)
+})
+
+await check('earlier alerts are looked up within one budget, then the run alerts', async () => {
+  let clock = 0
+  const asked: number[] = []
+  const slow = async (candidate: number, msLeft: number) => {
+    asked.push(msLeft)
+    clock += 40_000
+    return candidate === 3
+  }
+  // Two slow lookups use up the 60 s budget before the recorded third candidate is read.
+  assert.equal(await recordedWithin([1, 2, 3], slow, 60_000, () => clock), null)
+  assert.deepEqual(asked, [60_000, 20_000])
+  clock = 0
+  assert.equal(await recordedWithin([1, 3], slow, 60_000, () => clock), true)
+  clock = 0
+  assert.equal(await recordedWithin([1], slow, 60_000, () => clock), false)
 })
 
 await check(
@@ -350,8 +371,7 @@ await check('the alert text escapes what health answers and the config bring', (
       ':test_tube: *Deploy verify, pinned check* — `example/product`',
     ),
   )
-  assert.equal(markerName('staging', SHA, false), `deploy-verify-alert-staging-${SHA}`)
-  assert.equal(markerName('staging', SHA, true), `deploy-verify-pinned-alert-staging-${SHA}`)
+  assert.equal(markerName('staging', SHA), `deploy-verify-alert-staging-${SHA}`)
 })
 
 // ── The CLI, hermetic ───────────────────────────────────────────────────────────────────────────
@@ -382,18 +402,18 @@ case "$*" in
 esac
 `,
 )
-// Workflow runs as the API reports them: this Deploy verify run (42), an earlier one (40), a fork
-// pull request's CI run (39) and a fork pull request that edits deploy-verify.yml (38).
-const deployVerifyRun = {
-  workflow_id: 7,
-  event: 'workflow_run',
-  head_repository: { full_name: 'example/product' },
-}
+// Workflow runs as the API reports them: this Deploy verify run (42) and an earlier one (40), both
+// started by workflow_run; each other run differs from them in one field only.
+const deployVerifyRun = { workflow_id: 7, event: 'workflow_run' }
 const runs: Record<string, unknown> = {
   42: deployVerifyRun,
-  40: { ...deployVerifyRun, event: 'workflow_dispatch' },
-  39: { workflow_id: 3, event: 'pull_request', head_repository: { full_name: 'fork/product' } },
-  38: { workflow_id: 7, event: 'pull_request', head_repository: { full_name: 'fork/product' } },
+  40: deployVerifyRun,
+  // Another workflow of the repository, started the same way.
+  39: { ...deployVerifyRun, workflow_id: 9 },
+  // This workflow dispatched by hand, from any ref and so with any YAML.
+  38: { ...deployVerifyRun, event: 'workflow_dispatch' },
+  // This workflow run for a pull request, fork included.
+  37: { ...deployVerifyRun, event: 'pull_request' },
 }
 for (const [id, run] of Object.entries(runs))
   writeFileSync(join(RUNS, `${id}.json`), JSON.stringify(run))
@@ -480,7 +500,7 @@ function runCli(config: unknown, env: Record<string, string> = {}): Run {
   }
 }
 const config = { targets: { main: [API, WEB] } }
-const marker = markerName('main', SHA, false)
+const marker = markerName('main', SHA)
 /** The artifact list for `name`, each entry uploaded by the given run. */
 function artifactsOf(name: string, ...from: Array<{ run: number; expired?: boolean }>): string {
   const artifacts = from.map(({ run, expired }) => ({
@@ -576,14 +596,14 @@ await check('CLI: another run for the same branch and SHA does not alert again',
 })
 
 await check('CLI: a marker that Deploy verify did not record does not silence the alert', () => {
-  // Another workflow's artifact, a fork pull request editing deploy-verify.yml, an unknown run.
-  for (const run of [39, 38, 99]) {
+  // Another workflow, a dispatch, a pull request, a run that cannot be read (404).
+  for (const run of [39, 38, 37, 99]) {
     const r = runCli(config, { STUB_ARTIFACTS: artifactsOf(marker, { run }) })
     assert.equal(r.code, 1)
     assert.ok(r.outputs.includes('alert=true'), `run ${run}`)
   }
-  // A trusted marker among untrusted ones still counts.
-  const mixed = artifactsOf(marker, { run: 39 }, { run: 40 })
+  // A trusted marker after untrusted or unreadable ones still counts.
+  const mixed = artifactsOf(marker, { run: 39 }, { run: 99 }, { run: 40 })
   assert.ok(runCli(config, { STUB_ARTIFACTS: mixed }).outputs.includes('alert=false'))
 })
 

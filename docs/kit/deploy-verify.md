@@ -9,7 +9,7 @@ source branch. The rest of the CD chain is in [deploy-cloudflare.md](./deploy-cl
 
 ## Contract
 
-A verified Worker meets three conditions.
+A verified Worker meets four conditions.
 
 1. **Version tag.** Its deploy runs `wrangler deploy --tag <sha>`, where `<sha>` is the full commit
    SHA its Workers Build deploys, printed by `scripts/kit/cf-builds/require-deploy-sha.sh`.
@@ -19,10 +19,13 @@ A verified Worker meets three conditions.
    every deployed Wrangler environment.
 3. **Health field.** Each health URL listed for it answers a 2xx JSON object whose top-level
    `versionTag` field is `CF_VERSION_METADATA.tag`, or `null` without that binding or tag.
+4. **Uncached.** No cache answers for a listed URL: the response sends `Cache-Control: no-store`
+   and no Cloudflare cache rule covers it. A cached answer could report a version that no longer
+   serves.
 
 The Example API is the reference: `apps/example-api/wrangler.toml` declares the binding,
-`apps/example-api/src/routes/health.ts` returns the field and `scripts/kit/cf-builds/api-deploy.sh`
-tags the version.
+`apps/example-api/src/routes/health.ts` returns the field with `Cache-Control: no-store` and
+`scripts/kit/cf-builds/api-deploy.sh` tags the version.
 
 ### Version tag
 
@@ -100,8 +103,9 @@ fails. It checks out that commit and runs `scripts/kit/deploy-verify.ts` from it
 - The deadline is the promotion time plus `timeoutMinutes`. The promotion time comes from the
   repository activity of `deploy/<branch>` when its last event moved it to this SHA. Otherwise,
   and with `expected_sha`, the start of the verification replaces it.
-- `timeoutMinutes` bounds the polling window: a round that starts before the deadline counts. The
-  job itself stops after 75 minutes.
+- The first round always runs, even when the run starts after the deadline. A follow-up round
+  starts only before the deadline: the run stops when the next one would start at or after it.
+  `timeoutMinutes` bounds that polling window; the job itself stops after 75 minutes.
 - `deploy/<branch>` moves on: the run ends as superseded, without an alert. The gate run that moved
   it starts the verification of the new SHA.
 - A target still serves another tag, `null`, a non-2xx status, an invalid body or no answer in the
@@ -117,14 +121,16 @@ and, when there is one, the Deploy gate run.
   whose ID is the repository variable `SLACK_CHANNEL_BUGS_ALERT`. There is no default Slack
   channel. The bot token needs the `chat:write` scope and the bot must be able to post to that
   Slack channel, as a member for a private one.
-- After a successful post, an artifact named `deploy-verify-alert-<branch>-<sha>` records it for
-  90 days. A later run that finds it fails without posting again.
-- A marker counts only when a Deploy verify run of this repository uploaded it: same workflow,
-  started by `workflow_run` or `workflow_dispatch`, not from a fork. Any other artifact of that
-  name, such as one from a fork pull request, is logged and ignored.
-- A pinned run labels its alert as a pinned check and records it under
-  `deploy-verify-pinned-alert-<branch>-<sha>`: it never silences the alert of a promotion.
-- When the earlier alerts cannot be read, the run posts anyway: a duplicate beats a miss.
+- After a successful post, a run started by `workflow_run` uploads an artifact named
+  `deploy-verify-alert-<branch>-<sha>`, kept 90 days. A later run that finds it fails without
+  posting again.
+- A marker counts only when a Deploy verify run started by `workflow_run` uploaded it: that run
+  uses the default branch's YAML. A marker from another workflow, from a dispatch on any ref or
+  from a pull request, fork included, is logged and ignored.
+- A dispatch records no marker. A pinned run reads none either: it always reports, and labels
+  its alert as a pinned check.
+- When the earlier alerts cannot be read, or the lookup takes more than 60 seconds, the run posts
+  anyway: a duplicate beats a miss.
 - A missing secret or variable, or a Slack error, gives a warning; the failed run remains the
   alert.
 - An invalid config fails the run without a Slack alert.
@@ -169,7 +175,8 @@ never exceeds 60 minutes.
 2. In each deployed Wrangler environment of each verified Worker, declare the binding
    `CF_VERSION_METADATA`: `[version_metadata]` at top level, `[env.<name>.version_metadata]` in
    each named environment.
-3. Return `versionTag` from the public health response, as the Example API does.
+3. Return `versionTag` from the public health response with `Cache-Control: no-store`, as the
+   Example API does, and keep every listed URL out of Cloudflare cache rules.
 4. Set the repository secret `SLACK_FLINT_BOT_TOKEN`, a bot token with `chat:write` that can post
    to the Slack channel, and the repository variable `SLACK_CHANNEL_BUGS_ALERT`.
 5. Once every target reports its commit, add `config/product/deploy-verify.json` and let the
@@ -182,7 +189,8 @@ never exceeds 60 minutes.
 
 - **`Deploy verify: not served`** — a target still serves another commit at the deadline. Read the
   Workers Build of that commit in the Cloudflare dashboard, fix it, then push a new commit or
-  retry the build.
+  retry the build. When that build succeeded, look for a cache or a gradual deployment in front of
+  the health URL.
 - **`serves no version tag (null)`** — the binding is missing in that Wrangler environment, or the
   deploy did not pass `--tag`.
 - **`invalid body`** — the URL is not the health route, or the health response has no
@@ -204,21 +212,23 @@ never exceeds 60 minutes.
 - A break-glass laptop deploy can ship ignored files, such as a stale `.wrangler/` generated
   config, under a clean `HEAD`.
 - Duplicate keys in the JSON config are not detected; the last one wins.
-- A lost Slack response or a failed marker upload can post the alert again. Only the first 100
-  artifacts named after the marker are read.
+- A lost Slack response or a failed marker upload can post the alert again, and so does a gate
+  run after a dispatch alerted on the same SHA. Only the first 100 artifacts named after the
+  marker are read.
 - A served tag proves the version Cloudflare serves, not the behaviour of that version.
 
 ## Proof (CP-DEPLOY-VERIFY)
 
 - `bun run test:deploy-verify` (`scripts/kit/test-deploy-verify.ts`, in `validate:tooling`): the
   config contract, health answers, the polling loop on a fake clock (served, served only on a full
-  round, not served by the deadline, recovery, superseded, pinned SHA), the alert text and markers
-  and the CLI with stubbed `gh` and `curl` (no config, no target, invalid config, success, a
-  bracketed URL, one alert, no second alert, a marker of other origin, refusals, inert output).
+  round, not served by the deadline, no follow-up round past it, recovery, superseded, pinned
+  SHA), the earlier-alert lookup budget, the alert text and the CLI with stubbed `gh` and `curl`
+  (no config, no target, invalid config, success, a bracketed URL, one alert, no second alert,
+  markers of other origins, refusals, inert output).
 - `bun run test:cf-builds`: `api-deploy.sh` deploys with `--tag` and the tested commit, and
   `require-deploy-sha.sh` refuses a missing, malformed or different CI SHA and a dirty laptop
   worktree, also with the HEAD SHA given or untracked files hidden from `git status`.
-- The Example API tests: `/health` reports the tag, and `null` without one.
+- The Example API tests: `/health` reports the tag uncached, and `null` without one.
 - `bun run actions-pin:check` (in `validate:full`) checks that every action is pinned by SHA.
 
 **Does not** prove GitHub delivering the `workflow_run` event, the repository activity API, the

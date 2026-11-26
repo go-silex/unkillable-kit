@@ -18,7 +18,8 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
   files are not checked.
 - The showcase `api-deploy.sh` tags each Worker version with its verified commit
   (`wrangler deploy --tag`) and refuses before migrate when it cannot verify it. The Example API
-  declares the `version_metadata` binding and its health response gains `versionTag`.
+  declares the `version_metadata` binding and its health response gains `versionTag`, sent with
+  `Cache-Control: no-store`.
 - **Product action:** To adopt Deploy verify, tag the version in each Product deploy script with
   `sha="$(bash scripts/kit/cf-builds/require-deploy-sha.sh)"` as its own assignment under
   `set -e`, after the branch guard and before migrate, then `wrangler deploy --tag "$sha"`.
@@ -26,6 +27,8 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
   `version_metadata` binding `CF_VERSION_METADATA` (`[version_metadata]` at top level,
   `[env.<name>.version_metadata]` in a named environment; bindings are not inherited), and return
   its `tag` as the top-level `versionTag` field of the public health response, `null` without it.
+  Send that response with `Cache-Control: no-store` and keep its URL out of Cloudflare cache
+  rules.
 - **Product action:** Once every target reports its commit, add
   `config/product/deploy-verify.json`: per source branch (`main`, `staging`), the health URLs to
   check, and optionally `timeoutMinutes`. It applies once promoted to `deploy/<branch>`. Then run
