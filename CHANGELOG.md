@@ -16,10 +16,11 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 ### Flows
 
 - **Product action:** `mintCapabilityGrant` mints for the exact `orgId` it receives and no longer
-  trims it: a value with leading or trailing whitespace is denied with `GRANT_INVALID` and gets no
-  grant, and an empty or whitespace-only value is still denied with `ORG_ID_REQUIRED`. A Product
-  that mints with a value it has not normalized must normalize or refuse it first, then resolve
-  the org module policy facts and mint with that same value (go-silex/unkillable-kit#209).
+  trims it: a nonblank value with leading or trailing whitespace is denied with `GRANT_INVALID`
+  and gets no grant, and an empty or whitespace-only value is still denied with
+  `ORG_ID_REQUIRED`. A Product that mints with a value it has not normalized must normalize or
+  refuse it first, then resolve the org module policy facts and mint with that same value
+  (go-silex/unkillable-kit#209).
 
 ### Root
 

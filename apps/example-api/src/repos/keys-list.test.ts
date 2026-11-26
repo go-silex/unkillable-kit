@@ -69,7 +69,14 @@ describe('listApiKeysForSubject / listApiKeysForOrg', () => {
 
   it('listApiKeysForOrg with surrounding whitespace throws instead of trimming', async () => {
     const db = await seedStaffKeys()
-    for (const organizationId of [' org_acme ', 'org_acme ', '\torg_acme', 'org_acme\n']) {
+    for (const organizationId of [
+      ' org_acme ',
+      'org_acme ',
+      '\torg_acme',
+      'org_acme\n',
+      '\u00a0org_acme',
+      'org_acme\ufeff',
+    ]) {
       await expect(keysRepo.listApiKeysForOrg(db, 'user_staff', organizationId)).rejects.toThrow(
         /without leading or trailing whitespace/,
       )
