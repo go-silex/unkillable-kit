@@ -24,7 +24,10 @@ export type OrgPolicyFacts = {
 }
 
 export type MintGrantInput = {
-  /** Request-scoped org id (server-resolved: path param / X-Org-Id middleware). */
+  /**
+   * Request-scoped org id (server-resolved: path param / X-Org-Id middleware), exactly the value
+   * the facts were resolved for. Never normalized here: surrounding whitespace is denied.
+   */
   orgId: string
   /** Server-owned tool registry. NEVER built from a request body. */
   registry: ToolRegistry
@@ -51,9 +54,17 @@ export type MintGrantResult =
  * the property on whatever grant it is handed — ADR-0005 D4 amendment.
  */
 export function mintCapabilityGrant(input: MintGrantInput): MintGrantResult {
-  const orgId = input.orgId.trim()
-  if (!orgId) {
+  const orgId = input.orgId
+  if (!orgId.trim()) {
     return { ok: false, code: 'ORG_ID_REQUIRED', message: 'orgId is required' }
+  }
+  // The grant binds the id the caller resolved facts for; a trimmed copy could name another org.
+  if (orgId !== orgId.trim()) {
+    return {
+      ok: false,
+      code: 'GRANT_INVALID',
+      message: 'orgId must not have leading or trailing whitespace',
+    }
   }
   if (input.facts.moduleEffective !== true) {
     return {

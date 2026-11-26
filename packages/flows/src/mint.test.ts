@@ -75,6 +75,23 @@ describe('mintCapabilityGrant — fail-closed policy order', () => {
       expect(r.code).toBe('ORG_ID_REQUIRED')
     }
   })
+
+  it('denies GRANT_INVALID for an orgId with surrounding whitespace instead of trimming it', () => {
+    for (const orgId of [' org_1 ', 'org_1 ', '\torg_1', 'org_1\n', '\u00a0org_1', 'org_1\ufeff']) {
+      const r = mint({ orgId })
+      expect(r.ok).toBe(false)
+      if (r.ok) continue
+      expect(r.code).toBe('GRANT_INVALID')
+    }
+  })
+
+  it('binds the grant to the exact orgId, without case or Unicode normalization', () => {
+    const orgId = 'Org_A\u030a b' // decomposed Å and an inner space: neither is rewritten
+    const r = mint({ orgId })
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.grant.orgId).toBe(orgId)
+  })
 })
 
 describe('mintCapabilityGrant — allowsInfer is explicit from canWrite', () => {
