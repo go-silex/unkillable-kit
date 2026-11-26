@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Exercise Cloudflare entrypoints from an unrelated cwd with network/deploy tools stubbed.
 set -euo pipefail
+# shellcheck source=lib/hermetic-git.sh
+source "$(dirname "$0")/lib/hermetic-git.sh"
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd -P)"
 TMP="$(mktemp -d -t kit-cf-builds-XXXXXX)"
@@ -17,6 +19,12 @@ cp "${ROOT}/scripts/kit/cf-builds/"*.sh "${FIXTURE}/scripts/kit/cf-builds/"
 # packageManager of the fixture: the bun stub answers it by default, CF_STUB_BUN_VERSION overrides.
 FIXTURE_BUN=9.8.7
 printf '{\n  "name": "fixture",\n  "packageManager": "bun@%s"\n}\n' "${FIXTURE_BUN}" >"${FIXTURE}/package.json"
+# A git checkout, as Workers Builds clones it: the version tag is its HEAD (require-deploy-sha.sh).
+git init -q -b fixture "${FIXTURE}"
+git -C "${FIXTURE}" add -A
+git -C "${FIXTURE}" -c user.email=kit@example.com -c user.name=kit -c commit.gpgsign=false \
+  commit -q -m fixture
+FIXTURE_SHA="$(git -C "${FIXTURE}" rev-parse HEAD)"
 
 cat >"${BIN}/bun" <<STUB
 #!/usr/bin/env bash
@@ -55,8 +63,8 @@ run_entrypoint() {
   (
     cd "${TMP}"
     # Only what the case passes: never a CF branch variable or a stub answer inherited from the caller.
-    unset WORKERS_CI_BRANCH CF_PAGES_BRANCH CF_STUB_LIST CF_STUB_LIST_ERR CF_STUB_LIST_RC CF_STUB_TT \
-      CF_STUB_TT_RC CF_STUB_APPLY_RC CF_STUB_BUN_VERSION
+    unset WORKERS_CI_BRANCH CF_PAGES_BRANCH WORKERS_CI WORKERS_CI_COMMIT_SHA CF_STUB_LIST CF_STUB_LIST_ERR \
+      CF_STUB_LIST_RC CF_STUB_TT CF_STUB_TT_RC CF_STUB_APPLY_RC CF_STUB_BUN_VERSION
     env \
       BUN_INSTALL="${TMP}" \
       CF_BUILDS_TEST_LOG="${LOG}" \
@@ -163,7 +171,7 @@ mv "${TMP}/package.json.keep" "${FIXTURE}/package.json"
 LIST_CALL="bunx|${FIXTURE}/apps/example-api|wrangler d1 migrations list boilerplate-api --remote --env production"
 INFO_CALL="bunx|${FIXTURE}/apps/example-api|wrangler d1 time-travel info boilerplate-api --env production --json"
 APPLY_CALL="bunx|${FIXTURE}/apps/example-api|wrangler d1 migrations apply boilerplate-api --remote --env production"
-DEPLOY_CALL="bunx|${FIXTURE}/apps/example-api|wrangler deploy --env production"
+DEPLOY_CALL="bunx|${FIXTURE}/apps/example-api|wrangler deploy --env production --tag ${FIXTURE_SHA}"
 INSTALL_CALLS="bun|${FIXTURE}|--version
 bun|${FIXTURE}|install --frozen-lockfile --minimum-release-age 0"
 
@@ -311,7 +319,7 @@ bun|${FIXTURE}/apps/example-web|run build
 
 # Roxabi/roxabi-boilerplate-cf#256: only the CI-gated deploy/main branch ships. main itself (a push CI has not passed yet),
 # deploy/staging, an empty or an unset branch must refuse before any install, migration, deploy or
-# build call. With no variable the git fallback runs, and the fixture is not a git repo.
+# build call. With no variable the git fallback runs, and the fixture's branch is not deploy/main.
 assert_refused() {
   local script="$1" label="$2"
   shift 2
@@ -343,5 +351,60 @@ ${LIST_CALL}
 ${APPLY_CALL}
 ${DEPLOY_CALL}
 "
+
+# go-silex/unkillable-kit#215: the version is tagged with the commit it ships. In Workers Builds that is
+# WORKERS_CI_COMMIT_SHA, held to the checkout HEAD; elsewhere HEAD of a clean worktree. Anything
+# unverifiable refuses before install, migration or deploy.
+run_entrypoint api-deploy.sh WORKERS_CI_BRANCH=deploy/main WORKERS_CI=1 "WORKERS_CI_COMMIT_SHA=${FIXTURE_SHA}"
+assert_calls "${INSTALL_CALLS}
+${LIST_CALL}
+${APPLY_CALL}
+${DEPLOY_CALL}
+"
+assert_sha_refused() {
+  local label="$1" want="$2" out
+  shift 2
+  if out="$(run_entrypoint api-deploy.sh WORKERS_CI_BRANCH=deploy/main "$@" 2>&1)"; then
+    echo "FAIL: api-deploy.sh shipped with ${label}" >&2
+    exit 1
+  fi
+  assert_calls ""
+  if [[ "$out" != *"${want}"* ]]; then
+    echo "FAIL: ${label} refused without saying '${want}':" >&2
+    echo "$out" >&2
+    exit 1
+  fi
+}
+assert_sha_refused "Workers Builds and no commit SHA" "set no WORKERS_CI_COMMIT_SHA" WORKERS_CI=1
+assert_sha_refused "another commit SHA" "is not the checkout HEAD" WORKERS_CI=1 \
+  "WORKERS_CI_COMMIT_SHA=$(printf '%040d' 0)"
+assert_sha_refused "an uppercase SHA" "is not a full lowercase commit SHA" WORKERS_CI=1 \
+  "WORKERS_CI_COMMIT_SHA=${FIXTURE_SHA^^}"
+assert_sha_refused "a short SHA" "is not a full lowercase commit SHA" WORKERS_CI=1 \
+  "WORKERS_CI_COMMIT_SHA=${FIXTURE_SHA:0:12}"
+# Outside Workers Builds, other bytes than HEAD's would ship under its name: an untracked or a
+# modified file refuses. Workers Builds checks out the commit it names and is not held to that.
+touch "${FIXTURE}/apps/example-api/stray.ts"
+assert_sha_refused "an untracked file" "uncommitted changes"
+run_entrypoint api-deploy.sh WORKERS_CI_BRANCH=deploy/main WORKERS_CI=1 "WORKERS_CI_COMMIT_SHA=${FIXTURE_SHA}"
+assert_calls "${INSTALL_CALLS}
+${LIST_CALL}
+${APPLY_CALL}
+${DEPLOY_CALL}
+"
+rm "${FIXTURE}/apps/example-api/stray.ts"
+printf '\n' >>"${FIXTURE}/package.json"
+assert_sha_refused "a modified tracked file" "uncommitted changes"
+git -C "${FIXTURE}" checkout -q -- package.json
+mv "${FIXTURE}/.git" "${TMP}/fixture.git"
+assert_sha_refused "no git checkout" "is not a git checkout" "GIT_CEILING_DIRECTORIES=${TMP}"
+mv "${TMP}/fixture.git" "${FIXTURE}/.git"
+# Product deploy scripts run the helper directly: the SHA alone on stdout, no tool call.
+out="$(run_entrypoint require-deploy-sha.sh 2>/dev/null)"
+assert_calls ""
+if [[ "$out" != "${FIXTURE_SHA}" ]]; then
+  echo "FAIL: require-deploy-sha.sh printed '${out}', not ${FIXTURE_SHA}" >&2
+  exit 1
+fi
 
 echo "cf-builds: OK"

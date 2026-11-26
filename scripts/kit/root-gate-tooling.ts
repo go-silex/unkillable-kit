@@ -39,6 +39,7 @@ export const toolingSeconds: ReadonlyMap<string, number> = new Map([
   ['test:folder-size', 2],
   ['test:wrangler-migrations', 2],
   ['test:cf-builds', 2],
+  ['test:deploy-verify', 2],
   ['test:release-age-excludes', 1],
   ['test:actions-pin', 1],
   ['test:biome-strict', 1],

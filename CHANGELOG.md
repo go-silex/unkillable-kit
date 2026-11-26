@@ -4,6 +4,32 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ## Unreleased
 
+### Deploy
+
+- Deploy verify (`.github/workflows/deploy-verify.yml`) checks after each Deploy gate run that
+  every Worker listed in `config/product/deploy-verify.json` serves the commit of
+  `deploy/<branch>`, and posts one Slack alert per branch and commit when one does not by the
+  deadline: the promotion time plus 20 minutes by default, derived from observed Workers Builds
+  durations. Opt-in: without the file, a notice and nothing verified. It holds no Cloudflare
+  credential and only reads the repository. Runbook: `docs/kit/deploy-verify.md`
+  (go-silex/unkillable-kit#215).
+- The showcase `api-deploy.sh` tags each Worker version with its verified commit
+  (`wrangler deploy --tag`) and refuses before migrate when it cannot verify it. The Example API
+  declares the `version_metadata` binding and its health response gains `versionTag`.
+- **Product action:** To adopt Deploy verify, tag the version in each Product deploy script with
+  `sha="$(bash scripts/kit/cf-builds/require-deploy-sha.sh)"` as its own assignment under
+  `set -e`, after the branch guard and before migrate, then `wrangler deploy --tag "$sha"`.
+- **Product action:** In each Wrangler environment a verified Worker deploys, declare the
+  `version_metadata` binding `CF_VERSION_METADATA` (`[env.<name>.version_metadata]`; bindings
+  are not inherited), and return its `tag` as the top-level `versionTag` field of the public
+  health response, `null` without it.
+- **Product action:** Once every target reports its commit, add
+  `config/product/deploy-verify.json`: per source branch (`main`, `staging`), the health URLs to
+  check, and optionally `timeoutMinutes`. It applies once promoted to `deploy/<branch>`.
+- **Product action:** For the Slack alert, set the repository secret `SLACK_FLINT_BOT_TOKEN` and
+  the repository variable `SLACK_CHANNEL_BUGS_ALERT` (a Slack channel ID). Without them the run
+  still fails and warns.
+
 ## unkillable-kit/v0.10.0 — 2026-11-26
 
 ### Auth

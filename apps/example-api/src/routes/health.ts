@@ -20,6 +20,12 @@ const healthSchema = z
      * `ALLOW_PUBLIC_SIGNUP=true` — products opt in via env, not a kit default.
      */
     allowPublicSignup: z.boolean(),
+    /**
+     * Tag of the Worker version serving this request (`wrangler deploy --tag <commit SHA>`), read
+     * from the `CF_VERSION_METADATA` binding; null without that binding or tag. Deploy verify
+     * compares it with the promoted commit (docs/kit/deploy-verify.md).
+     */
+    versionTag: z.string().nullable(),
     demoLogin: z
       .object({
         email: z.string(),
@@ -54,6 +60,7 @@ healthRoutes.openapi(getHealth, (c) => {
     environment,
     authAdapter: 'better-auth',
     allowPublicSignup: allowPublicSignup(c.env),
+    versionTag: c.env.CF_VERSION_METADATA?.tag || null,
   }
 
   // Kit local DX only — public /health; never returned in staging/production.

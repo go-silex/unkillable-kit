@@ -78,6 +78,7 @@ This index locates the authoritative home for each rule and the operational guid
 - [Auth abuse response](./auth-abuse-response.md) — rate-limit and audit response procedure.
 - [GitHub App `kit-ci` setup](./ci-app-setup.md) — operator setup for merge automation without a PAT.
 - [Cloudflare deploy runbook](./deploy-cloudflare.md) — showcase deployment procedure.
+- [Deploy verify](./deploy-verify.md) — check that each promoted Worker serves the promoted commit, and alert on Slack.
 - [Cloudflare Email runbook](./email-cf-runbook.md) — binding, allowlist and transport operations.
 
 ## Onboarding and playbooks

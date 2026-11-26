@@ -9,7 +9,7 @@
  */
 import { z } from 'zod'
 
-/** D1 / R2 / Email / Queues / Workflows — wrangler only, never .dev.vars. */
+/** D1 / R2 / Email / Queues / Workflows / version metadata — wrangler only, never .dev.vars. */
 export const WORKER_BINDINGS = [
   'DB',
   'BUCKET',
@@ -17,6 +17,7 @@ export const WORKER_BINDINGS = [
   'DEMO_QUEUE',
   'FLOW_RUN',
   'NOTIFICATION_DELIVERY',
+  'CF_VERSION_METADATA',
 ] as const
 /**
  * Secrets + plain vars available on `c.env` as strings.

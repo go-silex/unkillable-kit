@@ -20,6 +20,12 @@ fi
 source "$(dirname "$0")/require-deploy-branch.sh"
 require_deploy_branch "$ROOT" deploy
 
+# go-silex/unkillable-kit#215: the version is tagged with the commit it ships, verified, for Deploy
+# verify; an unverifiable SHA refuses here, before install, migrate or deploy.
+# shellcheck source=require-deploy-sha.sh
+source "$(dirname "$0")/require-deploy-sha.sh"
+DEPLOY_SHA="$(require_deploy_sha "$ROOT")"
+
 # shellcheck source=require-bun-version.sh
 source "$(dirname "$0")/require-bun-version.sh"
 cd "$ROOT"
@@ -75,4 +81,4 @@ fi
 
 # Migrate then deploy. Not one distributed transaction (see runbook).
 bunx wrangler d1 migrations apply "$DB" --remote --env production
-bunx wrangler deploy --env production
+bunx wrangler deploy --env production --tag "$DEPLOY_SHA"

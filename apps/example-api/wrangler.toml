@@ -50,6 +50,12 @@ crons = ["0 * * * *", "*/5 * * * *"]
 enabled = true
 head_sampling_rate = 1
 
+# The serving version's id / tag / timestamp; /health reports the tag as `versionTag`, which Deploy
+# verify compares with the promoted commit (docs/kit/deploy-verify.md). A binding, so
+# non-inheritable: repeated in [env.production].
+[version_metadata]
+binding = "CF_VERSION_METADATA"
+
 # CF Workflows is non-inheritable. Names are account-scoped and must be
 # distinct per env (≤64). Do not add schedules here.
 [[workflows]]
@@ -100,6 +106,9 @@ crons = ["0 * * * *", "*/5 * * * *"]
 [env.production.observability]
 enabled = true
 head_sampling_rate = 1
+
+[env.production.version_metadata]
+binding = "CF_VERSION_METADATA"
 
 # Non-inheritable — repeat; name distinct from default env (account-scoped).
 [[env.production.workflows]]
