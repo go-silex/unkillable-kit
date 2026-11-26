@@ -149,7 +149,8 @@ meRoutes.openapi(listKeys, async (c) => {
   const db = c.get('db')!
   const subject = c.get('subject')!
   const requestId = c.get('requestId')
-  // D11: api_key is org-scoped. Missing/blank key org → [] owned HERE (never call listApiKeysForOrg).
+  // D11: api_key is org-scoped. Missing key org → [] owned HERE (never call listApiKeysForOrg).
+  // `org` is the exact organization recorded on the authenticated key; it is passed unchanged.
   if (c.get('authMethod') === 'api_key') {
     const org = c.get('keyOrganizationId')
     if (!org) return c.json({ keys: [], requestId })

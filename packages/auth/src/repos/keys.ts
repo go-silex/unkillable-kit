@@ -58,19 +58,21 @@ export async function listApiKeysForSubject(db: Db, subject: string) {
 
 /**
  * D11 scoped list: keys for subject within one organization.
- * Single semantic: `organizationId` must be non-empty after trim.
- * Blank/whitespace is a programming error here — the HTTP route owns missing-org → `[]`
- * (`GET /api/keys` short-circuits) and must not call this with a blank id.
+ * Filters on the exact `organizationId` received — never a normalized copy — so the value the
+ * caller checked is the value queried. Empty, or leading/trailing whitespace, is a programming
+ * error here: the HTTP route owns normalization or refusal before the call, and missing-org → `[]`
+ * (`GET /api/keys` short-circuits).
  */
 export async function listApiKeysForOrg(db: Db, subject: string, organizationId: string) {
-  const org = organizationId.trim()
-  if (!org) {
-    throw new Error('listApiKeysForOrg: organizationId must be non-empty')
+  if (!organizationId || organizationId !== organizationId.trim()) {
+    throw new Error(
+      'listApiKeysForOrg: organizationId must be non-empty, without leading or trailing whitespace',
+    )
   }
   return db
     .select(apiKeyPublicColumns)
     .from(apiKeys)
-    .where(and(eq(apiKeys.subject, subject), eq(apiKeys.organizationId, org)))
+    .where(and(eq(apiKeys.subject, subject), eq(apiKeys.organizationId, organizationId)))
     .orderBy(desc(apiKeys.createdAt))
     .all()
 }

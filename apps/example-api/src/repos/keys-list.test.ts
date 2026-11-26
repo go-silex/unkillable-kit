@@ -7,7 +7,8 @@ import { createMemoryEnv } from '../test/memory-env'
 /**
  * Explicit list paths (no dual blank semantics):
  * - listApiKeysForSubject → all keys for subject (session)
- * - listApiKeysForOrg → D11 scoped; blank org is a programming error (throw)
+ * - listApiKeysForOrg → D11 scoped on the exact organizationId; blank or whitespace-padded org is
+ *   a programming error (throw), never trimmed into another org's filter
  * HTTP missing-org → [] is owned by GET /api/keys route short-circuit only.
  */
 describe('listApiKeysForSubject / listApiKeysForOrg', () => {
@@ -46,7 +47,7 @@ describe('listApiKeysForSubject / listApiKeysForOrg', () => {
     expect(all.map((k) => k.id).sort()).toEqual(['key_1', 'key_2'])
   })
 
-  it('listApiKeysForOrg scopes to a real organizationId', async () => {
+  it('listApiKeysForOrg lists the keys of the exact organizationId only', async () => {
     const db = await seedStaffKeys()
     const scoped = await keysRepo.listApiKeysForOrg(db, 'user_staff', 'org_acme')
     expect(scoped.map((k) => k.id)).toEqual(['key_1'])
@@ -64,5 +65,14 @@ describe('listApiKeysForSubject / listApiKeysForOrg', () => {
     await expect(keysRepo.listApiKeysForOrg(db, 'user_staff', '   ')).rejects.toThrow(
       /organizationId must be non-empty/,
     )
+  })
+
+  it('listApiKeysForOrg with surrounding whitespace throws instead of trimming', async () => {
+    const db = await seedStaffKeys()
+    for (const organizationId of [' org_acme ', 'org_acme ', '\torg_acme', 'org_acme\n']) {
+      await expect(keysRepo.listApiKeysForOrg(db, 'user_staff', organizationId)).rejects.toThrow(
+        /without leading or trailing whitespace/,
+      )
+    }
   })
 })
