@@ -19,7 +19,7 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
   Builds or Pages, set the `BUN_VERSION` build variable to `1.4.5` on each project, production and
   staging, before the inherit merge reaches the branch that project's `deploy/<branch>` is promoted
   from: production projects before `main`, staging projects before `staging`, in the order of
-  [the deploy runbook](docs/kit/deploy-cloudflare.md#4b-bun-and-node-versions). The build refuses
+  the [deploy runbook](docs/kit/deploy-cloudflare.md#4b-bun-and-node-versions). The build refuses
   any other Bun. Locally, install Bun 1.4.5 before the sync block or `validate:full`, for example
   with `curl -fsSL https://bun.com/install | bash -s bun-v1.4.5`: `lock-ranges:check` fails under
   any other Bun. CI workflows read the version from `package.json` and need no change.
