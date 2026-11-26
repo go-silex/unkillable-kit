@@ -54,9 +54,9 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 - The Root Better Auth self-test runs its Core runs in parallel, in up to four synthetic Product
   workspaces, one per available CPU. Every scenario keeps its existing assertions, and
-  `better-auth:check` is unchanged. On the hosted Kit runner the four
-  `test:root-gate-better-auth:*` tasks took 97 s instead of 156 s, and the slowest tooling job
-  133 s instead of 177 s. A two-CPU Product runner runs two workspaces
+  `better-auth:check` is unchanged. On the hosted Kit runner, with Bun 1.4.5, the four
+  `test:root-gate-better-auth:*` tasks took 75 s instead of 156 s, and the slowest tooling job
+  143 s instead of 177 s. A two-CPU Product runner runs two workspaces
   (go-silex/unkillable-kit#200).
 
 ## unkillable-kit/v0.9.1 — 2026-11-26
