@@ -25,11 +25,11 @@ name: Deploy verify
 #
 # One alert per branch and SHA across automatic runs: after a successful post, a run started by
 # workflow_run uploads an artifact named after them, and a later run that finds one uploaded by
-# such a run, whose YAML is the default branch's, does not post again (retention 90 days). A
-# dispatch records no marker, so it posts whenever it fails; a pinned one reads none either, and
-# has its own concurrency group, so it never displaces the verification of a promotion. Runs for
-# one branch are serialized. No token, no Slack channel variable or a Slack error: a warning, and
-# the failed run stays the alert of last resort.
+# such a run, whose YAML is the default branch's, does not post again (retention 90 days). No
+# dispatch records a marker; an unpinned one honours those of automatic runs, a pinned one reads
+# none, posts whenever it fails and has its own concurrency group, so it never displaces the
+# verification of a promotion. Runs for one branch are serialized. No token, no Slack channel
+# variable or a Slack error: a warning, and the failed run stays the alert of last resort.
 
 on:
   workflow_run:

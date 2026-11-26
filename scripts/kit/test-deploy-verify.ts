@@ -166,7 +166,8 @@ await check('a health answer is a tag, unreachable or invalid', () => {
 
 // ── Polling on a fake clock ─────────────────────────────────────────────────────────────────────
 type Answer = Observation | ((round: number) => Observation)
-function fakeIo(answers: Record<string, Answer>, tips: Array<string | null> = []) {
+/** `tipMs`: how long each read of the deploy branch takes on the fake clock. */
+function fakeIo(answers: Record<string, Answer>, tips: Array<string | null> = [], tipMs = 0) {
   let clock = 0
   const sleeps: number[] = []
   const probes: Record<string, number> = {}
@@ -186,6 +187,7 @@ function fakeIo(answers: Record<string, Answer>, tips: Array<string | null> = []
     },
     readTip: async () => {
       tipReads += 1
+      clock += tipMs
       return tips.length > 0 ? (tips.shift() ?? null) : SHA
     },
     log: () => {},
@@ -264,6 +266,18 @@ await check('the last wait is cut so that the final round runs at the deadline',
   assert.equal(outcome.kind, 'unserved')
   assert.deepEqual(fake.sleeps, [POLL_MS, 4000])
   assert.equal(fake.probes[API], 3)
+})
+
+await check('a round that ends past the deadline is followed by one sample at once', async () => {
+  // Each tip read takes 3 s: round 2 starts at 18 s, before the 20 s deadline, and ends at 21 s.
+  const recovers = fakeIo({ [API]: (round) => (round < 3 ? stale : served) }, [], 3000)
+  const plan = { expected: SHA, targets: [API], deadline: 20_000, followTip: true }
+  assert.deepEqual(await verify(plan, recovers.io), { kind: 'served', rounds: 3 })
+  assert.deepEqual(recovers.sleeps, [POLL_MS])
+  const stays = fakeIo({ [API]: stale }, [], 3000)
+  const outcome = await verify(plan, stays.io)
+  assert.equal(outcome.kind, 'unserved')
+  assert.equal(stays.probes[API], 3)
 })
 
 await check('earlier alerts are looked up within one budget, then the run alerts', async () => {

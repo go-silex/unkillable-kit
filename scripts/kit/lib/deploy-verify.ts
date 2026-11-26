@@ -246,11 +246,13 @@ async function runRound(rounds: number, plan: VerifyPlan, io: VerifyIo): Promise
  * Polls until one round sees every target serve `expected`: a target that served it earlier and
  * then regressed does not count. Between rounds, a followed deploy/<branch> that moved ends the
  * run as superseded: the Deploy gate run that moved it starts the verification of the new SHA.
- * The first round always runs, even past the deadline. The last wait is cut so that the final
- * round samples the targets at the deadline; no round starts after it.
+ * Only a round that started at or after the deadline can end the run as unserved: the last wait is
+ * cut to the deadline, and a round that started before it but ended after it is followed at once
+ * by one more. The first round always runs.
  */
 export async function verify(plan: VerifyPlan, io: VerifyIo): Promise<VerifyOutcome> {
   for (let rounds = 1; ; rounds++) {
+    const started = io.now()
     const last = await runRound(rounds, plan, io)
     if (last.every(({ observation }) => serves(observation, plan.expected)))
       return { kind: 'served', rounds }
@@ -258,9 +260,9 @@ export async function verify(plan: VerifyPlan, io: VerifyIo): Promise<VerifyOutc
       const tip = await io.readTip()
       if (tip !== null && tip !== plan.expected) return { kind: 'superseded', tip, rounds }
     }
+    if (started >= plan.deadline) return { kind: 'unserved', rounds, last }
     const left = plan.deadline - io.now()
-    if (left <= 0) return { kind: 'unserved', rounds, last }
-    await io.sleep(Math.min(POLL_MS, left))
+    if (left > 0) await io.sleep(Math.min(POLL_MS, left))
   }
 }
 

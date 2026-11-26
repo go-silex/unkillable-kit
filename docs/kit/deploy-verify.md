@@ -103,9 +103,11 @@ fails. It checks out that commit and runs `scripts/kit/deploy-verify.ts` from it
 - The deadline is the promotion time plus `timeoutMinutes`. The promotion time comes from the
   repository activity of `deploy/<branch>` when its last event moved it to this SHA. Otherwise,
   and with `expected_sha`, the start of the verification replaces it.
-- The first round always runs, even when the run starts after the deadline. The last wait is cut
-  so that the final round samples every target at the deadline; no round starts after it.
-  `timeoutMinutes` bounds that polling window; the job itself stops after 75 minutes.
+- Only a round that started at or after the deadline can fail the run. The last wait is cut so
+  that the final round samples every target at the deadline, or just after it: a round that
+  started before the deadline but ended after it is followed at once by one more. The first
+  round always runs. `timeoutMinutes` bounds that polling window; the job itself stops after
+  75 minutes.
 - `deploy/<branch>` moves on: the run ends as superseded, without an alert. The gate run that moved
   it starts the verification of the new SHA.
 - A target still serves another tag, `null`, a non-2xx status, an invalid body or no answer in the
@@ -127,9 +129,9 @@ to the Deploy verify run and, when there is one, the Deploy gate run.
 - A marker counts only when a Deploy verify run started by `workflow_run` uploaded it: that run
   uses the default branch's YAML. A marker from another workflow, from a dispatch on any ref or
   from a pull request, fork included, is logged and ignored.
-- A dispatch records no marker: it posts whenever it fails, and a later dispatch or automatic run
-  for the same SHA can post again. A pinned run reads no marker either, and labels its alert as a
-  pinned check.
+- No dispatch records a marker. An unpinned dispatch honours the markers of automatic runs, so a
+  later dispatch or automatic run for the same SHA can post again after it. A pinned dispatch
+  reads no marker: it posts whenever it fails, and labels its alert as a pinned check.
 - When the earlier alerts cannot be read, or the lookup takes more than 60 seconds, the run posts
   anyway: a duplicate beats a miss.
 - A missing secret or variable, or a Slack error, gives a warning; the failed run remains the
