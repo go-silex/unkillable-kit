@@ -30,4 +30,9 @@ export type Env = WorkerStringEnv & {
   FLOW_RUN: Workflow<{ runId: string; orgId: string }>
   /** Native owner of notification deliveries. */
   NOTIFICATION_DELIVERY: Workflow<DeliveryRef>
+  /**
+   * Wrangler [version_metadata] binding: the serving version's id, tag and timestamp. Its tag is
+   * empty under `wrangler dev`; /health reports it as `versionTag` for Deploy verify.
+   */
+  CF_VERSION_METADATA?: WorkerVersionMetadata
 }

@@ -120,6 +120,8 @@ export type EnvLike = {
   /** Same type as the Worker binding, so services typecheck against `Pick<Env, 'FLOW_RUN'>`. */
   FLOW_RUN: Workflow<FlowRunParams>
   NOTIFICATION_DELIVERY: Workflow<DeliveryRef>
+  /** Absent unless a test plays a deployed version (`wrangler deploy --tag`). */
+  CF_VERSION_METADATA?: WorkerVersionMetadata
   ENVIRONMENT?: string
   CORS_ORIGINS?: string
   DEMO_USER_EMAIL?: string

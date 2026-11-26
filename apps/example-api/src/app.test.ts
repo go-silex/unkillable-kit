@@ -83,6 +83,24 @@ describe('createApp shipped entry — health & errors', () => {
     expect(prodBody.demoLogin).toBeUndefined()
   })
 
+  it('GET /health reports the serving version tag, uncached, null when there is none', async () => {
+    const app = createApp()
+    const versionTag = async (meta?: WorkerVersionMetadata) => {
+      const env = createMemoryEnv(meta ? { CF_VERSION_METADATA: meta } : {})
+      const body: unknown = await (await app.request('/health', {}, env)).json()
+      return body && typeof body === 'object' && 'versionTag' in body ? body.versionTag : 'absent'
+    }
+    const sha = 'a'.repeat(40)
+    const version = { id: 'version-id', timestamp: '2026-01-01T00:00:00.000Z' }
+    expect(await versionTag({ ...version, tag: sha })).toBe(sha)
+    // No binding (tests, a product that has not adopted it) and an untagged version alike.
+    expect(await versionTag()).toBeNull()
+    expect(await versionTag({ ...version, tag: '' })).toBeNull()
+    // A cache must not answer for the Worker version: the reference route forbids storing it.
+    const res = await app.request('/health', {}, createMemoryEnv())
+    expect(res.headers.get('cache-control')).toBe('no-store')
+  })
+
   it('unknown route returns nested NOT_FOUND envelope', async () => {
     const app = createApp()
     const env = createMemoryEnv()

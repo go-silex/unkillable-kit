@@ -53,7 +53,8 @@
     ".github/workflows/dependabot-automerge.yml",
     ".github/workflows/dependabot-alert-slack.yml",
     ".github/workflows/close-linked-issues.yml",
-    ".github/workflows/deploy-gate.yml"
+    ".github/workflows/deploy-gate.yml",
+    ".github/workflows/deploy-verify.yml"
   ],
   "tool_mandated_paths": ["docs/agents/issue-tracker.md"],
   "namespaced_trees": ["config", "scripts", "docs"],

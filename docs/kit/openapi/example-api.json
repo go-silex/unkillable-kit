@@ -47,6 +47,12 @@
           "allowPublicSignup": {
             "type": "boolean"
           },
+          "versionTag": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "demoLogin": {
             "type": "object",
             "properties": {
@@ -73,7 +79,8 @@
           "requestId",
           "environment",
           "authAdapter",
-          "allowPublicSignup"
+          "allowPublicSignup",
+          "versionTag"
         ]
       },
       "NotificationType": {
