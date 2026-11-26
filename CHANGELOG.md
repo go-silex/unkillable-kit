@@ -4,6 +4,8 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ## Unreleased
 
+## unkillable-kit/v0.9.1 — 2026-11-26
+
 ### CI
 
 - Tooling CI shards balance by measured task duration instead of recipe position, and the Root
