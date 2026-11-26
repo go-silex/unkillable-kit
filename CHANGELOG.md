@@ -32,6 +32,15 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 - Outside macOS, `bun:sqlite` now embeds SQLite 3.54, which refuses an `ALTER TABLE` that adds,
   renames or drops a column named `rowid`, `oid` or `_rowid_`. Kit migrations name no such column.
 
+### CI
+
+- The Root Better Auth self-test runs its Core runs in parallel, in up to four synthetic Product
+  workspaces, one per available CPU. Every scenario keeps its existing assertions, and
+  `better-auth:check` is unchanged. On the hosted Kit runner the four
+  `test:root-gate-better-auth:*` tasks took 97 s instead of 156 s, and the slowest tooling job
+  133 s instead of 177 s. A two-CPU Product runner runs two workspaces
+  (go-silex/unkillable-kit#200).
+
 ## unkillable-kit/v0.9.1 — 2026-11-26
 
 ### CI
