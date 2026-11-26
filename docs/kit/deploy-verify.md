@@ -224,10 +224,10 @@ never exceeds 60 minutes.
 
 - `bun run test:deploy-verify` (`scripts/kit/test-deploy-verify.ts`, in `validate:tooling`): the
   config contract, health answers, the polling loop on a fake clock (served, served only on a full
-  round, not served by the deadline, no follow-up round past it, recovery, superseded, pinned
-  SHA), the earlier-alert lookup budget, the alert text and the CLI with stubbed `gh` and `curl`
-  (no config, no target, invalid config, success, a bracketed URL, one alert, no second alert,
-  markers of other origins, refusals, inert output).
+  round, not served by the deadline, a decisive sample at or after it, recovery, superseded,
+  pinned SHA), the earlier-alert lookup budget, the alert text and the CLI with stubbed `gh` and
+  `curl` (no config, no target, invalid config, success, a bracketed URL, one alert, no second
+  alert, markers of other origins, refusals, inert output).
 - `bun run test:cf-builds`: `api-deploy.sh` deploys with `--tag` and the tested commit, and
   `require-deploy-sha.sh` refuses a missing, malformed or different CI SHA and a dirty laptop
   worktree, also with the HEAD SHA given or untracked files hidden from `git status`.
