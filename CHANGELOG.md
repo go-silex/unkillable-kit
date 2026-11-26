@@ -17,12 +17,15 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
   a security release that updates lsquic, c-ares, SQLite, llhttp and BoringSSL
   ([release notes](https://bun.com/blog/bun-v1.4.5)). If a Product builds with Cloudflare Workers
   Builds or Pages, set the `BUN_VERSION` build variable to `1.4.5` on each project, production and
-  staging, before the inherit merge reaches the branch that project's `deploy/<branch>` is promoted
-  from: production projects before `main`, staging projects before `staging`, in the order of
-  the [deploy runbook](docs/kit/deploy-cloudflare.md#4b-bun-and-node-versions). The build refuses
-  any other Bun. Locally, install Bun 1.4.5 before the sync block or `validate:full`, for example
-  with `curl -fsSL https://bun.com/install | bash -s bun-v1.4.5`: `lock-ranges:check` fails under
-  any other Bun. CI workflows read the version from `package.json` and need no change.
+  staging, just before the inherit merge reaches the branch that project's `deploy/<branch>` is
+  promoted from: production projects before `main`, staging projects before `staging`, in the
+  order of the [deploy runbook](docs/kit/deploy-cloudflare.md#4b-bun-and-node-versions). Set
+  earlier, a rebuild of the current deploy revision refuses. The build refuses a stale value only
+  where its build command starts with `bash scripts/kit/cf-builds/require-bun-version.sh`; keep
+  `SKIP_DEPENDENCY_INSTALL=1` where the build command installs. Locally, install Bun 1.4.5 before
+  the sync block or `validate:full`, for example with
+  `curl -fsSL https://bun.com/install | bash -s bun-v1.4.5`: `lock-ranges:check` fails under any
+  other Bun. CI workflows read the version from `package.json` and need no change.
 - `create-product` declares `@types/bun` `^1.4.5` in a new MCP App, like the Kit workspaces.
 - Bun 1.4.5 still installs versions already in `bun.lock` without re-checking their release age,
   so lock-reproducing installs are unchanged.
