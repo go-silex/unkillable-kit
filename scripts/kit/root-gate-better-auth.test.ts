@@ -12,7 +12,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { availableParallelism, tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { parseLock } from './deps-guard/lock'
 
@@ -55,8 +55,6 @@ for (const name of Object.keys(scenarios)) {
     `bun run scripts/kit/root-gate-better-auth.test.ts ${name}`,
   )
 }
-const root = mkdtempSync(join(tmpdir(), 'product-root-better-auth-'))
-const modules = join(root, app, 'node_modules')
 const database = 'binding = "DB"\ndatabase_name = "product-fixture"\ndatabase_id = "fixture-db"\n'
 const workerConfig = `name = "product-fixture"
 main = "src/worker.ts"
@@ -98,56 +96,115 @@ const release: NodeJS.ProcessEnv = {
   COVERAGE_ONLY: 'apps/other',
 }
 
-function put(file: string, contents: string) {
-  mkdirSync(dirname(join(root, file)), { recursive: true })
-  writeFileSync(join(root, file), contents)
+const passed = /apps\/product-fixture differential fixtures passed/
+// A Core run keeps about one CPU busy, running Bun, Node, Wrangler and workerd in turn. Up to four
+// workspaces, one per CPU like the hosted Kit runner, replay every step of the group in parallel;
+// each Core run executes once, in the first workspace that reaches it.
+const workspaceCount = Math.min(availableParallelism(), 4)
+const claimed = new Set<number>()
+let stopped = false
+let verified = 0
+/** Ends a workspace's replay after another workspace failed. */
+class Stopped extends Error {}
+type Expectation = {
+  refuses?: RegExp
+  name?: string
+  prints?: RegExp
+  omits?: RegExp
+  after?: () => void
 }
-function json(file: string, value: unknown) {
-  put(file, JSON.stringify(value))
-}
-function copy(file: string) {
-  mkdirSync(dirname(join(root, file)), { recursive: true })
-  copyFileSync(join(repo, file), join(root, file))
-}
-function command(bin: string, ...args: string[]) {
-  const result = spawnSync(bin, args, { cwd: root, env: release, encoding: 'utf8' })
-  if (result.error) throw result.error
-  return { status: result.status, output: `${result.stdout}${result.stderr}` }
-}
-function git(...args: string[]) {
-  const result = command('git', ...args)
-  assert.equal(result.status, 0, result.output)
-  return result.output.trim()
-}
-function runCore(expectedFailure?: RegExp, name?: string) {
-  const result = command(
-    process.execPath,
-    'run',
-    'validate:full',
-    '--',
-    '--ci-group',
-    'core',
-    '--receipt',
-    'root-core.json',
-  )
-  assert.equal(
-    result.status,
-    expectedFailure ? 1 : 0,
-    name ? `${name}\n${result.output}` : result.output,
-  )
-  if (expectedFailure) assert.match(result.output, expectedFailure, name ?? 'expected core failure')
+/** A Core run's exit status, receipt and output, then the scenario's own follow-up check. */
+function verifyCore(
+  root: string,
+  status: number,
+  output: string,
+  { refuses, name, prints, omits, after }: Expectation,
+) {
+  const context = name ? `${name}\n${output}` : output
+  assert.equal(status, refuses ? 1 : 0, context)
+  if (refuses) assert.match(output, refuses, name ?? 'expected core failure')
   const receipt = JSON.parse(readFileSync(join(root, 'root-core.json'), 'utf8'))
   assert.deepEqual(receipt.tasks, ['better-auth:check'])
-  assert.equal(receipt.complete, !expectedFailure)
+  assert.equal(receipt.complete, !refuses)
   rmSync(join(root, 'root-core.json'))
-  return result.output
+  if (prints) assert.match(output, prints, context)
+  if (omits) assert.doesNotMatch(output, omits, context)
+  after?.()
+}
+type Workspace = {
+  root: string
+  put(file: string, contents: string): void
+  json(file: string, value: unknown): void
+  core(expected?: RegExp | Expectation): Promise<void>
+  enroll(): void
+  alternateIssuerPackage(): void
+  reached(): number
 }
 
-/** The enrolled App that passes the differential; `enrollment` proves it, the other groups start from it. */
-function enroll() {
-  put(
-    `${app}/src/worker.ts`,
-    `import { fetch } from './edge'
+/** A synthetic Product that inherits the Root gate's Better Auth Core. */
+function createWorkspace(roots: string[]): Workspace {
+  const root = mkdtempSync(join(tmpdir(), 'product-root-better-auth-'))
+  roots.push(root)
+  const modules = join(root, app, 'node_modules')
+  const env: NodeJS.ProcessEnv = { ...release }
+  let reached = 0
+
+  function put(file: string, contents: string) {
+    mkdirSync(dirname(join(root, file)), { recursive: true })
+    writeFileSync(join(root, file), contents)
+  }
+  function json(file: string, value: unknown) {
+    put(file, JSON.stringify(value))
+  }
+  function copy(file: string) {
+    mkdirSync(dirname(join(root, file)), { recursive: true })
+    copyFileSync(join(repo, file), join(root, file))
+  }
+  function git(...args: string[]) {
+    const result = spawnSync('git', args, { cwd: root, env, encoding: 'utf8' })
+    if (result.error) throw result.error
+    const output = `${result.stdout}${result.stderr}`
+    assert.equal(result.status, 0, output)
+    return output.trim()
+  }
+  /** One Core run, `validate:full -- --ci-group core`, unless another workspace ran it. */
+  async function core(expected?: RegExp | Expectation) {
+    const run = reached++
+    if (stopped) throw new Stopped()
+    if (claimed.has(run)) return
+    claimed.add(run)
+    const child = Bun.spawn(
+      [
+        process.execPath,
+        'run',
+        'validate:full',
+        '--',
+        '--ci-group',
+        'core',
+        '--receipt',
+        'root-core.json',
+      ],
+      { cwd: root, env, stdout: 'pipe', stderr: 'pipe' },
+    )
+    const [stdout, stderr, status] = await Promise.all([
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+      child.exited,
+    ])
+    verifyCore(
+      root,
+      status,
+      `${stdout}${stderr}`,
+      expected instanceof RegExp ? { refuses: expected } : (expected ?? {}),
+    )
+    verified++
+  }
+
+  /** The enrolled App that passes the differential; `enrollment` proves it, the other groups start from it. */
+  function enroll() {
+    put(
+      `${app}/src/worker.ts`,
+      `import { fetch } from './edge'
 export default {
   fetch(req, env) {
     if ('ROOT_GATE_LOCAL_ONLY' in env) return new Response(null, { status: 418 })
@@ -155,15 +212,15 @@ export default {
   },
 }
 `,
-  )
-  put(`${app}/src/edge.ts`, `export { fetch } from './auth-consumer'\n`)
-  put(`${app}/wrangler.toml`, withRelease)
-  for (const localFile of ['.dev.vars', '.dev.vars.release', '.env']) {
-    put(`${app}/${localFile}`, 'ROOT_GATE_LOCAL_ONLY=fixture-canary\n')
-  }
-  put(
-    `${app}/migrations/9999_account_disabled.sql`,
-    `CREATE TABLE account_disabled (user_id TEXT PRIMARY KEY REFERENCES "user"(id));
+    )
+    put(`${app}/src/edge.ts`, `export { fetch } from './auth-consumer'\n`)
+    put(`${app}/wrangler.toml`, withRelease)
+    for (const localFile of ['.dev.vars', '.dev.vars.release', '.env']) {
+      put(`${app}/${localFile}`, 'ROOT_GATE_LOCAL_ONLY=fixture-canary\n')
+    }
+    put(
+      `${app}/migrations/9999_account_disabled.sql`,
+      `CREATE TABLE account_disabled (user_id TEXT PRIMARY KEY REFERENCES "user"(id));
 CREATE TRIGGER guard_disabled_insert BEFORE INSERT ON "user"
 WHEN NEW.disabled IS NOT 0
 BEGIN
@@ -179,37 +236,36 @@ BEGIN
   UPDATE "user" SET disabled = 1 WHERE id = NEW.user_id;
 END;
 `,
-  )
-  json(`${app}/package.json`, projectedManifest)
-}
+    )
+    json(`${app}/package.json`, projectedManifest)
+  }
 
-/** A workspace package that issues through the Kit factory. */
-function alternateIssuerPackage() {
-  put(
-    'packages/alternate-issuer/issuer.ts',
-    `import { createBetterAuth } from '@kit/auth/factory'
+  /** A workspace package that issues through the Kit factory. */
+  function alternateIssuerPackage() {
+    put(
+      'packages/alternate-issuer/issuer.ts',
+      `import { createBetterAuth } from '@kit/auth/factory'
 export function alternateIssuer(options) { return createBetterAuth(options) }
 `,
-  )
-  symlinkSync(
-    // The real installed Kit dependencies resolve outside this synthetic workspace.
-    join(repo, 'apps/starter-api/node_modules'),
-    join(root, 'packages/alternate-issuer/node_modules'),
-    'dir',
-  )
-  json('packages/alternate-issuer/package.json', {
-    name: '@fixture/alternate-issuer',
-    exports: { '.': './issuer.ts', './ordinary': './ordinary.ts' },
-    dependencies: { '@kit/auth': 'workspace:*' },
-  })
-  symlinkSync(
-    join(root, 'packages/alternate-issuer'),
-    join(modules, '@fixture/alternate-issuer'),
-    'dir',
-  )
-}
+    )
+    symlinkSync(
+      // The real installed Kit dependencies resolve outside this synthetic workspace.
+      join(repo, 'apps/starter-api/node_modules'),
+      join(root, 'packages/alternate-issuer/node_modules'),
+      'dir',
+    )
+    json('packages/alternate-issuer/package.json', {
+      name: '@fixture/alternate-issuer',
+      exports: { '.': './issuer.ts', './ordinary': './ordinary.ts' },
+      dependencies: { '@kit/auth': 'workspace:*' },
+    })
+    symlinkSync(
+      join(root, 'packages/alternate-issuer'),
+      join(modules, '@fixture/alternate-issuer'),
+      'dir',
+    )
+  }
 
-try {
   for (const file of readdirSync(join(repo, 'scripts/kit'))) {
     if (/^root-gate(?:-.*)?\.ts$/.test(file) && !file.endsWith('.test.ts'))
       copy(`scripts/kit/${file}`)
@@ -282,64 +338,93 @@ export function fetch(req, env) { return issueAuth(env, env.BETTER_AUTH_URL).han
     '-qm',
     'Synthetic Product',
   )
-  release.GITHUB_SHA = git('rev-parse', 'HEAD')
-  await scenarios[group as keyof typeof scenarios]()
-  console.log(`product-root-gate: inherited Better Auth Core ${group} fixtures passed`)
-} finally {
-  rmSync(root, { recursive: true, force: true })
+  env.GITHUB_SHA = git('rev-parse', 'HEAD')
+  return { root, put, json, core, enroll, alternateIssuerPackage, reached: () => reached }
 }
 
-function enrollmentScenarios() {
+const roots: string[] = []
+try {
+  const replicas = Array.from({ length: workspaceCount }, () => createWorkspace(roots))
+  const results = await Promise.allSettled(
+    replicas.map(async (workspace) => {
+      try {
+        await scenarios[group as keyof typeof scenarios](workspace)
+      } catch (error) {
+        stopped = true
+        throw error
+      }
+    }),
+  )
+  const failure = results.find(
+    (result): result is PromiseRejectedResult =>
+      result.status === 'rejected' && !(result.reason instanceof Stopped),
+  )
+  if (failure) throw failure.reason
+  const runs = replicas[0].reached()
+  assert.ok(
+    replicas.every((workspace) => workspace.reached() === runs) && verified === runs,
+    'every workspace must reach the same Core runs, and each run must be verified once',
+  )
+  console.log(
+    `product-root-gate: inherited Better Auth Core ${group} fixtures passed (${runs} Core runs, ${replicas.length} workspaces)`,
+  )
+} finally {
+  for (const root of roots) rmSync(root, { recursive: true, force: true })
+}
+
+async function enrollmentScenarios({ put, json, core, enroll }: Workspace) {
   // Inventory does not derive from the dependency declaration or the test registration.
   json(`${app}/package.json`, productManifest)
-  runCore(
+  await core(
     /apps\/product-fixture: shipping Better Auth composition must declare better-auth directly/,
   )
   json(`${app}/package.json`, { ...productManifest, dependencies: { 'better-auth': '*' } })
-  runCore(/kitBetterAuth must name the sole shipping createBetterAuth export/)
+  await core(/kitBetterAuth must name the sole shipping createBetterAuth export/)
   json(`${app}/package.json`, {
     ...productManifest,
     dependencies: { 'better-auth': '*' },
     kitBetterAuth: 'src/separate.test.ts',
   })
-  runCore(/kitBetterAuth must name the sole shipping createBetterAuth export.*src\/better-auth\.ts/)
+  await core(
+    /kitBetterAuth must name the sole shipping createBetterAuth export.*src\/better-auth\.ts/,
+  )
   json(`${app}/package.json`, enrolledManifest)
   const unwired = /Wrangler main src\/worker\.ts does not reach a runtime call to createBetterAuth/
-  runCore(unwired) // The only call is in an orphan source file.
+  await core(unwired) // The only call is in an orphan source file.
   put(
     `${app}/src/worker.ts`,
     `import { createBetterAuth } from './better-auth'
 export default { fetch: () => new Response(null, { status: 503 }) }
 `,
   )
-  runCore(unwired) // The reachable module imports the adapter but does not call it.
+  await core(unwired) // The reachable module imports the adapter but does not call it.
   enroll()
-  assert.match(runCore(), /apps\/product-fixture differential fixtures passed/)
+  await core({ prints: passed })
 
   put(`${app}/wrangler.toml`, withRelease.replace('directory = "../web/dist"', 'directory = ""'))
-  runCore(/wrangler\.toml --env release: assets\.directory must be a non-empty string/)
+  await core(/wrangler\.toml --env release: assets\.directory must be a non-empty string/)
   put(
     `${app}/wrangler.toml`,
     withRelease.replace('directory = "../web/dist"', 'directory = "./src/auth-consumer.ts"'),
   )
-  runCore(
+  await core(
     /wrangler\.toml --env release: assets\.directory points to a non-directory path: .*auth-consumer\.ts/,
   )
 
   // Only the default target is needed to prove the disabled-User failures.
   put(`${app}/wrangler.toml`, workerConfig)
   json(`${app}/package.json`, enrolledManifest)
-  runCore(/disabled User: declare kitBetterAuthDisableUser .*projected/)
+  await core(/disabled User: declare kitBetterAuthDisableUser .*projected/)
   json(`${app}/package.json`, {
     ...enrolledManifest,
     kitBetterAuthDisableUser: 'DELETE FROM account_disabled WHERE user_id = ?',
   })
-  runCore(/disabled User: kitBetterAuthDisableUser must disable the User/)
+  await core(/disabled User: kitBetterAuthDisableUser must disable the User/)
   json(`${app}/package.json`, {
     ...projectedManifest,
     kitBetterAuthDisableUser: `${projectedManifest.kitBetterAuthDisableUser}; SELECT 1;`,
   })
-  runCore(/disabled User: kitBetterAuthDisableUser must be one SQL statement/)
+  await core(/disabled User: kitBetterAuthDisableUser must be one SQL statement/)
   json(`${app}/package.json`, projectedManifest)
   const expiresSession = `${app}/migrations/9999_expire_disabled_session.sql`
   put(
@@ -350,10 +435,10 @@ BEGIN
 END;
 `,
   )
-  runCore(/disabled User: kitBetterAuthDisableUser must keep the session and leave its token/)
+  await core(/disabled User: kitBetterAuthDisableUser must keep the session and leave its token/)
 }
 
-function cookieScenarios() {
+async function cookieScenarios({ put, core, enroll }: Workspace) {
   enroll()
 
   const consumer = `${app}/src/auth-consumer.ts`
@@ -428,12 +513,11 @@ export async function fetch(req, env) {
 }
 `,
     )
-    const output = runCore(failure, name)
-    if (!failure) assert.match(output, /apps\/product-fixture differential fixtures passed/, name)
+    await core({ refuses: failure, name, prints: failure ? undefined : passed })
   }
 }
 
-function issuerScenarios() {
+async function issuerScenarios({ root, put, core, enroll, alternateIssuerPackage }: Workspace) {
   enroll()
 
   // The attestation exempts only the proven Kit call, not more issuer code in that file.
@@ -447,7 +531,7 @@ function issuerScenarios() {
       '  if (env.USE_ALTERNATE) anotherIssuer({ baseURL })\n  return createKitBetterAuth({',
     )}`,
   )
-  runCore(extraIssuerInComposition)
+  await core(extraIssuerInComposition)
   put(
     `${app}/${wrapper}`,
     enrolledSource.replace(
@@ -455,7 +539,7 @@ function issuerScenarios() {
       '  if (env.USE_ALTERNATE) { const alias = createKitBetterAuth; alias({ baseURL }) }\n  return createKitBetterAuth({',
     ),
   )
-  runCore(extraIssuerInComposition)
+  await core(extraIssuerInComposition)
   put(`${app}/${wrapper}`, enrolledSource)
 
   // Wrangler independently stages matching modules, even when the entry never imports them.
@@ -465,17 +549,19 @@ function issuerScenarios() {
   )}\n[[rules]]\ntype = "ESModule"\nglobs = ["**/*.part"]\nfallthrough = true\n[[rules]]\ntype = "Text"\nglobs = ["**/staged-data.js"]\nfallthrough = true\n`
   put(`${app}/wrangler.toml`, withStaged)
   put(`${app}/src/__fixtures__/dist/staged-data.js`, 'not executable source\n')
-  runCore()
+  await core()
   put(`${app}/src/__fixtures__/staged-issuer.part`, "export { betterAuth } from 'better-auth'\n")
-  runCore(/Wrangler release includes an extra Better Auth issuer: .*staged-issuer\.part/)
+  await core(/Wrangler release includes an extra Better Auth issuer: .*staged-issuer\.part/)
   rmSync(join(root, app, 'src/__fixtures__/staged-issuer.part'))
   put(`${app}/src/__fixtures__/dist/staged-generated.part`, 'export const embedded = true\n')
-  runCore(/Cannot inventory opaque Worker inputs.*staged-generated\.part/)
+  await core(/Cannot inventory opaque Worker inputs.*staged-generated\.part/)
 
   // Enrolled Workers also fail before executing an unsupported build command.
   put(`${app}/wrangler.toml`, `${withRelease}\n[build]\ncommand = "touch enrolled-build-ran"\n`)
-  runCore(/Cannot inventory opaque Worker inputs.*without build\.command/)
-  assert.equal(existsSync(join(root, app, 'enrolled-build-ran')), false)
+  await core({
+    refuses: /Cannot inventory opaque Worker inputs.*without build\.command/,
+    after: () => assert.equal(existsSync(join(root, app, 'enrolled-build-ran')), false),
+  })
   put('packages/opaque-enrolled/package.json', '{"name":"opaque-enrolled"}')
   put(
     'packages/opaque-enrolled/dist/index.js',
@@ -490,7 +576,7 @@ export function fetch(req, env) { return enabled(req) ? handle(req, env) : new R
 `,
   )
   put(`${app}/wrangler.toml`, withRelease)
-  runCore(/Cannot inventory opaque Worker inputs: .*opaque-enrolled\/dist\/index\.js/)
+  await core(/Cannot inventory opaque Worker inputs: .*opaque-enrolled\/dist\/index\.js/)
 
   // Fixture-looking paths are ignored during source discovery, but not when Wrangler ships them.
   put(
@@ -506,7 +592,7 @@ import { fetch as handle } from './auth-consumer'
 export function fetch(req, env) { return env.USE_FIXTURE_ISSUER ? issue(req) : handle(req, env) }
 `,
   )
-  runCore(
+  await core(
     /Wrangler release includes an extra Better Auth issuer: .*__fixtures__\/retained-issuer\.test\.ts/,
   )
   put(edge, `export { fetch } from './auth-consumer'\n`)
@@ -543,13 +629,15 @@ export function fetch(req, env) {
 }
 `,
   )
-  runCore(
-    /--env release\) failed:[\s\S]*mounted Better Auth cookie lacks provenance/,
-    'refuses a compatible cookie from another issuer',
-  )
+  await core({
+    refuses: /--env release\) failed:[\s\S]*mounted Better Auth cookie lacks provenance/,
+    name: 'refuses a compatible cookie from another issuer',
+  })
   // Mounted sign-in now succeeds, but another live branch still provisions an extra issuer.
   put(`${app}/wrangler.toml`, alternateFlag(''))
-  runCore(/Wrangler release includes an extra Better Auth issuer: .*alternate-issuer\/issuer\.ts/)
+  await core(
+    /Wrangler release includes an extra Better Auth issuer: .*alternate-issuer\/issuer\.ts/,
+  )
 
   put(
     `${app}/src/configured-issuer.ts`,
@@ -559,7 +647,7 @@ export function fetch(req, env) {
     `${app}/wrangler.toml`,
     `${workerConfig}\n[alias]\n"@kit/auth/factory" = "./src/configured-issuer.ts"\n`,
   )
-  runCore(/Wrangler build did not resolve the enrolled composition to the installed Kit factory/)
+  await core(/Wrangler build did not resolve the enrolled composition to the installed Kit factory/)
 
   put(
     `${app}/src/configured-better-auth.ts`,
@@ -569,10 +657,10 @@ export function fetch(req, env) {
     `${app}/wrangler.toml`,
     `${workerConfig}\n[alias]\n"better-auth" = "./src/configured-better-auth.ts"\n`,
   )
-  runCore(/Wrangler build resolved better-auth outside the installed Better Auth package/)
+  await core(/Wrangler build resolved better-auth outside the installed Better Auth package/)
 }
 
-async function resolutionScenarios() {
+async function resolutionScenarios({ root, put, json, core, alternateIssuerPackage }: Workspace) {
   alternateIssuerPackage()
 
   // An unenrolled Worker may use the client and refer to the workspace issuer's types.
@@ -590,7 +678,7 @@ import { createAuthClient } from 'better-auth/client'
 export default { fetch: () => Response.json(typeof createAuthClient) }
 `,
   )
-  assert.doesNotMatch(runCore(), /apps\/product-fixture differential fixtures passed/)
+  await core({ omits: passed })
 
   // Only the named release entrypoint imports this key. Default package
   // resolution selects an inert module; Wrangler's configured alias selects the issuer.
@@ -606,14 +694,14 @@ export default { fetch: (request, env) => alternateIssuer(env).handler(request) 
   )
   const distinctRelease = `${workerConfig}\n[env.release]\nmain = "src/release.ts"\n[[env.release.d1_databases]]\n${database}`
   put(`${app}/wrangler.toml`, distinctRelease)
-  assert.doesNotMatch(runCore(), /apps\/product-fixture differential fixtures passed/)
+  await core({ omits: passed })
   put(
     `${app}/wrangler.toml`,
     `${distinctRelease}\n[alias]\n"@fixture/alternate-issuer/ordinary" = "../../packages/alternate-issuer/issuer.ts"\n`,
   )
   const missingDependency =
     /apps\/product-fixture: shipping Better Auth composition must declare better-auth directly/
-  runCore(missingDependency)
+  await core(missingDependency)
 
   // Resolution can also target a package export directly, with no shared wrapper.
   const aliasSource = '@fixture/alternate-issuer/ordinary'
@@ -641,7 +729,7 @@ export default { fetch: () => Response.json(typeof selected) }
   ] as const) {
     useReleaseImport(aliasSource, imported)
     useReleaseAlias(Bun.resolveSync(specifier, join(root, app)))
-    runCore(error)
+    await core(error)
   }
   put(`${app}/wrangler.toml`, distinctRelease)
   for (const [specifier, helper] of [
@@ -649,7 +737,7 @@ export default { fetch: () => Response.json(typeof selected) }
     ['@kit/auth/factory', 'hashVerificationIdentifier'],
   ] as const) {
     useReleaseImport(specifier, helper)
-    runCore()
+    await core()
   }
 
   function useNamespace(source: string, expression: string, helpers = '') {
@@ -668,10 +756,10 @@ export default { fetch: () => Response.json(${expression}) }
   ] as const) {
     put(`${app}/wrangler.toml`, distinctRelease)
     useNamespace(specifier, `typeof sdk.${helper}`)
-    runCore()
+    await core()
     useReleaseAlias(Bun.resolveSync(specifier, join(root, app)))
     useNamespace(aliasSource, `typeof sdk[${JSON.stringify(helper)}]`)
-    runCore()
+    await core()
   }
   put(`${app}/wrangler.toml`, distinctRelease)
   useNamespace(
@@ -682,7 +770,7 @@ function local() {
   { const { sdk } = { sdk: { betterAuth: 2 } }; return sdk.betterAuth }
 }`,
   )
-  runCore()
+  await core()
   useReleaseAlias(Bun.resolveSync('@kit/auth/factory', join(root, app)))
   // With the Kit alias, statically reading the factory,
   // passing the namespace to another function or computing the key are all unsafe.
@@ -692,7 +780,7 @@ function local() {
     "sdk[new URL('https://example.invalid/get').pathname.slice(1)]",
   ]) {
     useNamespace(aliasSource, expression)
-    runCore(missingDependency)
+    await core(missingDependency)
   }
 
   // Transparent no_bundle source is emitted without an esbuild metafile.
@@ -704,7 +792,7 @@ function local() {
       'main = "src/plain-worker.mjs"\nno_bundle = true',
     ),
   )
-  assert.doesNotMatch(runCore(), /apps\/product-fixture differential fixtures passed/)
+  await core({ omits: passed })
 
   // Prebuilding removes the dependency edge. An opaque input cannot certify no auth.
   const prebuiltSource = `${app}/build/inline-worker.ts`
@@ -736,17 +824,19 @@ export default { fetch: (request) => betterAuth({}).handler(request) }
         `main = "dist/worker.mjs"\nno_bundle = ${noBundle}`,
       ),
     )
-    runCore(opaqueWorker)
+    await core(opaqueWorker)
   }
   const workspaceOutput = 'packages/alternate-issuer/dist/worker.mjs'
   mkdirSync(dirname(join(root, workspaceOutput)), { recursive: true })
   copyFileSync(join(root, app, 'dist/worker.mjs'), join(root, workspaceOutput))
   useReleaseImport(aliasSource, 'default')
   useReleaseAlias(join(root, workspaceOutput))
-  runCore(/Cannot inventory opaque Worker inputs: .* is a deployed workspace output/)
+  await core(/Cannot inventory opaque Worker inputs: .* is a deployed workspace output/)
   put(`${app}/wrangler.toml`, `${workerConfig}\n[build]\ncommand = "touch build-ran"\n`)
-  runCore(opaqueWorker)
-  assert.equal(existsSync(join(root, app, 'build-ran')), false)
+  await core({
+    refuses: opaqueWorker,
+    after: () => assert.equal(existsSync(join(root, app, 'build-ran')), false),
+  })
   put(`${app}/wrangler.toml`, workerConfig)
 
   // A runtime import of the same declared workspace cannot bypass enrollment.
@@ -756,12 +846,12 @@ export default { fetch: (request) => betterAuth({}).handler(request) }
 export default { fetch: (request, env) => alternateIssuer(env).handler(request) }
 `,
   )
-  runCore(missingDependency)
+  await core(missingDependency)
   json(`${app}/package.json`, {
     ...unenrolled,
     dependencies: { ...unenrolled.dependencies, 'better-auth': '*' },
   })
-  runCore(
+  await core(
     /kitBetterAuth must name the sole shipping createBetterAuth export.*runtime modules: none/,
   )
 
@@ -799,7 +889,7 @@ export function issuer() { return betterAuth({}) }
 export default { fetch: (request) => issuer().handler(request) }
 `,
   )
-  runCore(missingDependency)
+  await core(missingDependency)
 
   json('packages/nested-consumer/package.json', {
     name: 'nested-consumer',
@@ -816,7 +906,7 @@ export default { fetch: (request) => issuer().handler(request) }
       'bridge/better-auth': [`better-auth@${otherVersion}`, ''],
     },
   })
-  runCore(
+  await core(
     /multiple effective better-auth versions in bun.lock:\n0\.0\.1: packages\/nested-consumer\n\S+: apps\/product-fixture/,
   )
 }
