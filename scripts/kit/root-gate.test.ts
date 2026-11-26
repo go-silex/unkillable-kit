@@ -16,6 +16,7 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { toolingSeconds, toolingShardTasks } from './root-gate-tooling'
 
 const kitScripts = import.meta.dirname
 
@@ -600,6 +601,7 @@ function toolingShards() {
     }
     const paths = [1, 2, 3].map(runShard)
     const receipts = paths.map((path) => JSON.parse(readFileSync(path, 'utf8')))
+    // Unmeasured tasks weigh the same, so they are dealt out in recipe order.
     assert.deepEqual(
       receipts.map((receipt) => receipt.tasks),
       [0, 1, 2].map((index) => tasks.filter((_, offset) => offset % 3 === index)),
@@ -685,6 +687,38 @@ function toolingShards() {
     setRecipe()
     assert.notEqual(invoke('--plan').status, 0, 'empty shards refused')
   })
+}
+
+function toolingDurations() {
+  // Round-robin would put heavy:1 and heavy:3 on one shard; duration keeps the heavy tasks apart.
+  const recipe = ['light:1', 'heavy:1', 'heavy:2', 'light:2', 'heavy:3', 'light:3']
+  const seconds = new Map([
+    ['heavy:1', 100],
+    ['heavy:2', 90],
+    ['heavy:3', 80],
+    ['light:1', 1],
+    ['light:2', 1],
+    ['light:3', 1],
+  ])
+  assert.deepEqual(toolingShardTasks(recipe, seconds), [
+    ['heavy:1'],
+    ['heavy:2'],
+    ['light:1', 'light:2', 'heavy:3', 'light:3'],
+  ])
+
+  // The Kit recipe is fully measured, and its estimated slowest shard leaves room under the
+  // five-minute job timeout for checkout, install (about 30 s) and runner variance.
+  const manifest = JSON.parse(readFileSync(join(kitScripts, '../../package.json'), 'utf8'))
+  const tasks: string[] = manifest.scripts['validate:tooling'].split(' ').slice(3)
+  assert.deepEqual(
+    [...toolingSeconds.keys()].sort(),
+    [...tasks].sort(),
+    'root-gate-tooling.ts must hold one measured duration per validate:tooling task',
+  )
+  const loads = toolingShardTasks(tasks).map((shard) =>
+    shard.reduce((sum, task) => sum + (toolingSeconds.get(task) ?? 0), 0),
+  )
+  assert.ok(Math.max(...loads) <= 210, `estimated tooling shard loads exceed 210 s: ${loads}`)
 }
 
 function coveragePlan() {
@@ -1446,6 +1480,7 @@ consumerCoverageShardJoin()
 fullAndPlan()
 toolingAndPlan()
 toolingShards()
+toolingDurations()
 coveragePlan()
 joinAdmission()
 emptyPartitionJoin()

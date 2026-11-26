@@ -2,6 +2,52 @@ import { lstatSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 
 const count = 3
+// Slowest passing CI duration of each tooling task, in whole seconds, measured on Kit and Product
+// runners at unkillable-kit/v0.9.0. The four Better Auth groups share the former single test's
+// estimated 215 s in proportion to their first hosted run (go-silex/unkillable-kit#198).
+// Re-measure when a task changes cost: CI logs carry one `root-gate:task` record per task.
+export const toolingSeconds: ReadonlyMap<string, number> = new Map([
+  ['test:root-gate-better-auth:issuers', 79],
+  ['test:root-gate', 66],
+  ['test:root-gate-better-auth:resolution', 53],
+  ['test:root-gate-better-auth:cookies', 48],
+  ['test:create-product-preflight', 41],
+  ['test:release-prepare', 38],
+  ['test:root-gate-better-auth:enrollment', 37],
+  ['test:kit-schema-sync', 29],
+  ['test:dogfood-zero-edit', 24],
+  ['test:promote-deploy', 19],
+  ['test:kit-upgrade', 19],
+  ['test:tsconfig-orphans', 18],
+  ['test:doc-hygiene', 16],
+  ['test:bar-ssot', 14],
+  ['test:coverage-order', 9],
+  ['test:lock-ranges', 8],
+  ['test:trufflehog-pin', 7],
+  ['test:stack-contract', 6],
+  ['test:knip-config', 6],
+  ['test:tooling-selector', 5],
+  ['test:extract-dry-run', 5],
+  ['test:migrations-contract', 5],
+  ['test:import-boundary', 3],
+  ['test:deny-upstream', 3],
+  ['test:file-length', 3],
+  ['test:falsify', 3],
+  ['test:ts-major', 2],
+  ['test:debt', 2],
+  ['test:folder-size', 2],
+  ['test:wrangler-migrations', 2],
+  ['test:cf-builds', 2],
+  ['test:release-age-excludes', 1],
+  ['test:actions-pin', 1],
+  ['test:biome-strict', 1],
+  ['test:merge-gate', 1],
+  ['test:lefthook-deletes', 1],
+  ['test:hermetic-git', 1],
+  ['test:deps-guard', 1],
+  ['test:bun-version', 1],
+])
+const unmeasuredSeconds = 10
 const fail = (message: string): never => {
   throw new Error(message)
 }
@@ -16,15 +62,35 @@ type Identity = {
 }
 
 export function toolingPlan(tasks: string[]) {
-  return Array.from({ length: count }, (_, offset) => {
+  return toolingShardTasks(tasks).map((selected, offset) => {
+    if (selected.length === 0) fail('empty tooling shard')
     const index = offset + 1
-    if (toolingTasks(tasks, index).length === 0) fail('empty tooling shard')
     return { index, count, id: `tooling-${index}` }
   })
 }
 
+/**
+ * Longest task first onto the least-loaded shard (lowest index on ties), so shards finish
+ * together whatever the recipe order. Each shard keeps recipe order.
+ */
+export function toolingShardTasks(tasks: string[], seconds = toolingSeconds): string[][] {
+  const shards = Array.from({ length: count }, () => ({ load: 0, tasks: new Set<string>() }))
+  const weighed = tasks.map((task, position) => ({
+    task,
+    position,
+    weight: seconds.get(task) ?? unmeasuredSeconds,
+  }))
+  weighed.sort((a, b) => b.weight - a.weight || a.position - b.position)
+  for (const { task, weight } of weighed) {
+    const lightest = shards.reduce((best, shard) => (shard.load < best.load ? shard : best))
+    lightest.load += weight
+    lightest.tasks.add(task)
+  }
+  return shards.map((shard) => tasks.filter((task) => shard.tasks.has(task)))
+}
+
 function toolingTasks(tasks: string[], index: number) {
-  return tasks.filter((_, offset) => offset % count === index - 1)
+  return toolingShardTasks(tasks)[index - 1]
 }
 
 export function runToolingShard(
