@@ -3,21 +3,22 @@ import { basename, join } from 'node:path'
 
 const count = 3
 // Slowest passing CI duration of each tooling task, in whole seconds, measured on Kit and Product
-// runners at unkillable-kit/v0.9.0. The four Better Auth groups share the former single test's
-// estimated 215 s in proportion to their first hosted run (go-silex/unkillable-kit#198).
+// runners at unkillable-kit/v0.9.0. The four Better Auth groups were re-measured on the hosted Kit
+// runner, which runs four workspaces per group (go-silex/unkillable-kit#200); a two-CPU Product
+// runner runs two workspaces and takes longer.
 // Re-measure when a task changes cost: CI logs carry one `root-gate:task` record per task.
 export const toolingSeconds: ReadonlyMap<string, number> = new Map([
-  ['test:root-gate-better-auth:issuers', 79],
   ['test:root-gate', 66],
-  ['test:root-gate-better-auth:resolution', 53],
-  ['test:root-gate-better-auth:cookies', 48],
   ['test:create-product-preflight', 41],
   ['test:release-prepare', 38],
-  ['test:root-gate-better-auth:enrollment', 37],
+  ['test:root-gate-better-auth:resolution', 32],
   ['test:kit-schema-sync', 29],
+  ['test:root-gate-better-auth:cookies', 27],
   ['test:dogfood-zero-edit', 24],
+  ['test:root-gate-better-auth:issuers', 23],
   ['test:promote-deploy', 19],
   ['test:kit-upgrade', 19],
+  ['test:root-gate-better-auth:enrollment', 18],
   ['test:tsconfig-orphans', 18],
   ['test:doc-hygiene', 16],
   ['test:bar-ssot', 14],
