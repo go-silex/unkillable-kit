@@ -17,7 +17,6 @@ import { dirname, join, resolve } from 'node:path'
 import { parseLock } from './deps-guard/lock'
 
 const repo = resolve(import.meta.dirname, '../..')
-const root = mkdtempSync(join(tmpdir(), 'product-root-better-auth-'))
 const app = 'apps/product-fixture'
 const wrapper = 'src/better-auth.ts'
 const kitManifest = JSON.parse(readFileSync(join(repo, 'package.json'), 'utf8'))
@@ -35,6 +34,58 @@ assert.ok(locked)
 const resolution = [`better-auth@${locked.version}`, '']
 const otherVersion = '0.0.1'
 const scripts = { typecheck: 'true', 'test:coverage': 'true' }
+// Each group runs as its own tooling task, so CI can place the groups on separate shards.
+const scenarios = {
+  enrollment: enrollmentScenarios,
+  cookies: cookieScenarios,
+  issuers: issuerScenarios,
+  resolution: resolutionScenarios,
+}
+const group = process.argv[2] ?? ''
+if (process.argv.length !== 3 || !Object.hasOwn(scenarios, group))
+  throw new Error(
+    `usage: bun run scripts/kit/root-gate-better-auth.test.ts <${Object.keys(scenarios).join('|')}>`,
+  )
+const toolingTasks: string[] = kitManifest.scripts['validate:tooling'].split(' ').slice(3)
+for (const name of Object.keys(scenarios)) {
+  const task = `test:root-gate-better-auth:${name}`
+  assert.ok(toolingTasks.includes(task), `validate:tooling must run ${task}`)
+  assert.equal(
+    kitManifest.scripts[task],
+    `bun run scripts/kit/root-gate-better-auth.test.ts ${name}`,
+  )
+}
+const root = mkdtempSync(join(tmpdir(), 'product-root-better-auth-'))
+const modules = join(root, app, 'node_modules')
+const database = 'binding = "DB"\ndatabase_name = "product-fixture"\ndatabase_id = "fixture-db"\n'
+const workerConfig = `name = "product-fixture"
+main = "src/worker.ts"
+compatibility_date = "2026-07-01"
+compatibility_flags = ["nodejs_compat"]
+[[d1_databases]]
+${database}
+[assets]
+directory = "./public"
+`
+const withRelease = `${workerConfig}\n[[env.release.d1_databases]]\n${database}
+[env.release.assets]
+directory = "../web/dist"
+`
+const productManifest = { name: 'product-fixture', scripts }
+const enrolledManifest = {
+  ...productManifest,
+  dependencies: { 'better-auth': '*' },
+  kitBetterAuth: wrapper,
+}
+const projectedManifest = {
+  ...enrolledManifest,
+  kitBetterAuthDisableUser: 'INSERT INTO account_disabled (user_id) VALUES (?)',
+}
+const workspaces = {
+  '': { name: 'product-root-fixture' },
+  [app]: { name: 'product-fixture', dependencies: { 'better-auth': '*' } },
+}
+const packages = { 'better-auth': resolution }
 const release: NodeJS.ProcessEnv = {
   ...Object.fromEntries(
     Object.entries(process.env).filter(([name]) => !/^(GIT_|GITHUB_|COVERAGE_)/.test(name)),
@@ -92,6 +143,72 @@ function runCore(expectedFailure?: RegExp, name?: string) {
   return result.output
 }
 
+/** The enrolled App that passes the differential; `enrollment` proves it, the other groups start from it. */
+function enroll() {
+  put(
+    `${app}/src/worker.ts`,
+    `import { fetch } from './edge'
+export default {
+  fetch(req, env) {
+    if ('ROOT_GATE_LOCAL_ONLY' in env) return new Response(null, { status: 418 })
+    return fetch(req, env)
+  },
+}
+`,
+  )
+  put(`${app}/src/edge.ts`, `export { fetch } from './auth-consumer'\n`)
+  put(`${app}/wrangler.toml`, withRelease)
+  for (const localFile of ['.dev.vars', '.dev.vars.release', '.env']) {
+    put(`${app}/${localFile}`, 'ROOT_GATE_LOCAL_ONLY=fixture-canary\n')
+  }
+  put(
+    `${app}/migrations/9999_account_disabled.sql`,
+    `CREATE TABLE account_disabled (user_id TEXT PRIMARY KEY REFERENCES "user"(id));
+CREATE TRIGGER guard_disabled_insert BEFORE INSERT ON "user"
+WHEN NEW.disabled IS NOT 0
+BEGIN
+  SELECT RAISE(ABORT, 'projected');
+END;
+CREATE TRIGGER guard_disabled_update BEFORE UPDATE OF disabled ON "user"
+WHEN NEW.disabled IS NOT EXISTS (SELECT 1 FROM account_disabled WHERE user_id = NEW.id)
+BEGIN
+  SELECT RAISE(ABORT, 'projected');
+END;
+CREATE TRIGGER project_disabled AFTER INSERT ON account_disabled
+BEGIN
+  UPDATE "user" SET disabled = 1 WHERE id = NEW.user_id;
+END;
+`,
+  )
+  json(`${app}/package.json`, projectedManifest)
+}
+
+/** A workspace package that issues through the Kit factory. */
+function alternateIssuerPackage() {
+  put(
+    'packages/alternate-issuer/issuer.ts',
+    `import { createBetterAuth } from '@kit/auth/factory'
+export function alternateIssuer(options) { return createBetterAuth(options) }
+`,
+  )
+  symlinkSync(
+    // The real installed Kit dependencies resolve outside this synthetic workspace.
+    join(repo, 'apps/starter-api/node_modules'),
+    join(root, 'packages/alternate-issuer/node_modules'),
+    'dir',
+  )
+  json('packages/alternate-issuer/package.json', {
+    name: '@fixture/alternate-issuer',
+    exports: { '.': './issuer.ts', './ordinary': './ordinary.ts' },
+    dependencies: { '@kit/auth': 'workspace:*' },
+  })
+  symlinkSync(
+    join(root, 'packages/alternate-issuer'),
+    join(modules, '@fixture/alternate-issuer'),
+    'dir',
+  )
+}
+
 try {
   for (const file of readdirSync(join(repo, 'scripts/kit'))) {
     if (/^root-gate(?:-.*)?\.ts$/.test(file) && !file.endsWith('.test.ts'))
@@ -122,7 +239,6 @@ try {
   mkdirSync(join(root, 'packages'), { recursive: true })
   symlinkSync(join(repo, 'node_modules'), join(root, 'node_modules'), 'dir')
   symlinkSync(join(repo, 'packages/db'), join(root, 'packages/db'), 'dir')
-  const modules = join(root, app, 'node_modules')
   mkdirSync(join(modules, '@fixture'), { recursive: true })
   for (const name of ['@kit', 'better-auth', 'wrangler']) {
     symlinkSync(join(repo, 'apps/starter-api/node_modules', name), join(modules, name), 'dir')
@@ -130,16 +246,6 @@ try {
   cpSync(join(repo, 'apps/starter-api/migrations'), join(root, app, 'migrations'), {
     recursive: true,
   })
-  const database = 'binding = "DB"\ndatabase_name = "product-fixture"\ndatabase_id = "fixture-db"\n'
-  const workerConfig = `name = "product-fixture"
-main = "src/worker.ts"
-compatibility_date = "2026-07-01"
-compatibility_flags = ["nodejs_compat"]
-[[d1_databases]]
-${database}
-[assets]
-directory = "./public"
-`
   put(`${app}/wrangler.toml`, workerConfig)
   put(
     `${app}/${wrapper}`,
@@ -164,12 +270,6 @@ export function fetch(req, env) { return issueAuth(env, env.BETTER_AUTH_URL).han
     'export default { fetch: () => new Response(null, { status: 503 }) }\n',
   )
   put(`${app}/src/separate.test.ts`, readFileSync(join(root, app, wrapper), 'utf8'))
-  const productManifest = { name: 'product-fixture', scripts }
-  const workspaces = {
-    '': { name: 'product-root-fixture' },
-    [app]: { name: 'product-fixture', dependencies: { 'better-auth': '*' } },
-  }
-  const packages = { 'better-auth': resolution }
   json('bun.lock', { workspaces, packages })
   git('init', '-q')
   git(
@@ -183,7 +283,13 @@ export function fetch(req, env) { return issueAuth(env, env.BETTER_AUTH_URL).han
     'Synthetic Product',
   )
   release.GITHUB_SHA = git('rev-parse', 'HEAD')
+  await scenarios[group as keyof typeof scenarios]()
+  console.log(`product-root-gate: inherited Better Auth Core ${group} fixtures passed`)
+} finally {
+  rmSync(root, { recursive: true, force: true })
+}
 
+function enrollmentScenarios() {
   // Inventory does not derive from the dependency declaration or the test registration.
   json(`${app}/package.json`, productManifest)
   runCore(
@@ -197,11 +303,6 @@ export function fetch(req, env) { return issueAuth(env, env.BETTER_AUTH_URL).han
     kitBetterAuth: 'src/separate.test.ts',
   })
   runCore(/kitBetterAuth must name the sole shipping createBetterAuth export.*src\/better-auth\.ts/)
-  const enrolledManifest = {
-    ...productManifest,
-    dependencies: { 'better-auth': '*' },
-    kitBetterAuth: wrapper,
-  }
   json(`${app}/package.json`, enrolledManifest)
   const unwired = /Wrangler main src\/worker\.ts does not reach a runtime call to createBetterAuth/
   runCore(unwired) // The only call is in an orphan source file.
@@ -212,50 +313,7 @@ export default { fetch: () => new Response(null, { status: 503 }) }
 `,
   )
   runCore(unwired) // The reachable module imports the adapter but does not call it.
-  put(
-    `${app}/src/worker.ts`,
-    `import { fetch } from './edge'
-export default {
-  fetch(req, env) {
-    if ('ROOT_GATE_LOCAL_ONLY' in env) return new Response(null, { status: 418 })
-    return fetch(req, env)
-  },
-}
-`,
-  )
-  put(`${app}/src/edge.ts`, `export { fetch } from './auth-consumer'\n`)
-  const withRelease = `${workerConfig}\n[[env.release.d1_databases]]\n${database}
-[env.release.assets]
-directory = "../web/dist"
-`
-  put(`${app}/wrangler.toml`, withRelease)
-  for (const localFile of ['.dev.vars', '.dev.vars.release', '.env']) {
-    put(`${app}/${localFile}`, 'ROOT_GATE_LOCAL_ONLY=fixture-canary\n')
-  }
-  put(
-    `${app}/migrations/9999_account_disabled.sql`,
-    `CREATE TABLE account_disabled (user_id TEXT PRIMARY KEY REFERENCES "user"(id));
-CREATE TRIGGER guard_disabled_insert BEFORE INSERT ON "user"
-WHEN NEW.disabled IS NOT 0
-BEGIN
-  SELECT RAISE(ABORT, 'projected');
-END;
-CREATE TRIGGER guard_disabled_update BEFORE UPDATE OF disabled ON "user"
-WHEN NEW.disabled IS NOT EXISTS (SELECT 1 FROM account_disabled WHERE user_id = NEW.id)
-BEGIN
-  SELECT RAISE(ABORT, 'projected');
-END;
-CREATE TRIGGER project_disabled AFTER INSERT ON account_disabled
-BEGIN
-  UPDATE "user" SET disabled = 1 WHERE id = NEW.user_id;
-END;
-`,
-  )
-  const projectedManifest = {
-    ...enrolledManifest,
-    kitBetterAuthDisableUser: 'INSERT INTO account_disabled (user_id) VALUES (?)',
-  }
-  json(`${app}/package.json`, projectedManifest)
+  enroll()
   assert.match(runCore(), /apps\/product-fixture differential fixtures passed/)
 
   put(`${app}/wrangler.toml`, withRelease.replace('directory = "../web/dist"', 'directory = ""'))
@@ -293,10 +351,12 @@ END;
 `,
   )
   runCore(/disabled User: kitBetterAuthDisableUser must keep the session and leave its token/)
-  rmSync(join(root, expiresSession))
+}
+
+function cookieScenarios() {
+  enroll()
 
   const consumer = `${app}/src/auth-consumer.ts`
-  const enrolledConsumer = readFileSync(join(root, consumer), 'utf8')
   // Test response changes through the shipping sign-in mount, not against a standalone parser.
   put(`${app}/wrangler.toml`, workerConfig)
   for (const [name, modify, failure, secure] of [
@@ -371,8 +431,10 @@ export async function fetch(req, env) {
     const output = runCore(failure, name)
     if (!failure) assert.match(output, /apps\/product-fixture differential fixtures passed/, name)
   }
-  put(consumer, enrolledConsumer)
-  put(`${app}/wrangler.toml`, withRelease)
+}
+
+function issuerScenarios() {
+  enroll()
 
   // The attestation exempts only the proven Kit call, not more issuer code in that file.
   const enrolledSource = readFileSync(join(root, app, wrapper), 'utf8')
@@ -465,28 +527,7 @@ export function fetch(req, env) { return env.USE_FIXTURE_ISSUER ? issue(req) : h
     `${app}/src/alternate-worker.ts`,
     "import { fetch } from './alternate-consumer'\nexport default { fetch }\n",
   )
-  put(
-    'packages/alternate-issuer/issuer.ts',
-    `import { createBetterAuth } from '@kit/auth/factory'
-export function alternateIssuer(options) { return createBetterAuth(options) }
-`,
-  )
-  symlinkSync(
-    // The real installed Kit dependencies resolve outside this synthetic workspace.
-    join(repo, 'apps/starter-api/node_modules'),
-    join(root, 'packages/alternate-issuer/node_modules'),
-    'dir',
-  )
-  json('packages/alternate-issuer/package.json', {
-    name: '@fixture/alternate-issuer',
-    exports: { '.': './issuer.ts', './ordinary': './ordinary.ts' },
-    dependencies: { '@kit/auth': 'workspace:*' },
-  })
-  symlinkSync(
-    join(root, 'packages/alternate-issuer'),
-    join(modules, '@fixture/alternate-issuer'),
-    'dir',
-  )
+  alternateIssuerPackage()
   put(
     `${app}/src/alternate-consumer.ts`,
     `import { createBetterAuth as issueAuth } from './better-auth'
@@ -529,6 +570,10 @@ export function fetch(req, env) {
     `${workerConfig}\n[alias]\n"better-auth" = "./src/configured-better-auth.ts"\n`,
   )
   runCore(/Wrangler build resolved better-auth outside the installed Better Auth package/)
+}
+
+async function resolutionScenarios() {
+  alternateIssuerPackage()
 
   // An unenrolled Worker may use the client and refer to the workspace issuer's types.
   put(`${app}/wrangler.toml`, workerConfig)
@@ -774,9 +819,4 @@ export default { fetch: (request) => issuer().handler(request) }
   runCore(
     /multiple effective better-auth versions in bun.lock:\n0\.0\.1: packages\/nested-consumer\n\S+: apps\/product-fixture/,
   )
-  console.log(
-    'product-root-gate: inherited Better Auth Core inventory and differential fixtures passed',
-  )
-} finally {
-  rmSync(root, { recursive: true, force: true })
 }
