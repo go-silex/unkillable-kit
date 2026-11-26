@@ -4,6 +4,8 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ## Unreleased
 
+## unkillable-kit/v0.10.0 — 2026-11-26
+
 ### Auth
 
 - **Product action:** `listApiKeysForOrg` (`@kit/auth/repos/keys`) filters on the exact
