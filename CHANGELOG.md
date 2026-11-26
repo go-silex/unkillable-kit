@@ -4,6 +4,8 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ## Unreleased
 
+## unkillable-kit/v0.11.0 — 2026-11-26
+
 ### Deploy
 
 - Deploy verify (`.github/workflows/deploy-verify.yml`) checks after each Deploy gate run that
