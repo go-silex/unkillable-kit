@@ -8,11 +8,11 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 - Deploy verify (`.github/workflows/deploy-verify.yml`) checks after each Deploy gate run that
   evaluated a branch that every Worker listed in `config/product/deploy-verify.json` serves the
-  commit of `deploy/<branch>`, and posts one Slack alert per branch and commit when one does not
-  by the deadline: the promotion time plus 20 minutes by default, derived from observed Workers
-  Builds durations. Opt-in: without the file, a notice and nothing verified. It holds no
-  Cloudflare credential and only reads the repository. Runbook: `docs/kit/deploy-verify.md`
-  (go-silex/unkillable-kit#215).
+  commit of `deploy/<branch>`, and posts a Slack alert when one does not by the deadline, once
+  per branch and commit across automatic runs. The deadline is the promotion time plus 20 minutes
+  by default, derived from observed Workers Builds durations. Opt-in: without the file, a notice
+  and nothing verified. It holds no Cloudflare credential and only reads the repository.
+  Runbook: `docs/kit/deploy-verify.md` (go-silex/unkillable-kit#215).
 - Outside Workers Builds, `require-deploy-sha.sh` refuses any uncommitted or untracked file, even
   when `WORKERS_CI_COMMIT_SHA` names `HEAD`. Deploy break-glass from a fresh checkout: ignored
   files are not checked.

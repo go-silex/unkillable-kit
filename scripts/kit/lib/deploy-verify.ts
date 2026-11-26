@@ -246,7 +246,8 @@ async function runRound(rounds: number, plan: VerifyPlan, io: VerifyIo): Promise
  * Polls until one round sees every target serve `expected`: a target that served it earlier and
  * then regressed does not count. Between rounds, a followed deploy/<branch> that moved ends the
  * run as superseded: the Deploy gate run that moved it starts the verification of the new SHA.
- * The first round always runs, even past the deadline; a follow-up round starts only before it.
+ * The first round always runs, even past the deadline. The last wait is cut so that the final
+ * round samples the targets at the deadline; no round starts after it.
  */
 export async function verify(plan: VerifyPlan, io: VerifyIo): Promise<VerifyOutcome> {
   for (let rounds = 1; ; rounds++) {
@@ -257,15 +258,16 @@ export async function verify(plan: VerifyPlan, io: VerifyIo): Promise<VerifyOutc
       const tip = await io.readTip()
       if (tip !== null && tip !== plan.expected) return { kind: 'superseded', tip, rounds }
     }
-    if (plan.deadline - io.now() <= POLL_MS) return { kind: 'unserved', rounds, last }
-    await io.sleep(POLL_MS)
+    const left = plan.deadline - io.now()
+    if (left <= 0) return { kind: 'unserved', rounds, last }
+    await io.sleep(Math.min(POLL_MS, left))
   }
 }
 
 /**
  * Whether an earlier alert is on record, within one time budget: true once `recorded` confirms a
- * candidate, false when none does, null when `deadline` passes first (alert rather than miss).
- * `recorded` gets the time left, to bound its own request.
+ * candidate in time, false when none does, null when `deadline` passes first (alert rather than
+ * miss). `recorded` gets the time left, to bound its own request.
  */
 export async function recordedWithin<T>(
   candidates: T[],
@@ -276,7 +278,9 @@ export async function recordedWithin<T>(
   for (const candidate of candidates) {
     const left = deadline - now()
     if (left <= 0) return null
-    if (await recorded(candidate, left)) return true
+    const confirmed = await recorded(candidate, left)
+    if (now() > deadline) return null
+    if (confirmed) return true
   }
   return false
 }

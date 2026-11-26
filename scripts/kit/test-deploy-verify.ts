@@ -195,8 +195,8 @@ function fakeIo(answers: Record<string, Answer>, tips: Array<string | null> = []
 const served: Observation = { kind: 'tag', tag: SHA }
 const stale: Observation = { kind: 'tag', tag: OLD }
 const timeout = 20 * 60_000
-// Rounds start at 0, 15 s, … up to the last start before the deadline.
-const allRounds = timeout / POLL_MS
+// Rounds start at 0, 15 s, … and the final one at the deadline.
+const allRounds = timeout / POLL_MS + 1
 
 await check('every target serves the expected SHA: served at once, no wait', async () => {
   const fake = fakeIo({ [API]: served, [WEB]: served })
@@ -240,20 +240,30 @@ await check('a target that never serves it fails at the deadline, polled until t
   assert.equal(fake.probes[WEB], allRounds)
   assert.equal(
     fake.sleeps.reduce((a, b) => a + b, 0),
-    timeout - POLL_MS,
+    timeout,
   )
 })
 
-await check('no follow-up round starts at or after the deadline', async () => {
+await check('a target that serves it by the deadline is not alerted', async () => {
+  // WEB starts serving it in the last interval: only the round at the deadline sees it.
+  const fake = fakeIo({ [API]: served, [WEB]: (round) => (round < allRounds ? stale : served) })
+  const outcome = await verify(
+    { expected: SHA, targets: [API, WEB], deadline: timeout, followTip: true },
+    fake.io,
+  )
+  assert.deepEqual(outcome, { kind: 'served', rounds: allRounds })
+})
+
+await check('the last wait is cut so that the final round runs at the deadline', async () => {
   const fake = fakeIo({ [API]: stale })
   const outcome = await verify(
     { expected: SHA, targets: [API], deadline: POLL_MS + 4000, followTip: false },
     fake.io,
   )
-  // Round 2 at 15 s; a round 3 would start at 30 s, past the 19 s deadline.
+  // Rounds at 0, 15 s and 19 s, the deadline; none after it.
   assert.equal(outcome.kind, 'unserved')
-  assert.deepEqual(fake.sleeps, [POLL_MS])
-  assert.equal(fake.probes[API], 2)
+  assert.deepEqual(fake.sleeps, [POLL_MS, 4000])
+  assert.equal(fake.probes[API], 3)
 })
 
 await check('earlier alerts are looked up within one budget, then the run alerts', async () => {
@@ -264,13 +274,17 @@ await check('earlier alerts are looked up within one budget, then the run alerts
     clock += 40_000
     return candidate === 3
   }
-  // Two slow lookups use up the 60 s budget before the recorded third candidate is read.
-  assert.equal(await recordedWithin([1, 2, 3], slow, 60_000, () => clock), null)
+  const within = (candidates: number[]) => {
+    clock = 0
+    return recordedWithin(candidates, slow, 60_000, () => clock)
+  }
+  // The second lookup gets the 20 s left and ends past the budget: no third lookup.
+  assert.equal(await within([1, 2, 3]), null)
   assert.deepEqual(asked, [60_000, 20_000])
-  clock = 0
-  assert.equal(await recordedWithin([1, 3], slow, 60_000, () => clock), true)
-  clock = 0
-  assert.equal(await recordedWithin([1], slow, 60_000, () => clock), false)
+  // A record confirmed after the budget does not count either.
+  assert.equal(await within([1, 3]), null)
+  assert.equal(await within([3]), true)
+  assert.equal(await within([1]), false)
 })
 
 await check(

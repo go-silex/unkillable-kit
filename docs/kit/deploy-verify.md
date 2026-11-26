@@ -4,7 +4,7 @@ The Deploy gate moves `deploy/<branch>`; Cloudflare Workers Builds then builds a
 commit with no signal back to GitHub. A failed or stuck build leaves the previous version live while
 the gate run stays green. Deploy verify (`.github/workflows/deploy-verify.yml`,
 go-silex/unkillable-kit#215) checks from outside that every listed Worker serves the promoted commit
-and posts one Slack alert when one does not by the deadline. It is opt-in, per Product and per
+and posts a Slack alert when one does not by the deadline. It is opt-in, per Product and per
 source branch. The rest of the CD chain is in [deploy-cloudflare.md](./deploy-cloudflare.md).
 
 ## Contract
@@ -103,8 +103,8 @@ fails. It checks out that commit and runs `scripts/kit/deploy-verify.ts` from it
 - The deadline is the promotion time plus `timeoutMinutes`. The promotion time comes from the
   repository activity of `deploy/<branch>` when its last event moved it to this SHA. Otherwise,
   and with `expected_sha`, the start of the verification replaces it.
-- The first round always runs, even when the run starts after the deadline. A follow-up round
-  starts only before the deadline: the run stops when the next one would start at or after it.
+- The first round always runs, even when the run starts after the deadline. The last wait is cut
+  so that the final round samples every target at the deadline; no round starts after it.
   `timeoutMinutes` bounds that polling window; the job itself stops after 75 minutes.
 - `deploy/<branch>` moves on: the run ends as superseded, without an alert. The gate run that moved
   it starts the verification of the new SHA.
@@ -113,9 +113,9 @@ fails. It checks out that commit and runs `scripts/kit/deploy-verify.ts` from it
 
 ## Slack alert
 
-One alert per branch and SHA. It names the repository, the branch, the expected SHA and what each
-target served last, in code spans that Slack does not link, with links to the Deploy verify run
-and, when there is one, the Deploy gate run.
+Automatic runs post one alert per branch and SHA. It names the repository, the branch, the
+expected SHA and what each target served last, in code spans that Slack does not link, with links
+to the Deploy verify run and, when there is one, the Deploy gate run.
 
 - The workflow posts it with the repository secret `SLACK_FLINT_BOT_TOKEN` to the Slack channel
   whose ID is the repository variable `SLACK_CHANNEL_BUGS_ALERT`. There is no default Slack
@@ -127,8 +127,9 @@ and, when there is one, the Deploy gate run.
 - A marker counts only when a Deploy verify run started by `workflow_run` uploaded it: that run
   uses the default branch's YAML. A marker from another workflow, from a dispatch on any ref or
   from a pull request, fork included, is logged and ignored.
-- A dispatch records no marker. A pinned run reads none either: it always reports, and labels
-  its alert as a pinned check.
+- A dispatch records no marker: it posts whenever it fails, and a later dispatch or automatic run
+  for the same SHA can post again. A pinned run reads no marker either, and labels its alert as a
+  pinned check.
 - When the earlier alerts cannot be read, or the lookup takes more than 60 seconds, the run posts
   anyway: a duplicate beats a miss.
 - A missing secret or variable, or a Slack error, gives a warning; the failed run remains the
