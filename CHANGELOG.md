@@ -4,6 +4,13 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ## Unreleased
 
+### Root
+
+- Knip no longer reports CSS under App `public/` directories as unused files
+  (`ignoreFiles: ['apps/*/public/**/*.css']`). It reads only the `<script>` tags of `index.html`,
+  so a stylesheet served unchanged from `public/` and loaded by a `<link>`, for example to keep a
+  licence notice that the CSS build strips, failed the Root gate (go-silex/unkillable-kit#203).
+
 ### Bun runtime
 
 - **Product action:** The root Bun pin (`package.json#packageManager`) moves from 1.4.4 to 1.4.5,
