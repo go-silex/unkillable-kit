@@ -6,10 +6,10 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ### Root
 
-- Knip ignores CSS under App `public/` directories (`apps/*/public/**/*.css`). It reads only the
-  `<script>` tags of `index.html`, so a stylesheet served unchanged from `public/` and loaded by a
-  `<link>`, for example to keep a licence notice that the CSS build strips, failed the Root gate as
-  an unused file (go-silex/unkillable-kit#203).
+- Knip no longer reports CSS under App `public/` directories as unused files
+  (`ignoreFiles: ['apps/*/public/**/*.css']`). It reads only the `<script>` tags of `index.html`,
+  so a stylesheet served unchanged from `public/` and loaded by a `<link>`, for example to keep a
+  licence notice that the CSS build strips, failed the Root gate (go-silex/unkillable-kit#203).
 
 ## unkillable-kit/v0.9.1 — 2026-11-26
 
