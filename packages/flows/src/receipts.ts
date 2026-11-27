@@ -1,4 +1,4 @@
-import { z } from 'zod'
+import * as z from 'zod'
 
 /** App rollup (`flow_runs.status`). Not CF InstanceStatus. */
 export const FLOW_RUN_STATUSES = ['queued', 'running', 'succeeded', 'failed', 'cancelled'] as const

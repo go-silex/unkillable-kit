@@ -1,6 +1,6 @@
 /** Snapshot-only driver. Dispatch is interpret.readyTaskIds only. */
 
-import { z } from 'zod'
+import * as z from 'zod'
 import type { interpretRun } from '../interpret'
 import { emptyBundle, parseReceipts, type ReceiptBundle } from '../receipts'
 import { parseRunnerView } from '../snapshot'

@@ -2,7 +2,7 @@ import { auditEvents } from '@kit/auth/schema'
 import { AppError, takeListPage } from '@kit/core'
 import type { ListQuery } from '@kit/types'
 import { and, desc, eq, lt, or, sql } from 'drizzle-orm'
-import { z } from 'zod'
+import * as z from 'zod'
 import {
   kitNotificationDeploymentRules as deployment,
   kitNotificationOrganizationRules as organization,

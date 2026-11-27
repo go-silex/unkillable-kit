@@ -1,5 +1,5 @@
 import { AppError } from '@kit/core'
-import { z } from 'zod'
+import * as z from 'zod'
 import { notificationRowIdSchema } from '../delivery-ref'
 import { parseNotificationParams } from '../params'
 import type { Json } from '../types'

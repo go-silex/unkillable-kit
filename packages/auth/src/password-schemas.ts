@@ -1,4 +1,4 @@
-import { z } from 'zod'
+import * as z from 'zod'
 
 /** Public forgot-password request (enumeration-safe on the API). */
 export const forgotPasswordSchema = z.object({

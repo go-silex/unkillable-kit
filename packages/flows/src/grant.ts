@@ -1,4 +1,4 @@
-import { z } from 'zod'
+import * as z from 'zod'
 import type { CapabilityGrant } from './authority'
 import { MAX_ALLOWED_MODELS, MAX_MODEL_ID_CHARS, MAX_PERMIT_TOOLS } from './constants'
 

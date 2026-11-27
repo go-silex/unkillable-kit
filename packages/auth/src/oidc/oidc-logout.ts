@@ -7,7 +7,7 @@ import { createLogger } from '@kit/core'
 import { D1_IN_ARRAY_CHUNK, type KitD1Database } from '@kit/db'
 import type { DBAdapter } from 'better-auth'
 import { createAuthEndpoint } from 'better-auth/api'
-import { z } from 'zod'
+import * as z from 'zod'
 import type { KitBetterAuth } from '../better-auth-factory'
 import {
   type LogoutRow,

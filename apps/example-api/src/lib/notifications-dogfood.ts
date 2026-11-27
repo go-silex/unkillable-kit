@@ -4,7 +4,7 @@ import {
   type EmailContent,
 } from '@kit/notifications'
 import { MAX_TASK_TITLE_LEN } from '@kit/tasks'
-import { z } from 'zod'
+import * as z from 'zod'
 import { type NotificationLocale, notificationMessages } from '../messages'
 
 type Message = { email: EmailContent; slack: { text: string } }

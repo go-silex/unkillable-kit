@@ -1,5 +1,5 @@
 import { AppError } from '@kit/core'
-import { z } from 'zod'
+import * as z from 'zod'
 import { lifecycleBatch, lifecycleStatement } from './admit-sql'
 import type { Db } from './types'
 import { epochMsSchema, identitySchema, parseRepositoryInput } from './validation'

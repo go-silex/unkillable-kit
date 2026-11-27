@@ -1,4 +1,4 @@
-import type { z } from 'zod'
+import type * as z from 'zod'
 import type { NotificationDefinition, Registry, RegistryEntry } from './types'
 import { validKey } from './validation'
 

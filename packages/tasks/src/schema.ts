@@ -1,4 +1,4 @@
-import { z } from 'zod'
+import * as z from 'zod'
 import {
   MAX_ASSIGNEES,
   MAX_BOARD_KEY_LEN,

@@ -7,7 +7,7 @@ Kit MCP conventions around FastMCP: **ToolCatalogue**, public Zod shapes, agent 
 ```ts
 import { createToolCatalogue, toolRefusal, type ToolDef } from '@kit/mcp'
 import { FastMCP } from 'fastmcp'
-import { z } from 'zod'
+import * as z from 'zod'
 
 const input = z.object({ q: z.string().optional() })
 const myTool: ToolDef = {

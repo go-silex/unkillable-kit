@@ -1,4 +1,4 @@
-import type { z } from 'zod'
+import type * as z from 'zod'
 
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json }
 export type SourceRef = Readonly<{ kind: string; id: string }>

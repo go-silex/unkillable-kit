@@ -1,6 +1,6 @@
 import type { SQL } from 'drizzle-orm'
 import { SQLiteSyncDialect } from 'drizzle-orm/sqlite-core'
-import { z } from 'zod'
+import * as z from 'zod'
 import { lifecycleBatch, lifecycleStatement } from './admit-sql'
 import type { Db, ResolveInput, ResolveResult } from './types'
 import {
