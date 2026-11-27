@@ -4,6 +4,12 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ## Unreleased
 
+### UI
+
+- `@kit/ui` ships a command palette with shell-scoped sources, keyboard navigation, and
+  cancelable async search. The Example App registers navigation and notes search
+  (go-silex/unkillable-kit#201).
+
 ## unkillable-kit/v0.11.0 — 2026-11-26
 
 ### Deploy

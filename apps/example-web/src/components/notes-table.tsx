@@ -47,16 +47,18 @@ const col = createColumnHelper<ListTableFeatures, Note>()
 const NO_NOTES: Note[] = []
 
 export function NotesTable({
+  initialFilter = '',
   notes,
   onDelete,
   onCreate,
 }: {
+  initialFilter?: string
   notes: NotesQuery
   onDelete: (note: Note) => void
   onCreate: () => void
 }) {
   const { m } = useLocale()
-  const [globalFilter, setGlobalFilter] = useState('')
+  const [globalFilter, setGlobalFilter] = useState(initialFilter)
   const [bodyFilter, setBodyFilter] = useState<BodyFilter>('all')
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([])
 

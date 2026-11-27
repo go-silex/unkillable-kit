@@ -10,6 +10,7 @@ import {
   Button,
 } from '@kit/ui'
 import { useHotkey } from '@tanstack/react-hotkeys'
+import { useSearch } from '@tanstack/react-router'
 import { Plus } from 'lucide-react'
 import { useState } from 'react'
 import { toast } from 'sonner'
@@ -23,6 +24,7 @@ import { type Note, useDeleteNote, useNotes } from '../lib/notes'
 
 export function NotesPage() {
   const { m } = useLocale()
+  const { q } = useSearch({ from: '/app/notes' })
   const [open, setOpen] = useState(false)
   const [pendingDelete, setPendingDelete] = useState<Note | null>(null)
   const notes = useNotes()
@@ -45,7 +47,13 @@ export function NotesPage() {
         }
       />
 
-      <NotesTable notes={notes} onDelete={setPendingDelete} onCreate={() => setOpen(true)} />
+      <NotesTable
+        key={q}
+        notes={notes}
+        initialFilter={q}
+        onDelete={setPendingDelete}
+        onCreate={() => setOpen(true)}
+      />
 
       <NotesCreateDialog open={open} onOpenChange={setOpen} />
 

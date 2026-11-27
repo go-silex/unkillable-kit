@@ -24,14 +24,12 @@ Keep branding, shells, and release notes in the App. Share changelog code only w
 
 ## Conventions for example-web
 
-| Concern             | Pattern                                                                                                                              |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| Destructive confirm | `AlertDialog` (not `window.confirm`)                                                                                                 |
-| Lists empty         | `@kit/ui` `Empty` + `EmptyHeader` / `EmptyMedia` / `EmptyTitle`                                                                      |
-| Selects             | `@kit/ui` `Select` (Base UI) + `items` prop — not native `<select>`                                                                  |
-| Forms               | TanStack Form + Zod (`lib/schemas.ts`) + Field from ui                                                                               |
-| i18n chrome         | App catalogs (`src/messages/*`) + `LocaleSwitcher` (`locales` from `createI18n`). Hidden if one locale. Kit does not ship FR/EN copy |
-| Local D1 seed       | `bun run db:seed` after `db:migrate` — re-applies SQL only if `d1_migrations` missing                                                |
+- Destructive confirmation: `AlertDialog`, not `window.confirm`.
+- Empty lists: `Empty` with `EmptyHeader`, `EmptyMedia` and `EmptyTitle`.
+- Selects: Base UI `Select` with `items`, not native `<select>`.
+- Forms: TanStack Form, Zod (`lib/schemas.ts`) and Kit `Field`.
+- i18n: App catalogs (`src/messages/*`); `LocaleSwitcher` uses `createI18n` locales and hides for one locale.
+- Local D1 seed: `bun run db:seed` after `db:migrate`; reapplies SQL only if `d1_migrations` is missing.
 
 ## Exports
 
@@ -52,6 +50,56 @@ Set `activateOnFocus={false}` on `TabsList` for manual activation.
 | `InputGroup*`                         | pulled in by combobox                                             | Input chrome                                                                                             |
 
 Add more via `bun run --filter @kit/ui ui:add <name>`.
+
+### Command palette
+
+Mount one `CommandPalette` from `@kit/ui` in the Product shell. Its `sources` prop is
+the registration API: replacing it replaces the registered sources, and unmounting
+the palette removes them. Keep the array stable while its contents are unchanged.
+Source IDs must be unique in the palette; command IDs must be unique in their source.
+
+```tsx
+import { CommandPalette, type CommandSource } from '@kit/ui'
+
+const sources = [
+  {
+    id: 'navigation',
+    label: 'Navigation',
+    commands: [{ id: 'home', label: 'Home', keywords: ['dashboard'], href: '/' }],
+  },
+] satisfies readonly CommandSource[]
+
+<CommandPalette sources={sources} />
+```
+
+- A static `Command` has `id`, `label`, optional `keywords`, `icon` and `shortcut`
+  (display only), and either `run` or `href`. All whitespace-separated terms must
+  match the label or keywords, case-insensitively.
+- An async `CommandSource` supplies `search(query, { signal })`. It receives the
+  trimmed query (including the initial empty query), debounced by `debounceMs`
+  (default 200 ms). Honor the `AbortSignal`; changes to the query or registration
+  and closing the palette cancel obsolete work. Sources settle independently and
+  each reports loading, empty or error. Retry only reruns the failed source.
+- `open` and `onOpenChange` support a Product-owned trigger. The default
+  Cmd/Ctrl+K toggles from text fields too; pass `hotkey={false}` to opt out, or
+  pass a predicate to match a different keyboard event. `href` uses a native link;
+  an optional `onNavigate(href)` handles ordinary same-tab navigation. Modified
+  clicks keep browser behavior.
+- The modal dialog focuses a named combobox that controls a grouped listbox.
+  Up/Down stop at the ends; Home/End jump to the first/last result. Enter
+  activates the selection and Cmd/Ctrl+Enter opens a selected link in a new tab.
+  Escape closes and restores focus; source states are announced, and reduced
+  motion disables animations.
+- Override any `messages` key from `@kit/i18n`'s English palette defaults:
+  `title`, `close`, `placeholder`, `results`, `group`, `empty`, `loading`, `error`, `retry`.
+  Products also own source/command labels, keywords, and shortcut hints.
+
+A command is a UI affordance, **never authorization**. Filter commands by the
+applicable Organization Role or Platform Role; API guards still enforce access.
+Build sources inside the mounted Product shell; there is no ambient registry
+or sharing across Organizations. Remount the palette on Organization changes
+if the shell otherwise persists. `example-web` registers navigation and a
+cancelable search of the existing notes list.
 
 ### Sidebar 07 block (shadcn)
 
@@ -79,14 +127,20 @@ Installed via `bunx --bun shadcn@latest add sidebar-07` into `packages/ui`. That
 
 The Example App follows the official [v8 → v9 migration guide](https://tanstack.com/table/latest/docs/framework/react/guide/migrating) without the deprecated `useLegacyTable` bridge.
 
-| Rule                                                                                                                                                                                                                                                                                                                                     | Example App                                                                                                                                                   |
-| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Declare a module-scope `tableFeatures()` object and register every feature, row-model slot and named function the table uses                                                                                                                                                                                                             | `listTableFeatures` in `src/components/list-table.ts`: sorting, column and global filtering, `text`/`alphanumeric` sort and `includesString` filter functions |
-| Register every `filterFn` and `globalFilterFn` name a column or table option references, including the name column `filterFn: 'auto'` picks. An unregistered name warns in development only; that filter is skipped in production. Function values need no registration, and `globalFilterFn: 'auto'` uses the built-in `includesString` | `includesString` is registered for the notes title column and both tables' `globalFilterFn`; the body and status filters pass functions                       |
-| An unregistered `sortFn` name also warns in development only, then falls back: an auto `alphanumeric` choice uses a registered `text`, and anything else uses case-sensitive `basic`                                                                                                                                                     | `text` and `alphanumeric` are registered, so string columns sort case-insensitively and in natural order                                                      |
-| Keep `features`, `columns` and fallback `data` stable                                                                                                                                                                                                                                                                                    | Columns are built with `columnHelper.columns([...])` inside `useMemo`; the notes fallback is a module constant                                                |
-| Give each state slice one owner: the table, React state (with its `on<Slice>Change` whenever the table writes that slice), or an atom                                                                                                                                                                                                    | Sorting is table-owned; the search box and filter select own their filter slices                                                                              |
-| Render with `FlexRender`; iterate `row.getAllCells()` unless `columnVisibilityFeature` is registered                                                                                                                                                                                                                                     | `SortableTableHead` keeps `aria-sort` and the labelled sort button                                                                                            |
+- Declare `tableFeatures()` at module scope. `listTableFeatures` (`src/components/list-table.ts`)
+  registers sorting, column and global filters, `text`/`alphanumeric` sort and `includesString`.
+- Register named `filterFn`/`globalFilterFn` values, including the column's `'auto'` choice.
+  Unregistered names warn only in development and skip filtering. Functions need no registration;
+  `globalFilterFn: 'auto'` uses built-in `includesString`. Notes titles and both global filters
+  use the registered `includesString`; the body and status filters pass functions.
+- An unknown `sortFn` warns only in development and falls back. Auto `alphanumeric` uses a
+  registered `text`, otherwise case-sensitive `basic`. The Example App registers both string sorts.
+- Keep features, columns and fallback data stable: build `columnHelper.columns(...)` in
+  `useMemo` and use a module constant for the notes fallback.
+- Give each state slice one owner: table, React state (with `on<Slice>Change` when the table writes
+  it), or atom. The table owns sorting; search and filter inputs own their own slices.
+- Render via `FlexRender`; iterate `row.getAllCells()` unless `columnVisibilityFeature` is
+  registered. `SortableTableHead` keeps `aria-sort` and a labelled sort button.
 
 ### List data shapes
 
