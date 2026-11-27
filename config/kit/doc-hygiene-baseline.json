@@ -90,9 +90,9 @@
     "fileBytes": 175887
   },
   "docs/kit/security-dependabot.md": {
-    "overLimitLines": 28,
+    "overLimitLines": 10,
     "maxLineBytes": 732,
-    "fileBytes": 28728
+    "fileBytes": 24086
   },
   "docs/kit/standards/stack.md": {
     "overLimitLines": 50,
