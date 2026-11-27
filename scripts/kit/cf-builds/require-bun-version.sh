@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 # Sourced by install-monorepo.sh, api-deploy.sh and web-build.sh (Roxabi/roxabi-boilerplate-cf#316). package.json#packageManager
-# is the only Bun version declaration (CP-BUN-VERSION), but Workers Builds and Pages run the image's
-# own Bun — and the image's own `bun install` before the build command — unless the BUN_VERSION
-# build variable names another one (Bun has no version file the image reads). Any other Bun refuses
-# before install, migrate, deploy or build.
+# is the only Bun version declaration (CP-BUN-VERSION). Workers Builds reads that pin; Pages
+# requires the BUN_VERSION build variable. Set SKIP_DEPENDENCY_INSTALL=1 when the build
+# command installs, so this check runs before the install.
 # Usage: package_bun_version <ROOT>   prints the packageManager version, or refuses
 #        require_bun_version <ROOT>   refuses unless `bun --version` is that version
 # Run, not sourced, it checks the repository it lives in: a product project's build command is
@@ -29,8 +28,9 @@ require_bun_version() {
   echo "cf-builds: bun ${have} (package.json#packageManager bun@${want})"
   if [[ "${have}" != "${want}" ]]; then
     echo "error: refusing — bun ${have} is not package.json#packageManager bun@${want}." >&2
-    echo "  Set the build variable BUN_VERSION=${want} on this Workers Builds / Pages project: the image's" >&2
-    echo "  own pre-install ran with it too. docs/kit/deploy-cloudflare.md § Bun and Node versions." >&2
+    echo "  Workers Builds: check package.json#packageManager at the configured root and repository root." >&2
+    echo "  Pages: set the build variable BUN_VERSION=${want} on this project." >&2
+    echo "  See docs/kit/deploy-cloudflare.md § Bun and Node versions." >&2
     exit 1
   fi
 }

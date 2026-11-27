@@ -57,7 +57,7 @@ preflight_stop() {
 package_diff=$(git diff --no-textconv --no-ext-diff -U0 HEAD "$tip" -- package.json) || preflight_stop package.json
 # Read the whole pipe: grep -q can cause SIGPIPE, while large here-strings can fail on a full TMPDIR.
 if printf '%s\n' "$package_diff" | grep '^+.*"packageManager"' >/dev/null; then
-  echo "packageManager moves: set BUN_VERSION on each Workers Builds / Pages project just before this reaches its deploy/<branch> source branch (row 'Kit bumps packageManager')" >&2
+  echo "packageManager moves: Workers Builds reads the pin; for Pages only, set BUN_VERSION just before the bump reaches each project's deploy/<branch> source branch (row 'Kit bumps packageManager')" >&2
 fi
 workflow_diff=$(git diff --no-textconv --no-ext-diff -U0 HEAD "$tip" -- .github/workflows) || preflight_stop .github/workflows
 if printf '%s\n' "$workflow_diff" | grep '^+.*create-github-app-token@' >/dev/null; then

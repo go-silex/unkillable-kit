@@ -55,9 +55,9 @@
     "fileBytes": 11435
   },
   "docs/kit/deploy-cloudflare.md": {
-    "overLimitLines": 60,
+    "overLimitLines": 57,
     "maxLineBytes": 3643,
-    "fileBytes": 109951
+    "fileBytes": 107074
   },
   "docs/kit/environments.md": {
     "overLimitLines": 2,
@@ -87,7 +87,7 @@
   "docs/kit/product-consumer-contract.md": {
     "overLimitLines": 120,
     "maxLineBytes": 1657,
-    "fileBytes": 175887
+    "fileBytes": 175885
   },
   "docs/kit/security-dependabot.md": {
     "overLimitLines": 10,
@@ -107,7 +107,7 @@
   "docs/kit/testing/critical-path.md": {
     "overLimitLines": 92,
     "maxLineBytes": 3787,
-    "fileBytes": 279808
+    "fileBytes": 279806
   },
   "docs/kit/testing/ops-model.md": {
     "overLimitLines": 25,
