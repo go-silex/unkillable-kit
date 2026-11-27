@@ -65,6 +65,7 @@ export function ShellCommandPalette({
                   throw error
                 }
                 const needle = query.toLowerCase()
+                const reveal = crypto.randomUUID()
                 return response.notes
                   .filter(
                     ({ title, body }) =>
@@ -73,7 +74,7 @@ export function ShellCommandPalette({
                   .map(({ id, title }) => ({
                     id,
                     label: title,
-                    href: `/app/notes?${new URLSearchParams({ noteId: JSON.stringify(id) })}`,
+                    href: `/app/notes?${new URLSearchParams({ noteId: JSON.stringify(id), reveal })}`,
                   }))
               },
             },

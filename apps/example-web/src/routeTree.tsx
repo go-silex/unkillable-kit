@@ -155,8 +155,10 @@ const appIndexRoute = createRoute({
 const appNotesRoute = createRoute({
   getParentRoute: () => appLayoutRoute,
   path: 'notes',
-  validateSearch: (search: Record<string, unknown>): { noteId?: string } =>
-    typeof search.noteId === 'string' ? { noteId: search.noteId } : {},
+  validateSearch: (search: Record<string, unknown>): { noteId?: string; reveal?: string } => ({
+    ...(typeof search.noteId === 'string' ? { noteId: search.noteId } : {}),
+    ...(typeof search.reveal === 'string' ? { reveal: search.reveal } : {}),
+  }),
   component: NotesPage,
 })
 

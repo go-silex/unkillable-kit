@@ -1,10 +1,13 @@
+import { RouterProvider } from '@tanstack/react-router'
 import { act, fireEvent, screen } from '@testing-library/react'
 import { expect, it, vi } from 'vitest'
 import { apiFetch, HttpError } from '../lib/api'
 import { meQueryKey } from '../lib/auth'
 import { fr } from '../messages/fr'
+import { routeTree } from '../routeTree'
+import { createMe } from '../test/factories'
 import { createTestQueryClient } from '../test/query-client'
-import { renderWithAppProviders } from '../test/render'
+import { createTestRouter, renderWithAppProviders } from '../test/render'
 import { ShellCommandPalette } from './shell-command-palette'
 
 vi.mock(import('../lib/api'), async (importOriginal) => ({
@@ -32,11 +35,55 @@ it('registers navigation and cancelable notes search, and passes the result href
     signal: expect.any(AbortSignal),
   })
   const match = screen.getByRole('option', { name: 'Project kickoff' })
-  expect(match).toHaveAttribute('href', '/app/notes?noteId=%22a%22')
+  const href = match.getAttribute('href')
+  expect(href).toMatch(/^\/app\/notes\?noteId=%22a%22&reveal=[a-f0-9-]+$/)
   fireEvent.keyDown(input, { key: 'Enter' })
-  expect(navigate).toHaveBeenCalledExactlyOnceWith('/app/notes?noteId=%22a%22')
+  expect(navigate).toHaveBeenCalledExactlyOnceWith(href)
   await act(() => vi.advanceTimersByTimeAsync(32))
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+})
+
+it('reveals the same note again after filtering it out without leaving Notes', async () => {
+  const me = createMe()
+  const notes = [
+    { id: 'a', title: 'Project kickoff', body: 'Agenda', createdAt: 1 },
+    { id: 'b', title: 'Other record', body: 'Other body', createdAt: 2 },
+  ]
+  vi.mocked(apiFetch).mockImplementation(async (path) => {
+    if (path === '/api/me') return me
+    if (path === '/api/notes') return { notes }
+    throw new Error(`Unexpected request: ${path}`)
+  })
+  const queryClient = createTestQueryClient()
+  const router = createTestRouter(routeTree, '/app/notes', queryClient)
+  renderWithAppProviders(<RouterProvider router={router} />, { queryClient })
+
+  async function selectNote() {
+    fireEvent.click(await screen.findByRole('button', { name: fr.paletteTitle }))
+    fireEvent.change(screen.getByRole('combobox', { name: fr.palettePlaceholder }), {
+      target: { value: 'kickoff' },
+    })
+    fireEvent.click(await screen.findByRole('option', { name: 'Project kickoff' }))
+  }
+
+  await selectNote()
+  await screen.findByRole('row', { name: /Project kickoff/, current: true })
+  const initialHref = router.state.location.href
+  fireEvent.change(screen.getByRole('textbox', { name: fr.tableSearch }), {
+    target: { value: 'Other record' },
+  })
+  expect(screen.queryByRole('row', { name: /Project kickoff/ })).not.toBeInTheDocument()
+  expect(screen.getByRole('row', { name: /Other record/ })).toBeInTheDocument()
+
+  await selectNote()
+  expect(await screen.findByRole('row', { name: /Project kickoff/ })).toHaveAttribute(
+    'aria-current',
+    'true',
+  )
+  expect(router.state.location.pathname).toBe('/app/notes')
+  expect(router.state.location.href).not.toBe(initialHref)
+  expect(screen.getByRole('textbox', { name: fr.tableSearch })).toHaveValue('')
+  vi.mocked(apiFetch).mockReset()
 })
 
 it('does not register notes in the delegated shell', async () => {
