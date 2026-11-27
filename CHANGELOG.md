@@ -11,8 +11,9 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
   composition and the plugins on the first use of the handle it returns. Request authorization
   reads the session cookie issuer without building it, so a request that does not reach Better
   Auth no longer constructs it: in the reference composition, every route outside `/api/auth/*`.
-  Each call still builds and owns its own instance from the options it was given; nothing is
-  shared across requests (go-silex/unkillable-kit#226).
+  Each call still builds and owns its own instance from the options as they were at the call;
+  `createOidcProvider` likewise reads its login and consent pages when called. Nothing is shared
+  across requests (go-silex/unkillable-kit#226).
 - An error thrown while building the instance, by Better Auth or by the provider composition, now
   surfaces on the first use of the handle, not from `createBetterAuth`, and a route that never uses
   the instance no longer fails on it. The Kit's configuration checks (secret, trusted origins,

@@ -577,6 +577,61 @@ describe('createBetterAuth construction', () => {
     expect(requestSessionCookie(a, null).secret).toBe(SECRET)
   })
 
+  it('reads options through getters and calls the provider on its own receiver', () => {
+    class Provider implements OidcProviderConfig {
+      readonly #plugins: ReturnType<OidcProviderConfig['compose']>['plugins'] = []
+      composed = 0
+      waitUntil = vi.fn()
+      compose() {
+        this.composed += 1
+        return { plugins: this.#plugins }
+      }
+    }
+    const provider = new Provider()
+    const inherited = Object.create({
+      get secret() {
+        return SECRET
+      },
+    })
+    const options = Object.assign(inherited, {
+      database: stubD1(),
+      baseURL: 'http://localhost:8787',
+      trustedOrigins: ['http://localhost:5173'],
+      allowLoopbackOrigins: true,
+      oidcProvider: provider,
+    })
+    const auth = createBetterAuth(options) as BaAuth
+    expect(auth.options.secret).toBe(SECRET)
+    expect(provider.composed).toBe(1)
+  })
+
+  it('composes the tables from the schema map as it was at the call', async () => {
+    const queries: string[] = []
+    const statement = {
+      bind: () => statement,
+      first: async () => null,
+      run: async () => ({}),
+      all: async () => ({}),
+      raw: async <T = unknown>(): Promise<T[][]> => [[0 as T]],
+    }
+    const database = {
+      prepare: (query: string) => {
+        queries.push(query)
+        return statement
+      },
+    }
+    const table = (name: string) =>
+      sqliteTable(name, {
+        id: text('id').primaryKey(),
+        disabled: integer('disabled', { mode: 'boolean' }).notNull(),
+      }) as unknown as typeof betterAuthDrizzleSchema.user
+    const schema = { ...betterAuthDrizzleSchema, user: table('users_a') }
+    const auth = factory({ database, schema })
+    schema.user = table('users_b')
+    await auth.options.databaseHooks.session.create.before({ userId: 'user-a' })
+    expect(queries).toEqual([expect.stringContaining('"users_a"')])
+  })
+
   it('rejects configuration when called, before any use', () => {
     const { compose, oidcProvider } = counted()
     expect(() => factory({ oidcProvider, baseURL: 'not a url' })).toThrow('BETTER_AUTH_URL')

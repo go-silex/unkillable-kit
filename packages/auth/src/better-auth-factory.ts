@@ -24,12 +24,10 @@ import {
 import { BA_BASE_PATH } from './better-auth-base-path'
 import { assertAuthSecret, assertTrustedOrigins } from './better-auth-env'
 import type { BetterAuthLike } from './better-auth-port'
-import {
-  type BetterAuthTables,
-  betterAuthDrizzleSchema,
-  withBetterAuthRelations,
-} from './better-auth-schema'
+import type { BetterAuthTables } from './better-auth-schema'
 import { apiErrorOptions, authenticationLinkOrigins } from './better-auth-urls'
+import { authSchema, readCallOptions } from './construction/call-options'
+import { lazily, onFirstUse } from './construction/on-first-use'
 import { sessionCookieName } from './cookie-name'
 import { createFirstSessionAfterHook, type FirstSessionHandler } from './first-session-hook'
 import {
@@ -41,8 +39,6 @@ import {
 import { logBetterAuthEvent } from './logging/better-auth-logger'
 import { type OidcProviderConfig, providerComposition } from './oidc/oidc-config'
 import { registerLogoutD1 } from './oidc/oidc-logout-planning'
-import { withOptionalOidcSchema } from './oidc/oidc-provider-schema'
-import { lazily, onFirstUse } from './on-first-use'
 import { createKitOrganizationPlugin } from './org-plugin'
 import { createSessionAccountGuard, InactiveSessionError } from './policy/better-auth-session-guard'
 import { isAccountActive } from './repos/account-state'
@@ -104,20 +100,8 @@ function createSafeHandler(handler: (request: Request) => Response | Promise<Res
   }
 }
 
-/** Request-bound storage of one instance: built with it, never shared across factory calls. */
-function openStorage(opts: CreateBetterAuthOpts) {
-  const baseSchema =
-    !opts.schema || opts.schema === betterAuthDrizzleSchema
-      ? betterAuthDrizzleSchema
-      : withBetterAuthRelations(opts.schema)
-  const schema = withOptionalOidcSchema(baseSchema, opts.oidcProvider !== undefined)
-  // drizzle-orm/d1 names the workers `D1Database` type; the public contract is `@kit/db` `KitD1Database`.
-  return { schema, db: drizzle(opts.database as never, { schema }) }
-}
-
 export function createBetterAuth(input: CreateBetterAuthOpts): KitBetterAuth {
-  // Read at the call: the instance is built later, and the caller may reuse its options object.
-  const opts = { ...input, oidcProvider: input.oidcProvider && { ...input.oidcProvider } }
+  const opts = readCallOptions(input)
   assertAuthSecret('BETTER_AUTH_SECRET', opts.secret, {
     allowKitPlaceholder: opts.allowKitPlaceholderSecret,
   })
@@ -139,9 +123,11 @@ export function createBetterAuth(input: CreateBetterAuthOpts): KitBetterAuth {
   }
   const google = opts.google !== undefined
   const onAPIError = apiErrorOptions(google, trustedOrigins, opts.googleErrorURL)
-  const store = lazily(() => openStorage(opts))
+  const schema = authSchema(opts)
+  // drizzle-orm/d1 names the workers `D1Database` type; the public contract is `@kit/db` `KitD1Database`.
+  const store = lazily(() => drizzle(opts.database as never, { schema }))
   const googleOptions = googleConfiguration(opts.google, async (id) => {
-    const { db, schema } = store()
+    const db = store()
     const [existing] = await db
       .select({ email: schema.user.email })
       .from(schema.user)
@@ -152,7 +138,7 @@ export function createBetterAuth(input: CreateBetterAuthOpts): KitBetterAuth {
     return existing && { email: existing.email, active }
   })
   const auth = onFirstUse((): KitBetterAuth => {
-    const { db, schema } = store()
+    const db = store()
     const provider = providerComposition(
       opts.oidcProvider,
       (id) => isAccountActive(db, id, schema.user),

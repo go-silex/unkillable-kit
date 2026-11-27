@@ -38,10 +38,12 @@ function hasSafeOidcResponseQuery(uri: string) {
 
 /** Separate entry point keeps the provider peer out of the default factory import. */
 export function createOidcProvider(options: OidcProviderOptions): OidcProviderConfig {
+  // Read when created: the factory composes the provider later, on the first use of its handle.
+  const { loginPage, consentPage = loginPage } = options
   return {
     waitUntil: options.waitUntil,
     compose: (isActive, database) => {
-      const freshness = createOidcFreshLoginPolicy(database, options.loginPage)
+      const freshness = createOidcFreshLoginPolicy(database, loginPage)
       const userInfoScopes = defineRequestState<string[] | undefined>(() => undefined)
       const assertActive = async (userId: string) => {
         let active = false
@@ -126,8 +128,8 @@ export function createOidcProvider(options: OidcProviderOptions): OidcProviderCo
         jwt({ jwks: { keyPairConfig: { alg: 'RS256' } }, disableSettingJwtHeader: true }),
         withOidcPromptPolicy(
           oauthProvider({
-            loginPage: options.loginPage,
-            consentPage: options.consentPage ?? options.loginPage,
+            loginPage,
+            consentPage,
             scopes: ['openid', 'email', 'profile'],
             grantTypes: ['authorization_code'],
             allowDynamicClientRegistration: false,
