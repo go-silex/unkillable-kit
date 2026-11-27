@@ -76,31 +76,31 @@ GitHub docs: `cooldown` applies **only** to version updates, not security update
 
 ### Grouped Bun updates that omit empty `trustedDependencies`
 
-The next two grouped Bun updates after go-silex/unkillable-kit#130,
-go-silex/unkillable-kit#163 and go-silex/unkillable-kit#190, omitted
+Grouped PRs go-silex/unkillable-kit#163 and go-silex/unkillable-kit#190 again omitted
 `"trustedDependencies": []` from `bun.lock` (go-silex/unkillable-kit#134).
-`lock-ranges:check` failed because an ordinary install with the Kit's Bun rewrote the lock.
-Keep that check and the manifest's empty trust list unchanged.
+`lock-ranges:check` correctly failed: an ordinary install rewrote the lock.
 
-The [Dependabot Bun updater image](https://github.com/dependabot/dependabot-core/blob/main/bun/Dockerfile)
-pinned Bun 1.4.2 when checked, below the Kit's 1.4.5. In isolated copies of the Kit,
-`bun install --lockfile-only` with 1.4.2 dropped the empty entry; 1.4.5 kept it and restored
-it when missing. Repository Dependabot configuration cannot select the updater's Bun.
-Expect the omission to recur until the updater ships a Bun that writes the entry.
+The [Dependabot image](https://github.com/dependabot/dependabot-core/blob/main/bun/Dockerfile)
+pinned Bun 1.4.2 when checked. In isolated copies, `bun install --lockfile-only` with
+1.4.2 dropped the entry; the Kit's 1.4.5 kept and restored it. No repository setting selects
+the updater's Bun. Expect recurrence until the updater ships a Bun that writes the entry.
 
-Procedure for a grouped PR with this omission (set `PR_NUMBER` to the PR number):
+Before repair, confirm [explicit withdrawal](./ci-app-setup.md#reviewed-head-authorization)
+of any live grant. Set `PR_NUMBER` and run:
 
 ```bash
 gh pr checkout "${PR_NUMBER:?Set PR_NUMBER}" &&
-  bun run bun-version:check &&
+  actual=$(bun --version) && pin=$(jq -er .packageManager package.json) &&
+  [ "bun@$actual" = "$pin" ] &&
   bun install &&
   git commit --only -m "chore(deps): regenerate Bun lockfile" -- bun.lock &&
   git push
 ```
 
-Commit only `bun.lock`. The maintainer commit makes the PR ineligible for Dependabot admission
-(`FOREIGN_COMMIT`). Obtain current-head proof and independent-agent review of the **full** lock
-diff, not just the restored line, then use normal authorized landing. Never add `reviewed` directly.
+The maintainer commit triggers `FOREIGN_COMMIT`. Obtain current-head proof and independent
+review of the **full** lock diff. For example, go-silex/unkillable-kit#190 also lost
+the `hasInstallScript` flag for `wrangler/workerd`; regeneration should restore it.
+Then obtain fresh admission through normal authorized landing; never add `reviewed` directly.
 
 ## Automatic authorization
 
