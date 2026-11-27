@@ -647,6 +647,54 @@ describe('hosted worker routing', () => {
     expect(await names([warm])).toEqual(['third'])
   })
 
+  it('selects the identity port and apiBaseUrl of a cold authorization request on arrival', async () => {
+    const kv = new MemoryKv()
+    const clientId = await productClient(kv)
+    const bases: string[] = []
+    const options: Opts = {
+      name: 'hosted-test',
+      apiBaseUrl: () => 'http://first.test',
+      identityPort: {
+        resolve: async ({ apiBaseUrl }) => {
+          bases.push(apiBaseUrl)
+          return DEMO
+        },
+      },
+      register() {},
+    }
+    const hosted = createHostedMcpWorker<HostedMcpEnv>(options)
+    const pending = hosted.fetch(new Request(await authorizeUrl(clientId)), env(kv), ctx())
+    options.apiBaseUrl = () => 'http://second.test'
+    options.identityPort = port(new Response('replaced', { status: 418 }))
+    expect((await pending).status).toBe(200)
+    expect(bases).toEqual(['http://first.test'])
+  })
+
+  it('decides client registration on the Worker env itself, inherited bindings included', async () => {
+    const hosted = worker({ identityPort: port(DEMO) })
+    const deployed: HostedMcpEnv = Object.assign(
+      Object.create({ ENVIRONMENT: 'production' }),
+      env(new MemoryKv(), { MCP_PUBLIC_URL: LOCAL }),
+    )
+    const metadata = await hosted.fetch(
+      new Request(`${LOCAL}/.well-known/oauth-authorization-server`),
+      deployed,
+      ctx(),
+    )
+    expect(metadata.status).toBe(200)
+    expect(await metadata.json()).not.toHaveProperty('registration_endpoint')
+    const register = await hosted.fetch(
+      new Request(`${LOCAL}/register`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ redirect_uris: [REDIRECT], token_endpoint_auth_method: 'none' }),
+      }),
+      deployed,
+      ctx(),
+    )
+    expect(register.status).toBe(403)
+  })
+
   it('gives the identity port and apiBaseUrl an env without the oauth helper', async () => {
     const kv = new MemoryKv()
     const helper: boolean[] = []

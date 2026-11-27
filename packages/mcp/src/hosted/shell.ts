@@ -10,7 +10,6 @@ import { type ConsentPolicy, type HostedMcpEnv, identityPortFor, stripOauthHelpe
 import {
   ACCESS_TOKEN_TTL_SECONDS,
   AUTHORIZE_PATH,
-  allowDynamicClientRegistration,
   MCP_PATH,
   MCP_SCOPE,
   REGISTER_PATH,
@@ -29,12 +28,23 @@ type HostedShellSettings<Env extends HostedMcpEnv, AppEnv extends { Bindings: En
   consentPresentation: ResolvedConsentPresentation | undefined
 }
 
-/** What the router read when the request arrived, before loading the shell. */
-type ShellArrival = { origin: string; name: string; refreshTokenTTL: number | undefined }
+/**
+ * What an eagerly built provider read when its request arrived, before any await: the router
+ * reads it before loading the shell. Registration is decided on the Worker's own env.
+ */
+type ShellArrival<Env extends HostedMcpEnv> = Pick<
+  HostedMcpWorkerOptions<Env>,
+  'name' | 'identityPort' | 'apiBaseUrl'
+> & { origin: string; registration: boolean; refreshTokenTTL: number | undefined }
 
 /** Serves one request on a reserved path of the pinned origin, with a per-request env copy. */
 export type HostedShell<Env extends HostedMcpEnv> = {
-  fetch(request: Request, env: Env, ctx: ExecutionContext, arrival: ShellArrival): Promise<Response>
+  fetch(
+    request: Request,
+    env: Env,
+    ctx: ExecutionContext,
+    arrival: ShellArrival<Env>,
+  ): Promise<Response>
 }
 
 const REGISTER_DENIED = JSON.stringify({ error: 'access_denied' })
@@ -172,16 +182,16 @@ export function createHostedShell<Env extends HostedMcpEnv, AppEnv extends { Bin
   }
 
   // Only reserved paths reach the provider, so whatever it does not answer itself stays here.
-  const defaultHandler = {
+  const defaultHandlerFor = ({ identityPort, apiBaseUrl }: ShellArrival<Env>) => ({
     fetch(request: Request, env: Env) {
       const path = new URL(request.url).pathname
       if (path === AUTHORIZE_PATH) {
         if (!hasProviderHelper(env)) return new Response('OAuth helper missing', { status: 500 })
         const callerEnv = stripOauthHelper(env)
         return handleAuthorize(request, env, {
-          identityPort: identityPortFor(opts.identityPort, callerEnv),
+          identityPort: identityPortFor(identityPort, callerEnv),
           accountAdmission: (userId) => accountAdmissionResponse(userId, callerEnv),
-          apiBaseUrl: opts.apiBaseUrl(callerEnv, request),
+          apiBaseUrl: apiBaseUrl(callerEnv, request),
           consent,
           ...(consentPresentation ? { consentPresentation } : {}),
         })
@@ -194,19 +204,19 @@ export function createHostedShell<Env extends HostedMcpEnv, AppEnv extends { Bin
       }
       return new Response('Not found', { status: 404 })
     },
-  }
+  })
 
   return {
-    fetch(request, env, ctx, { origin, name, refreshTokenTTL }) {
+    fetch(request, env, ctx, arrival) {
+      const { origin, registration, refreshTokenTTL } = arrival
       const url = new URL(request.url)
-      const dcr = allowDynamicClientRegistration(env, url)
       const provider = new OAuthProvider<Env>({
         apiRoute: MCP_PATH,
         apiHandler,
-        defaultHandler,
+        defaultHandler: defaultHandlerFor(arrival),
         authorizeEndpoint: AUTHORIZE_PATH,
         tokenEndpoint: TOKEN_PATH,
-        ...(dcr ? { clientRegistrationEndpoint: REGISTER_PATH } : {}),
+        ...(registration ? { clientRegistrationEndpoint: REGISTER_PATH } : {}),
         accessTokenTTL: ACCESS_TOKEN_TTL_SECONDS,
         ...(refreshTokenTTL !== undefined ? { refreshTokenTTL } : {}),
         // Custom-scheme apps stay a consent-page redirect class (ADR-0015 D5); remote http never is.
@@ -219,7 +229,7 @@ export function createHostedShell<Env extends HostedMcpEnv, AppEnv extends { Bin
         resourceMetadata: {
           resource: `${origin}${MCP_PATH}`,
           ...(url.protocol === 'https:' ? { authorization_servers: [origin] } : {}),
-          resource_name: name,
+          resource_name: arrival.name,
         },
       })
       // The library sets env.OAUTH_PROVIDER only when absent. The router's per-request copy

@@ -9,7 +9,7 @@ import {
   type IdentitySource,
   stripOauthHelper,
 } from './env'
-import { isReservedPath, mcpPublicOrigin } from './host-policy'
+import { allowDynamicClientRegistration, isReservedPath, mcpPublicOrigin } from './host-policy'
 import { snapshotPresentation } from './presentation'
 import type { HostedShell } from './shell'
 import type { GrantAdmission } from './token-admission'
@@ -98,11 +98,15 @@ export function createHostedMcpWorker<
       // The provider is built for the configured origin only. Any other origin a request names
       // (cleartext, a preview host, a forged Host) has no shell.
       if (pinned.origin !== url.origin) return new Response('Not found', { status: 404 })
-      // Taken on arrival, as when the provider was built before any await: the import yields.
+      // Read on arrival, as when the provider was built before any await: the import yields.
+      // Registration is decided on this env; a copy drops inherited and non-enumerable bindings.
       const arrival = {
         origin: pinned.origin,
+        registration: allowDynamicClientRegistration(env, url),
         name: opts.name,
         refreshTokenTTL: opts.refreshTokenTTL,
+        identityPort: opts.identityPort,
+        apiBaseUrl: opts.apiBaseUrl,
       }
       const requestEnv = { ...env }
       if (!shell) {
