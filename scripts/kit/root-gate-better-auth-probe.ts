@@ -5,6 +5,7 @@ import { createRequire } from 'node:module'
 import { isAbsolute, join, parse, relative, resolve, sep } from 'node:path'
 import type { BetterAuthApp } from './root-gate-better-auth-apps'
 import { type BundleInputs, bundleWorker } from './root-gate-better-auth-build.ts'
+import { isBetterAuthServerSpecifier } from './root-gate-better-auth-entries.ts'
 import { inspectStagedModules, inspectWranglerInputs } from './root-gate-better-auth-inventory.ts'
 import type { WorkerTarget } from './root-gate-better-auth-worker'
 
@@ -182,7 +183,7 @@ function verifyBetterAuthResolution(probe: MountedProbe, inputs: BundleInputs, e
           file && isBelow(betterAuthRoot, file),
           `Wrangler build resolved ${specifier} outside the installed Better Auth package`,
         )
-        foundServer ||= specifier === 'better-auth'
+        foundServer ||= isBetterAuthServerSpecifier(specifier)
       } else if (file && isBelow(kitRoot, file)) {
         pending.add(entry.path)
       }

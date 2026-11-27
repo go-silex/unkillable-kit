@@ -655,9 +655,11 @@ export function fetch(req, env) {
   )
   put(
     `${app}/wrangler.toml`,
-    `${workerConfig}\n[alias]\n"better-auth" = "./src/configured-better-auth.ts"\n`,
+    `${workerConfig}\n[alias]\n"better-auth/minimal" = "./src/configured-better-auth.ts"\n`,
   )
-  await core(/Wrangler build resolved better-auth outside the installed Better Auth package/)
+  await core(
+    /Wrangler build resolved better-auth\/minimal outside the installed Better Auth package/,
+  )
 }
 
 async function resolutionScenarios({ root, put, json, core, alternateIssuerPackage }: Workspace) {

@@ -1,5 +1,5 @@
-import type * as BetterAuth from 'better-auth'
 import type * as BetterAuthApi from 'better-auth/api'
+import type * as BetterAuth from 'better-auth/minimal'
 import { drizzle } from 'drizzle-orm/d1'
 import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
 import { describe, expect, it, vi } from 'vitest'
@@ -9,7 +9,7 @@ import { createSessionAccountGuard, InactiveSessionError } from './better-auth-s
 
 const { getSession } = vi.hoisted(() => ({ getSession: vi.fn() }))
 
-vi.mock('better-auth', async (importOriginal) => ({
+vi.mock('better-auth/minimal', async (importOriginal) => ({
   ...(await importOriginal<typeof BetterAuth>()),
   betterAuth: () => ({ api: { getSession }, handler: vi.fn(), fetch: vi.fn() }),
 }))
