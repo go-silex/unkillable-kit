@@ -107,16 +107,16 @@
     "openapi:check": "bun run scripts/kit/gen-openapi.ts --check"
   },
   "devDependencies": {
-    "@actions/expressions": "0.3.61",
-    "@biomejs/biome": "2.6.8",
+    "@actions/expressions": "0.3.62",
+    "@biomejs/biome": "2.6.9",
     "@commitlint/cli": "^21.2.4",
     "@commitlint/config-conventional": "^21.2.4",
     "@types/bun": "^1.4.5",
     "@types/node": "^26.6.6",
     "@vitest/coverage-v8": "5.1.1",
-    "knip": "^6.47.0",
+    "knip": "^6.48.0",
     "lefthook": "^2.2.2",
-    "oxc-parser": "0.159.0",
+    "oxc-parser": "0.160.0",
     "turbo": "^2.11.13",
     "typescript": "^7.0.2"
   },
