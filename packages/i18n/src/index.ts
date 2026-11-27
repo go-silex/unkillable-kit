@@ -5,6 +5,8 @@
  * Locale policy = `catalogs` keys. One key → no switcher (`hasLocaleSwitcher`).
  */
 
+export { type CommandPaletteMessages, commandPaletteMessages } from './command-palette'
+
 export type LocaleCatalogs<L extends string, M> = Record<L, M>
 
 export type I18nEngine<L extends string, M> = {

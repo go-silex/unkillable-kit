@@ -1,3 +1,8 @@
+export {
+  CommandPalette,
+  type CommandPaletteProps,
+} from './components/command-palette/command-palette'
+export type { Command, CommandSource } from './components/command-palette/sources'
 /** sidebar-07 primitives. Acme sample chrome is not kit API (M-07). */
 export { NavUser, type NavUserData } from './components/nav-user'
 export * from './components/ui/alert'

@@ -46,11 +46,16 @@ const col = createColumnHelper<ListTableFeatures, Note>()
 /** Stable fallback: a fresh `[]` on every render would invalidate the table's row models. */
 const NO_NOTES: Note[] = []
 
+const revealSelectedNote = (row: HTMLTableRowElement | null) =>
+  row?.scrollIntoView?.({ block: 'nearest' })
+
 export function NotesTable({
+  selectedNoteId,
   notes,
   onDelete,
   onCreate,
 }: {
+  selectedNoteId?: string
   notes: NotesQuery
   onDelete: (note: Note) => void
   onCreate: () => void
@@ -242,15 +247,23 @@ export function NotesTable({
               ))}
             </TableHeader>
             <TableBody>
-              {rows.map((row) => (
-                <TableRow key={row.id}>
-                  {row.getAllCells().map((cell) => (
-                    <TableCell key={cell.id}>
-                      <FlexRender cell={cell} />
-                    </TableCell>
-                  ))}
-                </TableRow>
-              ))}
+              {rows.map((row) => {
+                const selected = row.original.id === selectedNoteId
+                return (
+                  <TableRow
+                    key={row.id}
+                    ref={selected ? revealSelectedNote : undefined}
+                    aria-current={selected || undefined}
+                    data-state={selected ? 'selected' : undefined}
+                  >
+                    {row.getAllCells().map((cell) => (
+                      <TableCell key={cell.id}>
+                        <FlexRender cell={cell} />
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                )
+              })}
             </TableBody>
           </Table>
         )}

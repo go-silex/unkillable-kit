@@ -11,16 +11,23 @@ function note(id: string, title: string, body: string): Note {
   return { id, title, body, createdAt: Number(id.slice(1)) }
 }
 
-function LoadedNotesTable({ notes }: { notes: Note[] }) {
+function LoadedNotesTable({ notes, selectedNoteId }: { notes: Note[]; selectedNoteId?: string }) {
   const query = useQuery({
     queryKey: ['notes-table-test'],
     queryFn: () => Promise.resolve({ notes }),
   })
-  return <NotesTable notes={query} onDelete={vi.fn()} onCreate={vi.fn()} />
+  return (
+    <NotesTable
+      notes={query}
+      selectedNoteId={selectedNoteId}
+      onDelete={vi.fn()}
+      onCreate={vi.fn()}
+    />
+  )
 }
 
-async function renderTable(notes: Note[]) {
-  renderWithAppProviders(<LoadedNotesTable notes={notes} />)
+async function renderTable(notes: Note[], selectedNoteId?: string) {
+  renderWithAppProviders(<LoadedNotesTable notes={notes} selectedNoteId={selectedNoteId} />)
   await screen.findByRole('table')
 }
 
@@ -39,6 +46,17 @@ beforeEach(() => {
 })
 
 describe('NotesTable on TanStack Table v9', () => {
+  it('highlights only the selected note when titles are identical', async () => {
+    await renderTable(
+      [note('n1', 'Same title', 'First note'), note('n2', 'Same title', 'Second note')],
+      'n2',
+    )
+    expect(screen.getByRole('row', { name: /First note/ })).not.toHaveAttribute('aria-current')
+    const selectedRow = screen.getByRole('row', { name: /Second note/ })
+    expect(selectedRow).toHaveAttribute('aria-current', 'true')
+    expect(selectedRow).toHaveAttribute('data-state', 'selected')
+  })
+
   it('cycles title sort none → asc → desc → none in case-insensitive order', async () => {
     const user = userEvent.setup()
     await renderTable([

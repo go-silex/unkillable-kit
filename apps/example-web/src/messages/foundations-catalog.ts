@@ -8,6 +8,14 @@ export type FoundationsMessages = {
   dsTabsSecond: string
   dsTabsFirstPanel: string
   dsTabsSecondPanel: string
+  paletteTitle: string
+  paletteClose: string
+  palettePlaceholder: string
+  paletteResults: string
+  paletteGroup: string
+  paletteEmpty: string
+  paletteOneResult: string
+  paletteManyResults: string
 }
 
 export const foundationsEn: FoundationsMessages = {
@@ -20,6 +28,14 @@ export const foundationsEn: FoundationsMessages = {
   dsTabsSecond: 'Second',
   dsTabsFirstPanel: 'Content of the first panel.',
   dsTabsSecondPanel: 'Content of the second panel.',
+  paletteTitle: 'Command palette',
+  paletteClose: 'Close command palette',
+  palettePlaceholder: 'Search commands…',
+  paletteResults: 'Results',
+  paletteGroup: 'Commands',
+  paletteEmpty: 'No results',
+  paletteOneResult: '1 result',
+  paletteManyResults: '{count} results',
 }
 
 export const foundationsFr: FoundationsMessages = {
@@ -32,4 +48,12 @@ export const foundationsFr: FoundationsMessages = {
   dsTabsSecond: 'Second',
   dsTabsFirstPanel: 'Contenu du premier panneau.',
   dsTabsSecondPanel: 'Contenu du second panneau.',
+  paletteTitle: 'Palette de commandes',
+  paletteClose: 'Fermer la palette de commandes',
+  palettePlaceholder: 'Chercher une commande…',
+  paletteResults: 'Résultats',
+  paletteGroup: 'Commandes',
+  paletteEmpty: 'Aucun résultat',
+  paletteOneResult: '1 résultat',
+  paletteManyResults: '{count} résultats',
 }
