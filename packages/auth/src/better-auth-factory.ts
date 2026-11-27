@@ -3,9 +3,10 @@
  * Products import this — they do not copy `example-api/src/lib/better-auth.ts`.
  */
 import type { KitD1Database } from '@kit/db'
-import { betterAuth } from 'better-auth'
 import { drizzleAdapter } from 'better-auth/adapters/drizzle'
 import { APIError, isAPIError } from 'better-auth/api'
+// The minimal initializer leaves out Kysely and its migration runner; the factory supplies Drizzle.
+import { betterAuth } from 'better-auth/minimal'
 import { magicLink } from 'better-auth/plugins'
 import { eq } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/d1'

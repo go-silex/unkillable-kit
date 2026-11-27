@@ -85,8 +85,8 @@ Refresh tokens, if issued, renew the same revocable grant.
 Only `mcp` is granted; plain PKCE, implicit flow and token exchange are off.
 Errors redirected to a client wait for identity authentication (RFC 9700
 §4.11.2). Implementation and token lifetime options:
-`packages/mcp/src/hosted/create-worker.ts`, `packages/mcp/src/hosted/authorize.ts`
-and `packages/mcp/README.md`.
+`packages/mcp/src/hosted/create-worker.ts`, `packages/mcp/src/hosted/shell.ts`,
+`packages/mcp/src/hosted/authorize.ts` and `packages/mcp/README.md`.
 
 The optional `grantAdmission` predicate is deny-only and receives a
 provider-verified grant tuple. It cannot mint or alter identity, scope, audience,
@@ -98,7 +98,7 @@ A refusal on exchange revokes the grant; a refusal on `/mcp` does not.
 An undecidable predicate must throw rather than return `false`, so unavailability
 blocks without being mistaken for invalid credentials or revoking the grant.
 A client whose grant is revoked must authorize again. Implementation and exercised outcomes:
-`packages/mcp/src/hosted/create-worker.ts` and
+`packages/mcp/src/hosted/shell.ts`, `packages/mcp/src/hosted/token-admission.ts` and
 `packages/mcp/src/hosted/grant-admission.test.ts`.
 
 **Non-claims.** Admission is not atomic with issuance. A request or exchange

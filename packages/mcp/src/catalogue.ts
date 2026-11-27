@@ -1,4 +1,4 @@
-import type { z } from 'zod'
+import type * as z from 'zod'
 import { checkInputBudget } from './budget'
 import { PublicToolError, stableJsonWire, toPublicToolError } from './publicErrors'
 

@@ -533,6 +533,71 @@ describe('hosted worker routing', () => {
     expect(seen).toEqual([])
   })
 
+  it('answers preflight and method checks on the shell endpoints, and leaves product preflight to the hook', async () => {
+    const kv = new MemoryKv()
+    const hosted = worker({
+      identityPort: port(DEMO),
+      fallthrough: (request) => new Response(`hook ${request.method}`),
+    })
+    const client = 'https://client.example'
+    const send = (origin: string, path: string, method: string) =>
+      hosted.fetch(
+        new Request(`${origin}${path}`, {
+          method,
+          headers: {
+            origin: client,
+            'access-control-request-method': 'POST',
+            'access-control-request-headers': 'authorization, content-type',
+          },
+        }),
+        envFor(kv, origin),
+        ctx(),
+      )
+    const cors = (res: Response) =>
+      [
+        'access-control-allow-origin',
+        'access-control-allow-methods',
+        'access-control-allow-headers',
+        'access-control-max-age',
+      ].map((name) => res.headers.get(name))
+    const PROVIDER_CORS = [client, '*', 'Authorization, *', '86400']
+    for (const origin of [LOCAL, PUBLIC]) {
+      for (const path of [
+        '/mcp',
+        '/mcp/sub',
+        '/token',
+        '/.well-known/oauth-authorization-server',
+        '/.well-known/oauth-protected-resource/mcp',
+        '/.well-known/oauth-protected-resource',
+        ...(origin === LOCAL ? ['/register'] : []),
+      ]) {
+        const res = await send(origin, path, 'OPTIONS')
+        expect(res.status, `${origin}${path}`).toBe(204)
+        expect(cors(res), `${origin}${path}`).toEqual(PROVIDER_CORS)
+      }
+      const authorize = await send(origin, '/authorize', 'OPTIONS')
+      expect([authorize.status, authorize.headers.get('allow')]).toEqual([405, 'GET, POST'])
+      expect(cors(authorize)).toEqual([null, null, null, null])
+      const token = await send(origin, '/token', 'GET')
+      expect([token.status, token.headers.get('allow')]).toEqual([405, 'POST, OPTIONS'])
+      expect(cors(token)).toEqual(PROVIDER_CORS)
+      for (const path of [
+        '/.well-known/oauth-authorization-server',
+        '/.well-known/oauth-protected-resource/mcp',
+      ]) {
+        const res = await send(origin, path, 'POST')
+        expect([res.status, res.headers.get('allow')], path).toEqual([405, 'GET, HEAD, OPTIONS'])
+      }
+      const product = await send(origin, '/api/projects', 'OPTIONS')
+      expect(await product.text()).toBe('hook OPTIONS')
+      expect(cors(product)).toEqual([null, null, null, null])
+    }
+    // Closed registration refuses before any preflight answer.
+    const closed = await send(PUBLIC, '/register', 'OPTIONS')
+    expect(closed.status).toBe(403)
+    expect(cors(closed)).toEqual([null, null, null, null])
+  })
+
   it('strips the oauth helper from the fallthrough env', async () => {
     const kv = new MemoryKv()
     let helperPresent = true
@@ -543,8 +608,94 @@ describe('hosted worker routing', () => {
         return new Response('ok')
       },
     })
-    await hosted.fetch(new Request(`${LOCAL}/health`), env(kv), ctx())
+    // A helper already on the Worker env must not reach the hook, nor be removed from that env.
+    const deployed = { ...env(kv), OAUTH_PROVIDER: {} }
+    await hosted.fetch(new Request(`${LOCAL}/health`), deployed, ctx())
     expect(helperPresent).toBe(false)
+    expect(deployed.OAUTH_PROVIDER).toEqual({})
+  })
+
+  it('builds each provider from the options read when its request arrives, loaded or not', async () => {
+    const options = {
+      name: 'first',
+      apiBaseUrl: () => 'http://127.0.0.1:8787',
+      identityPort: port(DEMO),
+      register() {},
+    }
+    const hosted = createHostedMcpWorker<HostedMcpEnv>(options)
+    const metadata = () =>
+      hosted.fetch(
+        new Request(`${LOCAL}/.well-known/oauth-protected-resource/mcp`),
+        env(new MemoryKv()),
+        ctx(),
+      )
+    const names = (pending: Promise<Response>[]) =>
+      Promise.all(
+        pending.map(
+          async (response) =>
+            ((await (await response).json()) as { resource_name: string }).resource_name,
+        ),
+      )
+    // Two concurrent first requests, while the shell loads, keep the name each arrived with.
+    const cold = [metadata()]
+    options.name = 'second'
+    cold.push(metadata())
+    options.name = 'third'
+    expect(await names(cold)).toEqual(['first', 'second'])
+    const warm = metadata()
+    options.name = 'fourth'
+    expect(await names([warm])).toEqual(['third'])
+  })
+
+  it('selects the identity port and apiBaseUrl of a cold authorization request on arrival', async () => {
+    const kv = new MemoryKv()
+    const clientId = await productClient(kv)
+    const bases: string[] = []
+    const options: Opts = {
+      name: 'hosted-test',
+      // A method, as Products may write it: called on the options, as before the lazy shell.
+      apiBaseUrl() {
+        return `http://${this.name}.test`
+      },
+      identityPort: {
+        resolve: async ({ apiBaseUrl }) => {
+          bases.push(apiBaseUrl)
+          return DEMO
+        },
+      },
+      register() {},
+    }
+    const hosted = createHostedMcpWorker<HostedMcpEnv>(options)
+    const pending = hosted.fetch(new Request(await authorizeUrl(clientId)), env(kv), ctx())
+    options.apiBaseUrl = () => 'http://second.test'
+    options.identityPort = port(new Response('replaced', { status: 418 }))
+    expect((await pending).status).toBe(200)
+    expect(bases).toEqual(['http://hosted-test.test'])
+  })
+
+  it('decides client registration on the Worker env itself, inherited bindings included', async () => {
+    const hosted = worker({ identityPort: port(DEMO) })
+    const deployed: HostedMcpEnv = Object.assign(
+      Object.create({ ENVIRONMENT: 'production' }),
+      env(new MemoryKv(), { MCP_PUBLIC_URL: LOCAL }),
+    )
+    const metadata = await hosted.fetch(
+      new Request(`${LOCAL}/.well-known/oauth-authorization-server`),
+      deployed,
+      ctx(),
+    )
+    expect(metadata.status).toBe(200)
+    expect(await metadata.json()).not.toHaveProperty('registration_endpoint')
+    const register = await hosted.fetch(
+      new Request(`${LOCAL}/register`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ redirect_uris: [REDIRECT], token_endpoint_auth_method: 'none' }),
+      }),
+      deployed,
+      ctx(),
+    )
+    expect(register.status).toBe(403)
   })
 
   it('gives the identity port and apiBaseUrl an env without the oauth helper', async () => {

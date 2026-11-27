@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm'
 import { describe, expect, it, vi } from 'vitest'
-import { z } from 'zod'
+import * as z from 'zod'
 import { flowRuns } from './db/schema'
 import {
   createFlowApprovalNotificationPorts,

@@ -7,7 +7,7 @@ Kit MCP conventions around FastMCP: **ToolCatalogue**, public Zod shapes, agent 
 ```ts
 import { createToolCatalogue, toolRefusal, type ToolDef } from '@kit/mcp'
 import { FastMCP } from 'fastmcp'
-import { z } from 'zod'
+import * as z from 'zod'
 
 const input = z.object({ q: z.string().optional() })
 const myTool: ToolDef = {
@@ -66,7 +66,7 @@ Import budgets, env key names, whoami status enum, and public error codes from `
 
 ## Hosted shell
 
-`@kit/mcp/hosted` is the optional Worker authorization-server shell ([ADR-0015](../../docs/kit/architecture/adr/0015-mcp-remote-oauth-worker.md) D8). Its only exports are `createHostedMcpWorker`, `createProductClient`, `HostedMcpWorker`, `HostedMcpWorkerOptions`, `ConsentPolicy`, `ConsentPresentation`, `Fallthrough`, `HostedMcpEnv`, `IdentitySource`, and `ACCESS_TOKEN_TTL_SECONDS`. Declare `@cloudflare/workers-oauth-provider` and `fastmcp` in the App that imports this subpath. Root `@kit/mcp` loads neither peer.
+`@kit/mcp/hosted` is the optional Worker authorization-server shell ([ADR-0015](../../docs/kit/architecture/adr/0015-mcp-remote-oauth-worker.md) D8). Its only exports are `createHostedMcpWorker`, `createProductClient`, `HostedMcpWorker`, `HostedMcpWorkerOptions`, `ConsentPolicy`, `ConsentPresentation`, `Fallthrough`, `HostedMcpEnv`, `IdentitySource`, and `ACCESS_TOKEN_TTL_SECONDS`. Declare `@cloudflare/workers-oauth-provider` and `fastmcp` in the App that imports this subpath. Neither root `@kit/mcp` nor `@kit/mcp/hosted` loads either peer at import: the shell module, with the provider, the FastMCP Edge server and the consent page, is evaluated on the first request to a reserved path of the pinned origin, and the provider is still built per request. Product routes reach `fallthrough` without evaluating it. A bundling deploy still uploads that code; only its evaluation leaves startup.
 
 ```ts
 import { createHostedMcpWorker } from '@kit/mcp/hosted'

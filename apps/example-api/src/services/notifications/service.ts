@@ -15,7 +15,7 @@ import type {
   ResolveInput,
   ResolveResult,
 } from '@kit/notifications/repos'
-import { z } from 'zod'
+import * as z from 'zod'
 import { handoffDeliveries, type NotificationRuntimePorts, planDeliveries } from './delivery-plan'
 
 export type { NotificationRuntimePorts } from './delivery-plan'

@@ -1,5 +1,5 @@
 import { and, eq, sql } from 'drizzle-orm'
-import { z } from 'zod'
+import * as z from 'zod'
 import { type DeliveryRef, deliveryRefSchema } from '../delivery-ref'
 import {
   kitNotifications as notifications,

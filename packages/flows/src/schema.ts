@@ -1,4 +1,4 @@
-import { z } from 'zod'
+import * as z from 'zod'
 import { FLOWS_VERSION, MAX_PERMIT_TOOLS, MAX_PLAN_TASKS, MAX_PLAN_TOTAL_TOKENS } from './constants'
 
 const nonEmptyId = z

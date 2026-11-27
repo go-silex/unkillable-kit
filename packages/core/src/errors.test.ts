@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { z } from 'zod'
+import * as z from 'zod'
 import { AppError, newRequestId, toApiErrorBody } from './errors'
 import { createLogger } from './logger'
 import { parseOrThrow, zodFieldErrors } from './parse'

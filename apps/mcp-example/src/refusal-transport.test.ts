@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { createToolCatalogue, toolRefusal } from '@kit/mcp'
 import { EdgeFastMCP } from 'fastmcp/edge'
 import { describe, expect, it } from 'vitest'
-import { z } from 'zod'
+import * as z from 'zod'
 import { createExampleCatalogue } from './catalogue'
 
 const payload = { code: 'NOT_READY', details: { pending: ['one'] } }

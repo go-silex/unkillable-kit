@@ -1,5 +1,5 @@
 import type { ChannelResult } from '@kit/notifications'
-import { z } from 'zod'
+import * as z from 'zod'
 
 export const deliveryCodeSchema = z
   .string()

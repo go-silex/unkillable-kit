@@ -1,4 +1,4 @@
-import { z } from 'zod'
+import * as z from 'zod'
 import { deliveryRefSchema } from '../delivery-ref'
 import { epochMsSchema, identitySchema, rowIdSchema, workflowIdSchema } from './validation'
 

@@ -1,4 +1,4 @@
-import { z } from 'zod'
+import * as z from 'zod'
 import { COMMENT_VISIBILITIES, MAX_COMMENT_BODY_LEN, MAX_TARGET_TYPE_LEN } from './constants'
 
 const idSchema = z.string().min(1).max(256)

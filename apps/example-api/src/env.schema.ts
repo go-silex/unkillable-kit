@@ -7,7 +7,7 @@
  * Live session secret is BETTER_AUTH_SECRET (getBetterAuthSecret).
  * Inventory + env:check must use this module, not a freehand Env type.
  */
-import { z } from 'zod'
+import * as z from 'zod'
 
 /** D1 / R2 / Email / Queues / Workflows / version metadata — wrangler only, never .dev.vars. */
 export const WORKER_BINDINGS = [

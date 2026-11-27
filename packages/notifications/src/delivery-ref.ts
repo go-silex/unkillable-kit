@@ -1,4 +1,4 @@
-import { z } from 'zod'
+import * as z from 'zod'
 
 // Absolute end keeps the full-string ASCII rule declarative for schema consumers.
 export const notificationRowIdSchema = z

@@ -1,4 +1,4 @@
-import { z } from 'zod'
+import * as z from 'zod'
 
 /** Shared list query — apps may `.extend` (e.g. `q` max). Limit default applied via `clampListLimit`. */
 export const listQuerySchema = z.object({

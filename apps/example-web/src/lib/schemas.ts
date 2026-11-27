@@ -1,6 +1,6 @@
 import { createOrgResponseSchema } from '@kit/api-client/me'
 import { changePasswordSchema, forgotPasswordSchema, resetPasswordSchema } from '@kit/auth'
-import { z } from 'zod'
+import * as z from 'zod'
 
 export { changePasswordSchema, createOrgResponseSchema, forgotPasswordSchema, resetPasswordSchema }
 

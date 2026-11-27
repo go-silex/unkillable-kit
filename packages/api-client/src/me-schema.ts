@@ -12,7 +12,7 @@
  * whose `fetch` transport needs the DOM `RequestCredentials`/`credentials`
  * surface, into their program. Keep this module zod-only.
  */
-import { z } from 'zod'
+import * as z from 'zod'
 
 /** Descriptive org fields match the Worker DTO (`z.string()`); gate-critical fields stay enum. */
 export const meOrgSchema = z.object({

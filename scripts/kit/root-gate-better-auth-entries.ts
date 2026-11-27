@@ -7,6 +7,13 @@ const serverPackages: Record<string, ServerPackage> = {
   '@kit/auth': { factory: 'createBetterAuth', subpaths: ['./factory'] },
 }
 
+/** Whether a bare specifier names a Better Auth entry that exports the server initializer. */
+export function isBetterAuthServerSpecifier(specifier: string) {
+  return serverPackages['better-auth'].subpaths.some(
+    (subpath) => specifier === (subpath === '.' ? 'better-auth' : `better-auth${subpath.slice(1)}`),
+  )
+}
+
 function collectTargets(dir: string, target: unknown, files: Set<string>) {
   if (typeof target === 'string' && target.startsWith('./')) {
     const path = resolve(dir, target)

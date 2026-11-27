@@ -1,6 +1,6 @@
 import { AppError } from '@kit/core'
 import type { KitD1Database, KitD1Statement } from '@kit/db'
-import { z } from 'zod'
+import * as z from 'zod'
 import { deliveryRefSchema } from '../delivery-ref'
 import { binding, lifecycleBatch } from './admit-sql'
 import type { AdmissionBatch, AdmissionOwnerIdentity, Db, NotifyResult } from './types'

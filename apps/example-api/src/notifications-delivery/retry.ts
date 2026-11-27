@@ -1,5 +1,5 @@
 import type { WorkflowDelayFunction } from 'cloudflare:workers'
-import { z } from 'zod'
+import * as z from 'zod'
 import { deliveryCodeSchema } from './types'
 
 const retryableName = 'NotificationDeliveryRetryable'

@@ -8,7 +8,7 @@ import {
   type ToolDef,
   whoamiResultSchema,
 } from '@kit/mcp'
-import { z } from 'zod'
+import * as z from 'zod'
 
 const emptyInput = z.object({})
 

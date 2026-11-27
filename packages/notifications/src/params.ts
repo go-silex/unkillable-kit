@@ -1,4 +1,4 @@
-import type { z } from 'zod'
+import type * as z from 'zod'
 
 function assertJsonArray(value: unknown[], ancestors: Set<object>): void {
   if (Reflect.ownKeys(value).length !== value.length + 1) throw new TypeError('Invalid JSON array')

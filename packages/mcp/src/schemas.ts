@@ -1,4 +1,4 @@
-import { z } from 'zod'
+import * as z from 'zod'
 import { WHOAMI_STATUS, type WhoamiStatus } from './agentWire'
 
 const whoamiStatusTuple = WHOAMI_STATUS as unknown as [WhoamiStatus, ...WhoamiStatus[]]

@@ -111,6 +111,26 @@
           }
         }
       }
+    },
+    {
+      "includes": ["packages/**", "apps/example-*/**", "apps/starter-*/**", "apps/mcp-example/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "zod": {
+                    "importNames": ["z", "default"],
+                    "message": "Use `import * as z from 'zod'`: the `z` re-export keeps every Zod locale in the bundle."
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   ]
 }

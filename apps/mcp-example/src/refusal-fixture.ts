@@ -1,6 +1,6 @@
 import { createToolCatalogue, toolRefusal } from '@kit/mcp'
 import { FastMCP } from 'fastmcp'
-import { z } from 'zod'
+import * as z from 'zod'
 import { createExampleCatalogue } from './catalogue'
 
 const mode = process.argv[2]

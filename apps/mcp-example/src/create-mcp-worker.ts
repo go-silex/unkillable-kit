@@ -9,7 +9,7 @@ import {
 import { createHostedMcpWorker } from '@kit/mcp/hosted'
 import { Hono } from 'hono'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
-import { z } from 'zod'
+import * as z from 'zod'
 import { createExampleCatalogue } from './catalogue'
 import type { McpExampleEnv } from './worker-env'
 
