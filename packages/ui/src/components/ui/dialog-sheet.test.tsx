@@ -30,15 +30,14 @@ describe('Dialog / Sheet / Tooltip (Base UI contracts)', () => {
               <DialogTitle>Title</DialogTitle>
               <DialogDescription>Desc</DialogDescription>
             </DialogHeader>
-            <DialogFooter>
-              <Button type="button">Close</Button>
-            </DialogFooter>
+            <DialogFooter showCloseButton />
           </DialogContent>
         </Dialog>,
       )
     })
     assertNoBaseUiContractErrors(errors)
     expect(screen.getByText('Title')).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: 'Close' })).toHaveLength(2)
   })
 
   it('Sheet open mounts cleanly', () => {
@@ -59,6 +58,43 @@ describe('Dialog / Sheet / Tooltip (Base UI contracts)', () => {
     })
     assertNoBaseUiContractErrors(errors)
     expect(screen.getByText('Sheet title')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Close' })).toBeInTheDocument()
+  })
+
+  it('localizes both Dialog close buttons independently', () => {
+    render(
+      <Dialog open>
+        <DialogContent closeLabel="Fermer">
+          <DialogHeader>
+            <DialogTitle>Fenêtre</DialogTitle>
+            <DialogDescription>Réglages de la fenêtre</DialogDescription>
+          </DialogHeader>
+          <DialogFooter showCloseButton closeLabel="Fermer la fenêtre" />
+        </DialogContent>
+      </Dialog>,
+    )
+
+    expect(screen.getByRole('button', { name: 'Fermer' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Fermer la fenêtre' })).toHaveTextContent(
+      'Fermer la fenêtre',
+    )
+    expect(screen.queryByText('Close')).not.toBeInTheDocument()
+  })
+
+  it('localizes the Sheet close button', () => {
+    render(
+      <Sheet open>
+        <SheetContent closeLabel="Fermer">
+          <SheetHeader>
+            <SheetTitle>Volet</SheetTitle>
+            <SheetDescription>Réglages du volet</SheetDescription>
+          </SheetHeader>
+        </SheetContent>
+      </Sheet>,
+    )
+
+    expect(screen.getByRole('button', { name: 'Fermer' })).toBeInTheDocument()
+    expect(screen.queryByText('Close')).not.toBeInTheDocument()
   })
 
   it('Tooltip with provider mounts cleanly', () => {

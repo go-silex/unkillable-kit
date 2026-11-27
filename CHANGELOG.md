@@ -28,6 +28,12 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
   no Bun version file ([deploy runbook](docs/kit/deploy-cloudflare.md#4b-bun-and-node-versions),
   go-silex/unkillable-kit#213).
 
+### UI
+
+- `@kit/ui` accepts optional `closeLabel` on `DialogContent`, `DialogFooter`, and `SheetContent`,
+  `mobileTitle` and `mobileDescription` on `Sidebar`, and `toggleLabel` on `SidebarTrigger` and
+  `SidebarRail`. English defaults are unchanged (go-silex/unkillable-kit#202).
+
 ## unkillable-kit/v0.12.0 — 2026-11-27
 
 ### Auth
