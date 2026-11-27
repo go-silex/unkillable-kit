@@ -25,6 +25,7 @@ import { localeLabels } from '../lib/i18n'
 import { useLocale } from '../lib/locale'
 import { useOrgContext } from '../lib/org-context'
 import { ImpersonationBanner } from './impersonation-banner'
+import { ShellCommandPalette } from './shell-command-palette'
 import { ShellBrand, ShellNav, ShellUserExtras } from './shell-nav'
 import { pageTitle } from './shell-title'
 
@@ -135,6 +136,18 @@ function ShellChrome({ mode, children }: { mode: ShellMode; children: ReactNode 
               className="mr-2 data-vertical:h-4 data-vertical:self-auto"
             />
             <h1 className="text-sm font-medium">{title}</h1>
+            <ShellCommandPalette
+              key={JSON.stringify([mode, activeOrgId, me.data?.impersonation?.id])}
+              mode={mode}
+              delegated={Boolean(me.data?.impersonation)}
+              onNavigate={(href) => {
+                const destination = new URL(href, window.location.origin)
+                const revealsNote =
+                  destination.pathname === '/app/notes' && destination.searchParams.has('noteId')
+                // Let the selected row position itself instead of resetting scroll after commit.
+                void navigate({ href, resetScroll: !revealsNote })
+              }}
+            />
           </div>
         </header>
         <div className="flex flex-1 flex-col">
