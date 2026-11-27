@@ -35,7 +35,7 @@ export function createBetterAuth(env: Env, baseURL: string): KitBetterAuth {
     allowPublicSignup: allowPublicSignup(env),
     allowLoopbackOrigins: isDevLikeEnvironment(env),
     trustedOrigins: corsAllowlist(env),
-    // Resolve on send — constructing BA every request must not require EMAIL_TRANSPORT.
+    // Resolve on send — building Better Auth must not require EMAIL_TRANSPORT.
     emailPort: {
       send: async (input) => resolveEmailPort(env).send(input),
     },

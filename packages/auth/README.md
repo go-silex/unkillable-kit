@@ -21,6 +21,17 @@ Authentication primitives and integration surfaces; it does not own product-spec
 - Known consumers: `apps/example-api`, `apps/example-web`, `packages/mcp`, `packages/notifications`.
 - Caller rules: [architecture decision](../../docs/kit/architecture/adr/0003-multi-tenant-rbac-modules.md).
 
+## Factory construction
+
+Call `createBetterAuth` from `@kit/auth/factory` for each request and never keep the handle across
+requests. The call reads its options once and checks the configuration (secret, trusted origins,
+e-mail, base URL, Google sign-in), throwing on an invalid one. The Better Auth instance, its
+database, the provider composition and the plugins are built on the first use of the handle, once
+per call. Request authorization reads only the session cookie issuer recorded on the handle, so a
+request that does not reach Better Auth never builds it. An error thrown while building, by Better
+Auth or by the provider composition, surfaces on that first use: a route that never uses the
+instance does not fail on it.
+
 ## Auth e-mail rendering
 
 Products can set `emailConfig.render` on `createBetterAuth` from
@@ -103,9 +114,9 @@ The pinned Better Auth 1.7.27 uses `redirect: 'manual'` for back-channel
 logout delivery on Workers. Delivery remains best effort; see the limitations
 below.
 
-The OIDC provider requires `better-auth`, `@better-auth/core`, and
-`@better-auth/oauth-provider` at exactly `1.7.27`, enforced at startup when OIDC
-is enabled. Do not override Better Auth's exact `better-call` dependency.
+When OIDC is enabled, the provider requires `better-auth`, `@better-auth/core`, and
+`@better-auth/oauth-provider` at exactly `1.7.27`; an instance checks this when it initialises its
+context, after its first use. Do not override Better Auth's exact `better-call` dependency.
 Sync and apply the opt-in `oidc_provider` schema set (including
 `better_auth_oidc_fresh_login`) before deploying, in addition to the sets
 required by the Better Auth mount. Use the canonical physical D1 `session`

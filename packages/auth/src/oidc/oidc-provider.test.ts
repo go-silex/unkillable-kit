@@ -842,3 +842,14 @@ describe('opt-in OpenID Provider', () => {
     expect((await request(auth, '/api/auth/token')).status).toBe(404)
   })
 })
+
+it('reads its pages when created, not when the factory composes it', () => {
+  const input = { loginPage: '/login', consentPage: '/consent', waitUntil: vi.fn() }
+  const provider = createOidcProvider(input)
+  Object.assign(input, { loginPage: '/elsewhere', consentPage: '/other' })
+  const { plugins } = provider.compose(async () => true, createSqliteD1(new Database(':memory:')))
+  expect(plugins.find((plugin) => plugin.id === 'oauth-provider')?.options).toMatchObject({
+    loginPage: '/login',
+    consentPage: '/consent',
+  })
+})

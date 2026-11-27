@@ -6,7 +6,9 @@ import { MAGIC_LINK_EXPIRES_IN_SEC, RESET_PASSWORD_TOKEN_EXPIRES_IN_SEC } from '
 import { getBetterAuthSecret } from './better-auth-env'
 import { createBetterAuth } from './better-auth-factory'
 import { betterAuthDrizzleSchema } from './better-auth-schema'
+import type { OidcProviderConfig } from './oidc/oidc-config'
 import * as accountState from './repos/account-state'
+import { requestSessionCookie } from './request/effective-session-cookie'
 
 const SECRET = 'test-better-auth-secret-xxxxxxxx32c!!'
 const emailConfig = {
@@ -17,6 +19,8 @@ const emailConfig = {
 
 type BaAuth = ReturnType<typeof createBetterAuth> & {
   options: {
+    secret?: string
+    baseURL?: string
     emailAndPassword?: {
       disableSignUp?: boolean
       resetPasswordTokenExpiresIn?: number
@@ -500,5 +504,152 @@ describe('createBetterAuth', () => {
       )
       expect(res.status, baseURL).toBe(200)
     }
+  })
+})
+
+describe('createBetterAuth construction', () => {
+  // The provider composition runs inside the Better Auth build: it counts constructions.
+  function counted() {
+    const compose = vi.fn<OidcProviderConfig['compose']>(() => ({ plugins: [] }))
+    return { compose, oidcProvider: { waitUntil: vi.fn(), compose } }
+  }
+
+  it('reads the session cookie issuer without building Better Auth, then builds it once', () => {
+    const { compose, oidcProvider } = counted()
+    const auth = factory({ oidcProvider, cookieName: 'kit_session', useSecureCookies: true })
+    expect(requestSessionCookie(auth, 'kit=1')).toEqual({
+      header: 'kit=1',
+      name: '__Secure-kit_session',
+      secret: SECRET,
+    })
+    expect(compose).not.toHaveBeenCalled()
+    expect(auth.api.getSession).toBe(auth.api.getSession)
+    expect(auth.options.plugins?.map((p) => p.id)).toContain('organization')
+    expect(compose).toHaveBeenCalledTimes(1)
+  })
+
+  it('builds each handle from its own options and database, in any order', () => {
+    const first = counted()
+    const second = counted()
+    const [databaseA, databaseB] = [stubD1(), stubD1()]
+    const a = factory({ database: databaseA, oidcProvider: first.oidcProvider, cookieName: 'a' })
+    const b = factory({
+      database: databaseB,
+      oidcProvider: second.oidcProvider,
+      cookieName: 'b',
+      secret: `${SECRET}b`,
+      useSecureCookies: false,
+    })
+    expect(b.options.advanced?.cookies?.session_token).toMatchObject({ name: 'b' })
+    expect(a.options.advanced?.cookies?.session_token).toMatchObject({ name: 'a' })
+    expect(first.compose).toHaveBeenCalledWith(expect.any(Function), databaseA)
+    expect(second.compose).toHaveBeenCalledWith(expect.any(Function), databaseB)
+    expect(a.api).not.toBe(b.api)
+    expect(requestSessionCookie(a, null)).toMatchObject({ name: '__Secure-a', secret: SECRET })
+    expect(requestSessionCookie(b, null)).toMatchObject({ name: 'b', secret: `${SECRET}b` })
+  })
+
+  it('builds each handle from its options as they were at its call', () => {
+    const first = counted()
+    const second = counted()
+    const [databaseA, databaseB] = [stubD1(), stubD1()]
+    const options = {
+      database: databaseA,
+      secret: SECRET,
+      baseURL: 'http://localhost:8787',
+      trustedOrigins: ['http://localhost:5173'],
+      allowLoopbackOrigins: true,
+      oidcProvider: first.oidcProvider,
+    }
+    const a = createBetterAuth(options) as BaAuth
+    Object.assign(options, {
+      database: databaseB,
+      secret: `${SECRET}b`,
+      baseURL: 'http://localhost:8788',
+      oidcProvider: second.oidcProvider,
+    })
+    first.oidcProvider.compose = second.compose
+    const b = createBetterAuth(options) as BaAuth
+    expect([a.options.secret, a.options.baseURL]).toEqual([SECRET, 'http://localhost:8787'])
+    expect([b.options.secret, b.options.baseURL]).toEqual([`${SECRET}b`, 'http://localhost:8788'])
+    expect(first.compose).toHaveBeenCalledExactlyOnceWith(expect.any(Function), databaseA)
+    expect(second.compose).toHaveBeenCalledExactlyOnceWith(expect.any(Function), databaseB)
+    expect(requestSessionCookie(a, null).secret).toBe(SECRET)
+  })
+
+  it('reads options through getters and calls the provider on its own receiver', () => {
+    class Provider implements OidcProviderConfig {
+      readonly #plugins: ReturnType<OidcProviderConfig['compose']>['plugins'] = []
+      composed = 0
+      waitUntil = vi.fn()
+      compose() {
+        this.composed += 1
+        return { plugins: this.#plugins }
+      }
+    }
+    const provider = new Provider()
+    const inherited = Object.create({
+      get secret() {
+        return SECRET
+      },
+    })
+    const options = Object.assign(inherited, {
+      database: stubD1(),
+      baseURL: 'http://localhost:8787',
+      trustedOrigins: ['http://localhost:5173'],
+      allowLoopbackOrigins: true,
+      oidcProvider: provider,
+    })
+    const auth = createBetterAuth(options) as BaAuth
+    expect(auth.options.secret).toBe(SECRET)
+    expect(provider.composed).toBe(1)
+  })
+
+  it('reads and joins the tables of the schema map as it was at the call', async () => {
+    const queries: string[] = []
+    const statement = {
+      bind: () => statement,
+      first: async () => null,
+      run: async () => ({}),
+      all: async () => ({}),
+      raw: async <T = unknown>(): Promise<T[][]> => [[0 as T]],
+    }
+    const database = {
+      prepare: (query: string) => {
+        queries.push(query)
+        return statement
+      },
+    }
+    const table = (name: string) =>
+      sqliteTable(name, {
+        id: text('id').primaryKey(),
+        disabled: integer('disabled', { mode: 'boolean' }).notNull(),
+      }) as unknown as typeof betterAuthDrizzleSchema.user
+    const schema = { ...betterAuthDrizzleSchema, user: table('users_a') }
+    const auth = factory({ database, schema })
+    schema.user = table('users_b')
+    await auth.options.databaseHooks.session.create.before({ userId: 'user-a' })
+    expect(queries).toEqual([expect.stringContaining('"users_a"')])
+    // Better Auth joins the session to its user through the Drizzle relations.
+    type Adapter = { findOne: (query: object) => Promise<unknown> }
+    const adapter = (
+      auth.options as unknown as { database: (options: unknown) => Adapter }
+    ).database(auth.options)
+    const where = [{ field: 'token', value: 'token' }]
+    await adapter.findOne({ model: 'session', where, join: { user: true } }).catch(() => undefined)
+    expect(queries.slice(1).join('\n')).toMatch(/"users_a"/)
+    expect(queries.join('\n')).not.toMatch(/"users_b"/)
+  })
+
+  it('rejects configuration when called, before any use', () => {
+    const { compose, oidcProvider } = counted()
+    expect(() => factory({ oidcProvider, baseURL: 'not a url' })).toThrow('BETTER_AUTH_URL')
+    expect(() =>
+      factory({ oidcProvider, google: { clientId: '', clientSecret: '', allowedDomains: [] } }),
+    ).toThrow('Invalid Google sign-in configuration')
+    expect(() => factory({ oidcProvider, googleErrorURL: 'https://evil.test/login' })).toThrow(
+      'googleErrorURL',
+    )
+    expect(compose).not.toHaveBeenCalled()
   })
 })
