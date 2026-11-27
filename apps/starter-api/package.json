@@ -20,7 +20,7 @@
     "@kit/db": "workspace:*",
     "better-auth": "^1.7.27",
     "drizzle-orm": "^0.45.4",
-    "hono": "^4.13.19"
+    "hono": "^4.13.21"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",
