@@ -191,7 +191,7 @@ export function createHostedShell<Env extends HostedMcpEnv, AppEnv extends { Bin
         return handleAuthorize(request, env, {
           identityPort: identityPortFor(identityPort, callerEnv),
           accountAdmission: (userId) => accountAdmissionResponse(userId, callerEnv),
-          apiBaseUrl: apiBaseUrl(callerEnv, request),
+          apiBaseUrl: apiBaseUrl.call(opts, callerEnv, request),
           consent,
           ...(consentPresentation ? { consentPresentation } : {}),
         })

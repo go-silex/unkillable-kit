@@ -653,7 +653,10 @@ describe('hosted worker routing', () => {
     const bases: string[] = []
     const options: Opts = {
       name: 'hosted-test',
-      apiBaseUrl: () => 'http://first.test',
+      // A method, as Products may write it: called on the options, as before the lazy shell.
+      apiBaseUrl() {
+        return `http://${this.name}.test`
+      },
       identityPort: {
         resolve: async ({ apiBaseUrl }) => {
           bases.push(apiBaseUrl)
@@ -667,7 +670,7 @@ describe('hosted worker routing', () => {
     options.apiBaseUrl = () => 'http://second.test'
     options.identityPort = port(new Response('replaced', { status: 418 }))
     expect((await pending).status).toBe(200)
-    expect(bases).toEqual(['http://first.test'])
+    expect(bases).toEqual(['http://hosted-test.test'])
   })
 
   it('decides client registration on the Worker env itself, inherited bindings included', async () => {
