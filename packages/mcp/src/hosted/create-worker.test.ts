@@ -533,6 +533,71 @@ describe('hosted worker routing', () => {
     expect(seen).toEqual([])
   })
 
+  it('answers preflight and method checks on the shell endpoints, and leaves product preflight to the hook', async () => {
+    const kv = new MemoryKv()
+    const hosted = worker({
+      identityPort: port(DEMO),
+      fallthrough: (request) => new Response(`hook ${request.method}`),
+    })
+    const client = 'https://client.example'
+    const send = (origin: string, path: string, method: string) =>
+      hosted.fetch(
+        new Request(`${origin}${path}`, {
+          method,
+          headers: {
+            origin: client,
+            'access-control-request-method': 'POST',
+            'access-control-request-headers': 'authorization, content-type',
+          },
+        }),
+        envFor(kv, origin),
+        ctx(),
+      )
+    const cors = (res: Response) =>
+      [
+        'access-control-allow-origin',
+        'access-control-allow-methods',
+        'access-control-allow-headers',
+        'access-control-max-age',
+      ].map((name) => res.headers.get(name))
+    const PROVIDER_CORS = [client, '*', 'Authorization, *', '86400']
+    for (const origin of [LOCAL, PUBLIC]) {
+      for (const path of [
+        '/mcp',
+        '/mcp/sub',
+        '/token',
+        '/.well-known/oauth-authorization-server',
+        '/.well-known/oauth-protected-resource/mcp',
+        '/.well-known/oauth-protected-resource',
+        ...(origin === LOCAL ? ['/register'] : []),
+      ]) {
+        const res = await send(origin, path, 'OPTIONS')
+        expect(res.status, `${origin}${path}`).toBe(204)
+        expect(cors(res), `${origin}${path}`).toEqual(PROVIDER_CORS)
+      }
+      const authorize = await send(origin, '/authorize', 'OPTIONS')
+      expect([authorize.status, authorize.headers.get('allow')]).toEqual([405, 'GET, POST'])
+      expect(cors(authorize)).toEqual([null, null, null, null])
+      const token = await send(origin, '/token', 'GET')
+      expect([token.status, token.headers.get('allow')]).toEqual([405, 'POST, OPTIONS'])
+      expect(cors(token)).toEqual(PROVIDER_CORS)
+      for (const path of [
+        '/.well-known/oauth-authorization-server',
+        '/.well-known/oauth-protected-resource/mcp',
+      ]) {
+        const res = await send(origin, path, 'POST')
+        expect([res.status, res.headers.get('allow')], path).toEqual([405, 'GET, HEAD, OPTIONS'])
+      }
+      const product = await send(origin, '/api/projects', 'OPTIONS')
+      expect(await product.text()).toBe('hook OPTIONS')
+      expect(cors(product)).toEqual([null, null, null, null])
+    }
+    // Closed registration refuses before any preflight answer.
+    const closed = await send(PUBLIC, '/register', 'OPTIONS')
+    expect(closed.status).toBe(403)
+    expect(cors(closed)).toEqual([null, null, null, null])
+  })
+
   it('strips the oauth helper from the fallthrough env', async () => {
     const kv = new MemoryKv()
     let helperPresent = true

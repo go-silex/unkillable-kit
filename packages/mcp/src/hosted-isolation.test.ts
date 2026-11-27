@@ -16,15 +16,20 @@ vi.mock('fastmcp/edge', () => {
   return {}
 })
 
-// Dynamic imports on purpose: the test is the load order — root first, then hosted.
-describe('@kit/mcp root stays free of the hosted peers', () => {
+// Dynamic imports on purpose: the test is the load order — root, hosted barrel, then the shell.
+describe('@kit/mcp loads the hosted peers only with the shell', () => {
   it('root barrel loads neither optional peer', async () => {
     await import('./index')
     expect([...loaded]).toEqual([])
   })
 
-  it('hosted barrel loads both (control)', async () => {
+  it('hosted barrel loads neither optional peer', async () => {
     await import('./hosted/index')
+    expect([...loaded]).toEqual([])
+  })
+
+  it('the shell loads both (control)', async () => {
+    await import('./hosted/shell')
     expect([...loaded].sort()).toEqual(['@cloudflare/workers-oauth-provider', 'fastmcp/edge'])
   })
 })
