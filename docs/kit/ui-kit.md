@@ -12,7 +12,7 @@ Shared **shadcn Base UI** primitives for Chemin A apps. Product branding does **
 
 From `@kit/ui`, import `ThemeProvider`, `useTheme`, and `Theme`. Wrap the App with `<ThemeProvider storageKey="kit.theme">` using an App-owned key. `useTheme()` returns `theme` (`light`, `dark`, `system`), `setTheme`, and the resolved theme. The provider toggles root `.dark` and tracks system changes in `system` mode. Invalid or inaccessible storage uses `system`, which resolves to `light` without a system preference.
 
-The Example App uses `kit.theme` in `public/theme-boot.js` before React mounts. Boot scripts must match the provider's storage key and theme rules.
+The Example App’s `public/theme-boot.js` uses `kit.theme` before React mounts; match the provider’s key and theme rules.
 
 ## Zero-edit / product brand
 
@@ -99,7 +99,7 @@ There is no ambient registry. Remount the palette when its Organization changes.
 
 ### Sidebar 07 block (shadcn)
 
-In `packages/ui`, run `bunx --bun shadcn@latest add sidebar-07`. Delete the Acme samples (`AppSidebar`, `NavMain`, `NavProjects`, `TeamSwitcher`) after install; never add them back.
+`bunx --bun shadcn@latest add sidebar-07` in `packages/ui` generates Acme chrome (`AppSidebar`, `NavMain`, `NavProjects`, `TeamSwitcher`); delete after install: it is not `@kit/ui` API and must stay out.
 
 | Export                         | Role                                                                  |
 | ------------------------------ | --------------------------------------------------------------------- |
