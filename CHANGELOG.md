@@ -4,6 +4,8 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ## Unreleased
 
+## unkillable-kit/v0.11.1 — 2026-11-27
+
 ### UI
 
 - `@kit/ui` ships a command palette with shell-scoped sources, keyboard navigation, and
