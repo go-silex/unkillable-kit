@@ -99,7 +99,7 @@ gh pr checkout "${PR_NUMBER:?Set PR_NUMBER}" &&
 
 The maintainer commit triggers `FOREIGN_COMMIT`. Obtain current-head proof and independent
 review of the **full** lock diff. For example, go-silex/unkillable-kit#190 also lost
-the `hasInstallScript` flag for `wrangler/workerd`; regeneration should restore it.
+the `hasInstallScript` flag for `wrangler/workerd`.
 Then obtain fresh admission through normal authorized landing; never add `reviewed` directly.
 
 ## Automatic authorization

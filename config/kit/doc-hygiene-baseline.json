@@ -92,7 +92,7 @@
   "docs/kit/security-dependabot.md": {
     "overLimitLines": 10,
     "maxLineBytes": 732,
-    "fileBytes": 24059
+    "fileBytes": 24027
   },
   "docs/kit/standards/stack.md": {
     "overLimitLines": 50,
