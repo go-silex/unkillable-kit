@@ -88,8 +88,8 @@ assert_calls "bun|${FIXTURE}|--version
 bun|${FIXTURE}|install --frozen-lockfile --minimum-release-age 0
 "
 
-# Roxabi/roxabi-boilerplate-cf#316: a Bun other than packageManager (the build image's own, or a stale BUN_VERSION) refuses
-# before any install, migration, deploy or build, and names the build variable that fixes it.
+# A Bun other than packageManager refuses before any install, migration, deploy or build.
+# The diagnostic points to the repository pin on Workers Builds and the build variable on Pages.
 assert_bun_refused() {
   local script="$1" want_calls="$2" out
   shift 2
@@ -98,8 +98,8 @@ assert_bun_refused() {
     exit 1
   fi
   assert_calls "${want_calls}"
-  if [[ "$out" != *"BUN_VERSION=${FIXTURE_BUN}"* ]]; then
-    echo "FAIL: ${script} refused without naming BUN_VERSION=${FIXTURE_BUN}:" >&2
+  if [[ "$out" != *"Workers Builds: check package.json#packageManager"* || "$out" != *"Pages: set the build variable BUN_VERSION=${FIXTURE_BUN}"* ]]; then
+    echo "FAIL: ${script} refused without naming the Workers Builds pin and Pages BUN_VERSION=${FIXTURE_BUN}:" >&2
     echo "$out" >&2
     exit 1
   fi
@@ -140,7 +140,7 @@ if [[ "$out" != *"packageManager names no bun@<version>"* ]]; then
 fi
 
 # Roxabi/roxabi-boilerplate-cf#316: a Corepack pin (bun@<x.y.z>+sha512.<digest>) is its x.y.z — the grammar check-bun-version.ts
-# accepts — so a matching Bun passes and a refusal names an installable BUN_VERSION.
+# accepts — so a matching Bun passes and a refusal names an installable Pages BUN_VERSION.
 printf '{\n  "name": "fixture",\n  "packageManager": "bun@%s+sha512.abc"\n}\n' "${FIXTURE_BUN}" >"${FIXTURE}/package.json"
 run_entrypoint require-bun-version.sh
 assert_calls "bun|${TMP}|--version
@@ -149,8 +149,8 @@ if out="$(run_entrypoint require-bun-version.sh CF_STUB_BUN_VERSION=1.2.15 2>&1)
   echo "FAIL: require-bun-version.sh ran with bun 1.2.15 against bun@${FIXTURE_BUN}+sha512.abc" >&2
   exit 1
 fi
-if [[ "$out" != *"BUN_VERSION=${FIXTURE_BUN} on"* ]]; then
-  echo "FAIL: a Corepack pin refused without naming BUN_VERSION=${FIXTURE_BUN}:" >&2
+if [[ "$out" != *"Pages: set the build variable BUN_VERSION=${FIXTURE_BUN} on"* ]]; then
+  echo "FAIL: a Corepack pin refused without naming Pages BUN_VERSION=${FIXTURE_BUN}:" >&2
   echo "$out" >&2
   exit 1
 fi

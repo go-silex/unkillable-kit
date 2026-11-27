@@ -20,6 +20,14 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
   e-mail, base URL, Google sign-in) still throw from the call. The OIDC provider's version check
   still runs when the instance initialises its context, which now happens only after first use.
 
+### Deploy
+
+- **Product action:** Workers Builds reads `package.json#packageManager`; Bun bumps need no
+  dashboard change, and existing `BUN_VERSION` variables can be removed there. Keep `BUN_VERSION`
+  on Pages only and update it to match the pin on each Bun bump: the Pages build image documents
+  no Bun version file ([deploy runbook](docs/kit/deploy-cloudflare.md#4b-bun-and-node-versions),
+  go-silex/unkillable-kit#213).
+
 ## unkillable-kit/v0.12.0 — 2026-11-27
 
 ### Auth
