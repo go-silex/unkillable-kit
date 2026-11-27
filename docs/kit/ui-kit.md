@@ -10,9 +10,9 @@ Shared **shadcn Base UI** primitives for Chemin A apps. Product branding does **
 
 ## Theme
 
-Import `ThemeProvider`, `useTheme`, and `Theme` from `@kit/ui`. Wrap the App in `<ThemeProvider storageKey="kit.theme">` with an App-owned key. `useTheme()` returns `theme` (`light`, `dark`, or `system`), `setTheme`, and the resolved theme. The provider toggles `.dark` on the document root and tracks system changes in `system` mode. Invalid or inaccessible storage falls back to `system`; without a system preference, it resolves to `light`.
+From `@kit/ui`, import `ThemeProvider`, `useTheme`, and `Theme`. Wrap the App with `<ThemeProvider storageKey="kit.theme">` using an App-owned key. `useTheme()` returns `theme` (`light`, `dark`, `system`), `setTheme`, and the resolved theme. The provider toggles root `.dark` and tracks system changes in `system` mode. Invalid or inaccessible storage uses `system`, which resolves to `light` without a system preference.
 
-The Example App uses `kit.theme` in `public/theme-boot.js` before React mounts. Boot scripts must match the provider's storage key and theme rules.
+The Example App’s `public/theme-boot.js` uses `kit.theme` before React mounts; match the provider’s key and theme rules.
 
 ## Zero-edit / product brand
 
@@ -36,7 +36,7 @@ Keep branding, shells, and release notes in the App. Share changelog code only w
 See `packages/ui/src/index.ts` and the catalogue for exports.
 `Tabs` + `TabsList` + `TabsTrigger` + `TabsContent` switch local panels.
 Set `activateOnFocus={false}` on `TabsList` for manual activation.
-`PasswordInput` is a Kit composition of `InputGroup`; pass `showPasswordLabel` and `hidePasswordLabel` from App i18n.
+Pass App i18n labels: `PasswordInput` `showPasswordLabel`/`hidePasswordLabel`; `DialogContent`, `DialogFooter`, `SheetContent` `closeLabel`; `Sidebar` `mobileTitle`/`mobileDescription`; `SidebarTrigger`, `SidebarRail` `toggleLabel`.
 
 ### Tasks-related primitives (shadcn, 2026-08)
 
@@ -99,7 +99,7 @@ There is no ambient registry. Remount the palette when its Organization changes.
 
 ### Sidebar 07 block (shadcn)
 
-Installed via `bunx --bun shadcn@latest add sidebar-07` into `packages/ui`. That command also vendors Acme sample chrome (`AppSidebar`, `NavMain`, `NavProjects`, `TeamSwitcher`); those files are **deleted after install** and must not be re-added — they are not `@kit/ui` API.
+`bunx --bun shadcn@latest add sidebar-07` in `packages/ui` generates Acme chrome (`AppSidebar`, `NavMain`, `NavProjects`, `TeamSwitcher`); delete after install: it is not `@kit/ui` API and must stay out.
 
 | Export                         | Role                                                                  |
 | ------------------------------ | --------------------------------------------------------------------- |

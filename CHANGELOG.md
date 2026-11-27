@@ -20,6 +20,12 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
   e-mail, base URL, Google sign-in) still throw from the call. The OIDC provider's version check
   still runs when the instance initialises its context, which now happens only after first use.
 
+### UI
+
+- `@kit/ui` accepts optional `closeLabel` on `DialogContent`, `DialogFooter`, and `SheetContent`,
+  `mobileTitle` and `mobileDescription` on `Sidebar`, and `toggleLabel` on `SidebarTrigger` and
+  `SidebarRail`. English defaults are unchanged (go-silex/unkillable-kit#202).
+
 ## unkillable-kit/v0.12.0 — 2026-11-27
 
 ### Auth
