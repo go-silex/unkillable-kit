@@ -19,6 +19,8 @@ const emailConfig = {
 
 type BaAuth = ReturnType<typeof createBetterAuth> & {
   options: {
+    secret?: string
+    baseURL?: string
     emailAndPassword?: {
       disableSignUp?: boolean
       resetPasswordTokenExpiresIn?: number
@@ -545,6 +547,34 @@ describe('createBetterAuth construction', () => {
     expect(a.api).not.toBe(b.api)
     expect(requestSessionCookie(a, null)).toMatchObject({ name: '__Secure-a', secret: SECRET })
     expect(requestSessionCookie(b, null)).toMatchObject({ name: 'b', secret: `${SECRET}b` })
+  })
+
+  it('builds each handle from its options as they were at its call', () => {
+    const first = counted()
+    const second = counted()
+    const [databaseA, databaseB] = [stubD1(), stubD1()]
+    const options = {
+      database: databaseA,
+      secret: SECRET,
+      baseURL: 'http://localhost:8787',
+      trustedOrigins: ['http://localhost:5173'],
+      allowLoopbackOrigins: true,
+      oidcProvider: first.oidcProvider,
+    }
+    const a = createBetterAuth(options) as BaAuth
+    Object.assign(options, {
+      database: databaseB,
+      secret: `${SECRET}b`,
+      baseURL: 'http://localhost:8788',
+      oidcProvider: second.oidcProvider,
+    })
+    first.oidcProvider.compose = second.compose
+    const b = createBetterAuth(options) as BaAuth
+    expect([a.options.secret, a.options.baseURL]).toEqual([SECRET, 'http://localhost:8787'])
+    expect([b.options.secret, b.options.baseURL]).toEqual([`${SECRET}b`, 'http://localhost:8788'])
+    expect(first.compose).toHaveBeenCalledExactlyOnceWith(expect.any(Function), databaseA)
+    expect(second.compose).toHaveBeenCalledExactlyOnceWith(expect.any(Function), databaseB)
+    expect(requestSessionCookie(a, null).secret).toBe(SECRET)
   })
 
   it('rejects configuration when called, before any use', () => {

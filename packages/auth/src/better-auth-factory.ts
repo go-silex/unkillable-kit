@@ -115,7 +115,9 @@ function openStorage(opts: CreateBetterAuthOpts) {
   return { schema, db: drizzle(opts.database as never, { schema }) }
 }
 
-export function createBetterAuth(opts: CreateBetterAuthOpts): KitBetterAuth {
+export function createBetterAuth(input: CreateBetterAuthOpts): KitBetterAuth {
+  // Read at the call: the instance is built later, and the caller may reuse its options object.
+  const opts = { ...input, oidcProvider: input.oidcProvider && { ...input.oidcProvider } }
   assertAuthSecret('BETTER_AUTH_SECRET', opts.secret, {
     allowKitPlaceholder: opts.allowKitPlaceholderSecret,
   })

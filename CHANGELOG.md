@@ -6,15 +6,18 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ### Auth
 
-- `createBetterAuth` (`@kit/auth/factory`) checks its configuration when called, as before, and
-  builds the Better Auth instance, its Drizzle database and its plugins on the first use of the
-  handle it returns. Request authorization reads the session cookie issuer without building it, so
-  a request that does not reach Better Auth no longer constructs it: in the reference composition,
-  every route outside `/api/auth/*`. Each call still builds and owns its own instance; nothing is
+- `createBetterAuth` (`@kit/auth/factory`) reads its options and checks its configuration when
+  called, as before, and builds the Better Auth instance, its Drizzle database, the provider
+  composition and the plugins on the first use of the handle it returns. Request authorization
+  reads the session cookie issuer without building it, so a request that does not reach Better
+  Auth no longer constructs it: in the reference composition, every route outside `/api/auth/*`.
+  Each call still builds and owns its own instance from the options it was given; nothing is
   shared across requests (go-silex/unkillable-kit#226).
-- An error that Better Auth itself throws while building its instance now surfaces on the first
-  use of the handle, not from `createBetterAuth`. The Kit's own configuration checks still throw
-  from the call.
+- An error thrown while building the instance, by Better Auth or by the provider composition, now
+  surfaces on the first use of the handle, not from `createBetterAuth`, and a route that never uses
+  the instance no longer fails on it. The Kit's configuration checks (secret, trusted origins,
+  e-mail, base URL, Google sign-in) still throw from the call. The OIDC provider's version check
+  still runs when the instance initialises its context, which now happens only after first use.
 
 ## unkillable-kit/v0.12.0 — 2026-11-27
 
