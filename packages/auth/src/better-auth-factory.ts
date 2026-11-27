@@ -1,6 +1,9 @@
 /**
  * Per-request Better Auth factory (CF Workers pattern, ADR-0002 + ADR-0008 D6).
  * Products import this — they do not copy `example-api/src/lib/better-auth.ts`.
+ *
+ * Configuration is checked when the factory is called; the Better Auth instance is built on its
+ * first use, so a request that only reads the session cookie issuer never constructs it.
  */
 import type { KitD1Database } from '@kit/db'
 import { drizzleAdapter } from 'better-auth/adapters/drizzle'
@@ -39,6 +42,7 @@ import { logBetterAuthEvent } from './logging/better-auth-logger'
 import { type OidcProviderConfig, providerComposition } from './oidc/oidc-config'
 import { registerLogoutD1 } from './oidc/oidc-logout-planning'
 import { withOptionalOidcSchema } from './oidc/oidc-provider-schema'
+import { lazily, onFirstUse } from './on-first-use'
 import { createKitOrganizationPlugin } from './org-plugin'
 import { createSessionAccountGuard, InactiveSessionError } from './policy/better-auth-session-guard'
 import { isAccountActive } from './repos/account-state'
@@ -100,6 +104,17 @@ function createSafeHandler(handler: (request: Request) => Response | Promise<Res
   }
 }
 
+/** Request-bound storage of one instance: built with it, never shared across factory calls. */
+function openStorage(opts: CreateBetterAuthOpts) {
+  const baseSchema =
+    !opts.schema || opts.schema === betterAuthDrizzleSchema
+      ? betterAuthDrizzleSchema
+      : withBetterAuthRelations(opts.schema)
+  const schema = withOptionalOidcSchema(baseSchema, opts.oidcProvider !== undefined)
+  // drizzle-orm/d1 names the workers `D1Database` type; the public contract is `@kit/db` `KitD1Database`.
+  return { schema, db: drizzle(opts.database as never, { schema }) }
+}
+
 export function createBetterAuth(opts: CreateBetterAuthOpts): KitBetterAuth {
   assertAuthSecret('BETTER_AUTH_SECRET', opts.secret, {
     allowKitPlaceholder: opts.allowKitPlaceholderSecret,
@@ -107,18 +122,6 @@ export function createBetterAuth(opts: CreateBetterAuthOpts): KitBetterAuth {
   const trustedOrigins = assertTrustedOrigins(opts.trustedOrigins, {
     allowLoopback: opts.allowLoopbackOrigins === true,
   })
-  const baseSchema =
-    !opts.schema || opts.schema === betterAuthDrizzleSchema
-      ? betterAuthDrizzleSchema
-      : withBetterAuthRelations(opts.schema)
-  const schema = withOptionalOidcSchema(baseSchema, opts.oidcProvider !== undefined)
-  // drizzle-orm/d1 names the workers `D1Database` type; the public contract is `@kit/db` `KitD1Database`.
-  const db = drizzle(opts.database as never, { schema })
-  const provider = providerComposition(
-    opts.oidcProvider,
-    (id) => isAccountActive(db, id, schema.user),
-    opts.database,
-  )
   const cookieName = sessionCookieName({ name: opts.cookieName })
   const secure = opts.useSecureCookies ?? true
   const publicSignup = opts.allowPublicSignup ?? false
@@ -133,142 +136,160 @@ export function createBetterAuth(opts: CreateBetterAuthOpts): KitBetterAuth {
     allowLoopbackHttp: opts.allowLoopbackOrigins === true,
   }
   const google = opts.google !== undefined
-  const auth = betterAuth({
-    baseURL: opts.baseURL,
-    basePath: BA_BASE_PATH,
-    disabledPaths: provider.disabledPaths,
-    // Leave Better Auth's default warn threshold intact; its messages and args are untrusted.
-    logger: { log: logBetterAuthEvent },
-    // Better Call otherwise logs the raw non-API error after Better Auth's logger returns.
-    onAPIError: apiErrorOptions(google, trustedOrigins, opts.googleErrorURL),
-    // The kit throttles in front, on D1 (`@kit/auth/repos/ba-throttle`). Better Auth's own limiter
-    // is memory per isolate, keyed `ip|path`, and on only when NODE_ENV is 'production': pinned off.
-    rateLimit: { enabled: false },
-    secret: opts.secret,
-    session: { cookieCache: { enabled: false } },
-    database: ((options) =>
-      registerLogoutD1(
-        drizzleAdapter(db, { provider: 'sqlite', schema })(options),
-        opts.database,
-      )) as ReturnType<typeof drizzleAdapter>,
-    hooks: { before: createSessionAccountGuard(db, schema) },
-    databaseHooks: {
-      account: google ? googleAccountHooks : undefined,
-      session: {
-        create: {
-          before: async (session) => {
-            let active = false
-            try {
-              active = await isAccountActive(db, session.userId, schema.user)
-            } catch {
-              // An unreadable account state must never issue a session.
-            }
-            if (!active) {
-              throw new APIError('UNAUTHORIZED', {
-                message: 'Invalid email or password',
-                ...(google ? { code: 'account_inactive' } : {}),
-              })
-            }
+  const onAPIError = apiErrorOptions(google, trustedOrigins, opts.googleErrorURL)
+  const store = lazily(() => openStorage(opts))
+  const googleOptions = googleConfiguration(opts.google, async (id) => {
+    const { db, schema } = store()
+    const [existing] = await db
+      .select({ email: schema.user.email })
+      .from(schema.user)
+      .where(eq(schema.user.id, id))
+      .limit(1)
+      .catch(() => [])
+    const active = await isAccountActive(db, id, schema.user).catch(() => false)
+    return existing && { email: existing.email, active }
+  })
+  const auth = onFirstUse((): KitBetterAuth => {
+    const { db, schema } = store()
+    const provider = providerComposition(
+      opts.oidcProvider,
+      (id) => isAccountActive(db, id, schema.user),
+      opts.database,
+    )
+    const instance = betterAuth({
+      baseURL: opts.baseURL,
+      basePath: BA_BASE_PATH,
+      disabledPaths: provider.disabledPaths,
+      // Leave Better Auth's default warn threshold intact; its messages and args are untrusted.
+      logger: { log: logBetterAuthEvent },
+      // Better Call otherwise logs the raw non-API error after Better Auth's logger returns.
+      onAPIError,
+      // The kit throttles in front, on D1 (`@kit/auth/repos/ba-throttle`). Better Auth's own limiter
+      // is memory per isolate, keyed `ip|path`, and on only when NODE_ENV is 'production': pinned off.
+      rateLimit: { enabled: false },
+      secret: opts.secret,
+      session: { cookieCache: { enabled: false } },
+      database: ((options) =>
+        registerLogoutD1(
+          drizzleAdapter(db, { provider: 'sqlite', schema })(options),
+          opts.database,
+        )) as ReturnType<typeof drizzleAdapter>,
+      hooks: { before: createSessionAccountGuard(db, schema) },
+      databaseHooks: {
+        account: google ? googleAccountHooks : undefined,
+        session: {
+          create: {
+            before: async (session) => {
+              let active = false
+              try {
+                active = await isAccountActive(db, session.userId, schema.user)
+              } catch {
+                // An unreadable account state must never issue a session.
+              }
+              if (!active) {
+                throw new APIError('UNAUTHORIZED', {
+                  message: 'Invalid email or password',
+                  ...(google ? { code: 'account_inactive' } : {}),
+                })
+              }
+            },
+            after: createFirstSessionAfterHook(opts.onFirstSession),
           },
-          after: createFirstSessionAfterHook(opts.onFirstSession),
         },
       },
-    },
-    verification: { storeIdentifier: { hash: hashVerificationIdentifier } },
-    ...googleConfiguration(opts.google, async (id) => {
-      const [existing] = await db
-        .select({ email: schema.user.email })
-        .from(schema.user)
-        .where(eq(schema.user.id, id))
-        .limit(1)
-        .catch(() => [])
-      const active = await isAccountActive(db, id, schema.user).catch(() => false)
-      return existing && { email: existing.email, active }
-    }),
-    emailAndPassword: {
-      enabled: true,
-      disableSignUp: !publicSignup,
-      revokeSessionsOnPasswordReset: true,
-      resetPasswordTokenExpiresIn,
-      ...(emailPort && emailConfig
-        ? {
-            sendResetPassword: async ({ user, url, token }) => {
-              const callback = new URL(url)
-              const redirectTo = callback.searchParams.get('callbackURL')
-              // Better Auth invokes this only for known accounts. Returning silently
-              // preserves its generic response when no redirect was supplied.
-              if (!redirectTo) return
-              callback.pathname = callback.pathname.slice(
-                0,
-                callback.pathname.lastIndexOf('/reset-password/'),
-              )
-              callback.search = ''
-              const resetUrl = new URL(redirectTo, callback)
-              resetUrl.searchParams.set('token', token)
-              await sendResetPasswordMail(emailPort, {
-                email: user.email,
-                url: resetUrl.href,
-                emailConfig,
-                expiresInSec: resetPasswordTokenExpiresIn,
-                ...tokenHref,
-              })
-            },
-          }
-        : {}),
-    },
-    plugins: [
-      createKitOrganizationPlugin(),
-      ...provider.plugins,
-      ...googleRedirectOnlyPlugins(google),
-      ...(emailPort && emailConfig
-        ? [
-            magicLink({
-              expiresIn: magicLinkExpiresIn,
-              disableSignUp: !publicSignup,
-              sendMagicLink: async ({ email, url }) => {
-                await sendMagicLinkMail(emailPort, {
-                  email,
-                  url,
+      verification: { storeIdentifier: { hash: hashVerificationIdentifier } },
+      ...googleOptions,
+      emailAndPassword: {
+        enabled: true,
+        disableSignUp: !publicSignup,
+        revokeSessionsOnPasswordReset: true,
+        resetPasswordTokenExpiresIn,
+        ...(emailPort && emailConfig
+          ? {
+              sendResetPassword: async ({ user, url, token }) => {
+                const callback = new URL(url)
+                const redirectTo = callback.searchParams.get('callbackURL')
+                // Better Auth invokes this only for known accounts. Returning silently
+                // preserves its generic response when no redirect was supplied.
+                if (!redirectTo) return
+                callback.pathname = callback.pathname.slice(
+                  0,
+                  callback.pathname.lastIndexOf('/reset-password/'),
+                )
+                callback.search = ''
+                const resetUrl = new URL(redirectTo, callback)
+                resetUrl.searchParams.set('token', token)
+                await sendResetPasswordMail(emailPort, {
+                  email: user.email,
+                  url: resetUrl.href,
                   emailConfig,
-                  expiresInSec: magicLinkExpiresIn,
+                  expiresInSec: resetPasswordTokenExpiresIn,
                   ...tokenHref,
                 })
               },
-            }),
-          ]
-        : []),
-    ],
-    advanced: {
-      disableOriginCheck: false,
-      backgroundTasks: provider.backgroundTasks,
-      database: { joins: true },
-      useSecureCookies: secure,
-      cookies: {
-        session_token: {
-          name: cookieName,
-          attributes: { httpOnly: true, sameSite: 'lax', path: '/', secure },
+            }
+          : {}),
+      },
+      plugins: [
+        createKitOrganizationPlugin(),
+        ...provider.plugins,
+        ...googleRedirectOnlyPlugins(google),
+        ...(emailPort && emailConfig
+          ? [
+              magicLink({
+                expiresIn: magicLinkExpiresIn,
+                disableSignUp: !publicSignup,
+                sendMagicLink: async ({ email, url }) => {
+                  await sendMagicLinkMail(emailPort, {
+                    email,
+                    url,
+                    emailConfig,
+                    expiresInSec: magicLinkExpiresIn,
+                    ...tokenHref,
+                  })
+                },
+              }),
+            ]
+          : []),
+      ],
+      advanced: {
+        disableOriginCheck: false,
+        backgroundTasks: provider.backgroundTasks,
+        database: { joins: true },
+        useSecureCookies: secure,
+        cookies: {
+          session_token: {
+            name: cookieName,
+            attributes: { httpOnly: true, sameSite: 'lax', path: '/', secure },
+          },
         },
       },
-    },
-    trustedOrigins,
+      trustedOrigins,
+    })
+    const handle = createSafeHandler(instance.handler)
+    instance.fetch = instance.handler = (request) =>
+      provider.protectResponse?.(request, handle) ?? handle(request)
+    instance.api.getSession = new Proxy(instance.api.getSession, {
+      async apply(target, thisArg, args) {
+        try {
+          return await Reflect.apply(target, thisArg, args)
+        } catch (error) {
+          const options = args[0] as
+            | { asResponse?: boolean; returnHeaders?: boolean; returnStatus?: boolean }
+            | undefined
+          const rawSession = !(
+            options?.asResponse ||
+            options?.returnHeaders ||
+            options?.returnStatus
+          )
+          if (error instanceof InactiveSessionError && rawSession) return null
+          throw error
+        }
+      },
+    })
+    return instance
   })
-  const handle = createSafeHandler(auth.handler)
-  auth.fetch = auth.handler = (request) =>
-    provider.protectResponse?.(request, handle) ?? handle(request)
-  auth.api.getSession = new Proxy(auth.api.getSession, {
-    async apply(target, thisArg, args) {
-      try {
-        return await Reflect.apply(target, thisArg, args)
-      } catch (error) {
-        const options = args[0] as
-          | { asResponse?: boolean; returnHeaders?: boolean; returnStatus?: boolean }
-          | undefined
-        const rawSession = !(options?.asResponse || options?.returnHeaders || options?.returnStatus)
-        if (error instanceof InactiveSessionError && rawSession) return null
-        throw error
-      }
-    },
-  })
+  // Keyed by the returned handle: reading the issuer must not build the instance.
   recordSessionCookie(auth, secure ? `__Secure-${cookieName}` : cookieName, opts.secret)
   return auth
 }

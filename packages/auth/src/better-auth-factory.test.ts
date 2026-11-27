@@ -6,7 +6,9 @@ import { MAGIC_LINK_EXPIRES_IN_SEC, RESET_PASSWORD_TOKEN_EXPIRES_IN_SEC } from '
 import { getBetterAuthSecret } from './better-auth-env'
 import { createBetterAuth } from './better-auth-factory'
 import { betterAuthDrizzleSchema } from './better-auth-schema'
+import type { OidcProviderConfig } from './oidc/oidc-config'
 import * as accountState from './repos/account-state'
+import { requestSessionCookie } from './request/effective-session-cookie'
 
 const SECRET = 'test-better-auth-secret-xxxxxxxx32c!!'
 const emailConfig = {
@@ -500,5 +502,60 @@ describe('createBetterAuth', () => {
       )
       expect(res.status, baseURL).toBe(200)
     }
+  })
+})
+
+describe('createBetterAuth construction', () => {
+  // The provider composition runs inside the Better Auth build: it counts constructions.
+  function counted() {
+    const compose = vi.fn<OidcProviderConfig['compose']>(() => ({ plugins: [] }))
+    return { compose, oidcProvider: { waitUntil: vi.fn(), compose } }
+  }
+
+  it('reads the session cookie issuer without building Better Auth, then builds it once', () => {
+    const { compose, oidcProvider } = counted()
+    const auth = factory({ oidcProvider, cookieName: 'kit_session', useSecureCookies: true })
+    expect(requestSessionCookie(auth, 'kit=1')).toEqual({
+      header: 'kit=1',
+      name: '__Secure-kit_session',
+      secret: SECRET,
+    })
+    expect(compose).not.toHaveBeenCalled()
+    expect(auth.api.getSession).toBe(auth.api.getSession)
+    expect(auth.options.plugins?.map((p) => p.id)).toContain('organization')
+    expect(compose).toHaveBeenCalledTimes(1)
+  })
+
+  it('builds each handle from its own options and database, in any order', () => {
+    const first = counted()
+    const second = counted()
+    const [databaseA, databaseB] = [stubD1(), stubD1()]
+    const a = factory({ database: databaseA, oidcProvider: first.oidcProvider, cookieName: 'a' })
+    const b = factory({
+      database: databaseB,
+      oidcProvider: second.oidcProvider,
+      cookieName: 'b',
+      secret: `${SECRET}b`,
+      useSecureCookies: false,
+    })
+    expect(b.options.advanced?.cookies?.session_token).toMatchObject({ name: 'b' })
+    expect(a.options.advanced?.cookies?.session_token).toMatchObject({ name: 'a' })
+    expect(first.compose).toHaveBeenCalledWith(expect.any(Function), databaseA)
+    expect(second.compose).toHaveBeenCalledWith(expect.any(Function), databaseB)
+    expect(a.api).not.toBe(b.api)
+    expect(requestSessionCookie(a, null)).toMatchObject({ name: '__Secure-a', secret: SECRET })
+    expect(requestSessionCookie(b, null)).toMatchObject({ name: 'b', secret: `${SECRET}b` })
+  })
+
+  it('rejects configuration when called, before any use', () => {
+    const { compose, oidcProvider } = counted()
+    expect(() => factory({ oidcProvider, baseURL: 'not a url' })).toThrow('BETTER_AUTH_URL')
+    expect(() =>
+      factory({ oidcProvider, google: { clientId: '', clientSecret: '', allowedDomains: [] } }),
+    ).toThrow('Invalid Google sign-in configuration')
+    expect(() => factory({ oidcProvider, googleErrorURL: 'https://evil.test/login' })).toThrow(
+      'googleErrorURL',
+    )
+    expect(compose).not.toHaveBeenCalled()
   })
 })
