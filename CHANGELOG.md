@@ -4,6 +4,37 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ## Unreleased
 
+### Auth
+
+- `createBetterAuth` (`@kit/auth/factory`) builds on the `better-auth/minimal` initializer with
+  the same options, Drizzle adapter, hooks and plugins. It leaves out Kysely, its Better Auth
+  adapter and the built-in migration runner, so a Worker with no other importer no longer bundles
+  them; the instance cannot run Better Auth migrations, and schema changes stay Drizzle
+  migrations (go-silex/unkillable-kit#214).
+- `better-auth:check` accepts the factory's Better Auth server import from `better-auth` or
+  `better-auth/minimal`; a Wrangler alias that moves either outside the installed package still
+  fails it.
+- **Product action:** A Product test that mocks `better-auth` to replace the initializer behind
+  `createBetterAuth` mocks `better-auth/minimal` instead.
+
+### Validation
+
+- Kit packages and examples import Zod as `import * as z from 'zod'`, so a Worker bundles the
+  English locale only, not every Zod locale. Issues and message text are unchanged. A lint rule
+  keeps `import { z }` and the default Zod import out of Kit paths; Product paths are not
+  checked. A Product's own `import { z } from 'zod'`, and dependencies that import Zod that way
+  (`@hono/zod-openapi`, `fastmcp`), still bundle every locale (go-silex/unkillable-kit#214).
+
+### MCP
+
+- `@kit/mcp/hosted` evaluates its shell (OAuth provider, FastMCP Edge server, consent page) on
+  the first request to a reserved path of the pinned origin. Product routes reach `fallthrough`
+  without evaluating it or building a provider, on every origin and configuration, and the
+  shell's answers are unchanged. A bundled Worker still uploads the shell, and the lazily
+  evaluated modules tree-shake less: the upload is larger than with an eager shell, by about
+  75 KiB raw in a co-located fixture and 145 KiB in the dedicated MCP example
+  (go-silex/unkillable-kit#214).
+
 ## unkillable-kit/v0.11.0 — 2026-11-26
 
 ### Deploy
