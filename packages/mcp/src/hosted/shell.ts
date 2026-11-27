@@ -29,9 +29,12 @@ type HostedShellSettings<Env extends HostedMcpEnv, AppEnv extends { Bindings: En
   consentPresentation: ResolvedConsentPresentation | undefined
 }
 
-/** Serves one request on a reserved path of the pinned origin. */
+/** What the router read when the request arrived, before loading the shell. */
+type ShellArrival = { origin: string; name: string; refreshTokenTTL: number | undefined }
+
+/** Serves one request on a reserved path of the pinned origin, with a per-request env copy. */
 export type HostedShell<Env extends HostedMcpEnv> = {
-  fetch(request: Request, env: Env, ctx: ExecutionContext, origin: string): Promise<Response>
+  fetch(request: Request, env: Env, ctx: ExecutionContext, arrival: ShellArrival): Promise<Response>
 }
 
 const REGISTER_DENIED = JSON.stringify({ error: 'access_denied' })
@@ -194,7 +197,7 @@ export function createHostedShell<Env extends HostedMcpEnv, AppEnv extends { Bin
   }
 
   return {
-    fetch(request, env, ctx, origin) {
+    fetch(request, env, ctx, { origin, name, refreshTokenTTL }) {
       const url = new URL(request.url)
       const dcr = allowDynamicClientRegistration(env, url)
       const provider = new OAuthProvider<Env>({
@@ -205,7 +208,7 @@ export function createHostedShell<Env extends HostedMcpEnv, AppEnv extends { Bin
         tokenEndpoint: TOKEN_PATH,
         ...(dcr ? { clientRegistrationEndpoint: REGISTER_PATH } : {}),
         accessTokenTTL: ACCESS_TOKEN_TTL_SECONDS,
-        ...(opts.refreshTokenTTL !== undefined ? { refreshTokenTTL: opts.refreshTokenTTL } : {}),
+        ...(refreshTokenTTL !== undefined ? { refreshTokenTTL } : {}),
         // Custom-scheme apps stay a consent-page redirect class (ADR-0015 D5); remote http never is.
         allowPrivateUseRedirectUris: true,
         allowTokenExchangeGrant: false,
@@ -216,12 +219,12 @@ export function createHostedShell<Env extends HostedMcpEnv, AppEnv extends { Bin
         resourceMetadata: {
           resource: `${origin}${MCP_PATH}`,
           ...(url.protocol === 'https:' ? { authorization_servers: [origin] } : {}),
-          resource_name: opts.name,
+          resource_name: name,
         },
       })
-      // The library sets env.OAUTH_PROVIDER only when absent. A per-request copy keeps
-      // the helper bound to this request's origin instead of the first one served.
-      return provider.fetch(request, { ...env }, ctx)
+      // The library sets env.OAUTH_PROVIDER only when absent. The router's per-request copy
+      // keeps the helper bound to this request's origin instead of the first one served.
+      return provider.fetch(request, env, ctx)
     },
   }
 }

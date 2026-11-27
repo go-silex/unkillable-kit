@@ -608,8 +608,43 @@ describe('hosted worker routing', () => {
         return new Response('ok')
       },
     })
-    await hosted.fetch(new Request(`${LOCAL}/health`), env(kv), ctx())
+    // A helper already on the Worker env must not reach the hook, nor be removed from that env.
+    const deployed = { ...env(kv), OAUTH_PROVIDER: {} }
+    await hosted.fetch(new Request(`${LOCAL}/health`), deployed, ctx())
     expect(helperPresent).toBe(false)
+    expect(deployed.OAUTH_PROVIDER).toEqual({})
+  })
+
+  it('builds each provider from the options read when its request arrives, loaded or not', async () => {
+    const options = {
+      name: 'first',
+      apiBaseUrl: () => 'http://127.0.0.1:8787',
+      identityPort: port(DEMO),
+      register() {},
+    }
+    const hosted = createHostedMcpWorker<HostedMcpEnv>(options)
+    const metadata = () =>
+      hosted.fetch(
+        new Request(`${LOCAL}/.well-known/oauth-protected-resource/mcp`),
+        env(new MemoryKv()),
+        ctx(),
+      )
+    const names = (pending: Promise<Response>[]) =>
+      Promise.all(
+        pending.map(
+          async (response) =>
+            ((await (await response).json()) as { resource_name: string }).resource_name,
+        ),
+      )
+    // Two concurrent first requests, while the shell loads, keep the name each arrived with.
+    const cold = [metadata()]
+    options.name = 'second'
+    cold.push(metadata())
+    options.name = 'third'
+    expect(await names(cold)).toEqual(['first', 'second'])
+    const warm = metadata()
+    options.name = 'fourth'
+    expect(await names([warm])).toEqual(['third'])
   })
 
   it('gives the identity port and apiBaseUrl an env without the oauth helper', async () => {

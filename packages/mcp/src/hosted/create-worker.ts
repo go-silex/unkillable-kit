@@ -98,10 +98,19 @@ export function createHostedMcpWorker<
       // The provider is built for the configured origin only. Any other origin a request names
       // (cleartext, a preview host, a forged Host) has no shell.
       if (pinned.origin !== url.origin) return new Response('Not found', { status: 404 })
-      // Dynamic on purpose: evaluating the shell is the startup cost product routes skip.
-      const { createHostedShell } = await import('./shell')
-      shell ??= createHostedShell(opts, settings)
-      return shell.fetch(request, env, ctx, pinned.origin)
+      // Taken on arrival, as when the provider was built before any await: the import yields.
+      const arrival = {
+        origin: pinned.origin,
+        name: opts.name,
+        refreshTokenTTL: opts.refreshTokenTTL,
+      }
+      const requestEnv = { ...env }
+      if (!shell) {
+        // Dynamic on purpose: evaluating the shell is the startup cost product routes skip.
+        const { createHostedShell } = await import('./shell')
+        shell ??= createHostedShell(opts, settings)
+      }
+      return shell.fetch(request, requestEnv, ctx, arrival)
     },
   }
 }
