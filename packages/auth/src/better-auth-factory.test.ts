@@ -605,7 +605,7 @@ describe('createBetterAuth construction', () => {
     expect(provider.composed).toBe(1)
   })
 
-  it('composes the tables from the schema map as it was at the call', async () => {
+  it('reads and joins the tables of the schema map as it was at the call', async () => {
     const queries: string[] = []
     const statement = {
       bind: () => statement,
@@ -630,6 +630,15 @@ describe('createBetterAuth construction', () => {
     schema.user = table('users_b')
     await auth.options.databaseHooks.session.create.before({ userId: 'user-a' })
     expect(queries).toEqual([expect.stringContaining('"users_a"')])
+    // Better Auth joins the session to its user through the Drizzle relations.
+    type Adapter = { findOne: (query: object) => Promise<unknown> }
+    const adapter = (
+      auth.options as unknown as { database: (options: unknown) => Adapter }
+    ).database(auth.options)
+    const where = [{ field: 'token', value: 'token' }]
+    await adapter.findOne({ model: 'session', where, join: { user: true } }).catch(() => undefined)
+    expect(queries.slice(1).join('\n')).toMatch(/"users_a"/)
+    expect(queries.join('\n')).not.toMatch(/"users_b"/)
   })
 
   it('rejects configuration when called, before any use', () => {

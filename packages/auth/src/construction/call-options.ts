@@ -40,11 +40,14 @@ function pinProvider(provider: OidcProviderConfig | undefined): OidcProviderConf
   return { waitUntil, compose: (isActive, database) => compose.call(provider, isActive, database) }
 }
 
-/** The instance's tables, composed at the call from the schema map as it is then. */
+/**
+ * The instance's tables, composed at the call from the schema map as it is then. The relations
+ * get their own copy of the map: Drizzle resolves them lazily, when the database is opened.
+ */
 export function authSchema(options: CreateBetterAuthOpts) {
   const tables =
     !options.schema || options.schema === betterAuthDrizzleSchema
       ? betterAuthDrizzleSchema
-      : withBetterAuthRelations(options.schema)
+      : withBetterAuthRelations({ ...options.schema })
   return withOptionalOidcSchema(tables, options.oidcProvider !== undefined)
 }
