@@ -56,6 +56,7 @@ it('reveals the same note again after filtering it out without leaving Notes', a
   })
   const queryClient = createTestQueryClient()
   const router = createTestRouter(routeTree, '/app/notes', queryClient)
+  const navigate = vi.spyOn(router, 'navigate')
   renderWithAppProviders(<RouterProvider router={router} />, { queryClient })
 
   async function selectNote() {
@@ -83,6 +84,15 @@ it('reveals the same note again after filtering it out without leaving Notes', a
   expect(router.state.location.pathname).toBe('/app/notes')
   expect(router.state.location.href).not.toBe(initialHref)
   expect(screen.getByRole('textbox', { name: fr.tableSearch })).toHaveValue('')
+  expect(navigate).toHaveBeenCalledWith({
+    href: expect.stringContaining('/app/notes?noteId='),
+    resetScroll: false,
+  })
+
+  fireEvent.click(screen.getByRole('button', { name: fr.paletteTitle }))
+  fireEvent.click(screen.getByRole('option', { name: fr.navNotes }))
+  expect(navigate).toHaveBeenCalledWith({ href: '/app/notes', resetScroll: true })
+  await screen.findByRole('row', { name: /Project kickoff/, current: false })
   vi.mocked(apiFetch).mockReset()
 })
 

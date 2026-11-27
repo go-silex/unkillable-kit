@@ -141,7 +141,11 @@ function ShellChrome({ mode, children }: { mode: ShellMode; children: ReactNode 
               mode={mode}
               delegated={Boolean(me.data?.impersonation)}
               onNavigate={(href) => {
-                void navigate({ href })
+                const destination = new URL(href, window.location.origin)
+                const revealsNote =
+                  destination.pathname === '/app/notes' && destination.searchParams.has('noteId')
+                // Let the selected row position itself instead of resetting scroll after commit.
+                void navigate({ href, resetScroll: !revealsNote })
               }}
             />
           </div>
