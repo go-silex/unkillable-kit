@@ -4,6 +4,8 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ## Unreleased
 
+## unkillable-kit/v0.12.0 — 2026-11-27
+
 ### Auth
 
 - `createBetterAuth` (`@kit/auth/factory`) builds on the `better-auth/minimal` initializer with
