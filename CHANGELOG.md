@@ -4,6 +4,18 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ## Unreleased
 
+### Auth
+
+- `createBetterAuth` (`@kit/auth/factory`) checks its configuration when called, as before, and
+  builds the Better Auth instance, its Drizzle database and its plugins on the first use of the
+  handle it returns. Request authorization reads the session cookie issuer without building it, so
+  a request that does not reach Better Auth no longer constructs it: in the reference composition,
+  every route outside `/api/auth/*`. Each call still builds and owns its own instance; nothing is
+  shared across requests (go-silex/unkillable-kit#226).
+- An error that Better Auth itself throws while building its instance now surfaces on the first
+  use of the handle, not from `createBetterAuth`. The Kit's own configuration checks still throw
+  from the call.
+
 ## unkillable-kit/v0.12.0 — 2026-11-27
 
 ### Auth

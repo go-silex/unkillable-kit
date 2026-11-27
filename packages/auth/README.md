@@ -21,6 +21,15 @@ Authentication primitives and integration surfaces; it does not own product-spec
 - Known consumers: `apps/example-api`, `apps/example-web`, `packages/mcp`, `packages/notifications`.
 - Caller rules: [architecture decision](../../docs/kit/architecture/adr/0003-multi-tenant-rbac-modules.md).
 
+## Factory construction
+
+Call `createBetterAuth` from `@kit/auth/factory` for each request and never keep the handle across
+requests. The call checks the configuration and throws on an invalid one. The Better Auth instance,
+its database and its plugins are built on the first use of the handle, once per call. Request
+authorization reads only the session cookie issuer recorded on the handle, so a request that does
+not reach Better Auth never builds it. An error that Better Auth itself throws while building
+surfaces on that first use.
+
 ## Auth e-mail rendering
 
 Products can set `emailConfig.render` on `createBetterAuth` from
