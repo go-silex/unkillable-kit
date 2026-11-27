@@ -1,16 +1,20 @@
 import type { Command } from './sources'
 
 export function CommandEntry({
+  id,
+  selected,
   command,
   close,
   onNavigate,
 }: {
+  id: string
+  selected: boolean
   command: Command
   close: () => void
   onNavigate: ((href: string) => void) | undefined
 }) {
   const className =
-    'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-start hover:bg-accent [[aria-selected=true]>&]:bg-accent [[aria-selected=true]>&]:text-accent-foreground'
+    'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-start hover:bg-accent aria-selected:bg-accent aria-selected:text-accent-foreground'
   const content = (
     <>
       {command.icon != null && (
@@ -28,6 +32,9 @@ export function CommandEntry({
     const href = command.href
     return (
       <a
+        id={id}
+        role="option"
+        aria-selected={selected}
         href={href}
         tabIndex={-1}
         className={className}
@@ -53,6 +60,9 @@ export function CommandEntry({
   }
   return (
     <button
+      id={id}
+      role="option"
+      aria-selected={selected}
       type="button"
       tabIndex={-1}
       className={className}

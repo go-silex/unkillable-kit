@@ -24,7 +24,7 @@ import { type Note, useDeleteNote, useNotes } from '../lib/notes'
 
 export function NotesPage() {
   const { m } = useLocale()
-  const { q } = useSearch({ from: '/app/notes' })
+  const { noteId } = useSearch({ from: '/app/notes' })
   const [open, setOpen] = useState(false)
   const [pendingDelete, setPendingDelete] = useState<Note | null>(null)
   const notes = useNotes()
@@ -48,9 +48,9 @@ export function NotesPage() {
       />
 
       <NotesTable
-        key={q}
+        key={noteId}
         notes={notes}
-        initialFilter={q}
+        selectedNoteId={noteId}
         onDelete={setPendingDelete}
         onCreate={() => setOpen(true)}
       />

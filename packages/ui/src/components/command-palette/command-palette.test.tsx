@@ -104,6 +104,8 @@ it('navigates across groups, stops at the ends, and runs the selected action', (
   press('Enter')
   expect(last).toHaveBeenCalledOnce()
   expect(first).not.toHaveBeenCalled()
+  fireEvent.click(firstOption)
+  expect(first).toHaveBeenCalledOnce()
 })
 
 it('statically matches terms across the label and keywords, with overridable messages', () => {
@@ -115,6 +117,8 @@ it('statically matches terms across the label and keywords, with overridable mes
         placeholder: 'Chercher',
         group: 'Commandes',
         empty: 'Aucun résultat',
+        resultCount: (count) => `${count} résultat`,
+        sourceStatus: (label, status) => `${label} — ${status}`,
       }}
       sources={[
         {
@@ -133,8 +137,9 @@ it('statically matches terms across the label and keywords, with overridable mes
   fireEvent.change(input, { target: { value: 'NOTE Draft' } })
   expect(screen.getByRole('option', { name: 'Create note' })).toBeInTheDocument()
   expect(screen.queryByRole('option', { name: 'Archive note' })).not.toBeInTheDocument()
+  expect(screen.getByRole('status')).toHaveTextContent('Commandes — 1 résultat')
   fireEvent.change(input, { target: { value: 'missing' } })
-  expect(screen.getByRole('status')).toHaveTextContent('Commandes: Aucun résultat')
+  expect(screen.getByRole('status')).toHaveTextContent('Commandes — Aucun résultat')
   expect(input).not.toHaveAttribute('aria-activedescendant')
 })
 
@@ -145,7 +150,10 @@ it('renders a real link and leaves modified navigation out of the same-tab adapt
     { id: 'navigation', commands: [{ id: 'home', label: 'Home', href: '/home' }] },
   ]
   render(<CommandPalette open sources={sources} onNavigate={onNavigate} />)
-  expect(screen.getByRole('link', { name: 'Home' })).toHaveAttribute('href', '/home')
+  const linkOption = screen.getByRole('option', { name: 'Home' })
+  expect(linkOption).toBeInstanceOf(HTMLAnchorElement)
+  expect(linkOption).toHaveAttribute('href', '/home')
+  expect(queryInput()).toHaveAttribute('aria-activedescendant', linkOption.id)
   press('Enter', { ctrlKey: true })
   press('Enter', { metaKey: true })
   expect(openWindow).toHaveBeenCalledTimes(2)
@@ -153,6 +161,8 @@ it('renders a real link and leaves modified navigation out of the same-tab adapt
   expect(onNavigate).not.toHaveBeenCalled()
   press('Enter')
   expect(onNavigate).toHaveBeenCalledExactlyOnceWith('/home')
+  fireEvent.click(linkOption)
+  expect(onNavigate).toHaveBeenCalledTimes(2)
 })
 
 it('settles each source independently and retries only the failed source', async () => {
@@ -172,6 +182,8 @@ it('settles each source independently and retries only the failed source', async
     />,
   )
   expect(screen.getByText('Slow: Loading…')).toBeInTheDocument()
+  const live = screen.getByRole('status')
+  expect(live).toHaveTextContent('Slow: Loading… · Fast: Loading… · Empty: Loading…')
   await act(() => vi.advanceTimersByTimeAsync(39))
   expect(fast.requests).toHaveLength(0)
   await act(() => vi.advanceTimersByTimeAsync(1))
@@ -182,12 +194,16 @@ it('settles each source independently and retries only the failed source', async
   expect(screen.getByRole('option', { name: 'Fast result' })).toBeInTheDocument()
   expect(screen.getByText('Slow: Loading…')).toBeInTheDocument()
   expect(screen.getByText('Empty: No results')).toBeInTheDocument()
+  expect(screen.getByRole('status')).toBe(live)
+  expect(live).toHaveTextContent('Slow: Loading… · Fast: 1 result · Empty: No results')
   await act(async () => slow.requests[0]?.reject(new Error('not user-facing')))
   expect(screen.getByText('Slow: Could not load results')).toBeInTheDocument()
+  expect(live).toHaveTextContent('Slow: Could not load results')
   fireEvent.click(
     screen.getByRole('button', { name: 'Retry', description: 'Slow: Could not load results' }),
   )
   expect(screen.getByText('Slow: Loading…')).toBeInTheDocument()
+  expect(live).toHaveTextContent('Slow: Loading…')
   expect(slow.requests).toHaveLength(2)
   expect(fast.requests).toHaveLength(1)
   expect(empty.requests).toHaveLength(1)
@@ -195,6 +211,7 @@ it('settles each source independently and retries only the failed source', async
     slow.requests[1]?.resolve([{ id: 'recovered', label: 'Recovered', run: vi.fn() }]),
   )
   expect(screen.getByRole('option', { name: 'Recovered' })).toBeInTheDocument()
+  expect(live).toHaveTextContent('Slow: 1 result · Fast: 1 result · Empty: No results')
 })
 
 it('cancels stale requests on query changes and unregistration, even if a source ignores abort', async () => {
@@ -219,4 +236,36 @@ it('cancels stale requests on query changes and unregistration, even if a source
   rerender(<CommandPalette open sources={[]} />)
   expect(source.requests[1]?.signal.aborted).toBe(true)
   expect(screen.queryByRole('option')).not.toBeInTheDocument()
+})
+
+it('keeps a search and its active result when other sources register or unregister', async () => {
+  vi.useFakeTimers()
+  const found = controlSearch()
+  const extra = controlSearch()
+  const source = { id: 'search', search: found.search }
+  const staticSource: CommandSource = {
+    id: 'static',
+    commands: [{ id: 'home', label: 'Home', run: vi.fn() }],
+  }
+  const extraSource = { id: 'extra', search: extra.search }
+  const { rerender } = render(<CommandPalette open sources={[source]} debounceMs={20} />)
+  await act(() => vi.advanceTimersByTimeAsync(10))
+  rerender(<CommandPalette open sources={[staticSource, source]} debounceMs={20} />)
+  await act(() => vi.advanceTimersByTimeAsync(10))
+  expect(found.requests).toHaveLength(1)
+  rerender(<CommandPalette open sources={[staticSource, source, extraSource]} debounceMs={20} />)
+  await act(() => vi.advanceTimersByTimeAsync(20))
+  expect(found.requests[0]?.signal.aborted).toBe(false)
+  expect(found.requests).toHaveLength(1)
+  await act(async () => found.requests[0]?.resolve([{ id: 'hit', label: 'A hit', run: vi.fn() }]))
+  press('End')
+  const active = screen.getByRole('option', { name: 'A hit', selected: true })
+  rerender(<CommandPalette open sources={[source]} debounceMs={20} />)
+  expect(extra.requests[0]?.signal.aborted).toBe(true)
+  rerender(<CommandPalette open sources={[staticSource, source]} debounceMs={20} />)
+  await act(() => vi.advanceTimersByTimeAsync(20))
+  expect(found.requests[0]?.signal.aborted).toBe(false)
+  expect(found.requests).toHaveLength(1)
+  expect(screen.getByRole('option', { name: 'A hit', selected: true })).toBe(active)
+  expect(queryInput()).toHaveAttribute('aria-activedescendant', active.id)
 })

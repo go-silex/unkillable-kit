@@ -9,6 +9,8 @@ export const commandPaletteMessages = {
   loading: 'Loading…',
   error: 'Could not load results',
   retry: 'Retry',
-} satisfies Record<string, string>
+  resultCount: (count: number) => `${count} ${count === 1 ? 'result' : 'results'}`,
+  sourceStatus: (label: string, status: string) => `${label}: ${status}`,
+}
 
 export type CommandPaletteMessages = typeof commandPaletteMessages

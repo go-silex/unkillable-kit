@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 export type Command = {
   id: string
@@ -24,75 +24,92 @@ type SourceResult =
   | { state: 'loading' | 'error' }
   | { state: 'ready'; commands: readonly Command[] }
 
-type SearchRequest = {
-  sources: readonly CommandSource[]
-  query: string
-  delay: number
-}
-
-type Snapshot = {
-  request: SearchRequest
-  results: ReadonlyMap<string, SourceResult>
-}
-
 const loading = { state: 'loading' } as const
 
-export function useCommandResults(sources: readonly CommandSource[], query: string, delay: number) {
-  const request = useMemo(() => ({ sources, query, delay }), [sources, query, delay])
-  const [snapshot, setSnapshot] = useState<Snapshot>()
-  const retries = useRef(new Map<string, () => void>())
+type Search = NonNullable<CommandSource['search']>
+type SearchIdentity = { search: Search; query: string }
+type SearchJob = SearchIdentity & { cancel: () => void; retry: () => void }
+type Snapshot = SearchIdentity & { result: SourceResult }
 
-  useEffect(() => {
-    const { sources, query, delay } = request
-    const controller = new AbortController()
-    const scheduled = new Map<string, () => void>()
-    const activeRetries = retries.current
-
-    function publish(id: string, result: SourceResult) {
-      if (controller.signal.aborted) return
-      setSnapshot((previous) => {
-        const results = new Map(previous?.request === request ? previous.results : undefined)
-        results.set(id, result)
-        return { request, results }
-      })
+function startSearch(
+  search: Search,
+  query: string,
+  delay: number,
+  notify: (result: SourceResult) => void,
+): SearchJob {
+  const controller = new AbortController()
+  const publish = (result: SourceResult) => {
+    if (!controller.signal.aborted) notify(result)
+  }
+  async function run() {
+    try {
+      const commands = await search(query, { signal: controller.signal })
+      publish({ state: 'ready', commands })
+    } catch {
+      publish({ state: 'error' })
     }
-
-    for (const { id, search } of sources) {
-      if (!search) continue
-      const run = async () => {
-        if (controller.signal.aborted) return
-        try {
-          const commands = await search(query, { signal: controller.signal })
-          publish(id, { state: 'ready', commands })
-        } catch {
-          publish(id, { state: 'error' })
-        }
-      }
-      scheduled.set(id, () => void run())
-      activeRetries.set(id, () => {
-        publish(id, loading)
-        void run()
-      })
-    }
-
-    if (scheduled.size === 0) return
-    const timeout = setTimeout(() => {
-      for (const run of scheduled.values()) run()
-    }, delay)
-    return () => {
+  }
+  const timeout = setTimeout(() => void run(), delay)
+  return {
+    search,
+    query,
+    cancel() {
       clearTimeout(timeout)
       controller.abort()
-      activeRetries.clear()
-    }
-  }, [request])
+    },
+    retry() {
+      publish(loading)
+      void run()
+    },
+  }
+}
 
-  const results = snapshot?.request === request ? snapshot.results : undefined
+export function useCommandResults(sources: readonly CommandSource[], query: string, delay: number) {
+  const [snapshots, setSnapshots] = useState<ReadonlyMap<string, Snapshot>>(() => new Map())
+  const jobs = useRef(new Map<string, SearchJob>())
+
+  useEffect(() => {
+    const current = jobs.current
+    const searches = new Map(sources.map(({ id, search }) => [id, search]))
+    const obsolete: string[] = []
+    for (const [id, job] of current) {
+      if (job.query === query && job.search === searches.get(id)) continue
+      job.cancel()
+      current.delete(id)
+      obsolete.push(id)
+    }
+    if (obsolete.length > 0) {
+      setSnapshots((previous) => {
+        const next = new Map(previous)
+        for (const id of obsolete) next.delete(id)
+        return next
+      })
+    }
+    for (const [id, search] of searches) {
+      if (!search || current.has(id)) continue
+      current.set(
+        id,
+        startSearch(search, query, delay, (result) => {
+          setSnapshots((previous) => new Map(previous).set(id, { search, query, result }))
+        }),
+      )
+    }
+  }, [sources, query, delay])
+
+  useEffect(() => {
+    const current = jobs.current
+    return () => {
+      for (const job of current.values()) job.cancel()
+      current.clear()
+    }
+  }, [])
+
   const terms = query.toLowerCase().split(/\s+/).filter(Boolean)
   return {
-    groups: sources.map((source) => ({
-      source,
-      result: source.commands
-        ? ({
+    groups: sources.map((source) => {
+      const snapshot = snapshots.get(source.id)
+      const result: SourceResult = source.commands
+        ? {
             state: 'ready',
             commands:
               terms.length === 0
@@ -105,9 +122,12 @@ export function useCommandResults(sources: readonly CommandSource[], query: stri
                         name.includes(term) || aliases?.some((keyword) => keyword.includes(term)),
                     )
                   }),
-          } satisfies SourceResult)
-        : (results?.get(source.id) ?? loading),
-    })),
-    retry: (id: string) => retries.current.get(id)?.(),
+          }
+        : snapshot && snapshot.search === source.search && snapshot.query === query
+          ? snapshot.result
+          : loading
+      return { source, result }
+    }),
+    retry: (id: string) => jobs.current.get(id)?.retry(),
   }
 }

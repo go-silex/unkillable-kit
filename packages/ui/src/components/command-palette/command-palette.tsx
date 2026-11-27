@@ -127,11 +127,22 @@ function PaletteSearch({
   const { groups, retry } = useCommandResults(sources, text.trim(), delay)
   const options = groups.map(({ source, result }) => {
     const groupId = `${listId}-group-${encodeURIComponent(source.id)}`
+    const label = source.label ?? strings.group
+    const count = result.state === 'ready' ? result.commands.length : 0
+    const status =
+      result.state === 'loading'
+        ? strings.loading
+        : result.state === 'error'
+          ? strings.error
+          : count === 0
+            ? strings.empty
+            : strings.resultCount(count)
     return {
       source,
       result,
       groupId,
-      label: source.label ?? strings.group,
+      label,
+      status: strings.sourceStatus(label, status),
       items:
         result.state === 'ready'
           ? result.commands.map((command) => ({
@@ -151,10 +162,13 @@ function PaletteSearch({
     if (activeId) document.getElementById(activeId)?.scrollIntoView?.({ block: 'nearest' })
   }, [activeId])
 
-  function activateResult(id: string, href: string | undefined, newTab: boolean) {
+  function activateResult(id: string, newTab: boolean) {
+    const option = document.getElementById(id)
     if (!newTab) {
-      document.getElementById(id)?.querySelector<HTMLElement>('a,button')?.click()
-    } else if (href !== undefined) {
+      option?.click()
+    } else if (option instanceof HTMLAnchorElement) {
+      const href = option.getAttribute('href')
+      if (href == null) return
       window.open(href, '_blank', 'noopener,noreferrer')
       close()
     }
@@ -165,7 +179,7 @@ function PaletteSearch({
     const { key, metaKey, ctrlKey } = event
     if (key === 'Enter') {
       event.preventDefault()
-      activateResult(selected.id, selected.command.href, metaKey || ctrlKey)
+      activateResult(selected.id, metaKey || ctrlKey)
       return
     }
     if (metaKey || ctrlKey) return
@@ -205,6 +219,9 @@ function PaletteSearch({
           <XIcon aria-hidden="true" />
         </DialogClose>
       </div>
+      <p role="status" aria-live="polite" aria-atomic="true" className="sr-only">
+        {options.length === 0 ? strings.empty : options.map(({ status }) => status).join(' · ')}
+      </p>
       <div className="max-h-[55vh] overflow-y-auto">
         <div id={listId} role="listbox" aria-label={strings.results}>
           {options.map(
@@ -215,40 +232,28 @@ function PaletteSearch({
                     {label}
                   </legend>
                   {items.map(({ id, command }) => (
-                    <div
+                    <CommandEntry
                       key={id}
                       id={id}
-                      role="option"
-                      tabIndex={-1}
-                      aria-selected={activeId === id}
-                    >
-                      <CommandEntry command={command} close={close} onNavigate={onNavigate} />
-                    </div>
+                      selected={activeId === id}
+                      command={command}
+                      close={close}
+                      onNavigate={onNavigate}
+                    />
                   ))}
                 </fieldset>
               ),
           )}
         </div>
-        {options.length === 0 && (
-          <p role="status" className="p-2">
-            {strings.empty}
-          </p>
-        )}
+        {options.length === 0 && <p className="p-2">{strings.empty}</p>}
         {options.map(
-          ({ source, groupId, label, items, result }) =>
+          ({ source, groupId, status, items, result }) =>
             items.length === 0 && (
               <div
                 key={groupId}
                 className="flex items-center justify-between px-2 py-1 text-muted-foreground"
               >
-                <p id={groupId} role="status">
-                  {label}:{' '}
-                  {result.state === 'loading'
-                    ? strings.loading
-                    : result.state === 'error'
-                      ? strings.error
-                      : strings.empty}
-                </p>
+                <p id={groupId}>{status}</p>
                 {result.state === 'error' && (
                   <Button
                     type="button"

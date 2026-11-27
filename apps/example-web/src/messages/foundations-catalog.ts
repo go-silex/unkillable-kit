@@ -14,6 +14,8 @@ export type FoundationsMessages = {
   paletteResults: string
   paletteGroup: string
   paletteEmpty: string
+  paletteOneResult: string
+  paletteManyResults: string
 }
 
 export const foundationsEn: FoundationsMessages = {
@@ -32,6 +34,8 @@ export const foundationsEn: FoundationsMessages = {
   paletteResults: 'Results',
   paletteGroup: 'Commands',
   paletteEmpty: 'No results',
+  paletteOneResult: '1 result',
+  paletteManyResults: '{count} results',
 }
 
 export const foundationsFr: FoundationsMessages = {
@@ -50,4 +54,6 @@ export const foundationsFr: FoundationsMessages = {
   paletteResults: 'Résultats',
   paletteGroup: 'Commandes',
   paletteEmpty: 'Aucun résultat',
+  paletteOneResult: '1 résultat',
+  paletteManyResults: '{count} résultats',
 }

@@ -53,10 +53,8 @@ Add more via `bun run --filter @kit/ui ui:add <name>`.
 
 ### Command palette
 
-Mount one `CommandPalette` from `@kit/ui` in the Product shell. Its `sources` prop is
-the registration API: replacing it replaces the registered sources, and unmounting
-the palette removes them. Keep the array stable while its contents are unchanged.
-Source IDs must be unique in the palette; command IDs must be unique in their source.
+Mount one `CommandPalette` from `@kit/ui` in the Product shell. `sources` is its
+registration prop. Source IDs are unique per palette; command IDs per source.
 
 ```tsx
 import { CommandPalette, type CommandSource } from '@kit/ui'
@@ -69,37 +67,35 @@ const sources = [
   },
 ] satisfies readonly CommandSource[]
 
-<CommandPalette sources={sources} />
+export function ProductShell() {
+  return <CommandPalette sources={sources} />
+}
 ```
 
 - A static `Command` has `id`, `label`, optional `keywords`, `icon` and `shortcut`
   (display only), and either `run` or `href`. All whitespace-separated terms must
   match the label or keywords, case-insensitively.
-- An async `CommandSource` supplies `search(query, { signal })`. It receives the
-  trimmed query (including the initial empty query), debounced by `debounceMs`
-  (default 200 ms). Honor the `AbortSignal`; changes to the query or registration
-  and closing the palette cancel obsolete work. Sources settle independently and
-  each reports loading, empty or error. Retry only reruns the failed source.
+- `search(query, { signal })` receives the trimmed query (initially empty) after
+  `debounceMs` (200 ms). Honor abort: close, query changes and removing or replacing
+  the source's search callback cancel obsolete work. Unchanged searches survive
+  other registration changes. Retry only reruns the failed source.
 - `open` and `onOpenChange` support a Product-owned trigger. The default
   Cmd/Ctrl+K toggles from text fields too; pass `hotkey={false}` to opt out, or
   pass a predicate to match a different keyboard event. `href` uses a native link;
   an optional `onNavigate(href)` handles ordinary same-tab navigation. Modified
   clicks keep browser behavior.
-- The modal dialog focuses a named combobox that controls a grouped listbox.
-  Up/Down stop at the ends; Home/End jump to the first/last result. Enter
-  activates the selection and Cmd/Ctrl+Enter opens a selected link in a new tab.
-  Escape closes and restores focus; source states are announced, and reduced
-  motion disables animations.
-- Override any `messages` key from `@kit/i18n`'s English palette defaults:
-  `title`, `close`, `placeholder`, `results`, `group`, `empty`, `loading`, `error`, `retry`.
-  Products also own source/command labels, keywords, and shortcut hints.
+- The combobox controls a grouped listbox. Up/Down stop at the ends; Home/End
+  jump to first/last. Enter activates the option itself; Cmd/Ctrl+Enter opens its
+  link in a new tab. Escape restores focus. A polite live region announces
+  loading, counts, empty results and errors. Reduced motion disables animation.
+- Override `messages` from `@kit/i18n`: `title`, `close`, `placeholder`, `results`,
+  `group`, `empty`, `loading`, `error`, `retry`, `resultCount(count)`, `sourceStatus(label, status)`.
+  Products supply source and command labels, keywords, and shortcut hints.
 
 A command is a UI affordance, **never authorization**. Filter commands by the
 applicable Organization Role or Platform Role; API guards still enforce access.
-Build sources inside the mounted Product shell; there is no ambient registry
-or sharing across Organizations. Remount the palette on Organization changes
-if the shell otherwise persists. `example-web` registers navigation and a
-cancelable search of the existing notes list.
+There is no ambient registry. Remount the palette when its Organization changes.
+`example-web` registers navigation and cancelable notes search with links to exact rows.
 
 ### Sidebar 07 block (shadcn)
 

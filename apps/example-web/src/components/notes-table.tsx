@@ -46,19 +46,22 @@ const col = createColumnHelper<ListTableFeatures, Note>()
 /** Stable fallback: a fresh `[]` on every render would invalidate the table's row models. */
 const NO_NOTES: Note[] = []
 
+const revealSelectedNote = (row: HTMLTableRowElement | null) =>
+  row?.scrollIntoView?.({ block: 'nearest' })
+
 export function NotesTable({
-  initialFilter = '',
+  selectedNoteId,
   notes,
   onDelete,
   onCreate,
 }: {
-  initialFilter?: string
+  selectedNoteId?: string
   notes: NotesQuery
   onDelete: (note: Note) => void
   onCreate: () => void
 }) {
   const { m } = useLocale()
-  const [globalFilter, setGlobalFilter] = useState(initialFilter)
+  const [globalFilter, setGlobalFilter] = useState('')
   const [bodyFilter, setBodyFilter] = useState<BodyFilter>('all')
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([])
 
@@ -244,15 +247,23 @@ export function NotesTable({
               ))}
             </TableHeader>
             <TableBody>
-              {rows.map((row) => (
-                <TableRow key={row.id}>
-                  {row.getAllCells().map((cell) => (
-                    <TableCell key={cell.id}>
-                      <FlexRender cell={cell} />
-                    </TableCell>
-                  ))}
-                </TableRow>
-              ))}
+              {rows.map((row) => {
+                const selected = row.original.id === selectedNoteId
+                return (
+                  <TableRow
+                    key={row.id}
+                    ref={selected ? revealSelectedNote : undefined}
+                    aria-current={selected || undefined}
+                    data-state={selected ? 'selected' : undefined}
+                  >
+                    {row.getAllCells().map((cell) => (
+                      <TableCell key={cell.id}>
+                        <FlexRender cell={cell} />
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                )
+              })}
             </TableBody>
           </Table>
         )}
