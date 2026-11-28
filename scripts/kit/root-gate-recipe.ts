@@ -10,6 +10,15 @@ export const gateFlags = ['--no-env-file', '--config=config/kit/bunfig.gates.tom
 /** The launch every lane recipe (`validate:full`, `validate:tooling`) starts with. */
 export const rootGateLaunch = `bun ${gateFlags.join(' ')} run scripts/kit/root-gate.ts`
 
+/**
+ * The environment of a task. Bun reads `BUN_OPTIONS` in every runtime, so `--no-env-file` there
+ * keeps a cwd `.env` out of every Bun runtime that the task starts with its inherited environment,
+ * whatever the launch.
+ */
+export function gateEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  return { ...env, BUN_OPTIONS: [env.BUN_OPTIONS, '--no-env-file'].filter(Boolean).join(' ') }
+}
+
 /** The tasks of a lane recipe: the words after the runner script, whatever launch precedes it. */
 export function recipeTasks(source: string): string[] {
   const words = source.split(' ')

@@ -418,9 +418,11 @@ EOF
   git -C "$tree" -c user.email=fixture@example.invalid -c user.name=Fixture commit -qm decoy
 }
 
+# Drops the BUN_OPTIONS that the Root gate gives its tasks: this tests the package.json flags alone.
 assert_not_repointed() {
   local channel="$1" tree="$2" output rc
-  output="$(cd "$tree" && env -u LOCK_RANGES_ROOT bun run lock-ranges:check 2>&1)" && rc=0 || rc=$?
+  output="$(cd "$tree" && env -u BUN_OPTIONS -u LOCK_RANGES_ROOT bun run lock-ranges:check 2>&1)" &&
+    rc=0 || rc=$?
   if [[ "$rc" -eq 1 && "$output" == *"check-lock-ranges: FAIL"* && "$output" == *"left-pad"* ]]; then
     echo "PASS: $channel cannot re-point lock-ranges:check"
     PASS=$((PASS + 1))

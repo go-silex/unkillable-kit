@@ -5,7 +5,7 @@ import { basename, join, resolve } from 'node:path'
 import { committedPaths, hasAppManifestAt, pullRequestCheckout } from './root-gate-ci-context'
 import { kitAppPrefixes, productAppWorkspaces } from './root-gate-enrollment'
 import { mergeParts, runPart } from './root-gate-parts'
-import { gateFlags, recipeTasks, rootGateLaunch } from './root-gate-recipe'
+import { gateEnv, gateFlags, recipeTasks, rootGateLaunch } from './root-gate-recipe'
 import { joinTooling, runToolingShard, toolingPlan } from './root-gate-tooling'
 
 const root = resolve(import.meta.dirname, '../..')
@@ -131,6 +131,7 @@ function run(tasks: string[], shard?: string): { results: Result[]; code: number
     const started = performance.now()
     const child = spawnSync(process.execPath, [...gateFlags, 'run', task], {
       cwd: root,
+      env: gateEnv(),
       stdio: 'inherit',
     })
     const durationMs = Math.round((performance.now() - started) * 1000) / 1000

@@ -5,7 +5,8 @@
 # GATE holds the flags the root package.json launches SCANNER with. Every script segment that runs
 # it must agree. --config is made absolute so that a fixture can launch from any cwd. Bun reads a cwd
 # .env and a cwd bunfig.toml (preload, define) before the gate's own code runs; --no-env-file and
-# --config close those two channels.
+# --config close those two channels. The fixture launches drop the BUN_OPTIONS that the Root gate
+# gives its tasks, so that they test the package.json flags alone.
 
 # shellcheck shell=bash
 
@@ -190,7 +191,8 @@ assert_gate_launch() {
   printf 'process.env.%s = "%s"\n' "$var" "$stolen" >"$base/bunfig/steal.ts"
   printf 'preload = ["%s"]\n' "$base/bunfig/steal.ts" >"$base/bunfig/bunfig.toml"
   clean_rc=0
-  clean="$(cd "$base/clean" && env -u "$var" bun "${GATE[@]}" "$SCANNER" 2>&1)" || clean_rc=$?
+  clean="$(cd "$base/clean" && env -u BUN_OPTIONS -u "$var" bun "${GATE[@]}" "$SCANNER" 2>&1)" ||
+    clean_rc=$?
   for channel in env bunfig; do
     kept=()
     for flag in "${GATE[@]}"; do
@@ -200,8 +202,10 @@ assert_gate_launch() {
       esac
     done
     closed_rc=0
-    closed="$(cd "$base/$channel" && env -u "$var" bun "${GATE[@]}" "$SCANNER" 2>&1)" || closed_rc=$?
-    open="$(cd "$base/$channel" && env -u "$var" bun "${kept[@]}" "$SCANNER" 2>&1)" || true
+    closed="$(cd "$base/$channel" && env -u BUN_OPTIONS -u "$var" bun "${GATE[@]}" "$SCANNER" 2>&1)" ||
+      closed_rc=$?
+    open="$(cd "$base/$channel" && env -u BUN_OPTIONS -u "$var" bun "${kept[@]}" "$SCANNER" 2>&1)" ||
+      true
     if [[ "$clean" == *"$(basename "$SCANNER" .ts): "* ]] \
       && [[ "$closed_rc" -eq "$clean_rc" && "$closed" == "$clean" ]] \
       && [[ "$open" == *"$marker"* && "$open" != "$clean" ]]; then
