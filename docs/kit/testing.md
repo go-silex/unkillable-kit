@@ -33,7 +33,9 @@ child exit code (or 1 if unavailable). A failure is recorded before fail-fast st
 read-only plan modes emit no task timings. A CI Tooling shard runs two tasks at a time, whatever
 the runner's CPU count: tasks start in recipe order, each keeps its output and its record in one
 block, blocks follow recipe order, and `durationMs` includes the time a task shared with another.
-After a failure the shard starts no further task and records the ones still running.
+Once the gate has seen a failure, the shard starts no further task and records the ones still
+running. A shard that cannot capture a task's output, or whose log is refused, fails without a
+receipt.
 
 Workspace Vitest configs use the shared `ciMaxWorkers` setting: CI uses all available CPUs;
 outside CI, Vitest keeps its defaults. Coverage parts and their merge use the same App config.

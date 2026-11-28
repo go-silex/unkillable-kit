@@ -89,12 +89,14 @@ function mostAtOnce(effects: string) {
 }
 
 // A fixture task records its start, then obeys the ROOT_FIXTURE_* variables of the test:
-// AWAIT holds a task until a file contains a text ({"<task>": ["<file>", "<text>"]}, exit 98
-// after 30 s), HOLD keeps every task open that many milliseconds and records its end.
+// NOISE prints that many bytes, AWAIT holds a task until a file contains a text
+// ({"<task>": ["<file>", "<text>"]}, exit 98 after 30 s), HOLD keeps every task open that many
+// milliseconds and records its end.
 const fixtureTask = `import { appendFileSync, existsSync, readFileSync, writeSync } from 'node:fs'
 const task = process.argv[2]
 appendFileSync('effects.txt', task + '\\n')
 if (process.env.ROOT_FIXTURE_PROGRESS) writeSync(1, 'progress:' + task)
+if (process.env.ROOT_FIXTURE_NOISE) writeSync(1, 'x'.repeat(Number(process.env.ROOT_FIXTURE_NOISE)))
 const [file, text] = JSON.parse(process.env.ROOT_FIXTURE_AWAIT ?? '{}')[task] ?? []
 const deadline = Date.now() + 30000
 while (file && !(existsSync(file) && readFileSync(file, 'utf8').includes(text))) {
@@ -727,15 +729,21 @@ function toolingShards() {
   })
 }
 
+/** Gives the fixture `count` tooling tasks, each run by the fixture task; returns their names. */
+function toolingTasks(fixture: string, count: number) {
+  const manifestPath = join(fixture, 'package.json')
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+  const tasks = Array.from({ length: count }, (_, i) => `tooling:task${i}`)
+  for (const task of tasks) manifest.scripts[task] = `bun run task.ts ${task}`
+  manifest.scripts['validate:tooling'] = `bun run scripts/kit/root-gate.ts ${tasks.join(' ')}`
+  writeFileSync(manifestPath, JSON.stringify(manifest))
+  return tasks
+}
+
 function toolingShardOverlap() {
   withFixture('bun run task.ts test:coverage', (fixture, env) => {
-    const manifestPath = join(fixture, 'package.json')
-    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
-    const tasks = Array.from({ length: 12 }, (_, i) => `tooling:task${i}`)
-    for (const task of tasks) manifest.scripts[task] = `bun run task.ts ${task}`
-    manifest.scripts['validate:tooling'] = `bun run scripts/kit/root-gate.ts ${tasks.join(' ')}`
-    writeFileSync(manifestPath, JSON.stringify(manifest))
     // Unmeasured tasks weigh the same, so the first shard takes every third task.
+    const tasks = toolingTasks(fixture, 12)
     const [first, second, third, fourth] = tasks.filter((_, offset) => offset % 3 === 0)
     const effects = join(fixture, 'effects.txt')
     const receipt = join(fixture, 'tooling-1.json')
@@ -808,6 +816,90 @@ function toolingShardOverlap() {
       { task: first, status: 'failed', exitCode: 17 },
       { task: second, status: 'passed', exitCode: 0 },
     ])
+
+    // A later task fails after a slot was refilled: the first task has ended, and the third runs
+    // beside the second until the gate has printed the failed record. No fourth task starts.
+    env.ROOT_FIXTURE_FAIL = second
+    env.ROOT_FIXTURE_AWAIT = JSON.stringify({
+      [second]: ['effects.txt', `${third}\n`],
+      [third]: ['gate.out', `"task":"${second}"`],
+    })
+    const later = runShard()
+    assert.equal(later.status, 17, later.stderr)
+    const refilled = JSON.parse(readFileSync(receipt, 'utf8'))
+    assert.equal(refilled.complete, false)
+    assert.deepEqual(
+      refilled.results,
+      [
+        { task: first, exitCode: 0 },
+        { task: second, exitCode: 17 },
+        { task: third, exitCode: 0 },
+      ],
+      'a failure of a later task is recorded with the tasks around it',
+    )
+    assert.deepEqual(
+      readFileSync(effects, 'utf8').trimEnd().split('\n').sort(),
+      [first, second, third],
+      'no task starts after a later task failed',
+    )
+    assertTimings(readFileSync(output, 'utf8'), [
+      { task: first, status: 'passed', exitCode: 0 },
+      { task: second, status: 'failed', exitCode: 17 },
+      { task: third, status: 'passed', exitCode: 0 },
+    ])
+  })
+}
+
+function toolingCaptureFault() {
+  // Root opens a file whatever its folder allows, so nothing can be made to fail for it.
+  if (process.getuid?.() === 0) return
+  const folder = mkdtempSync(join(tmpdir(), 'root-gate-capture-'))
+  try {
+    // Under this umask the folder of the capture files is created read-only: no task can be given
+    // its file. The caller catches the error as the gate does, so the run must end on its own:
+    // nothing left that keeps the process alive, nothing left behind.
+    const script = `import { runTogether } from ${JSON.stringify(join(kitScripts, 'root-gate-tasks.ts'))}
+process.umask(0o277)
+try {
+  await runTogether(${JSON.stringify(folder)}, ['one', 'two'], 2)
+} catch (error) {
+  console.error(String(error))
+  process.exitCode = 1
+}
+`
+    const run = spawnSync(process.execPath, ['-e', script], {
+      cwd: folder,
+      env: { ...process.env, TMPDIR: folder },
+      encoding: 'utf8',
+      timeout: 30_000,
+    })
+    assert.equal(run.signal, null, 'the run ends on its own')
+    assert.equal(run.status, 1, run.stdout)
+    assert.match(run.stderr, /EACCES/)
+    assert.deepEqual(readdirSync(folder), [], 'the capture folder is removed')
+  } finally {
+    rmSync(folder, { recursive: true, force: true })
+  }
+}
+
+function toolingLogRefused() {
+  withFixture('bun run task.ts test:coverage', (fixture, env) => {
+    toolingTasks(fixture, 6)
+    const receipt = join(fixture, 'tooling-1.json')
+    // Each of the two tasks of the shard prints more than a pipe holds and the reader takes
+    // nothing, so the log is still on its way when both have ended. The reader then goes away.
+    env.ROOT_FIXTURE_NOISE = String(1 << 20)
+    env.ROOT_FIXTURE_HOLD = '1'
+    const reader = `until [ "$(grep -c '^end:' effects.txt 2>/dev/null)" = 2 ]; do sleep 0.05; done; sleep 0.3`
+    const shard = '"$0" run validate:tooling -- --ci-tooling-shard 1/3 --receipt "$1"'
+    const run = spawnSync(
+      'bash',
+      ['-c', `set -o pipefail; ${shard} | { ${reader}; }`, process.execPath, receipt],
+      { cwd: fixture, env, encoding: 'utf8', timeout: 60_000 },
+    )
+    assert.equal(run.signal, null, run.stderr)
+    assert.notEqual(run.status, 0, 'a log that stdout refused fails the shard')
+    assert.equal(existsSync(receipt), false, 'and leaves no receipt')
   })
 }
 
@@ -1599,6 +1691,8 @@ fullAndPlan()
 toolingAndPlan()
 toolingShards()
 toolingShardOverlap()
+toolingCaptureFault()
+toolingLogRefused()
 toolingDurations()
 coveragePlan()
 joinAdmission()
