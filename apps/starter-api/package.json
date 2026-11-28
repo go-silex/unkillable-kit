@@ -8,7 +8,7 @@
   "scripts": {
     "dev": "wrangler dev",
     "types": "wrangler types src/worker-configuration.d.ts --include-env=false",
-    "typecheck": "wrangler types src/worker-configuration.d.ts --include-env=false --check && tsc --noEmit -p tsconfig.json",
+    "typecheck": "wrangler types src/worker-configuration.d.ts --include-env=false --check && bun check --no-script --no-pretty -p tsconfig.json",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "db:migrate": "wrangler d1 migrations apply starter-api-local --local",

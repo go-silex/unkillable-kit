@@ -9,7 +9,7 @@
     "dev:http": "wrangler dev --port 8788",
     "start": "bun run src/index.ts",
     "types": "wrangler types src/worker-configuration.d.ts --include-env=false",
-    "typecheck": "wrangler types src/worker-configuration.d.ts --include-env=false --check && tsc --noEmit -p tsconfig.json",
+    "typecheck": "wrangler types src/worker-configuration.d.ts --include-env=false --check && bun check --no-script --no-pretty -p tsconfig.json",
     "test": "vitest run && bun run scripts/stdio-smoke.mjs",
     "test:coverage": "vitest run --coverage",
     "smoke:stdio": "bun run scripts/stdio-smoke.mjs",

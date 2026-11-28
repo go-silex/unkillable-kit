@@ -97,7 +97,7 @@
   "docs/kit/standards/stack.md": {
     "overLimitLines": 50,
     "maxLineBytes": 867,
-    "fileBytes": 63266
+    "fileBytes": 63265
   },
   "docs/kit/testing/coverage.md": {
     "overLimitLines": 7,
@@ -107,7 +107,7 @@
   "docs/kit/testing/critical-path.md": {
     "overLimitLines": 92,
     "maxLineBytes": 3787,
-    "fileBytes": 279806
+    "fileBytes": 279800
   },
   "docs/kit/testing/ops-model.md": {
     "overLimitLines": 25,

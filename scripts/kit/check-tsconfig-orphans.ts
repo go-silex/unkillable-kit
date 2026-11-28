@@ -16,7 +16,8 @@
  *   tracked {ts,tsx,mts,cts} MINUS <ws>/src/** for every {apps,packages}/<ws>
  *   that has a package.json
  *   is a subset of the files opened by the root project or a runnable,
- *   cited workspace project (`tsc --listFilesOnly`).
+ *   cited workspace project (`tsc --listFilesOnly`). Coverage requires a
+ *   literal `&&` chain of direct checkers and supported setup commands.
  *
  * The manifest is what makes that subtraction legitimate: a directory under
  * apps|packages without one is not a workspace, nothing runs a project for it,
@@ -37,10 +38,14 @@
  *   for each {apps,packages}/<ws>: tracked files under <ws>/src/ imply at
  *   least one runnable tsconfig*.json at the workspace root (otherwise the
  *   coverage subtraction has nothing to assume); every such project is named
- *   by a tsc command in that workspace's own `typecheck` script — and every
- *   project that script names exists. A citation counts only when tsc/tsgo/
- *   vue-tsc is in the same command as `-p`/`-b`. `|| true` and `|` discard
- *   tsc's status and do not count.
+ *   by the workspace's own `typecheck` script, and every named project exists.
+ *   `bun check` cites projects only through that same strict chain, with
+ *   `--no-script`, optional `--no-pretty`, and at most one project operand.
+ *   Root `typecheck:tooling` also requires `--no-script` for `bun check`.
+ *   The legacy `tsc`/`tsgo`/`vue-tsc` citation path supports project and build
+ *   operands; it ignores comments and commands directly following `||`.
+ *   A checker with no project operand cites its cwd's tsconfig.json.
+ *   `|| true` and `|` discard the checker's status and do not count.
  *
  * Does NOT prove the covering project uses the right compilerOptions, does
  * NOT check coverage of workspace src/ files (a workspace `exclude` can still
@@ -92,12 +97,13 @@ const PROJECT_INPUT_KEYS = ['files', 'include', 'references']
 
 /** `tsc`, `tsgo`, `vue-tsc`, or any of them reached through a path. */
 const TSC_BINARY = /(?:^|\/)(?:[\w.]+-)?ts(?:c|go)$/
+const BUN_BINARY = /(?:^|\/)bun$/
 
-/** Shell operators that end one command inside a package script. */
-const SCRIPT_SEPARATORS = /&&|\|\||;|\|/
+/** Preserve each command's preceding operator for the citation audit. */
+const SCRIPT_SEPARATORS = /(&&|\|\||;|\|)/
 
 /**
- * `|| true`, `|| exit 0`, or a pipe: the script's status is not tsc's.
+ * `|| true`, `|| exit 0`, or a pipe: the script's status is not the checker's.
  * Not a shell parser — these two spellings are the ones that turn a red
  * typecheck green without deleting the command.
  */
@@ -291,13 +297,9 @@ function parseJsonc(rel: string): Record<string, unknown> {
 /**
  * Projects a workspace script runs, as ROOT-relative posix paths.
  *
- * Read the way a shell reads it: split on `&&`/`||`/`;`/`|`, then per command
- * take the `-p` / `--project[=]` / `-b` operands — but only if that command
- * is tsc (or tsgo / vue-tsc). `echo … -p tsconfig.json` is not a citation.
- * A tsc command with no operand compiles `<cwd>/tsconfig.json`, which inside
- * a workspace script is that workspace's own project — counted, so
- * `"typecheck": "tsc --noEmit"` is recognised instead of being reported as
- * an uncited project.
+ * Bun citations come from the strict chain. Legacy checker commands take
+ * `-p` / `--project[=]` / `-b` operands. `echo … -p tsconfig.json` is not
+ * a citation. Without an operand a checker cites `<cwd>/tsconfig.json`.
  */
 function citeProject(cited: Set<string>, wsDir: string, operand: string): void {
   const value = operand.replace(/^\.\//, '')
@@ -353,34 +355,90 @@ function citeFromTokens(tokens: string[], wsDir: string, cited: Set<string>): nu
   return operands
 }
 
-function citedProjects(script: string, wsDir: string): Set<string> {
+function isBunCheck(tokens: string[]): boolean {
+  return BUN_BINARY.test(tokens[0] ?? '') && tokens[1] === 'check'
+}
+
+function legacyCitedProjects(commands: string[][], wsDir: string): Set<string> {
   const cited = new Set<string>()
-  for (const segment of script.split(SCRIPT_SEPARATORS)) {
-    const tokens = tokenize(segment)
+  for (const tokens of commands) {
+    if (isBunCheck(tokens)) continue
     if (!tokens.some((token) => TSC_BINARY.test(token))) continue
-    if (citeFromTokens(tokens, wsDir, cited) === 0) citeProject(cited, wsDir, ROOT_PROJECT_REL)
+    if (citeFromTokens(tokens, wsDir, cited) === 0) {
+      citeProject(cited, wsDir, ROOT_PROJECT_REL)
+    }
   }
   return cited
 }
 
-/**
- * Coverage requires a narrower proof than the legacy citation audit. Accept
- * only direct tsc commands joined by && and a small checking-only flag set.
- * Anything requiring shell interpretation contributes no workspace coverage.
- */
-function coverageProjects(script: unknown, wsDir: string): Set<string> {
+function bunProjectOperand(flag: string, next: string | undefined): string | undefined {
+  if (flag === '-p' || flag === '--project') return next
+  return flag.startsWith('--project=') ? flag.slice('--project='.length) : undefined
+}
+
+/** No shell syntax, no positional inputs, and at most one project operand. */
+function strictBunProject(command: string): string | undefined {
+  const tokens = command.split(/[ \t]+/)
+  if (!isBunCheck(tokens)) return undefined
+  let noScript = false
+  let project: string | undefined
+  for (let i = 2; i < tokens.length; i++) {
+    const token = tokens[i] as string
+    if (token === '--no-script') {
+      noScript = true
+      continue
+    }
+    if (token === '--no-pretty') continue
+    const operand = bunProjectOperand(token, tokens[i + 1])
+    if (
+      project !== undefined ||
+      operand === undefined ||
+      !/^(?!-)[A-Za-z0-9_./-]+$/.test(operand)
+    ) {
+      return undefined
+    }
+    project = operand
+    if (!token.startsWith('--project=')) i++
+  }
+  return noScript ? (project ?? ROOT_PROJECT_REL) : undefined
+}
+
+/** A whole literal && chain proves both Bun citation and workspace coverage. */
+function strictChainProjects(script: string | undefined, wsDir: string): Set<string> | undefined {
+  if (script === undefined || /[^A-Za-z0-9_./= \t&-]/.test(script)) return undefined
   const projects = new Set<string>()
-  if (typeof script !== 'string' || /[\r\n]/.test(script)) return projects
-  const commands = script.split('&&')
-  for (const command of commands) {
-    const match =
-      /^[ \t]*tsc(?:[ \t]+--noEmit)?(?:[ \t]+(?:-p|--project)[ \t]+([A-Za-z0-9_./-]+))?[ \t]*(?![\s\S])/.exec(
+  for (const segment of script.split('&&')) {
+    if (segment.includes('&')) return undefined
+    const command = segment.trim()
+    // Worker type generation and its output directory are setup, not citations.
+    if (
+      /^mkdir[ \t]+-p[ \t]+(?!-)[A-Za-z0-9_./-]+$/.test(command) ||
+      /^wrangler[ \t]+types[ \t]+(?!-)[A-Za-z0-9_./-]+(?:[ \t]+--include-env=false(?:[ \t]+--check)?|[ \t]+--check(?:[ \t]+--include-env=false)?)?$/.test(
         command,
       )
-    if (!match) return new Set()
-    citeProject(projects, wsDir, match[1] ?? ROOT_PROJECT_REL)
+    ) {
+      continue
+    }
+    const tsc = /^tsc(?:[ \t]+--noEmit)?(?:[ \t]+(?:-p|--project)[ \t]+([A-Za-z0-9_./-]+))?$/.exec(
+      command,
+    )
+    const project = tsc ? (tsc[1] ?? ROOT_PROJECT_REL) : strictBunProject(command)
+    if (project === undefined) return undefined
+    citeProject(projects, wsDir, project)
   }
   return projects
+}
+
+/**
+ * Shell text that can hide a `#`: an escape, a single- or double-quoted string (unterminated runs
+ * to the end), or a comment, which starts a word and ends at its line.
+ */
+const SHELL_COMMENT_SCAN =
+  /\\[\s\S]|'[^']*(?:'|$)|"(?:\\[\s\S]|[^"\\])*(?:"|$)|(^|[\s&|;()<>])#[^\n]*/g
+
+/** Remove shell comments before their operators can be mistaken for commands. */
+function stripScriptComment(script: string): string {
+  return script.replace(SHELL_COMMENT_SCAN, (match, before?: string) => before ?? match)
 }
 
 /** argv of one command, honouring the quotes a package script may use. */
@@ -392,7 +450,7 @@ function tokenize(segment: string): string[] {
     if (quote !== '') {
       if (char === quote) quote = ''
       else current += char
-    } else if (char === '"' || char === "'") {
+    } else if (/['"]/.test(char)) {
       quote = char
     } else if (char.trim().length === 0) {
       if (current.length > 0) tokens.push(current)
@@ -410,15 +468,44 @@ function tokenize(segment: string): string[] {
  * `typecheck` script, and every project that script names must exist.
  *
  * This is the invariant the `{apps,packages}/<ws>/src/**` subtraction above
- * assumes. `turbo typecheck` runs the script and nothing else, so the script
- * is the only place where "this program is checked in CI" is expressed. A
- * workspace with src/ and no project makes that assumption false — reported,
- * not silently green.
+ * assumes. `turbo typecheck` executes only that script, so it is the sole place
+ * the workspace declares which projects `bun check` or a legacy checker checks
+ * in CI. A workspace with src/ and no project violates that assumption.
+ * Root `typecheck:tooling` is inspected only for Bun's `--no-script` requirement.
  */
-function typecheckScript(manifest: string): unknown {
+function manifestScript(manifest: string, name: string): string | undefined {
   const scripts = parseJsonc(manifest).scripts
   if (scripts === null || typeof scripts !== 'object') return undefined
-  return (scripts as Record<string, unknown>).typecheck
+  const script = (scripts as Record<string, unknown>)[name]
+  return typeof script === 'string' ? script : undefined
+}
+
+function auditScriptCommands(
+  script: string | undefined,
+  manifest: string,
+  name: string,
+  location: string,
+  problems: { report: string; fix: string }[],
+): string[][] {
+  if (script === undefined) return []
+  const segments = stripScriptComment(script).split(SCRIPT_SEPARATORS)
+  const cited: string[][] = []
+  let scripted = false
+  for (let i = 0; i < segments.length; i += 2) {
+    const tokens = tokenize(segments[i] as string)
+    if (segments[i - 1] !== '||') cited.push(tokens)
+    if (!isBunCheck(tokens)) continue
+    const noScript = tokens.indexOf('--no-script', 2)
+    const endOfFlags = tokens.indexOf('--', 2)
+    if (noScript === -1 || (endOfFlags !== -1 && endOfFlags < noScript)) scripted = true
+  }
+  if (scripted) {
+    problems.push({
+      report: `SCRIPTED ${location} — "bun check" without --no-script can run the manifest's "check" script instead of the type checker`,
+      fix: `add --no-script to each "bun check" in "${name}" in ${manifest}`,
+    })
+  }
+  return cited
 }
 
 function auditWorkspaceProjects(
@@ -455,7 +542,7 @@ function auditWorkspaceProjects(
           ? `the "typecheck" script of ${wsDir} never runs this project`
           : `${wsDir} has no "typecheck" script, so nothing runs this project`
       }`,
-      fix: `make "typecheck" in ${manifest} run \`tsc --noEmit -p ${basename(rel)}\`, or delete ${rel}`,
+      fix: `use \`bun check --no-script --no-pretty -p ${basename(rel)}\` in "${manifest}" (literal commands joined by &&; one project per checker), or delete ${rel}`,
     })
   }
   return { audited, runnableHere, projects, problems }
@@ -472,7 +559,7 @@ function auditMissingProjects(
   if (runnableHere === 0 && trackedTs.some((path) => path.startsWith(`${wsDir}/src/`))) {
     problems.push({
       report: `NO PROJECT ${wsDir} — src/ is subtracted from coverage but no project owns it`,
-      fix: `add ${wsDir}/tsconfig.json covering src/ and a "typecheck" script that runs \`tsc --noEmit\``,
+      fix: `add ${wsDir}/tsconfig.json covering src/ and set "typecheck" to \`bun check --no-script --no-pretty -p tsconfig.json\``,
     })
   }
   for (const rel of runs) {
@@ -500,25 +587,31 @@ function auditCitations(): {
   const projects = new Map<string, string>()
   const trackedTs = gitFiles(TS_PATHSPECS, false)
 
+  const rootManifest = 'package.json'
+  if (existsSync(resolve(ROOT, rootManifest))) {
+    const name = 'typecheck:tooling'
+    auditScriptCommands(manifestScript(rootManifest, name), rootManifest, name, 'root', problems)
+  }
+
   for (const manifest of manifests) {
     const wsDir = manifest.slice(0, -'/package.json'.length)
-    const script = typecheckScript(manifest)
-    const swallowed = typeof script === 'string' && swallowsExit(script)
-    const runs =
-      typeof script === 'string' && !swallowed ? citedProjects(script, wsDir) : new Set<string>()
+    const script = manifestScript(manifest, 'typecheck')
+    const commands = auditScriptCommands(script, manifest, 'typecheck', wsDir, problems)
+    const swallowed = script !== undefined && swallowsExit(stripScriptComment(script))
+    const eligible = strictChainProjects(script, wsDir)
+    const runs = eligible ?? (swallowed ? new Set<string>() : legacyCitedProjects(commands, wsDir))
 
     if (swallowed) {
       problems.push({
-        report: `SWALLOWED ${wsDir} — the "typecheck" script discards tsc's exit status (\`|| true\` or a pipe)`,
+        report: `SWALLOWED ${wsDir} — the "typecheck" script discards the checker's exit status (\`|| true\` or a pipe)`,
         fix: `remove \`|| true\` / the pipe from "typecheck" in ${manifest} so a type error fails the script`,
       })
     }
 
     const local = auditWorkspaceProjects(wsDir, manifest, script, swallowed, runs, tsconfigs)
     audited += local.audited
-    const eligible = coverageProjects(script, wsDir)
     for (const project of local.projects) {
-      if (eligible.has(project)) projects.set(project, wsDir)
+      if (eligible?.has(project)) projects.set(project, wsDir)
     }
     problems.push(...local.problems)
 
@@ -558,7 +651,7 @@ function main(): void {
   }
   if (citations.problems.length > 0) {
     console.error(
-      `\ntsconfig-orphans: ${citations.problems.length} citation break(s) of ${citations.audited} workspace project(s) — a project no "typecheck" script runs is checked by nobody`,
+      `\ntsconfig-orphans: ${citations.problems.length} citation break(s); ${citations.audited} workspace project(s) audited`,
     )
   }
   if (orphans.length > 0 || citations.problems.length > 0) {

@@ -28,6 +28,7 @@ export const toolingSeconds: ReadonlyMap<string, number> = new Map([
   ['test:stack-contract', 6],
   ['test:knip-config', 6],
   ['test:tooling-selector', 5],
+  ['test:typecheck-gate', 5],
   ['test:extract-dry-run', 5],
   ['test:migrations-contract', 5],
   ['test:import-boundary', 3],

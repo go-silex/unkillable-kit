@@ -8,6 +8,8 @@
       "outputs": ["dist/**"]
     },
     "typecheck": {
+      // Turbo does not track the Bun pin (packageManager) as an input, and uncached typecheck takes ~1 s.
+      "cache": false,
       "dependsOn": ["^typecheck"]
     },
     // No `test:coverage` task: the root script is `scripts/kit/test-coverage.sh`
