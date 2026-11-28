@@ -394,8 +394,10 @@ assert_exit "missing package.json → 1" 1 "${MISSING_PKG}"
 
 # Git passes a literal URL as the remote name when pushing to it directly.
 (
-  unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE
+  unset GIT_CONFIG_COUNT GIT_CONFIG_PARAMETERS
   export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+  # shellcheck source=lib/hermetic-git.sh
+  XDG_RUNTIME_DIR="${TMP}" source "${ROOT}/scripts/kit/lib/hermetic-git.sh"
   export PATH="${TMP}/bin:${ROOT}/node_modules/.bin:${PATH}"
   export PUSH_URL="${TMP}/remote's.git"
   probe="${TMP}/push-probe"
