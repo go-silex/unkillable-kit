@@ -7,7 +7,7 @@ CI minutes and red loops on GitHub are costly (Free private, agents, merge-on-gr
 ```text
 Developer / agent workstation
   pre-commit  → Biome (staged)           # fast
-  pre-push    → Kit scripts in .lefthook/pre-push/
+  pre-push    → Kit scripts in .lefthook/pre-push/ (run on each push)
          ↓
   push only when green locally
          ↓
