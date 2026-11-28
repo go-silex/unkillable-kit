@@ -33,14 +33,14 @@ assert_exit() {
     FAIL=$((FAIL + 1))
     return
   fi
-  if [[ -n "${expect_tag}" ]] && ! echo "${out}" | grep -Fq "${expect_tag}"; then
+  if [[ -n "${expect_tag}" ]] && ! grep -Fq "${expect_tag}" <<<"${out}"; then
     echo "  FAIL: ${name} expected output to contain '${expect_tag}'" >&2
     echo "    out: $(echo "${out}" | tr '\n' ' ')" >&2
     FAIL=$((FAIL + 1))
     return
   fi
   # Success must prove a scan ran (not OK (0 wrangler files, …)).
-  if [[ "${expect}" -eq 0 ]] && ! echo "${out}" | grep -Eq '[1-9][0-9]* wrangler files'; then
+  if [[ "${expect}" -eq 0 ]] && ! grep -Eq '[1-9][0-9]* wrangler files' <<<"${out}"; then
     echo "  FAIL: ${name} success output must report ≥1 wrangler file" >&2
     echo "    out: $(echo "${out}" | tr '\n' ' ')" >&2
     FAIL=$((FAIL + 1))

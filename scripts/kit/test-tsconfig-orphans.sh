@@ -40,7 +40,7 @@ assert_case() {
   echo "  PASS: ${name} (exit ${rc})"
   # Echo the line that carries the evidence, so a reader sees the verdict.
   if [[ -n "${marker}" ]]; then
-    printf '%s\n' "${output}" | grep -F -m1 -- "${marker}" | sed 's/^/    /'
+    grep -F -m1 -- "${marker}" <<<"${output}" | sed 's/^/    /'
   else
     echo "    ${output##*$'\n'}"
   fi

@@ -240,7 +240,7 @@ gitcfg add --all
 gitcfg commit -q -m apps
 list_with "changed apps stay in tier order and are not duplicated" 0 $'apps/acme-api\napps/acme-web' - \
   COVERAGE_LIST_ONLY=1 COVERAGE_CHANGED_BASE="${base}"
-pkg="$(printf '%s\n' "${KIT_ORDER}" | awk '/^packages\// { print; exit }')"
+pkg="$(awk '/^packages\// { print; exit }' <<<"${KIT_ORDER}")"
 mkdir -p "${TREE}/${pkg}/src"
 echo pkg >"${TREE}/${pkg}/src/touched.txt"
 gitcfg add --all

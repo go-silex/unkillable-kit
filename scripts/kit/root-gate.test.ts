@@ -3,11 +3,13 @@ import { type SpawnSyncReturns, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import {
   chmodSync,
+  closeSync,
   copyFileSync,
   cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readdirSync,
   readFileSync,
   rmSync,
@@ -16,6 +18,7 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { linkModules } from './lib/fixture-modules'
 import { toolingSeconds, toolingShardTasks } from './root-gate-tooling'
 
 const kitScripts = import.meta.dirname
@@ -62,6 +65,51 @@ function assertTimings(
   }
 }
 
+/** Each task's output is one block, in recipe order: its header, its output, then its record. */
+function assertBlocks(output: string, tasks: string[]) {
+  const blocks = output.split('root-gate: running ').slice(1)
+  assert.equal(blocks.length, tasks.length, output)
+  for (const [index, block] of blocks.entries()) {
+    const task = tasks[index]
+    assert.ok(block.startsWith(`${task}\n`), block)
+    assert.deepEqual(block.match(/progress:[a-z0-9:]+/g), [`progress:${task}`], block)
+    assert.ok(block.trimEnd().split('\n').at(-1)?.includes(`"task":"${task}"`), block)
+  }
+}
+
+/** Largest number of tasks open together, from the start and `end:` lines of the effects log. */
+function mostAtOnce(effects: string) {
+  let open = 0
+  let most = 0
+  for (const line of effects.trimEnd().split('\n')) {
+    open += line.startsWith('end:') ? -1 : 1
+    most = Math.max(most, open)
+  }
+  return most
+}
+
+// A fixture task records its start, then obeys the ROOT_FIXTURE_* variables of the test:
+// NOISE prints that many bytes, AWAIT holds a task until a file contains a text
+// ({"<task>": ["<file>", "<text>"]}, exit 98 after 30 s), HOLD keeps every task open that many
+// milliseconds and records its end.
+const fixtureTask = `import { appendFileSync, existsSync, readFileSync, writeSync } from 'node:fs'
+const task = process.argv[2]
+appendFileSync('effects.txt', task + '\\n')
+if (process.env.ROOT_FIXTURE_PROGRESS) writeSync(1, 'progress:' + task)
+if (process.env.ROOT_FIXTURE_NOISE) writeSync(1, 'x'.repeat(Number(process.env.ROOT_FIXTURE_NOISE)))
+const [file, text] = JSON.parse(process.env.ROOT_FIXTURE_AWAIT ?? '{}')[task] ?? []
+const deadline = Date.now() + 30000
+while (file && !(existsSync(file) && readFileSync(file, 'utf8').includes(text))) {
+  if (Date.now() > deadline) process.exit(98)
+  Bun.sleepSync(5)
+}
+if (process.env.ROOT_FIXTURE_HOLD) {
+  Bun.sleepSync(Number(process.env.ROOT_FIXTURE_HOLD))
+  appendFileSync('effects.txt', 'end:' + task + '\\n')
+}
+if (process.env.ROOT_FIXTURE_FAIL === task) process.exit(17)
+`
+
 function withFixture(
   coverageScript: string,
   exercise: (fixture: string, env: NodeJS.ProcessEnv) => void,
@@ -73,12 +121,11 @@ function withFixture(
       if (
         key.startsWith('GIT_') ||
         key.startsWith('GITHUB_') ||
+        key.startsWith('ROOT_FIXTURE_') ||
         key === 'COVERAGE_LIST_ONLY' ||
         key === 'COVERAGE_LIST_KIT' ||
         key === 'COVERAGE_ONLY' ||
-        key === 'COVERAGE_CHANGED_BASE' ||
-        key === 'ROOT_FIXTURE_FAIL' ||
-        key === 'ROOT_FIXTURE_PROGRESS'
+        key === 'COVERAGE_CHANGED_BASE'
       )
         delete env[key]
     }
@@ -123,10 +170,7 @@ function withFixture(
         },
       }),
     )
-    writeFileSync(
-      join(fixture, 'task.ts'),
-      "import { appendFileSync, writeSync } from 'node:fs'\nappendFileSync('effects.txt', process.argv[2] + '\\n')\nif (process.env.ROOT_FIXTURE_PROGRESS) writeSync(1, 'progress:' + process.argv[2])\nif (process.env.ROOT_FIXTURE_FAIL === process.argv[2]) process.exit(17)\n",
-    )
+    writeFileSync(join(fixture, 'task.ts'), fixtureTask)
 
     const git = (...args: string[]) => command(fixture, env, 'git', args)
     requireSuccess(git('init', '-q'))
@@ -663,14 +707,10 @@ function toolingShards() {
     rmSync(duplicate)
     rmSync(paths[0])
     assert.notEqual(joinReceipts().status, 0)
+    // Which task ran beside the failing one depends on timing; toolingShardOverlap pins the results.
     env.ROOT_FIXTURE_FAIL = tasks[3]
     assert.notEqual(invoke('--ci-tooling-shard', '1/3', '--receipt', paths[0]).status, 0)
-    const partial = JSON.parse(readFileSync(paths[0], 'utf8'))
-    assert.equal(partial.complete, false)
-    assert.deepEqual(
-      partial.results.map((result: { task: string }) => result.task),
-      [tasks[0], tasks[3]],
-    )
+    assert.equal(JSON.parse(readFileSync(paths[0], 'utf8')).complete, false)
     assert.notEqual(joinReceipts().status, 0)
     delete env.ROOT_FIXTURE_FAIL
     rmSync(paths[0])
@@ -686,6 +726,260 @@ function toolingShards() {
     tasks.splice(1)
     setRecipe()
     assert.notEqual(invoke('--plan').status, 0, 'empty shards refused')
+  })
+}
+
+/** Gives the fixture `count` tooling tasks, each run by the fixture task; returns their names. */
+function toolingTasks(fixture: string, count: number) {
+  const manifestPath = join(fixture, 'package.json')
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+  const tasks = Array.from({ length: count }, (_, i) => `tooling:task${i}`)
+  for (const task of tasks) manifest.scripts[task] = `bun run task.ts ${task}`
+  manifest.scripts['validate:tooling'] = `bun run scripts/kit/root-gate.ts ${tasks.join(' ')}`
+  writeFileSync(manifestPath, JSON.stringify(manifest))
+  return tasks
+}
+
+function toolingShardOverlap() {
+  withFixture('bun run task.ts test:coverage', (fixture, env) => {
+    // Unmeasured tasks weigh the same, so the first shard takes every third task.
+    const tasks = toolingTasks(fixture, 12)
+    const [first, second, third, fourth] = tasks.filter((_, offset) => offset % 3 === 0)
+    const effects = join(fixture, 'effects.txt')
+    const receipt = join(fixture, 'tooling-1.json')
+    const output = join(fixture, 'gate.out')
+    // The gate prints to a file, so a fixture task can wait for what the gate has printed.
+    const runShard = () => {
+      for (const stale of [effects, receipt]) rmSync(stale, { force: true })
+      const stdout = openSync(output, 'w')
+      try {
+        const args = ['run', 'validate:tooling', '--', '--ci-tooling-shard', '1/3']
+        return spawnSync(process.execPath, [...args, '--receipt', receipt], {
+          cwd: fixture,
+          env,
+          stdio: ['ignore', stdout, 'pipe'],
+          encoding: 'utf8',
+        })
+      } finally {
+        closeSync(stdout)
+      }
+    }
+
+    // The first two tasks are open together: the second waits for the first to start, and the
+    // first ends only after the third has started, which takes the second one ending.
+    env.ROOT_FIXTURE_PROGRESS = '1'
+    env.ROOT_FIXTURE_HOLD = '150'
+    env.ROOT_FIXTURE_AWAIT = JSON.stringify({
+      [first]: ['effects.txt', `${third}\n`],
+      [second]: ['effects.txt', `${first}\n`],
+    })
+    const passed = runShard()
+    assert.equal(passed.status, 0, passed.stderr)
+    assert.equal(mostAtOnce(readFileSync(effects, 'utf8')), 2, 'two tasks at a time, never three')
+    const shard = [first, second, third, fourth]
+    const complete = JSON.parse(readFileSync(receipt, 'utf8'))
+    assert.equal(complete.complete, true)
+    assert.deepEqual(
+      complete.results,
+      shard.map((task) => ({ task, exitCode: 0 })),
+      'results keep recipe order although the second task ended first',
+    )
+    assertBlocks(readFileSync(output, 'utf8'), shard)
+    assertTimings(
+      readFileSync(output, 'utf8'),
+      shard.map((task) => ({ task, status: 'passed', exitCode: 0 })),
+    )
+
+    // The first task fails while the second runs: the second ends only once the gate has printed
+    // the failed record, so the gate knows of the failure before a slot frees.
+    delete env.ROOT_FIXTURE_HOLD
+    env.ROOT_FIXTURE_FAIL = first
+    env.ROOT_FIXTURE_AWAIT = JSON.stringify({ [second]: ['gate.out', `"task":"${first}"`] })
+    const failed = runShard()
+    assert.equal(failed.status, 17, failed.stderr)
+    const partial = JSON.parse(readFileSync(receipt, 'utf8'))
+    assert.equal(partial.complete, false)
+    assert.deepEqual(
+      partial.results,
+      [
+        { task: first, exitCode: 17 },
+        { task: second, exitCode: 0 },
+      ],
+      'the running task is awaited and recorded',
+    )
+    assert.deepEqual(
+      readFileSync(effects, 'utf8').trimEnd().split('\n').sort(),
+      [first, second],
+      'no task starts after a failure',
+    )
+    assertTimings(readFileSync(output, 'utf8'), [
+      { task: first, status: 'failed', exitCode: 17 },
+      { task: second, status: 'passed', exitCode: 0 },
+    ])
+
+    // A later task fails after a slot was refilled: the first task has ended, and the third runs
+    // beside the second until the gate has printed the failed record. No fourth task starts.
+    env.ROOT_FIXTURE_FAIL = second
+    env.ROOT_FIXTURE_AWAIT = JSON.stringify({
+      [second]: ['effects.txt', `${third}\n`],
+      [third]: ['gate.out', `"task":"${second}"`],
+    })
+    const later = runShard()
+    assert.equal(later.status, 17, later.stderr)
+    const refilled = JSON.parse(readFileSync(receipt, 'utf8'))
+    assert.equal(refilled.complete, false)
+    assert.deepEqual(
+      refilled.results,
+      [
+        { task: first, exitCode: 0 },
+        { task: second, exitCode: 17 },
+        { task: third, exitCode: 0 },
+      ],
+      'a failure of a later task is recorded with the tasks around it',
+    )
+    assert.deepEqual(
+      readFileSync(effects, 'utf8').trimEnd().split('\n').sort(),
+      [first, second, third],
+      'no task starts after a later task failed',
+    )
+    assertTimings(readFileSync(output, 'utf8'), [
+      { task: first, status: 'passed', exitCode: 0 },
+      { task: second, status: 'failed', exitCode: 17 },
+      { task: third, status: 'passed', exitCode: 0 },
+    ])
+  })
+}
+
+// A task for the tests that call the runner itself. `first` makes read-only what TMPDIR holds,
+// the folder of the capture files; `second` ends 300 ms after it.
+const runnerTask = `import { appendFileSync, chmodSync, existsSync, readdirSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+const task = process.argv[2]
+const tmp = process.env.TMPDIR
+if (task === 'first') {
+  for (const name of readdirSync(tmp)) chmodSync(join(tmp, name), 0o500)
+  writeFileSync('first.done', '')
+}
+if (task === 'second') {
+  while (!existsSync('first.done')) Bun.sleepSync(5)
+  Bun.sleepSync(300)
+  appendFileSync('effects.txt', 'end:second\\n')
+}
+`
+
+/**
+ * Calls the runner in a process of its own, `before` first, over tasks run by `runnerTask`. That
+ * process catches the error as the gate does, so a run that leaves something alive ends as a
+ * timeout here. It then tells which task ends the run had waited for.
+ */
+function runTogetherIn(folder: string, tasks: string[], limit: number, before = '') {
+  writeFileSync(join(folder, 'task.ts'), runnerTask)
+  const scripts = Object.fromEntries(tasks.map((task) => [task, `bun run task.ts ${task}`]))
+  writeFileSync(join(folder, 'package.json'), JSON.stringify({ scripts }))
+  const script = `import { existsSync, readFileSync } from 'node:fs'
+import { runTogether } from ${JSON.stringify(join(kitScripts, 'root-gate-tasks.ts'))}
+${before}
+try {
+  await runTogether(${JSON.stringify(folder)}, ${JSON.stringify(tasks)}, ${limit})
+  console.error('resolved')
+} catch (error) {
+  console.error(String(error))
+  process.exitCode = 1
+}
+console.error('waited for ' + (existsSync('effects.txt') ? readFileSync('effects.txt', 'utf8') : ''))
+`
+  return spawnSync(process.execPath, ['-e', script], {
+    cwd: folder,
+    env: { ...process.env, TMPDIR: join(folder, 'tmp') },
+    encoding: 'utf8',
+    timeout: 30_000,
+  })
+}
+
+function toolingRunFaults() {
+  // Root opens a file whatever its folder allows, so these faults cannot be made for it.
+  if (process.getuid?.() === 0) return
+  const scratch = (exercise: (folder: string, tmp: string) => void) => {
+    const folder = mkdtempSync(join(tmpdir(), 'root-gate-runner-'))
+    const tmp = join(folder, 'tmp')
+    mkdirSync(tmp)
+    try {
+      exercise(folder, tmp)
+    } finally {
+      for (const name of readdirSync(tmp)) chmodSync(join(tmp, name), 0o700)
+      rmSync(folder, { recursive: true, force: true })
+    }
+  }
+
+  // No task can be given its file: under this umask the folder of the capture files is created
+  // read-only. The run ends on its own, with the error, and leaves nothing behind.
+  scratch((folder, tmp) => {
+    const run = runTogetherIn(folder, ['one', 'two'], 2, 'process.umask(0o277)')
+    assert.equal(run.signal, null, 'the run ends on its own')
+    assert.equal(run.status, 1, run.stderr)
+    assert.match(run.stderr, /EACCES/)
+    assert.deepEqual(readdirSync(tmp), [], 'the capture folder is removed')
+  })
+
+  // The third task cannot be given its file while the second still runs, and the capture folder
+  // cannot be removed either: the first task made it read-only. The run waits for the second
+  // task, then ends with the first of the two errors.
+  scratch((folder) => {
+    const run = runTogetherIn(folder, ['first', 'second', 'third'], 2)
+    assert.equal(run.signal, null, 'the run ends on its own')
+    assert.equal(run.status, 1, run.stderr)
+    assert.match(run.stderr, /EACCES[^\n]*open/)
+    assert.match(run.stderr, /^waited for end:second$/m, 'the running task is awaited')
+  })
+
+  // stdout refuses one write and takes the next ones: the run still rejects.
+  scratch((folder) => {
+    const refuseOnce = `const write = process.stdout.write.bind(process.stdout)
+let writes = 0
+process.stdout.write = (data, done) => {
+  writes += 1
+  if (writes > 1) return write(data, done)
+  done(new Error('refused once'))
+  return true
+}`
+    const run = runTogetherIn(folder, ['one'], 1, refuseOnce)
+    assert.equal(run.signal, null, 'the run ends on its own')
+    assert.equal(run.status, 1, run.stderr)
+    assert.match(run.stderr, /refused once/)
+  })
+}
+
+function toolingLogRefused() {
+  withFixture('bun run task.ts test:coverage', (fixture, env) => {
+    toolingTasks(fixture, 6)
+    const receipt = join(fixture, 'tooling-1.json')
+    const effects = join(fixture, 'effects.txt')
+    const shard = '"$0" run validate:tooling -- --ci-tooling-shard 1/3 --receipt "$1"'
+    const refused = (reader: string) => {
+      rmSync(effects, { force: true })
+      const run = spawnSync(
+        'bash',
+        ['-c', `set -o pipefail; ${shard} | { ${reader}; }`, process.execPath, receipt],
+        { cwd: fixture, env, encoding: 'utf8', timeout: 60_000 },
+      )
+      assert.equal(run.signal, null, run.stderr)
+      assert.notEqual(run.status, 0, 'a log that stdout refused fails the shard')
+      assert.equal(existsSync(receipt), false, 'and leaves no receipt')
+      return readFileSync(effects, 'utf8')
+    }
+
+    // The reader goes away while the two tasks of the shard run: the shard still waits for them.
+    env.ROOT_FIXTURE_HOLD = '400'
+    const awaited = refused('head -c 1 > /dev/null')
+    assert.equal(awaited.match(/^end:/gm)?.length, 2, awaited)
+
+    // Each of the two tasks prints more than a pipe holds and the reader takes nothing, so the
+    // log is still on its way when both have ended. The reader then goes away.
+    env.ROOT_FIXTURE_NOISE = String(1 << 20)
+    env.ROOT_FIXTURE_HOLD = '1'
+    refused(
+      `until [ "$(grep -c '^end:' effects.txt 2>/dev/null)" = 2 ]; do sleep 0.05; done; sleep 0.3`,
+    )
   })
 }
 
@@ -1095,14 +1389,10 @@ function partitionVitest() {
         }),
       )
     }
-    symlinkSync(join(kitScripts, '../../node_modules'), join(fixture, 'node_modules'), 'dir')
+    linkModules(join(kitScripts, '../../node_modules'), join(fixture, 'node_modules'))
     const app = join(fixture, 'apps/example-api')
     mkdirSync(join(app, 'src'))
-    symlinkSync(
-      join(kitScripts, '../../apps/example-api/node_modules'),
-      join(app, 'node_modules'),
-      'dir',
-    )
+    linkModules(join(kitScripts, '../../apps/example-api/node_modules'), join(app, 'node_modules'))
     writeFileSync(
       join(app, 'vitest.config.ts'),
       `import { defineConfig } from 'vitest/config'\nexport default defineConfig({ test: { coverage: { provider: 'v8', include: ['src/*.ts'], exclude: ['src/*.test.ts'], reportsDirectory: '../../coverage/example-api', reporter: ['json-summary'], reportOnFailure: true, thresholds: { lines: 90, functions: 90, branches: 90, statements: 90 } } } })\n`,
@@ -1480,6 +1770,9 @@ consumerCoverageShardJoin()
 fullAndPlan()
 toolingAndPlan()
 toolingShards()
+toolingShardOverlap()
+toolingRunFaults()
+toolingLogRefused()
 toolingDurations()
 coveragePlan()
 joinAdmission()

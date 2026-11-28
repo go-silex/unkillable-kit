@@ -15,6 +15,11 @@
 # set as a belt for the parent process.
 #
 # Idempotent: re-sourcing does not stack duplicate keys / rewrite the file.
+#
+# Harnesses that run together share the file. It is written aside, private, and published whole,
+# so a reader finds it whole or not at all: linked into place, where the first one wins, or moved
+# there where hard links are refused. A move can replace a file published meanwhile, by the same
+# content.
 
 # shellcheck shell=bash
 
@@ -24,13 +29,21 @@ _hermetic_dir="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}"
 _hermetic_cfg="${_hermetic_dir}/kit-hermetic-git-282.config"
 
 if [ ! -f "$_hermetic_cfg" ]; then
-  umask 077
-  cat >"$_hermetic_cfg" <<'CFG'
-[maintenance]
-	auto = false
-[gc]
-	auto = 0
-CFG
+  # A subshell: its umask stays in it, and so does a failure, which the check below reports.
+  # errexit is ignored inside the left operand of `||`, hence the explicit exits.
+  (
+    umask 077
+    [ ! -e "$_hermetic_cfg" ] || exit 1
+    new="$(mktemp "${_hermetic_cfg}.XXXXXX")" || exit 1
+    printf '[maintenance]\n\tauto = false\n[gc]\n\tauto = 0\n' >"$new" \
+      && { ln "$new" "$_hermetic_cfg" || mv -n "$new" "$_hermetic_cfg"; } 2>/dev/null
+    rm -f "$new"
+  ) || :
+  if [ ! -f "$_hermetic_cfg" ]; then
+    echo "hermetic-git: cannot create ${_hermetic_cfg}" >&2
+    unset _hermetic_dir _hermetic_cfg
+    return 1
+  fi
 fi
 
 # Preserve a pre-existing GIT_CONFIG_GLOBAL via include (once).

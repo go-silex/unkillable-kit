@@ -37,7 +37,7 @@ assert_exit() {
     FAIL=$((FAIL + 1))
     return
   fi
-  if [[ -n "${expect_tag}" ]] && ! echo "${out}" | grep -q "${expect_tag}"; then
+  if [[ -n "${expect_tag}" ]] && ! grep -q "${expect_tag}" <<<"${out}"; then
     echo "  FAIL: ${name} expected output to contain '${expect_tag}'" >&2
     echo "    out: $(echo "${out}" | tr '\n' ' ')" >&2
     FAIL=$((FAIL + 1))

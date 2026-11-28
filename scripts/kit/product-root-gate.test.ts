@@ -8,11 +8,11 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
-  symlinkSync,
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
+import { linkModules } from './lib/fixture-modules'
 
 const repo = join(import.meta.dirname, '../..')
 const app = 'apps/product-fixture'
@@ -133,7 +133,7 @@ function setup(root: string) {
   for (const path of listed.split('\n')) workspace(path, { 'test:coverage': coverage })
   workspace(kitApp, { typecheck, 'test:coverage': coverage })
   source(kitApp, 'export const value: number = 1\n')
-  symlinkSync(join(repo, 'node_modules'), join(root, 'node_modules'), 'dir')
+  linkModules(join(repo, 'node_modules'), join(root, 'node_modules'))
   mkdirSync(join(root, 'receipts'))
   git('init', '-q', '-b', 'main')
 
@@ -239,7 +239,7 @@ export default { test: {
 export default { test: { maxWorkers: 1, coverage: makeCoverage('product-fixture', { lines: 100 }) } }
 `,
   )
-  symlinkSync(join(repo, kitApp, 'node_modules'), join(root, app, 'node_modules'), 'dir')
+  linkModules(join(repo, kitApp, 'node_modules'), join(root, app, 'node_modules'))
   put(
     `${app}/src/value.test.ts`,
     `import { expect, test } from 'vitest'

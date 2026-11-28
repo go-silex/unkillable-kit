@@ -1,7 +1,11 @@
 import { lstatSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
+import type { Outcome } from './root-gate-tasks'
 
 const count = 3
+// Tasks of one shard that run together. Measured on two- and four-CPU runners: two shortens
+// every shard, four does not shorten the longest one (go-silex/unkillable-kit#233).
+const together = 2
 // Slowest passing CI duration of each tooling task, in whole seconds, measured on Kit and Product
 // runners at unkillable-kit/v0.9.0. The four Better Auth groups were re-measured on the hosted Kit
 // runner, which runs four workspaces per group (go-silex/unkillable-kit#200); a two-CPU Product
@@ -54,7 +58,6 @@ const unmeasuredSeconds = 10
 const fail = (message: string): never => {
   throw new Error(message)
 }
-type Result = { task: string; exitCode: number }
 type Identity = {
   repository: string
   checkoutSha: string
@@ -96,12 +99,12 @@ function toolingTasks(tasks: string[], index: number) {
   return toolingShardTasks(tasks)[index - 1]
 }
 
-export function runToolingShard(
+export async function runToolingShard(
   spec: string,
   path: string,
   tasks: string[],
   identity: Identity,
-  run: (tasks: string[]) => { results: Result[]; code: number },
+  run: (tasks: string[], limit: number) => Promise<Outcome>,
 ) {
   const match = /^([1-3])\/3$/.exec(spec)
   if (!match) return fail('invalid tooling shard')
@@ -109,7 +112,7 @@ export function runToolingShard(
   toolingPlan(tasks)
   if (basename(path) !== `tooling-${index}.json`) fail('incorrect tooling receipt filename')
   const selected = toolingTasks(tasks, index)
-  const outcome = run(selected)
+  const outcome = await run(selected, together)
   writeFileSync(
     path,
     `${JSON.stringify({ version: 1, group: 'tooling', index, count, ...identity, tasks: selected, results: outcome.results, complete: outcome.code === 0 })}\n`,
