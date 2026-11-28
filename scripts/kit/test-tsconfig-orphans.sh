@@ -506,6 +506,11 @@ seed_workspace "${UNREACHED}" "apps/web" "echo '#' && tsc --noEmit -p tsconfig.j
 git -C "${UNREACHED}" add -A
 assert_case "quoted hash does not comment out a legacy checker → 0" 0 "${UNREACHED}" "project(s) all cited"
 
+# A comment ends at its line: the legacy checker on the next line still runs and is cited.
+seed_workspace "${UNREACHED}" "apps/web" 'echo ready # setup finished\ntsc --noEmit -p tsconfig.json'
+git -C "${UNREACHED}" add -A
+assert_case "comment does not hide the next line's legacy checker → 0" 0 "${UNREACHED}" "project(s) all cited"
+
 # --- `|| true` runs tsc but the script cannot fail ---
 SWALLOW="${TMP}/swallow"
 seed_tree "${SWALLOW}"

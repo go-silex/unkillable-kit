@@ -429,26 +429,16 @@ function strictChainProjects(script: string | undefined, wsDir: string): Set<str
   return projects
 }
 
-/** Remove a shell comment before its operators can be mistaken for commands. */
+/**
+ * Shell text that can hide a `#`: an escape, a single- or double-quoted string (unterminated runs
+ * to the end), or a comment, which starts a word and ends at its line.
+ */
+const SHELL_COMMENT_SCAN =
+  /\\[\s\S]|'[^']*(?:'|$)|"(?:\\[\s\S]|[^"\\])*(?:"|$)|(^|[\s&|;()<>])#[^\n]*/g
+
+/** Remove shell comments before their operators can be mistaken for commands. */
 function stripScriptComment(script: string): string {
-  let quote = ''
-  let startsWord = true
-  for (let i = 0; i < script.length; i++) {
-    const char = script[i] as string
-    if (char === '\\' && quote !== "'") {
-      i++
-      startsWord = false
-      continue
-    }
-    if (quote !== '') {
-      if (char === quote) quote = ''
-      continue
-    }
-    if (char === '#' && startsWord) return script.slice(0, i)
-    if (/['"]/.test(char)) quote = char
-    startsWord = /[\s&|;()<>]/.test(char)
-  }
-  return script
+  return script.replace(SHELL_COMMENT_SCAN, (match, before?: string) => before ?? match)
 }
 
 /** argv of one command, honouring the quotes a package script may use. */
