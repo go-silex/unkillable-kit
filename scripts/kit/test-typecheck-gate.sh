@@ -63,11 +63,27 @@ write_workspace_manifest() {
 }
 
 in_workspace() { (cd "$WORKSPACE" && "$@"); }
-reference() { (cd "$ROOT" && TYPECHECK_REFERENCE_ROOT="$TREE" bun "${GATE[@]}" run "$SCANNER"); }
+reference() { bun "${GATE[@]}" run "$TREE/scripts/kit/typecheck-reference.ts"; }
+reference_task() { (cd "$TREE" && bun run typecheck:reference); }
+
+write_root_manifest() {
+  bun "${GATE[@]}" -e '
+    const [, liveManifest, workspaces, tooling] = process.argv
+    const { scripts } = await Bun.file(liveManifest).json()
+    const typecheck = scripts["typecheck:reference"]
+    if (typeof typecheck !== "string") throw new Error("missing live reference script")
+    console.log(JSON.stringify({
+      workspaces: JSON.parse(workspaces),
+      scripts: { "typecheck:tooling": tooling, "typecheck:reference": typecheck },
+    }))
+  ' "$ROOT/package.json" "$1" "$2"
+}
 
 check_live_flags() {
   (cd "$ROOT" && bun "${GATE[@]}" -e '
-    const manifests = ["package.json", ...new Bun.Glob("{apps,packages}/*/package.json").scanSync(".")]
+    const { workspaces } = await Bun.file("package.json").json()
+    const manifests = ["package.json", ...workspaces.flatMap(pattern =>
+      [...new Bun.Glob(`${pattern}/package.json`).scanSync(".")])]
     for (const path of manifests) {
       const { scripts } = await Bun.file(path).json()
       const task = path === "package.json" ? "typecheck:tooling" : "typecheck"
@@ -102,9 +118,12 @@ seed_error "$TREE"
 mv "$TREE/src/index.ts" "$TREE/src/root.ts"
 seed_error "$WORKSPACE"
 write_workspace_manifest plain >"$WORKSPACE/package.json"
-printf '%s\n' '{"scripts":{"typecheck:tooling":"bun check --no-script --no-pretty -p tsconfig.json"}}' >"$TREE/package.json"
-mkdir -p "$TREE/config/kit" "$TREE/config/product"
-cp "$ROOT/config/kit/zero-edit-zones.json" "$TREE/config/kit/"
+TOOLING='bun check --no-script --no-pretty -p tsconfig.json'
+write_root_manifest '["packages/*"]' "$TOOLING" >"$TREE/package.json"
+mkdir -p "$TREE/config/kit" "$TREE/config/product" "$TREE/scripts/kit"
+cp "$ROOT/config/kit/"{zero-edit-zones.json,bunfig.gates.toml} "$TREE/config/kit/"
+cp "$SCANNER" "$ROOT/scripts/kit/resolve-tree-identity.mjs" "$TREE/scripts/kit/"
+ln -s "$ROOT/node_modules" "$TREE/node_modules"
 git -C "$TREE" init -q
 git -C "$TREE" remote add origin https://github.com/example/acme-product.git
 MARKER="$TREE/config/product/inheritance.json"
@@ -113,28 +132,36 @@ SKIP='typecheck-reference: skipped (Product tree'
 assert_case 'Product reference skips both broken projects' 0 "$SKIP"$'\n!error TS' reference
 
 rm "$MARKER"
-DIAGNOSTICS=$'src/root.ts(1,14): error TS2322\npackages/x/src/index.ts(1,14): error TS2322\n2 project(s) checked by tsc, 2 failed'
+DIAGNOSTICS=$'src/root.ts(1,14): error TS2322\npackages/x/src/index.ts(1,14): error TS2322\ntsc output (exit 1):\nbun check output (exit 1):\n2 project(s); tsc \n2 failed, 0 divergence(s)'
 GITHUB_REPOSITORY=go-silex/unkillable-kit \
   assert_case 'Kit reference checks both projects' 1 "$DIAGNOSTICS" reference
 assert_case 'unclassifiable tree still checks both projects' 1 \
   "$DIAGNOSTICS"$'\ntree classification failed; running reference:\ncannot classify repo' reference
 
-# Keep a copy of the Product fixture for the launch-channel tests.
-PRODUCT="$TMP/product"
-cp -R "$TREE" "$PRODUCT"
-printf '{"version":1,"upstreamCommit":"%040d"}\n' 1 >"$PRODUCT/config/product/inheritance.json"
 git -C "$TREE" remote set-url origin https://github.com/go-silex/unkillable-kit.git
-printf '%s\n' '{"scripts":{"typecheck:tooling":"bun check --no-script -p tsconfig.json || true"}}' >"$TREE/package.json"
+CLEAN="$TMP/clean"
+cp -R "$TREE" "$CLEAN"
+printf '%s\n' 'export const n: number = 1' >"$CLEAN/src/root.ts"
+printf '%s\n' 'export const n: number = 1' >"$CLEAN/packages/x/src/index.ts"
+TREE="$CLEAN" assert_case 'alternate checkout is clean' 0 '0 failed, 0 divergence(s)' reference
+printf 'TYPECHECK_REFERENCE_ROOT="%s"\n' "$CLEAN" >"$TREE/.env"
+assert_case 'outer package script cannot redirect reference through .env' 1 \
+  "$DIAGNOSTICS" reference_task
+
+EXTRA="$TREE/extensions/extra"
+seed_error "$EXTRA"
+write_workspace_manifest plain >"$EXTRA/package.json"
+write_root_manifest '["packages/*","extensions/*"]' "$TOOLING" >"$TREE/package.json"
+assert_case 'declared workspace outside apps and packages is checked' 1 \
+  $'extensions/extra/src/index.ts(1,14): error TS2322\n3 project(s); tsc \n3 failed, 0 divergence(s)' reference
+
+write_root_manifest '["packages/*"]' "$TOOLING || true" >"$TREE/package.json"
 assert_case 'unmappable script fails instead of dropping projects' 2 \
   'package.json scripts.typecheck:tooling: cannot map command to a tsc project' reference
 
-# assert_gate_launch compares exact output. Run the unmodified scanner from the malformed Kit
-# fixture so the clean baseline is fast and deterministic (no elapsed-time line from tsc).
-mkdir -p "$TREE/scripts/kit"
-cp "$SCANNER" "$ROOT/scripts/kit/resolve-tree-identity.mjs" "$TREE/scripts/kit/"
-cp "$ROOT/config/kit/bunfig.gates.toml" "$TREE/config/kit/"
-SCANNER="$TREE/scripts/kit/typecheck-reference.ts" \
-  assert_gate_launch TYPECHECK_REFERENCE_ROOT "$PRODUCT" "$SKIP"
+write_root_manifest 'null' "$TOOLING" >"$TREE/package.json"
+assert_case 'invalid workspace declaration fails closed' 2 \
+  'package.json workspaces must be an array of strings' reference
 
 echo "== typecheck gate summary: $PASS pass, $FAIL fail =="
 [[ "$FAIL" -eq 0 ]]

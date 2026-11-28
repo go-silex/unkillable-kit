@@ -42,7 +42,9 @@
  *   A citation counts only when `-p` / `--project` belongs to `bun check` or
  *   `tsc`/`tsgo`/`vue-tsc` (which also support build citations); without a
  *   project operand, the citation is to the current directory's tsconfig.json.
- *   `bun check` requires `--no-script`, also in root `typecheck:tooling`.
+ *   Only the last project operand of a `bun check` command counts. That
+ *   command requires `--no-script`, also in root `typecheck:tooling`.
+ *   Comments and commands immediately following `||` cannot cite projects.
  *   `|| true` and `|` discard the checker's status and do not count.
  *
  * Does NOT prove the covering project uses the right compilerOptions, does
@@ -97,8 +99,8 @@ const PROJECT_INPUT_KEYS = ['files', 'include', 'references']
 const TSC_BINARY = /(?:^|\/)(?:[\w.]+-)?ts(?:c|go)$/
 const BUN_BINARY = /(?:^|\/)bun$/
 
-/** Shell operators that end one command inside a package script. */
-const SCRIPT_SEPARATORS = /&&|\|\||;|\|/
+/** Preserve each command's preceding operator for the citation audit. */
+const SCRIPT_SEPARATORS = /(&&|\|\||;|\|)/
 
 /**
  * `|| true`, `|| exit 0`, or a pipe: the script's status is not the checker's.
@@ -338,22 +340,16 @@ function citeBuildOperands(
   return operands
 }
 
-function citeFromTokens(
-  tokens: string[],
-  wsDir: string,
-  cited: Set<string>,
-  bunCheck: boolean,
-): number {
+function citeFromTokens(tokens: string[], wsDir: string, cited: Set<string>): number {
   let operands = 0
-  for (let i = bunCheck ? 2 : 0; i < tokens.length; i++) {
+  for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i] as string
-    if (bunCheck && token === '--') break
     const fromFlag = citeProjectFlag(token, tokens[i + 1], wsDir, cited)
     if (fromFlag > 0) {
       operands += fromFlag
       continue
     }
-    if (!bunCheck && (token === '-b' || token === '--build')) {
+    if (token === '-b' || token === '--build') {
       operands += citeBuildOperands(tokens, i, wsDir, cited)
     }
   }
@@ -367,9 +363,12 @@ function isBunCheck(tokens: string[]): boolean {
 function citedProjects(commands: string[][], wsDir: string): Set<string> {
   const cited = new Set<string>()
   for (const tokens of commands) {
-    const bunCheck = isBunCheck(tokens)
-    if (!(bunCheck || tokens.some((token) => TSC_BINARY.test(token)))) continue
-    if (citeFromTokens(tokens, wsDir, cited, bunCheck) === 0) {
+    if (isBunCheck(tokens)) {
+      citeProject(cited, wsDir, lastBunProject(tokens))
+      continue
+    }
+    if (!tokens.some((token) => TSC_BINARY.test(token))) continue
+    if (citeFromTokens(tokens, wsDir, cited) === 0) {
       citeProject(cited, wsDir, ROOT_PROJECT_REL)
     }
   }
@@ -379,6 +378,22 @@ function citedProjects(commands: string[][], wsDir: string): Set<string> {
 function bunProjectOperand(flag: string, next: string | undefined): string | undefined {
   if (flag === '-p' || flag === '--project') return next
   return flag.startsWith('--project=') ? flag.slice('--project='.length) : undefined
+}
+
+function lastBunProject(tokens: string[]): string {
+  let project = ROOT_PROJECT_REL
+  for (let i = 2; i < tokens.length; i++) {
+    const flag = tokens[i] as string
+    if (flag === '--') break
+    const operand = bunProjectOperand(flag, tokens[i + 1])
+    if (operand === undefined) continue
+    if (!flag.startsWith('--project=')) {
+      if (operand.startsWith('-')) continue
+      i++
+    }
+    project = operand
+  }
+  return project
 }
 
 /** No shell syntax, no positional inputs, and at most one project operand. */
@@ -431,6 +446,28 @@ function coverageProjects(script: unknown, wsDir: string): Set<string> {
   return projects
 }
 
+/** Remove a shell comment before its operators can be mistaken for commands. */
+function stripScriptComment(script: string): string {
+  let quote = ''
+  let startsWord = true
+  for (let i = 0; i < script.length; i++) {
+    const char = script[i] as string
+    if (char === '\\' && quote !== "'") {
+      i++
+      startsWord = false
+      continue
+    }
+    if (quote !== '') {
+      if (char === quote) quote = ''
+      continue
+    }
+    if (char === '#' && startsWord) return script.slice(0, i)
+    if (/['"]/.test(char)) quote = char
+    startsWord = /[\s&|;()<>]/.test(char)
+  }
+  return script
+}
+
 /** argv of one command, honouring the quotes a package script may use. */
 function tokenize(segment: string): string[] {
   const tokens: string[] = []
@@ -442,9 +479,6 @@ function tokenize(segment: string): string[] {
       else current += char
     } else if (/['"]/.test(char)) {
       quote = char
-    } else if (char === '#' && current.length === 0 && isBunCheck(tokens)) {
-      // `bun check -p tsconfig.json # --no-script`: a comment cannot disable script dispatch.
-      break
     } else if (char.trim().length === 0) {
       if (current.length > 0) tokens.push(current)
       current = ''
@@ -466,34 +500,39 @@ function tokenize(segment: string): string[] {
  * in CI. A workspace with src/ and no project violates that assumption.
  * Root `typecheck:tooling` is inspected only for Bun's `--no-script` requirement.
  */
-function manifestScript(manifest: string, name: string): unknown {
+function manifestScript(manifest: string, name: string): string | undefined {
   const scripts = parseJsonc(manifest).scripts
   if (scripts === null || typeof scripts !== 'object') return undefined
-  return (scripts as Record<string, unknown>)[name]
+  const script = (scripts as Record<string, unknown>)[name]
+  return typeof script === 'string' ? stripScriptComment(script) : undefined
 }
 
 function auditScriptCommands(
-  script: unknown,
+  script: string | undefined,
   manifest: string,
   name: string,
   location: string,
   problems: { report: string; fix: string }[],
 ): string[][] {
-  if (typeof script !== 'string') return []
-  const commands = script.split(SCRIPT_SEPARATORS).map(tokenize)
-  const scripted = commands.some((tokens) => {
-    if (!isBunCheck(tokens)) return false
+  if (script === undefined) return []
+  const segments = script.split(SCRIPT_SEPARATORS)
+  const cited: string[][] = []
+  let scripted = false
+  for (let i = 0; i < segments.length; i += 2) {
+    const tokens = tokenize(segments[i] as string)
+    if (segments[i - 1] !== '||') cited.push(tokens)
+    if (!isBunCheck(tokens)) continue
     const noScript = tokens.indexOf('--no-script', 2)
     const endOfFlags = tokens.indexOf('--', 2)
-    return noScript === -1 || (endOfFlags !== -1 && endOfFlags < noScript)
-  })
+    if (noScript === -1 || (endOfFlags !== -1 && endOfFlags < noScript)) scripted = true
+  }
   if (scripted) {
     problems.push({
       report: `SCRIPTED ${location} — "bun check" without --no-script can run the manifest's "check" script instead of the type checker`,
       fix: `add --no-script to each "bun check" in "${name}" in ${manifest}`,
     })
   }
-  return commands
+  return cited
 }
 
 function auditWorkspaceProjects(

@@ -355,6 +355,18 @@ git -C "${BUNCITED}" add -A
 assert_case "test project dropped from bun check → 1 naming it" 1 "${BUNCITED}" \
   "UNCITED apps/web/tsconfig.test.json"
 
+# Bun only checks the last project flag. Put the witness in src/ so only
+# the citation invariant can catch the first project's missing check.
+BUNLAST="${TMP}/bun-last-project"
+seed_tree "${BUNLAST}"
+seed_workspace "${BUNLAST}" "apps/web" "bun check --no-script -p tsconfig.json -p tsconfig.test.json"
+echo 'export const broken: number = "not a number"' >"${BUNLAST}/apps/web/src/owned.ts"
+write_project "${BUNLAST}/apps/web/tsconfig.test.json" '"src/**/*.test.ts"'
+echo 'export const test = 1' >"${BUNLAST}/apps/web/src/owned.test.ts"
+git -C "${BUNLAST}" add -A
+assert_case "only the last bun project flag counts → 1 naming the first project" 1 "${BUNLAST}" \
+  "UNCITED apps/web/tsconfig.json"
+
 # An actual `check` script makes the risk concrete; refusal must not depend on
 # whether that script exists today or on workspace tests needing coverage.
 SCRIPTED="${TMP}/scripted"
@@ -457,6 +469,24 @@ seed_workspace "${ECHO}" "apps/web" "echo skipping -p tsconfig.json"
 git -C "${ECHO}" add -A
 assert_case "echo naming -p is not a citation → 1" 1 "${ECHO}" \
   "UNCITED apps/web/tsconfig.json"
+
+# These checkers never run. A tracked source error would escape a green gate.
+UNREACHED="${TMP}/unreached"
+seed_tree "${UNREACHED}"
+for script in \
+  'echo done # && bun check --no-script -p tsconfig.json' \
+  'true || bun check --no-script -p tsconfig.json' \
+  'true || tsc --noEmit -p tsconfig.json'; do
+  seed_workspace "${UNREACHED}" "apps/web" "${script}"
+  echo 'export const broken: number = "not a number"' >"${UNREACHED}/apps/web/src/owned.ts"
+  git -C "${UNREACHED}" add -A
+  assert_case "checker does not cite a project: ${script} → 1" 1 "${UNREACHED}" \
+    "UNCITED apps/web/tsconfig.json"
+done
+
+seed_workspace "${UNREACHED}" "apps/web" "echo '#' && bun check --no-script -p tsconfig.json"
+git -C "${UNREACHED}" add -A
+assert_case "quoted hash does not comment out a checker → 0" 0 "${UNREACHED}" "project(s) all cited"
 
 # --- `|| true` runs tsc but the script cannot fail ---
 SWALLOW="${TMP}/swallow"
