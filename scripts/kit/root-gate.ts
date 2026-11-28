@@ -5,6 +5,7 @@ import { basename, join, resolve } from 'node:path'
 import { committedPaths, hasAppManifestAt, pullRequestCheckout } from './root-gate-ci-context'
 import { kitAppPrefixes, productAppWorkspaces } from './root-gate-enrollment'
 import { mergeParts, runPart } from './root-gate-parts'
+import { gateEnv, gateFlags, recipeTasks, rootGateLaunch } from './root-gate-recipe'
 import { joinTooling, runToolingShard, toolingPlan } from './root-gate-tooling'
 
 const root = resolve(import.meta.dirname, '../..')
@@ -31,19 +32,19 @@ function recipe(args: string[]) {
   const candidates = ['validate:full', 'validate:tooling'].flatMap((name) => {
     const source = scripts[name]
     if (typeof source !== 'string') return []
-    const tasks = source.split(' ').slice(3)
-    return JSON.stringify(args.slice(0, tasks.length)) === JSON.stringify(tasks)
+    const tasks = recipeTasks(source)
+    return tasks.length > 0 && JSON.stringify(args.slice(0, tasks.length)) === JSON.stringify(tasks)
       ? [{ name, source }]
       : []
   })
   if (candidates.length !== 1) fail('arguments differ from canonical recipe')
   const { name, source } = candidates[0]
+  const tasks = recipeTasks(source as string)
   if (
-    typeof source !== 'string' ||
-    !/^bun run scripts\/kit\/root-gate\.ts(?: [A-Za-z0-9_:-]+)+$/.test(source)
+    source !== `${rootGateLaunch} ${tasks.join(' ')}` ||
+    !tasks.every((task) => /^[A-Za-z0-9_:-]+$/.test(task))
   )
-    fail('malformed canonical recipe')
-  const tasks = (source as string).split(' ').slice(3)
+    fail(`malformed canonical recipe: ${name} must be "${rootGateLaunch} <task>..."`)
   if (
     new Set(tasks).size !== tasks.length ||
     tasks.filter((task) => task === 'test:coverage').length !==
@@ -128,7 +129,11 @@ function run(tasks: string[], shard?: string): { results: Result[]; code: number
   for (const task of tasks) {
     console.log(`root-gate: running ${task}`)
     const started = performance.now()
-    const child = spawnSync(process.execPath, ['run', task], { cwd: root, stdio: 'inherit' })
+    const child = spawnSync(process.execPath, [...gateFlags, 'run', task], {
+      cwd: root,
+      env: gateEnv(),
+      stdio: 'inherit',
+    })
     const durationMs = Math.round((performance.now() - started) * 1000) / 1000
     const exitCode = child.status ?? 1
     const failed = exitCode !== 0 || !!child.error || !!child.signal

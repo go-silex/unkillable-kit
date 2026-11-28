@@ -1,5 +1,7 @@
 # Bun config for the kit gates, deliberately empty.
 # Every gate launcher in package.json (and the bun steps of extract-dry-run.sh) passes
-# `--no-env-file --config=config/kit/bunfig.gates.toml`. Bun then reads this file instead of the
+# `--no-env-file --config=config/kit/bunfig.gates.toml`, and so do the Root gate runner in the
+# `validate:full` / `validate:tooling` recipes and its dispatch of each task, whose environment
+# every task inherits (go-silex/unkillable-kit#242). Bun then reads this file instead of the
 # tree's `bunfig.toml`, so a tree `preload` or `define` cannot set a gate's *_ROOT override or patch
 # its runtime (Roxabi/roxabi-boilerplate-cf#319). Kit-owned under config/kit/ (zero-edit); keep it free of settings.

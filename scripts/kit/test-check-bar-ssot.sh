@@ -38,7 +38,9 @@ assert_exit() {
 
 seed_ok() {
   local tree="$1"
-  mkdir -p "${tree}/docs/kit/standards" "${tree}/docs/kit/processes" "${tree}/scripts/kit"
+  mkdir -p "${tree}/docs/kit/standards" "${tree}/docs/kit/processes" "${tree}/scripts/kit" \
+    "${tree}/config/kit"
+  cp "${ROOT}/config/kit/bunfig.gates.toml" "${tree}/config/kit/bunfig.gates.toml"
   mkdir -p "${tree}/.lefthook/pre-push"
   cp "${ROOT}/scripts/kit/root-gate.ts" "${tree}/scripts/kit/root-gate.ts"
   local module
@@ -57,8 +59,8 @@ EOF
   cat >"${tree}/package.json" <<'EOF'
 {
   "scripts": {
-    "validate:full": "bun run scripts/kit/root-gate.ts uniquely-zz-gate lint typecheck banlist zod-major ts-major import-boundary test:kit-schema-sync wrangler-migrations:check test:wrangler-migrations zero-edit extract-dry-run test:coverage",
-    "validate:tooling": "bun run scripts/kit/root-gate.ts tooling-one tooling-two tooling-three",
+    "validate:full": "bun --no-env-file --config=config/kit/bunfig.gates.toml run scripts/kit/root-gate.ts uniquely-zz-gate lint typecheck banlist zod-major ts-major import-boundary test:kit-schema-sync wrangler-migrations:check test:wrangler-migrations zero-edit extract-dry-run test:coverage",
+    "validate:tooling": "bun --no-env-file --config=config/kit/bunfig.gates.toml run scripts/kit/root-gate.ts tooling-one tooling-two tooling-three",
     "tooling-one": "true", "tooling-two": "true", "tooling-three": "true",
     "uniquely-zz-gate": "true", "lint": "true", "typecheck": "true", "banlist": "true",
     "zod-major": "true", "ts-major": "true", "import-boundary": "true",

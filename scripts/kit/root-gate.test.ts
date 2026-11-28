@@ -16,6 +16,7 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { gateFlags, recipeTasks, rootGateLaunch } from './root-gate-recipe'
 import { toolingSeconds, toolingShardTasks } from './root-gate-tooling'
 
 const kitScripts = import.meta.dirname
@@ -78,7 +79,9 @@ function withFixture(
         key === 'COVERAGE_ONLY' ||
         key === 'COVERAGE_CHANGED_BASE' ||
         key === 'ROOT_FIXTURE_FAIL' ||
-        key === 'ROOT_FIXTURE_PROGRESS'
+        key === 'ROOT_FIXTURE_PROGRESS' ||
+        key === 'BUN_OPTIONS' ||
+        key === 'ROOT_GATE_INVOKER_BUN_OPTIONS'
       )
         delete env[key]
     }
@@ -100,19 +103,17 @@ function withFixture(
         copyFileSync(join(kitScripts, name), join(fixtureScripts, name))
       }
     }
-    const zones = 'config/kit/zero-edit-zones.json'
     mkdirSync(join(fixture, 'config/kit'), { recursive: true })
-    copyFileSync(join(kitScripts, '../..', zones), join(fixture, zones))
+    for (const config of ['config/kit/zero-edit-zones.json', 'config/kit/bunfig.gates.toml'])
+      copyFileSync(join(kitScripts, '../..', config), join(fixture, config))
     writeFileSync(join(fixtureScripts, 'test-coverage.sh'), '#!/bin/bash\nexit 0\n')
     writeFileSync(
       join(fixture, 'package.json'),
       JSON.stringify({
         private: true,
         scripts: {
-          'validate:full':
-            'bun run scripts/kit/root-gate.ts core:first test:coverage core:last core:tail',
-          'validate:tooling':
-            'bun run scripts/kit/root-gate.ts tooling:first tooling:last tooling:tail',
+          'validate:full': `${rootGateLaunch} core:first test:coverage core:last core:tail`,
+          'validate:tooling': `${rootGateLaunch} tooling:first tooling:last tooling:tail`,
           'tooling:first': 'bun run task.ts tooling:first',
           'tooling:last': 'bun run task.ts tooling:last',
           'tooling:tail': 'bun run task.ts tooling:tail',
@@ -555,18 +556,95 @@ function toolingAndPlan() {
     const manifestPath = join(fixture, 'package.json')
     const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
     for (const recipe of [
-      'bun run scripts/kit/root-gate.ts tooling:first tooling:first',
-      'bun run scripts/kit/root-gate.ts tooling:first test:coverage',
-      'bun run scripts/kit/root-gate.ts tooling:first validate:tooling',
-      'bun run scripts/kit/root-gate.ts tooling:first validate:full',
-      'bun run scripts/kit/root-gate.ts tooling:first missing:task',
-      'bun run scripts/kit/root-gate.ts tooling:first  tooling:last',
+      `${rootGateLaunch} tooling:first tooling:first`,
+      `${rootGateLaunch} tooling:first test:coverage`,
+      `${rootGateLaunch} tooling:first validate:tooling`,
+      `${rootGateLaunch} tooling:first validate:full`,
+      `${rootGateLaunch} tooling:first missing:task`,
+      `${rootGateLaunch} tooling:first  tooling:last`,
+      // A runner launch that loads the cwd .env or bunfig.toml, which every task inherits.
+      'bun run scripts/kit/root-gate.ts tooling:first tooling:last tooling:tail',
+      'bun --no-env-file run scripts/kit/root-gate.ts tooling:first tooling:last tooling:tail',
     ]) {
       manifest.scripts['validate:tooling'] = recipe
       writeFileSync(manifestPath, JSON.stringify(manifest))
       const rejected = invoke('--', '--plan')
       assert.ok(rejected.status !== null && rejected.status !== 0, `must reject ${recipe}`)
       assert.equal(existsSync(effects), false, 'rejected recipe must not execute tasks')
+    }
+  })
+}
+
+/**
+ * A cwd .env or bunfig.toml must not reach the tasks through the runner or its task dispatch, and
+ * a cwd .env must not reach a Bun runtime that a task starts without the gate flags.
+ */
+function hermeticRunner() {
+  withFixture('bun run task.ts test:coverage', (fixture, env) => {
+    const manifestPath = join(fixture, 'package.json')
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+    const tasks = recipeTasks(manifest.scripts['validate:tooling'])
+    // Node reads neither file, so only the runner or its dispatch can hand those tasks a variable.
+    // tooling:last starts Bun without the gate flags.
+    for (const task of tasks) manifest.scripts[task] = `node task.mjs ${task}`
+    manifest.scripts['tooling:last'] = 'bun task.mjs tooling:last'
+    writeFileSync(manifestPath, JSON.stringify(manifest))
+    writeFileSync(
+      join(fixture, 'task.mjs'),
+      "import { appendFileSync } from 'node:fs'\nappendFileSync('effects.txt', process.argv[2] + '\\n')\nif (process.env.ROOT_FIXTURE_FAIL === process.argv[2]) process.exit(17)\n",
+    )
+    const effects = join(fixture, 'effects.txt')
+    const steal = "process.env.ROOT_FIXTURE_FAIL = 'tooling:first'\n"
+    const runner = ['scripts/kit/root-gate.ts', ...tasks]
+    // Each channel sets the variable that makes its target task exit 17. The control drops the
+    // gate flags, or the gate environment, at the layer that reads the channel.
+    const channels = [
+      {
+        name: '.env',
+        target: 'tooling:first',
+        files: { '.env': 'ROOT_FIXTURE_FAIL=tooling:first\n' },
+        gated: ['run', 'validate:tooling'],
+        control: ['run', ...runner],
+      },
+      {
+        name: '.env in a task',
+        target: 'tooling:last',
+        files: { '.env': 'ROOT_FIXTURE_FAIL=tooling:last\n' },
+        gated: ['run', 'validate:tooling'],
+        control: ['run', 'tooling:last'],
+      },
+      {
+        name: 'preload',
+        target: 'tooling:first',
+        files: { 'bunfig.toml': 'preload = ["./steal.ts"]\n', 'steal.ts': steal },
+        gated: ['run', 'validate:tooling'],
+        control: ['run', ...runner],
+      },
+      {
+        // `bun = true` runs `node` as Bun, which then runs the preload. This case covers the
+        // dispatch alone, so the runner is launched exactly as its recipe launches it.
+        name: '[run] bun',
+        target: 'tooling:first',
+        files: {
+          'bunfig.toml': 'preload = ["./steal.ts"]\n[run]\nbun = true\n',
+          'steal.ts': steal,
+        },
+        gated: [...gateFlags, 'run', ...runner],
+        control: ['run', 'tooling:first'],
+      },
+    ]
+    for (const { name, target, files, gated, control } of channels) {
+      for (const [path, text] of Object.entries(files)) writeFileSync(join(fixture, path), text)
+      requireSuccess(command(fixture, env, process.execPath, gated))
+      assert.equal(readFileSync(effects, 'utf8'), `${tasks.join('\n')}\n`, name)
+      rmSync(effects)
+      const open = command(fixture, env, process.execPath, control)
+      assert.ok(
+        open.status === 17 || new RegExp(`"task":"${target}".*"exitCode":17`).test(open.stdout),
+        `${name}: the control launch must hand the variable to ${target}\n${open.stdout}\n${open.stderr}`,
+      )
+      rmSync(effects)
+      for (const path of Object.keys(files)) rmSync(join(fixture, path))
     }
   })
 }
@@ -578,7 +656,7 @@ function toolingShards() {
     const tasks = Array.from({ length: 33 }, (_, i) => `tooling:task${i}`)
     for (const task of tasks) manifest.scripts[task] = `bun run task.ts ${task}`
     const setRecipe = () => {
-      manifest.scripts['validate:tooling'] = `bun run scripts/kit/root-gate.ts ${tasks.join(' ')}`
+      manifest.scripts['validate:tooling'] = `${rootGateLaunch} ${tasks.join(' ')}`
       writeFileSync(manifestPath, JSON.stringify(manifest))
     }
     setRecipe()
@@ -709,7 +787,7 @@ function toolingDurations() {
   // The Kit recipe is fully measured, and its estimated slowest shard leaves room under the
   // five-minute job timeout for checkout, install (about 30 s) and runner variance.
   const manifest = JSON.parse(readFileSync(join(kitScripts, '../../package.json'), 'utf8'))
-  const tasks: string[] = manifest.scripts['validate:tooling'].split(' ').slice(3)
+  const tasks = recipeTasks(manifest.scripts['validate:tooling'])
   assert.deepEqual(
     [...toolingSeconds.keys()].sort(),
     [...tasks].sort(),
@@ -1479,6 +1557,7 @@ liveCoverageShardJoin()
 consumerCoverageShardJoin()
 fullAndPlan()
 toolingAndPlan()
+hermeticRunner()
 toolingShards()
 toolingDurations()
 coveragePlan()

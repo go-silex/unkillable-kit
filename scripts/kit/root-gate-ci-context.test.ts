@@ -11,6 +11,7 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
+import { rootGateLaunch } from './root-gate-recipe'
 
 type BaseMove = 'none' | 'advanced' | 'unrelated'
 type Change = (paths: string[], removals?: string[], baseMove?: BaseMove) => void
@@ -45,7 +46,7 @@ function fixture(exercise: (repo: string, env: NodeJS.ProcessEnv, change: Change
       JSON.stringify({
         workspaces: ['apps/*', 'packages/*'],
         scripts: {
-          'validate:full': 'bun run scripts/kit/root-gate.ts test:coverage',
+          'validate:full': `${rootGateLaunch} test:coverage`,
           'test:coverage': 'bash scripts/kit/test-coverage.sh',
         },
       }),
@@ -53,6 +54,10 @@ function fixture(exercise: (repo: string, env: NodeJS.ProcessEnv, change: Change
     write(
       'config/kit/zero-edit-zones.json',
       '{"protected_prefixes":["apps/example-api/","apps/example-web/","packages/"]}\n',
+    )
+    write(
+      'config/kit/bunfig.gates.toml',
+      readFileSync(join(import.meta.dirname, '../../config/kit/bunfig.gates.toml'), 'utf8'),
     )
     for (const app of ['fixture-web', 'fixture-api']) {
       write(
