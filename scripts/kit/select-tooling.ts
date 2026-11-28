@@ -9,6 +9,7 @@ const prefixes = [
   'scripts/kit/',
   'config/kit/',
   '.github/',
+  '.lefthook/',
   'tooling/',
   'docs/kit/',
   'packages/auth/',

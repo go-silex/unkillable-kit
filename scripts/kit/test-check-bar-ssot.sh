@@ -39,6 +39,7 @@ assert_exit() {
 seed_ok() {
   local tree="$1"
   mkdir -p "${tree}/docs/kit/standards" "${tree}/docs/kit/processes" "${tree}/scripts/kit"
+  mkdir -p "${tree}/.lefthook/pre-push"
   cp "${ROOT}/scripts/kit/root-gate.ts" "${tree}/scripts/kit/root-gate.ts"
   local module
   for module in "${ROOT}"/scripts/kit/root-gate-*.ts; do
@@ -90,13 +91,18 @@ EOF
   cat >"${tree}/lefthook.yml" <<'EOF'
 # steps = package.json `validate:full` — do not copy them here.
 pre-push:
-  commands:
-    validate-full:
-      run: bun run validate:full
-    validate-tooling:
-      run: |
-        bun scripts/kit/select-tooling.ts
-        bun run validate:tooling
+  scripts:
+    "validate-full.sh":
+      runner: bash
+    "validate-tooling.sh":
+      runner: bash
+EOF
+  cat >"${tree}/.lefthook/pre-push/validate-full.sh" <<'EOF'
+exec bun run validate:full
+EOF
+  cat >"${tree}/.lefthook/pre-push/validate-tooling.sh" <<'EOF'
+bun scripts/kit/select-tooling.ts --pre-push "$1"
+bun run validate:tooling
 EOF
 }
 
@@ -134,17 +140,10 @@ assert_exit "split testing section inventory → 1" 1 "${BAD_SPLIT}"
 
 BAD_WRAP="${TMP}/bad-wrap"
 seed_ok "${BAD_WRAP}"
-cat >"${BAD_WRAP}/lefthook.yml" <<'EOF'
+cat >"${BAD_WRAP}/.lefthook/pre-push/validate-full.sh" <<'EOF'
 # validate:full = uniquely-zz-gate · lint ·
 #                 typecheck · banlist
-pre-push:
-  commands:
-    validate-full:
-      run: bun run validate:full
-    validate-tooling:
-      run: |
-        bun scripts/kit/select-tooling.ts
-        bun run validate:tooling
+exec bun run validate:full
 EOF
 assert_exit "wrapped middot inventory → 1" 1 "${BAD_WRAP}"
 
@@ -172,29 +171,15 @@ assert_exit "tokenizer unique name from fixture package.json → 1" 1 "${NEW_MAR
 
 BAD_LH="${TMP}/bad-lefthook"
 seed_ok "${BAD_LH}"
-cat >"${BAD_LH}/lefthook.yml" <<'EOF'
-pre-push:
-  commands:
-    validate-full:
-      run: bun run lint && bun run typecheck && bun run ts-major && bun run import-boundary
-    validate-tooling:
-      run: |
-        bun scripts/kit/select-tooling.ts
-        bun run validate:tooling
+cat >"${BAD_LH}/.lefthook/pre-push/validate-full.sh" <<'EOF'
+bun run lint && bun run typecheck && bun run ts-major && bun run import-boundary
 EOF
 assert_exit "lefthook copies inner steps → 1" 1 "${BAD_LH}"
 
 PLAN_LH="${TMP}/plan-lefthook"
 seed_ok "${PLAN_LH}"
-cat >"${PLAN_LH}/lefthook.yml" <<'EOF'
-pre-push:
-  commands:
-    validate-full:
-      run: bun run validate:full -- --plan
-    validate-tooling:
-      run: |
-        bun scripts/kit/select-tooling.ts
-        bun run validate:tooling
+cat >"${PLAN_LH}/.lefthook/pre-push/validate-full.sh" <<'EOF'
+exec bun run validate:full -- --plan
 EOF
 assert_exit "lefthook plan is not full execution → 1" 1 "${PLAN_LH}"
 
@@ -320,14 +305,26 @@ MISSING_TOOLING_HOOK="${TMP}/missing-tooling-hook"
 seed_ok "${MISSING_TOOLING_HOOK}"
 cat >"${MISSING_TOOLING_HOOK}/lefthook.yml" <<'EOF'
 pre-push:
+  scripts:
+    "validate-full.sh":
+      runner: bash
+  # validate-tooling.sh exists but isn't registered
+EOF
+assert_exit "missing tooling script registration → 1" 1 "${MISSING_TOOLING_HOOK}"
+
+COMMAND_HOOK="${TMP}/command-hook"
+seed_ok "${COMMAND_HOOK}"
+cat >"${COMMAND_HOOK}/lefthook.yml" <<'EOF'
+pre-push:
   commands:
     validate-full:
       run: bun run validate:full
-    select:
-      run: bun scripts/kit/select-tooling.ts
-    # bun run validate:tooling
+    validate-tooling:
+      run: |
+        bun scripts/kit/select-tooling.ts --pre-push "{1}"
+        bun run validate:tooling
 EOF
-assert_exit "missing tooling hook invocation → 1" 1 "${MISSING_TOOLING_HOOK}"
+assert_exit "inline pre-push commands are not scripts → 1" 1 "${COMMAND_HOOK}"
 
 MISSING_TOOLING_CI="${TMP}/missing-tooling-ci"
 seed_ok "${MISSING_TOOLING_CI}"
@@ -344,13 +341,8 @@ assert_exit "missing tooling ci invocation → 1" 1 "${MISSING_TOOLING_CI}"
 
 MISSING_SELECTOR_HOOK="${TMP}/missing-selector-hook"
 seed_ok "${MISSING_SELECTOR_HOOK}"
-cat >"${MISSING_SELECTOR_HOOK}/lefthook.yml" <<'EOF'
-pre-push:
-  commands:
-    full:
-      run: bun run validate:full
-    tooling:
-      run: bun run validate:tooling
+cat >"${MISSING_SELECTOR_HOOK}/.lefthook/pre-push/validate-tooling.sh" <<'EOF'
+bun run validate:tooling
 EOF
 assert_exit "missing hook selector → 1" 1 "${MISSING_SELECTOR_HOOK}"
 

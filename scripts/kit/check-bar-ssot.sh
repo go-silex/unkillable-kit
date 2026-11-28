@@ -16,6 +16,8 @@ FILES=(
   docs/kit/processes/dev-process.md
   docs/kit/testing.md
   lefthook.yml
+  .lefthook/pre-push/validate-full.sh
+  .lefthook/pre-push/validate-tooling.sh
 )
 shopt -s nullglob
 for file in "${ROOT}"/docs/kit/testing/*.md; do
@@ -108,6 +110,7 @@ line_invokes_validate_full() {
     stripped="${stripped#"${stripped%%[![:space:]]*}"}"
   fi
   [[ "${stripped}" == \#* ]] && return 1
+  [[ "${role}" != hook ]] || stripped="${stripped#exec }"
   local full='^(run:[[:space:]]*)?bun[[:space:]]+run[[:space:]]+validate:full[[:space:]]*(#.*)?$'
   local join='^(run:[[:space:]]*)?bun[[:space:]]+run[[:space:]]+validate:full[[:space:]]+--[[:space:]]+--ci-join[[:space:]]+[^[:space:]]+[[:space:]]+--producers-result[[:space:]]+[^[:space:]]+[[:space:]]+--coverage-result[[:space:]]+[^[:space:]]+[[:space:]]+--parts-result[[:space:]]+[^[:space:]]+[[:space:]]*(#.*)?$'
   [[ "${stripped}" =~ ${full} ]] || { [[ "${role}" == ci ]] && [[ "${stripped}" =~ ${join} ]]; }
@@ -207,21 +210,32 @@ done
 
 LEFTHOOK="${ROOT}/lefthook.yml"
 if [[ -f "${LEFTHOOK}" ]]; then
-  pre_push="$(awk '
-    /^pre-push:[[:space:]]*$/ {grab=1; print; next}
-    grab && /^[A-Za-z0-9_-]+:/ {exit}
-    grab {print}
+  pre_push_scripts="$(awk '
+    /^pre-push:[[:space:]]*$/ {hook=1; next}
+    hook && /^[^[:space:]#]/ {exit}
+    hook && /^  scripts:[[:space:]]*$/ {scripts=1; next}
+    scripts && /^  [^[:space:]#]/ {exit}
+    scripts {print}
   ' "${LEFTHOOK}")"
   found=0 tooling_found=0 selector_found=0
-  while IFS= read -r line || [[ -n "${line}" ]]; do
-    line="${line%$'\r'}"
-    stripped="${line#"${line%%[![:space:]]*}"}"
-    line_invokes_validate_full "${stripped}" hook && found=1
-    line_invokes_tooling "${stripped}" && tooling_found=1
-    line_invokes_selector "${stripped}" && selector_found=1
-  done <<< "${pre_push}"
+  full_script="${ROOT}/.lefthook/pre-push/validate-full.sh"
+  tooling_script="${ROOT}/.lefthook/pre-push/validate-tooling.sh"
+  if grep -Eq '^    ("validate-full\.sh"|validate-full\.sh):[[:space:]]*$' <<< "${pre_push_scripts}" &&
+    [[ -f "${full_script}" ]]; then
+    while IFS= read -r line || [[ -n "${line}" ]]; do
+      line_invokes_validate_full "${line#"${line%%[![:space:]]*}"}" hook && found=1
+    done <"${full_script}"
+  fi
+  if grep -Eq '^    ("validate-tooling\.sh"|validate-tooling\.sh):[[:space:]]*$' <<< "${pre_push_scripts}" &&
+    [[ -f "${tooling_script}" ]]; then
+    while IFS= read -r line || [[ -n "${line}" ]]; do
+      stripped="${line#"${line%%[![:space:]]*}"}"
+      line_invokes_tooling "${stripped}" && tooling_found=1
+      line_invokes_selector "${stripped}" && selector_found=1
+    done <"${tooling_script}"
+  fi
   if [[ "${found}" -eq 0 || "${tooling_found}" -eq 0 || "${selector_found}" -eq 0 ]]; then
-    echo "error: lefthook.yml: pre-push must invoke both lanes and tooling selector" >&2
+    echo "error: lefthook.yml: pre-push scripts must invoke both lanes and tooling selector" >&2
     FAIL=1
   fi
 fi

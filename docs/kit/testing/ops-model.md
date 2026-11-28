@@ -18,6 +18,12 @@ merge-on-green (current exact-head authorization receipt + checks)
 
 After Biome, pre-commit restages the indexed ACMR paths as literal names using tracked-only updates, including already-indexed files under ignore rules. It does not discover ignored untracked neighbors, and staged deletions remain deletions. `test:lefthook-deletes` exercises these index boundaries.
 
+Pre-push uses the Kit-owned scripts in `.lefthook/pre-push/`: deny-upstream, TruffleHog,
+the full gate, then the tooling selector and its lane when applicable. Unlike Lefthook
+commands, the scripts run even when the checked-out branch has no diff against the
+remote default branch. The tooling wrapper passes Git's push stdin and remote name
+to the selector.
+
 | Layer                               | Role                                                                                                    | Cost expectation                             |
 | ----------------------------------- | ------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
 | **Lefthook pre-push**               | Local Root gate: `validate:full` and applicable tooling                                                 | Accept wall-clock; fix here                  |

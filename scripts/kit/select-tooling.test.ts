@@ -223,6 +223,7 @@ try {
     'config/kit/settings.json',
     '.github/workflows/example.yml',
     'lefthook.yml',
+    '.lefthook/pre-push/validate-tooling.sh',
     'package.json',
     'bun.lock',
     'tooling/a',
