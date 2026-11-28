@@ -293,7 +293,10 @@ prod_mutant "component-legacy" "release.component must not reuse the legacy Kit 
 # Falsify the guard independently of the ordinary malformed-input fixtures.
 mutant_root="$TMP/allow-legacy-component-scanner"
 mkdir -p "$mutant_root/scripts/kit"
-ln -s "$ROOT/packages" "$mutant_root/packages"
+# The scanner resolves `yaml` from packages/flows/package.json: link that base and its install only.
+mkdir -p "$mutant_root/packages/flows"
+ln -s "$ROOT/packages/flows/package.json" "$mutant_root/packages/flows/package.json"
+ln -s "$ROOT/packages/flows/node_modules" "$mutant_root/packages/flows/node_modules"
 ln -s "$ROOT/scripts/kit/lib" "$mutant_root/scripts/kit/lib"
 mutant_scanner="$mutant_root/scripts/kit/check-stack-contract.ts"
 awk '

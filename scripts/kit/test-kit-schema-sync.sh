@@ -640,7 +640,11 @@ fi
 # --- 10: refuse apps/example-api ---
 echo "-- 10 refuse example-api --"
 sql_ex="$(sql_count "${KIT_SQL}")"
-run_sync --app "${ROOT}/apps/example-api" --modules core
+# The absolute form (10b covers the relative one). The script refuses before it reads the app, so
+# this case's live inputs are the Kit migrations and the manifest path checked below: derive the
+# app from KIT_SQL instead of writing a whole-directory reference that the tooling selector
+# would count as an input (go-silex/unkillable-kit#234).
+run_sync --app "${KIT_SQL%/migrations}" --modules core
 if [[ "${RUN_EC}" -eq 1 && "${RUN_OUT}" == *"refuse kit app apps/example-api (applied SSoT)"* \
   && "$(sql_count "${KIT_SQL}")" == "${sql_ex}" \
   && ! -f "${ROOT}/apps/example-api/kit-schema-manifest.json" ]]; then

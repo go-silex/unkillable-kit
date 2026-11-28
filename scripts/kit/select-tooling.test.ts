@@ -270,6 +270,35 @@ try {
   put('packages/core/src/value.ts', 'changed again')
   head = commit('test input')
   assert.equal(select('--base', beforeInput, '--head', head), 0, 'uncovered test input runs')
+  put(
+    'scripts/kit/test-release.sh',
+    'printf "notes" >"$repo/CHANGELOG.md"\ngit -C "$repo" show HEAD:CHANGELOG.md\n',
+  )
+  let beforeChange = commit('fixture root-level name')
+  put('CHANGELOG.md', 'release notes')
+  head = commit('changelog only')
+  assert.equal(select('--base', beforeChange, '--head', head), 1, 'fixture root-level name skips')
+  // This file is a self-test too: its live references must name paths absent from the Kit.
+  put('scripts/kit/test-live-root.sh', 'grep -q notes "$ROOT/LIVE-NOTES.md"\n')
+  put('LIVE-NOTES.md', 'notes')
+  beforeChange = commit('live root-level reference')
+  put('LIVE-NOTES.md', 'notes, amended')
+  head = commit('root-level file read live')
+  assert.equal(select('--base', beforeChange, '--head', head), 0, 'live root-level file runs')
+  put('scripts/kit/test-live-path.ts', "readFileSync(join(source, 'docs/live/notes.md'))\n")
+  beforeChange = commit('literal path with a directory')
+  put('docs/live/notes.md', 'changed')
+  head = commit('literal path change')
+  assert.equal(select('--base', beforeChange, '--head', head), 0, 'literal path change runs')
+  put('scripts/kit/test-live-dir.sh', `ls "\${ROOT}/apps/demo/migrations"\n`)
+  beforeChange = commit('directory reference')
+  put('apps/demo/src/index.ts', 'changed')
+  head = commit('sibling of the referenced directory')
+  assert.equal(select('--base', beforeChange, '--head', head), 1, 'directory sibling skips')
+  beforeChange = head
+  put('apps/demo/migrations/0001_init.sql', 'changed')
+  head = commit('file under the referenced directory')
+  assert.equal(select('--base', beforeChange, '--head', head), 0, 'file under directory runs')
   env.GITHUB_REPOSITORY = 'product'
   put('config/product/inheritance.json', JSON.stringify({ upstreamCommit: base }))
   const productBase = head
