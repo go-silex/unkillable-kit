@@ -173,6 +173,33 @@ try {
   assert.equal(push(update(head, 'refs/heads/topic', '0'.repeat(40))), 0, 'new feature runs')
   assert.equal(push(update(head, 'refs/heads/main', base)), 0, 'local main push runs')
   assert.equal(push(update(base, 'refs/heads/main', head)), 2, 'non-HEAD push is refused')
+  for (const [name, target, expected] of [
+    ['release-head', head, 0],
+    ['release-older', base, 2],
+  ] as const) {
+    git(
+      '-c',
+      'user.name=Fixture',
+      '-c',
+      'user.email=fixture@example.invalid',
+      'tag',
+      '-am',
+      name,
+      name,
+      target,
+    )
+    const ref = `refs/tags/${name}`
+    const object = git('rev-parse', ref)
+    assert.notEqual(object, target, 'annotated tags have their own object IDs')
+    assert.equal(push(`${ref} ${object} ${ref} ${'0'.repeat(40)}\n`), expected, name)
+  }
+  assert.equal(
+    push(
+      `(delete) ${'0'.repeat(40)} refs/tags/release-older ${git('rev-parse', 'refs/tags/release-older')}\n`,
+    ),
+    0,
+    'tag deletion runs without peeling the zero ID',
+  )
   assert.equal(
     push(update(head, 'refs/heads/topic', base) + update(head, 'refs/heads/main', base)),
     0,
@@ -223,6 +250,7 @@ try {
     'config/kit/settings.json',
     '.github/workflows/example.yml',
     'lefthook.yml',
+    '.lefthook/pre-push/validate-tooling.sh',
     'package.json',
     'bun.lock',
     'tooling/a',

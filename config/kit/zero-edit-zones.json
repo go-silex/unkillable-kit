@@ -11,6 +11,7 @@
     "config/kit/",
     "scripts/kit/",
     "docs/kit/",
+    ".lefthook/",
     "tooling/"
   ],
   "protected_files": [
