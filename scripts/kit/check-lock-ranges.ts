@@ -353,12 +353,17 @@ function candidateTree(root: string): string {
 }
 
 function resolveOperatorCache(root: string): string {
-  // Same resolution as a frozen install: honour tree `.env` (no --no-env-file), also under the
-  // Root gate, which adds --no-env-file to every Bun runtime of a task through BUN_OPTIONS.
+  // Same resolution as a frozen install: honour tree `.env` (no --no-env-file) unless the invoker's
+  // own BUN_OPTIONS refuses it. Under the Root gate, BUN_OPTIONS also carries the gate's
+  // --no-env-file and ROOT_GATE_INVOKER_BUN_OPTIONS the invoker's own value (see gateEnv).
+  const invoker = process.env.ROOT_GATE_INVOKER_BUN_OPTIONS
   const result = spawnSync(process.execPath, ['pm', 'cache'], {
     cwd: root,
     encoding: 'utf8',
-    env: { ...process.env, BUN_OPTIONS: undefined },
+    env: {
+      ...process.env,
+      BUN_OPTIONS: invoker === undefined ? process.env.BUN_OPTIONS : invoker || undefined,
+    },
   })
   if (result.status !== 0 || !result.stdout.toString().trim()) {
     throw new Error('cannot resolve Bun package cache; warm the Bun cache and retry')

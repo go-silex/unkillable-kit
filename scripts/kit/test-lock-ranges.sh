@@ -919,6 +919,39 @@ else
   FAIL=$((FAIL + 1))
 fi
 
+# As the Root gate runs it: the gate's own --no-env-file does not keep .env out of that resolution
+output="$(cd "$DOTENV_CACHE" && env -u LOCK_RANGES_ROOT -u BUN_INSTALL_CACHE_DIR -u BUN_INSTALL \
+  HOME="$empty_home" XDG_CONFIG_HOME="$empty_home" BUN_OPTIONS=--no-env-file \
+  ROOT_GATE_INVOKER_BUN_OPTIONS= bun scripts/kit/check-lock-ranges.ts 2>&1)" && rc=0 || rc=$?
+if [[ "$rc" -eq 0 ]]; then
+  echo 'PASS: under the Root gate, the .env-selected cache is still used'
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: .env cache select under the Root gate (rc=$rc): $output" >&2
+  FAIL=$((FAIL + 1))
+fi
+
+# The invoker's own --no-env-file still keeps .env out of that resolution under the Root gate:
+# .env names an empty cache, the default one is warm.
+OPTOUT="$TMP/dotenv-cache-optout"
+rm -rf "$OPTOUT" "$TMP/optout-home" "$TMP/optout-empty-cache"
+cp -a "$DOTENV_CACHE" "$OPTOUT"
+mkdir -p "$TMP/optout-home/.bun/install" "$TMP/optout-empty-cache"
+cp -a "$SUITE_CACHE" "$TMP/optout-home/.bun/install/cache"
+printf 'BUN_INSTALL_CACHE_DIR=%s\n' "$TMP/optout-empty-cache" >"$OPTOUT/.env"
+git -C "$OPTOUT" add .env && git -C "$OPTOUT" commit -qm dotenv-cache-optout
+output="$(cd "$OPTOUT" && env -u LOCK_RANGES_ROOT -u BUN_INSTALL_CACHE_DIR -u BUN_INSTALL \
+  HOME="$TMP/optout-home" XDG_CONFIG_HOME="$TMP/optout-home" \
+  BUN_OPTIONS='--no-env-file --no-env-file' ROOT_GATE_INVOKER_BUN_OPTIONS=--no-env-file \
+  bun scripts/kit/check-lock-ranges.ts 2>&1)" && rc=0 || rc=$?
+if [[ "$rc" -eq 0 ]]; then
+  echo "PASS: the invoker's own --no-env-file keeps .env out of the cache resolution"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL: invoker opt-out (rc=$rc): $output" >&2
+  FAIL=$((FAIL + 1))
+fi
+
 # Large tracked file streams (no in-memory buffer limit)
 LARGE="$TMP/large-file"
 rm -rf "$LARGE"

@@ -80,7 +80,8 @@ function withFixture(
         key === 'COVERAGE_CHANGED_BASE' ||
         key === 'ROOT_FIXTURE_FAIL' ||
         key === 'ROOT_FIXTURE_PROGRESS' ||
-        key === 'BUN_OPTIONS'
+        key === 'BUN_OPTIONS' ||
+        key === 'ROOT_GATE_INVOKER_BUN_OPTIONS'
       )
         delete env[key]
     }

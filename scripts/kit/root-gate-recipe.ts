@@ -13,10 +13,16 @@ export const rootGateLaunch = `bun ${gateFlags.join(' ')} run scripts/kit/root-g
 /**
  * The environment of a task. Bun reads `BUN_OPTIONS` in every runtime, so `--no-env-file` there
  * keeps a cwd `.env` out of every Bun runtime that the task starts with its inherited environment,
- * whatever the launch.
+ * whatever the launch. `ROOT_GATE_INVOKER_BUN_OPTIONS` keeps the invoker's own value, for a script
+ * that must resolve something exactly as the invoker's own Bun would (`check-lock-ranges.ts`).
  */
 export function gateEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  return { ...env, BUN_OPTIONS: [env.BUN_OPTIONS, '--no-env-file'].filter(Boolean).join(' ') }
+  const invoker = env.ROOT_GATE_INVOKER_BUN_OPTIONS ?? env.BUN_OPTIONS ?? ''
+  return {
+    ...env,
+    ROOT_GATE_INVOKER_BUN_OPTIONS: invoker,
+    BUN_OPTIONS: [invoker, '--no-env-file'].filter(Boolean).join(' '),
+  }
 }
 
 /** The tasks of a lane recipe: the words after the runner script, whatever launch precedes it. */
