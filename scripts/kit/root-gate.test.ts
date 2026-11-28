@@ -605,8 +605,8 @@ function hermeticRunner() {
         control: ['run', ...runner],
       },
       {
-        // `bun = true` runs `node` as Bun, which then runs the preload. The outer `bun run`
-        // reads this setting itself, so the runner is launched as its recipe launches it.
+        // `bun = true` runs `node` as Bun, which then runs the preload. This case covers the
+        // dispatch alone, so the runner is launched exactly as its recipe launches it.
         name: '[run] bun',
         files: {
           'bunfig.toml': 'preload = ["./steal.ts"]\n[run]\nbun = true\n',
