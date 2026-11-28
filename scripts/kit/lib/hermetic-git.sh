@@ -15,6 +15,9 @@
 # set as a belt for the parent process.
 #
 # Idempotent: re-sourcing does not stack duplicate keys / rewrite the file.
+#
+# Harnesses that run together share the file. It is written aside (mktemp: mode 600) and
+# linked into place, so a reader finds it whole or not at all, and `ln` keeps the first one.
 
 # shellcheck shell=bash
 
@@ -24,13 +27,14 @@ _hermetic_dir="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}"
 _hermetic_cfg="${_hermetic_dir}/kit-hermetic-git-282.config"
 
 if [ ! -f "$_hermetic_cfg" ]; then
-  umask 077
-  cat >"$_hermetic_cfg" <<'CFG'
-[maintenance]
-	auto = false
-[gc]
-	auto = 0
-CFG
+  _hermetic_new="$(mktemp "${_hermetic_cfg}.XXXXXX")"
+  printf '[maintenance]\n\tauto = false\n[gc]\n\tauto = 0\n' >"$_hermetic_new"
+  ln "$_hermetic_new" "$_hermetic_cfg" 2>/dev/null || :
+  rm -f "$_hermetic_new"
+  if [ ! -f "$_hermetic_cfg" ]; then
+    echo "hermetic-git: cannot create ${_hermetic_cfg}" >&2
+    return 1
+  fi
 fi
 
 # Preserve a pre-existing GIT_CONFIG_GLOBAL via include (once).
@@ -64,4 +68,4 @@ if [ -z "$_hermetic_git_already" ]; then
   _n=$((_n + 1))
   export GIT_CONFIG_COUNT="${_n}"
 fi
-unset _hermetic_git_already _i _k _n _hermetic_dir _hermetic_cfg
+unset _hermetic_git_already _i _k _n _hermetic_dir _hermetic_cfg _hermetic_new

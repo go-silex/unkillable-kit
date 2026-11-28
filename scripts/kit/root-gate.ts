@@ -5,6 +5,7 @@ import { basename, join, resolve } from 'node:path'
 import { committedPaths, hasAppManifestAt, pullRequestCheckout } from './root-gate-ci-context'
 import { kitAppPrefixes, productAppWorkspaces } from './root-gate-enrollment'
 import { mergeParts, runPart } from './root-gate-parts'
+import { type Outcome, type Result, runTogether, taskEnd } from './root-gate-tasks'
 import { joinTooling, runToolingShard, toolingPlan } from './root-gate-tooling'
 
 const root = resolve(import.meta.dirname, '../..')
@@ -13,7 +14,6 @@ function fail(message: string): never {
   throw new Error(message)
 }
 type Group = 'core' | 'coverage'
-type Result = { task: string; exitCode: number }
 type Identity = {
   repository: string
   checkoutSha: string
@@ -122,29 +122,24 @@ function bindCoverage(tasks: string[], shard?: string) {
   if (process.env.COVERAGE_ONLY) fail('narrowed coverage cannot execute the Root gate')
 }
 
-function run(tasks: string[], shard?: string): { results: Result[]; code: number } {
+function run(tasks: string[], shard?: string): Outcome {
   bindCoverage(tasks, shard)
   const results: Result[] = []
   for (const task of tasks) {
     console.log(`root-gate: running ${task}`)
     const started = performance.now()
     const child = spawnSync(process.execPath, ['run', task], { cwd: root, stdio: 'inherit' })
-    const durationMs = Math.round((performance.now() - started) * 1000) / 1000
-    const exitCode = child.status ?? 1
-    const failed = exitCode !== 0 || !!child.error || !!child.signal
-    results.push({ task, exitCode })
-    console.log(
-      `\n${JSON.stringify({
-        event: 'root-gate:task',
-        task,
-        durationMs,
-        status: failed ? 'failed' : 'passed',
-        exitCode,
-      })}`,
-    )
-    if (failed) return { results, code: exitCode || 1 }
+    const end = taskEnd(task, started, child.status, !!child.error || !!child.signal)
+    results.push(end.result)
+    console.log(end.record)
+    if (end.failed) return { results, code: end.result.exitCode || 1 }
   }
   return { results, code: 0 }
+}
+
+function together(tasks: string[], limit: number) {
+  bindCoverage(tasks)
+  return runTogether(root, tasks, limit)
 }
 
 function validateTaskResults(receipt: Record<string, unknown>, selected: string[]) {
@@ -457,12 +452,12 @@ try {
     options[2] === '--receipt' &&
     options[3]
   ) {
-    process.exitCode = runToolingShard(
+    process.exitCode = await runToolingShard(
       options[1],
       options[3],
       current.tasks,
       identity(current.recipeHash, current.runnerHash),
-      run,
+      together,
     )
   } else if (
     current.name === 'validate:tooling' &&

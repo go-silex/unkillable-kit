@@ -26,11 +26,14 @@ running, so this install does not exercise a native compilation fallback. Prebui
 not prove source compilation. An explicit native source build is a separate proof and does not
 establish that an install fallback ran.
 
-The sequential Root gate writes a JSON line per attempted task, alongside its running logs and
+The Root gate writes a JSON line per attempted task, alongside its running logs and
 task output: `event` is `root-gate:task`, `task` names the task, `durationMs` is monotonic elapsed
 milliseconds rounded to three decimals, `status` is `passed` or `failed`, and `exitCode` is the
 child exit code (or 1 if unavailable). A failure is recorded before fail-fast stops execution;
-read-only plan modes emit no task timings.
+read-only plan modes emit no task timings. A CI Tooling shard runs two tasks at a time, whatever
+the runner's CPU count: tasks start in recipe order, each keeps its output and its record in one
+block, blocks follow recipe order, and `durationMs` includes the time a task shared with another.
+After a failure the shard starts no further task and records the ones still running.
 
 Workspace Vitest configs use the shared `ciMaxWorkers` setting: CI uses all available CPUs;
 outside CI, Vitest keeps its defaults. Coverage parts and their merge use the same App config.

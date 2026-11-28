@@ -77,6 +77,41 @@ fi
 rm -rf "$CALLER"
 trap - EXIT
 
+# Harnesses that run together share one config file. The first sourcing creates it whole and
+# private, leaving nothing beside it and its caller's umask alone; a later one keeps what it finds.
+SHARED="$(mktemp -d -t hermetic-git-shared.XXXXXX)"
+trap 'rm -rf "$SHARED"' EXIT
+shared_cfg="${SHARED}/kit-hermetic-git-282.config"
+caller_umask="$(
+  export XDG_RUNTIME_DIR="$SHARED"
+  unset GIT_CONFIG_GLOBAL
+  umask 022
+  # shellcheck source=lib/hermetic-git.sh
+  source "$HELPER"
+  umask
+)"
+if [[ "$caller_umask" == "0022" && "$(ls -A "$SHARED")" == "${shared_cfg##*/}" \
+  && "$(cat "$shared_cfg")" == $'[maintenance]\n\tauto = false\n[gc]\n\tauto = 0' \
+  && "$(ls -l "$shared_cfg")" == -rw-------* ]]; then
+  ok "first sourcing creates the shared config whole and private, caller umask untouched"
+else
+  ko "shared config creation (caller umask=${caller_umask}, folder=$(ls -lA "$SHARED" | tr '\n' ' '))"
+fi
+printf '%s\n' '[kept]' >"$shared_cfg"
+(
+  export XDG_RUNTIME_DIR="$SHARED"
+  unset GIT_CONFIG_GLOBAL
+  # shellcheck source=lib/hermetic-git.sh
+  source "$HELPER"
+)
+if [[ "$(cat "$shared_cfg")" == "[kept]" ]]; then
+  ok "a later sourcing keeps the shared config it finds"
+else
+  ko "a later sourcing rewrote the shared config"
+fi
+rm -rf "$SHARED"
+trap - EXIT
+
 TRACE2="$(mktemp -t hermetic-git-trace2.XXXXXX)"
 # Not `( … ) || rc=$?`: errexit is ignored inside the left operand of `||`, so
 # a failed step would let the next ones run. Push/fetch name the bare repo by

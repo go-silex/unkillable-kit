@@ -32,13 +32,13 @@ For that proof, the authenticated `gh` API must return exactly one open PR for t
 In Product mode the selector validates context before skipping inherited tooling self-tests.
 A tooling zero-edit exception or changes to Product configuration, manifests or the shared,
 unprotected `bun.lock` select the lane; uncertainty also runs it. CI balances the canonical
-tooling recipe over three VMs by measured task duration, sequential and fail-fast per shard;
-siblings continue on failure. The read-only plan refuses empty shards and assigns new tasks.
+tooling recipe over three VMs by measured task duration, two tasks at a time and fail-fast per
+shard; siblings continue on failure. The read-only plan refuses empty shards and assigns new tasks.
 With selection false, all three jobs validate it and skip checkout, install, execution and receipts.
 Invalid selection or a failed, cancelled or skipped producer blocks `ci`. When selected, `ci`
 joins exactly three separate artifact directories, requiring complete ordered task results bound
 to the tooling recipe, checkout, run, attempt and runner. This is separate from the Root join.
-Run `bun run validate:tooling` explicitly when needed; local execution remains sequential and
+Run `bun run validate:tooling` explicitly when needed; local runs are sequential and
 fail-fast. These self-tests do not replace live tree checks, Product validation or secret scanning.
 
 ### CI runtime budget

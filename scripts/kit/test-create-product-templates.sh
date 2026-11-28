@@ -95,9 +95,15 @@ done
 export PATH="$original_path"
 mkdir -p "$fixture/packages/config"
 cp packages/config/{vitest-coverage.mts,vitest-workers.mts,tsconfig.base.json} "$fixture/packages/config/"
-ln -s "$root/node_modules" "$fixture/node_modules"
+# One link per installed package, not a link to their folder: Vitest and Vite keep their caches
+# under node_modules, and tasks that run together must not share the checkout's.
+link_modules() {
+  mkdir "$2"
+  ln -s "$1"/* "$1/.bin" "$2/"
+}
+link_modules "$root/node_modules" "$fixture/node_modules"
 app="$fixture/apps/fixture-mcp"
-ln -s "$root/apps/mcp-example/node_modules" "$app/node_modules"
+link_modules "$root/apps/mcp-example/node_modules" "$app/node_modules"
 (cd "$app" && bunx --no-install vitest run --coverage)
 
 # Break only the actual CLI launch, not the imports exercised by unit tests.
