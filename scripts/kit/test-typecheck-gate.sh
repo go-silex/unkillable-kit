@@ -148,6 +148,18 @@ printf 'TYPECHECK_REFERENCE_ROOT="%s"\n' "$CLEAN" >"$TREE/.env"
 assert_case 'outer package script cannot redirect reference through .env' 1 \
   "$DIAGNOSTICS" reference_task
 
+# Bun follows references without --build; tsc -p on a references-only solution does not.
+SOLUTION="$CLEAN/packages/x"
+printf '%s\n' '{"scripts":{"typecheck":"bun check --no-script --no-pretty -p tsconfig.json"}}' \
+  >"$SOLUTION/package.json"
+printf '%s\n' '{"files":[],"references":[{"path":"./sub"}]}' >"$SOLUTION/tsconfig.json"
+seed_error "$SOLUTION/sub"
+printf '%s\n' '{"compilerOptions":{"strict":true,"composite":true},"include":["src"]}' \
+  >"$SOLUTION/sub/tsconfig.json"
+TREE="$CLEAN" assert_case 'Bun-only failure is reported as a divergence' 1 \
+  $'DIVERGENCE packages/x/tsconfig.json: tsc exit 0, bun check exit 1\nerror TS2322\n1 failed, 1 divergence(s)' \
+  reference
+
 EXTRA="$TREE/extensions/extra"
 seed_error "$EXTRA"
 write_workspace_manifest plain >"$EXTRA/package.json"

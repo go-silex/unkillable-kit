@@ -355,8 +355,8 @@ git -C "${BUNCITED}" add -A
 assert_case "test project dropped from bun check → 1 naming it" 1 "${BUNCITED}" \
   "UNCITED apps/web/tsconfig.test.json"
 
-# Bun only checks the last project flag. Put the witness in src/ so only
-# the citation invariant can catch the first project's missing check.
+# Multiple Bun project flags invalidate the chain, even though Bun itself
+# checks the last project. A src/ witness exercises citation, not coverage.
 BUNLAST="${TMP}/bun-last-project"
 seed_tree "${BUNLAST}"
 seed_workspace "${BUNLAST}" "apps/web" "bun check --no-script -p tsconfig.json -p tsconfig.test.json"
@@ -364,8 +364,19 @@ echo 'export const broken: number = "not a number"' >"${BUNLAST}/apps/web/src/ow
 write_project "${BUNLAST}/apps/web/tsconfig.test.json" '"src/**/*.test.ts"'
 echo 'export const test = 1' >"${BUNLAST}/apps/web/src/owned.test.ts"
 git -C "${BUNLAST}" add -A
-assert_case "only the last bun project flag counts → 1 naming the first project" 1 "${BUNLAST}" \
+assert_case "multiple Bun project flags invalidate citation → 1 naming the first project" 1 "${BUNLAST}" \
   "UNCITED apps/web/tsconfig.json"
+
+# Product-generated setup can precede an eligible checker.
+PRODUCTCHAIN="${TMP}/product-chain"
+seed_tree "${PRODUCTCHAIN}"
+seed_workspace "${PRODUCTCHAIN}" "apps/web" \
+  "mkdir -p ../../.wrangler && wrangler types ../../.wrangler/product-worker-configuration.d.ts --include-env=false && bun check --no-script --no-pretty -p tsconfig.json"
+mkdir -p "${PRODUCTCHAIN}/apps/web/test"
+echo 'export const test = 1' >"${PRODUCTCHAIN}/apps/web/test/owned.test.ts"
+write_project "${PRODUCTCHAIN}/apps/web/tsconfig.json" '"src", "test"'
+git -C "${PRODUCTCHAIN}" add -A
+assert_case "Product-generated checker chain cites and covers → 0" 0 "${PRODUCTCHAIN}" "0 orphan(s)"
 
 # An actual `check` script makes the risk concrete; refusal must not depend on
 # whether that script exists today or on workspace tests needing coverage.
@@ -476,17 +487,24 @@ seed_tree "${UNREACHED}"
 for script in \
   'echo done # && bun check --no-script -p tsconfig.json' \
   'true || bun check --no-script -p tsconfig.json' \
+  'bun check --no-script --no-pretty -p tsconfig.json; echo done' \
+  "echo '&& bun check --no-script -p tsconfig.json &&'" \
+  'bun check --no-script --no-pretty -p tsconfig.json good.ts' \
+  'bun check --no-script --no-pretty -p tsconfig.json --noCheck' \
+  'bun check --no-script -p tsconfig.json # trailing comment' \
   'true || tsc --noEmit -p tsconfig.json'; do
   seed_workspace "${UNREACHED}" "apps/web" "${script}"
   echo 'export const broken: number = "not a number"' >"${UNREACHED}/apps/web/src/owned.ts"
+  echo 'export const good = 1' >"${UNREACHED}/apps/web/good.ts"
+  write_tsconfig "${UNREACHED}" '"scripts/kit/**/*.ts", "apps/web/good.ts"'
   git -C "${UNREACHED}" add -A
   assert_case "checker does not cite a project: ${script} → 1" 1 "${UNREACHED}" \
     "UNCITED apps/web/tsconfig.json"
 done
 
-seed_workspace "${UNREACHED}" "apps/web" "echo '#' && bun check --no-script -p tsconfig.json"
+seed_workspace "${UNREACHED}" "apps/web" "echo '#' && tsc --noEmit -p tsconfig.json"
 git -C "${UNREACHED}" add -A
-assert_case "quoted hash does not comment out a checker → 0" 0 "${UNREACHED}" "project(s) all cited"
+assert_case "quoted hash does not comment out a legacy checker → 0" 0 "${UNREACHED}" "project(s) all cited"
 
 # --- `|| true` runs tsc but the script cannot fail ---
 SWALLOW="${TMP}/swallow"
