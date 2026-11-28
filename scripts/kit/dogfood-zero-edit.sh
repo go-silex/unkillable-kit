@@ -661,7 +661,10 @@ run_exception_expiry_cases() {
   fx_commit "$tree" "chore: extend the new exception"
   assert_zero_edit "new exception beyond 90 days → refused (legacy one not flagged)" \
     "$tree" 1 "OVER CAP README.md"
-  if run_zero_edit_capture "$tree" "$SELF_SIM_PRODUCT_IDENTITY" | grep -q "OVER CAP package.json"; then
+  # The refused run exits 1: piped into grep, that status would hide what grep found.
+  local flagged
+  flagged="$(run_zero_edit_capture "$tree" "$SELF_SIM_PRODUCT_IDENTITY" || true)"
+  if [[ "$flagged" == *"OVER CAP package.json"* ]]; then
     echo "FAIL: the grandfathered legacy exception must not be flagged" >&2
     exit 1
   fi

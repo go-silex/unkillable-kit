@@ -45,7 +45,7 @@ assert_exit_match() {
     FAIL=$((FAIL + 1))
     return
   fi
-  if ! echo "$out" | grep -qE "$pat"; then
+  if ! grep -qE "$pat" <<<"$out"; then
     echo "  FAIL: $name output missing pattern: $pat" >&2
     echo "    out: $(echo "$out" | tr '\n' ' ')" >&2
     FAIL=$((FAIL + 1))
@@ -68,7 +68,7 @@ assert_output() {
     FAIL=$((FAIL + 1))
     return
   fi
-  if ! echo "$out" | grep -qE "$expect_pat"; then
+  if ! grep -qE "$expect_pat" <<<"$out"; then
     echo "  FAIL: $name output missing pattern: $expect_pat" >&2
     echo "    out: $(echo "$out" | tr '\n' ' ')" >&2
     FAIL=$((FAIL + 1))
@@ -287,7 +287,7 @@ assert_exit_match "starter with one joined set id fails" 1 'found \["audit,core"
 echo '{"version":1,"sets":["core","audit"],"modules":{}}' \
   >"${FIX_STARTER}/apps/starter-api/kit-schema-manifest.json"
 assert_output "starter with core and audit passes the scope check" 'extract-dry-run: banlist' \
-  "out=\$(run_extract_gate '${FIX_STARTER}' 2>&1 || true); ! echo \"\$out\" | grep -q 'must sync only' && echo \"\$out\" | grep -E '== extract-dry-run: banlist'"
+  "out=\$(run_extract_gate '${FIX_STARTER}' 2>&1 || true); ! grep -q 'must sync only' <<<\"\$out\" && grep -E '== extract-dry-run: banlist' <<<\"\$out\""
 
 # 12) reserved example-web-branded is denied on kit and product trees
 FIX_BRANDED="$TMP/branded-fail"

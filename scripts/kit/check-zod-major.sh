@@ -30,11 +30,11 @@ for f in "${PIN_FILES[@]}"; do
     fail=1
     continue
   fi
-  if echo "$line" | grep -qE '"zod":\s*"\^?3'; then
+  if grep -qE '"zod":\s*"\^?3' <<<"$line"; then
     echo "check-zod-major: $f still pins zod 3.x: $line" >&2
     fail=1
   fi
-  if ! echo "$line" | grep -qE '"zod":\s*"\^4'; then
+  if ! grep -qE '"zod":\s*"\^4' <<<"$line"; then
     echo "check-zod-major: $f zod pin is not ^4.x: $line" >&2
     fail=1
   fi

@@ -59,13 +59,13 @@ assert_case() {
     FAIL=$((FAIL + 1))
     return
   fi
-  if [[ -n "${expect_tag}" ]] && ! echo "${out}" | grep -q "${expect_tag}"; then
+  if [[ -n "${expect_tag}" ]] && ! grep -q "${expect_tag}" <<<"${out}"; then
     echo "  FAIL: ${name} expected output to contain '${expect_tag}'" >&2
     echo "    out: $(echo "${out}" | tr '\n' ' ')" >&2
     FAIL=$((FAIL + 1))
     return
   fi
-  if [[ -n "${forbid_tag}" ]] && echo "${out}" | grep -q "${forbid_tag}"; then
+  if [[ -n "${forbid_tag}" ]] && grep -q "${forbid_tag}" <<<"${out}"; then
     echo "  FAIL: ${name} expected output not to contain '${forbid_tag}'" >&2
     echo "    out: $(echo "${out}" | tr '\n' ' ')" >&2
     FAIL=$((FAIL + 1))
@@ -204,7 +204,7 @@ if [[ "${got}" -ne 1 ]]; then
   echo "  FAIL: untagged default expected exit 1, got ${got}" >&2
   echo "    out: $(echo "${out}" | tr '\n' ' ')" >&2
   FAIL=$((FAIL + 1))
-elif ! echo "${out}" | grep -q "untagged"; then
+elif ! grep -q "untagged" <<<"${out}"; then
   echo "  FAIL: untagged default expected output to contain 'untagged'" >&2
   echo "    out: $(echo "${out}" | tr '\n' ' ')" >&2
   FAIL=$((FAIL + 1))
