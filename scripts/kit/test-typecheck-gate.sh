@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Hermetic self-test for the live bun check scripts and the Kit-only tsc reference.
 set -euo pipefail
+# shellcheck source=lib/hermetic-git.sh
+source "$(cd "$(dirname "$0")" && pwd -P)/lib/hermetic-git.sh"
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd -P)"
 SCANNER="$ROOT/scripts/kit/typecheck-reference.ts"
@@ -8,10 +10,6 @@ TSC="$ROOT/node_modules/.bin/tsc"
 source "$ROOT/scripts/kit/lib/gate-launch.sh"
 
 unset GITHUB_REPOSITORY TYPECHECK_REFERENCE_ROOT
-while IFS= read -r var; do
-  unset "$var"
-done < <(git rev-parse --local-env-vars)
-export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 
 TMP="$(mktemp -d -t typecheck-gate.XXXXXX)"
 trap 'rm -rf "$TMP"' EXIT
