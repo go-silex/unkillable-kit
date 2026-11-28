@@ -850,56 +850,136 @@ function toolingShardOverlap() {
   })
 }
 
-function toolingCaptureFault() {
-  // Root opens a file whatever its folder allows, so nothing can be made to fail for it.
-  if (process.getuid?.() === 0) return
-  const folder = mkdtempSync(join(tmpdir(), 'root-gate-capture-'))
-  try {
-    // Under this umask the folder of the capture files is created read-only: no task can be given
-    // its file. The caller catches the error as the gate does, so the run must end on its own:
-    // nothing left that keeps the process alive, nothing left behind.
-    const script = `import { runTogether } from ${JSON.stringify(join(kitScripts, 'root-gate-tasks.ts'))}
-process.umask(0o277)
+// A task for the tests that call the runner itself. `first` makes read-only what TMPDIR holds,
+// the folder of the capture files; `second` ends 300 ms after it.
+const runnerTask = `import { appendFileSync, chmodSync, existsSync, readdirSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+const task = process.argv[2]
+const tmp = process.env.TMPDIR
+if (task === 'first') {
+  for (const name of readdirSync(tmp)) chmodSync(join(tmp, name), 0o500)
+  writeFileSync('first.done', '')
+}
+if (task === 'second') {
+  while (!existsSync('first.done')) Bun.sleepSync(5)
+  Bun.sleepSync(300)
+  appendFileSync('effects.txt', 'end:second\\n')
+}
+`
+
+/**
+ * Calls the runner in a process of its own, `before` first, over tasks run by `runnerTask`. That
+ * process catches the error as the gate does, so a run that leaves something alive ends as a
+ * timeout here. It then tells which task ends the run had waited for.
+ */
+function runTogetherIn(folder: string, tasks: string[], limit: number, before = '') {
+  writeFileSync(join(folder, 'task.ts'), runnerTask)
+  const scripts = Object.fromEntries(tasks.map((task) => [task, `bun run task.ts ${task}`]))
+  writeFileSync(join(folder, 'package.json'), JSON.stringify({ scripts }))
+  const script = `import { existsSync, readFileSync } from 'node:fs'
+import { runTogether } from ${JSON.stringify(join(kitScripts, 'root-gate-tasks.ts'))}
+${before}
 try {
-  await runTogether(${JSON.stringify(folder)}, ['one', 'two'], 2)
+  await runTogether(${JSON.stringify(folder)}, ${JSON.stringify(tasks)}, ${limit})
+  console.error('resolved')
 } catch (error) {
   console.error(String(error))
   process.exitCode = 1
 }
+console.error('waited for ' + (existsSync('effects.txt') ? readFileSync('effects.txt', 'utf8') : ''))
 `
-    const run = spawnSync(process.execPath, ['-e', script], {
-      cwd: folder,
-      env: { ...process.env, TMPDIR: folder },
-      encoding: 'utf8',
-      timeout: 30_000,
-    })
-    assert.equal(run.signal, null, 'the run ends on its own')
-    assert.equal(run.status, 1, run.stdout)
-    assert.match(run.stderr, /EACCES/)
-    assert.deepEqual(readdirSync(folder), [], 'the capture folder is removed')
-  } finally {
-    rmSync(folder, { recursive: true, force: true })
+  return spawnSync(process.execPath, ['-e', script], {
+    cwd: folder,
+    env: { ...process.env, TMPDIR: join(folder, 'tmp') },
+    encoding: 'utf8',
+    timeout: 30_000,
+  })
+}
+
+function toolingRunFaults() {
+  // Root opens a file whatever its folder allows, so these faults cannot be made for it.
+  if (process.getuid?.() === 0) return
+  const scratch = (exercise: (folder: string, tmp: string) => void) => {
+    const folder = mkdtempSync(join(tmpdir(), 'root-gate-runner-'))
+    const tmp = join(folder, 'tmp')
+    mkdirSync(tmp)
+    try {
+      exercise(folder, tmp)
+    } finally {
+      for (const name of readdirSync(tmp)) chmodSync(join(tmp, name), 0o700)
+      rmSync(folder, { recursive: true, force: true })
+    }
   }
+
+  // No task can be given its file: under this umask the folder of the capture files is created
+  // read-only. The run ends on its own, with the error, and leaves nothing behind.
+  scratch((folder, tmp) => {
+    const run = runTogetherIn(folder, ['one', 'two'], 2, 'process.umask(0o277)')
+    assert.equal(run.signal, null, 'the run ends on its own')
+    assert.equal(run.status, 1, run.stderr)
+    assert.match(run.stderr, /EACCES/)
+    assert.deepEqual(readdirSync(tmp), [], 'the capture folder is removed')
+  })
+
+  // The third task cannot be given its file while the second still runs, and the capture folder
+  // cannot be removed either: the first task made it read-only. The run waits for the second
+  // task, then ends with the first of the two errors.
+  scratch((folder) => {
+    const run = runTogetherIn(folder, ['first', 'second', 'third'], 2)
+    assert.equal(run.signal, null, 'the run ends on its own')
+    assert.equal(run.status, 1, run.stderr)
+    assert.match(run.stderr, /EACCES[^\n]*open/)
+    assert.match(run.stderr, /^waited for end:second$/m, 'the running task is awaited')
+  })
+
+  // stdout refuses one write and takes the next ones: the run still rejects.
+  scratch((folder) => {
+    const refuseOnce = `const write = process.stdout.write.bind(process.stdout)
+let writes = 0
+process.stdout.write = (data, done) => {
+  writes += 1
+  if (writes > 1) return write(data, done)
+  done(new Error('refused once'))
+  return true
+}`
+    const run = runTogetherIn(folder, ['one'], 1, refuseOnce)
+    assert.equal(run.signal, null, 'the run ends on its own')
+    assert.equal(run.status, 1, run.stderr)
+    assert.match(run.stderr, /refused once/)
+  })
 }
 
 function toolingLogRefused() {
   withFixture('bun run task.ts test:coverage', (fixture, env) => {
     toolingTasks(fixture, 6)
     const receipt = join(fixture, 'tooling-1.json')
-    // Each of the two tasks of the shard prints more than a pipe holds and the reader takes
-    // nothing, so the log is still on its way when both have ended. The reader then goes away.
+    const effects = join(fixture, 'effects.txt')
+    const shard = '"$0" run validate:tooling -- --ci-tooling-shard 1/3 --receipt "$1"'
+    const refused = (reader: string) => {
+      rmSync(effects, { force: true })
+      const run = spawnSync(
+        'bash',
+        ['-c', `set -o pipefail; ${shard} | { ${reader}; }`, process.execPath, receipt],
+        { cwd: fixture, env, encoding: 'utf8', timeout: 60_000 },
+      )
+      assert.equal(run.signal, null, run.stderr)
+      assert.notEqual(run.status, 0, 'a log that stdout refused fails the shard')
+      assert.equal(existsSync(receipt), false, 'and leaves no receipt')
+      return readFileSync(effects, 'utf8')
+    }
+
+    // The reader goes away while the two tasks of the shard run: the shard still waits for them.
+    env.ROOT_FIXTURE_HOLD = '400'
+    const awaited = refused('head -c 1 > /dev/null')
+    assert.equal(awaited.match(/^end:/gm)?.length, 2, awaited)
+
+    // Each of the two tasks prints more than a pipe holds and the reader takes nothing, so the
+    // log is still on its way when both have ended. The reader then goes away.
     env.ROOT_FIXTURE_NOISE = String(1 << 20)
     env.ROOT_FIXTURE_HOLD = '1'
-    const reader = `until [ "$(grep -c '^end:' effects.txt 2>/dev/null)" = 2 ]; do sleep 0.05; done; sleep 0.3`
-    const shard = '"$0" run validate:tooling -- --ci-tooling-shard 1/3 --receipt "$1"'
-    const run = spawnSync(
-      'bash',
-      ['-c', `set -o pipefail; ${shard} | { ${reader}; }`, process.execPath, receipt],
-      { cwd: fixture, env, encoding: 'utf8', timeout: 60_000 },
+    refused(
+      `until [ "$(grep -c '^end:' effects.txt 2>/dev/null)" = 2 ]; do sleep 0.05; done; sleep 0.3`,
     )
-    assert.equal(run.signal, null, run.stderr)
-    assert.notEqual(run.status, 0, 'a log that stdout refused fails the shard')
-    assert.equal(existsSync(receipt), false, 'and leaves no receipt')
   })
 }
 
@@ -1691,7 +1771,7 @@ fullAndPlan()
 toolingAndPlan()
 toolingShards()
 toolingShardOverlap()
-toolingCaptureFault()
+toolingRunFaults()
 toolingLogRefused()
 toolingDurations()
 coveragePlan()

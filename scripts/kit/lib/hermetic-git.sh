@@ -16,9 +16,10 @@
 #
 # Idempotent: re-sourcing does not stack duplicate keys / rewrite the file.
 #
-# Harnesses that run together share the file. It is written aside, private, and published whole:
-# linked into place, where the first one wins, or moved there where hard links are refused. A
-# reader finds it whole or not at all.
+# Harnesses that run together share the file. It is written aside, private, and published whole,
+# so a reader finds it whole or not at all: linked into place, where the first one wins, or moved
+# there where hard links are refused. A move can replace a file published meanwhile, by the same
+# content.
 
 # shellcheck shell=bash
 

@@ -36,10 +36,12 @@ export function taskEnd(
  * Each task writes to a file of its own, so the log keeps one block per task, in recipe order:
  * the earliest unfinished task is printed as it goes, a later one once those before it ended.
  * A file rather than a pipe: a task ends when its process exits, whatever it left running, and
- * its two streams stay in the order it wrote them. What it left running is not printed after that.
+ * its two streams stay in the order it wrote them. What it left running is printed until the
+ * block of the task is closed, not after.
  *
- * Rejects, once the running tasks ended, when a task cannot be given its file or its process, and
- * when stdout refuses the log: the caller gets no results for a run it could not carry out or show.
+ * An error of the run itself, as opposed to a task's, is a fault: a capture file that cannot be
+ * opened, read or removed, a process that cannot be started, a write that stdout refuses. After
+ * the first one no further task starts; the run waits for the running ones, then rejects with it.
  */
 export function runTogether(root: string, tasks: string[], limit: number): Promise<Outcome> {
   const { promise, resolve, reject } = Promise.withResolvers<Outcome>()
@@ -47,16 +49,36 @@ export function runTogether(root: string, tasks: string[], limit: number): Promi
   const started: Slot[] = []
   let running = 0
   let failed = false
-  let fault: { error: unknown } | undefined
   let head = 0
-  let sent: Promise<Error | null | undefined> = Promise.resolve(undefined)
+  let fault: { error: unknown } | undefined
+  const refuse = (error: unknown) => {
+    fault ??= { error }
+  }
+  // Every step that can throw runs in here: a callback that threw would settle nothing.
+  const guard = (work: () => void) => {
+    try {
+      work()
+      return true
+    } catch (error) {
+      refuse(error)
+      return false
+    }
+  }
 
   // Only process.stdout.write: on a pipe, console.log would overtake what it has not flushed.
-  // `sent` settles when stdout has taken the last write, with the error if it refused it.
+  // The run settles when stdout has answered every write. A write it refuses is a fault, whatever
+  // it takes afterwards.
+  let unanswered = 0
+  let answered = () => {}
+  process.stdout.on('error', refuse)
   const out = (data: string | Uint8Array) => {
-    const taken = Promise.withResolvers<Error | null | undefined>()
-    process.stdout.write(data, taken.resolve)
-    sent = taken.promise
+    process.stdout.write(data, (error) => {
+      if (error) refuse(error)
+      unanswered -= 1
+      if (unanswered === 0) answered()
+    })
+    // Counted after the call: a write that throws has no answer to wait for.
+    unanswered += 1
   }
   const print = () => {
     for (; head < started.length; head += 1) {
@@ -76,51 +98,56 @@ export function runTogether(root: string, tasks: string[], limit: number): Promi
     }
   }
 
-  const live = setInterval(print, 200)
+  const live = setInterval(() => guard(print), 200)
   const finish = () => {
     clearInterval(live)
-    rmSync(folder, { recursive: true, force: true })
-    if (fault) return reject(fault.error)
+    guard(() => rmSync(folder, { recursive: true, force: true }))
     const ends = started.flatMap((slot) => (slot.end ? [slot.end] : []))
     const first = ends.find((end) => end.failed)
     const outcome = {
       results: ends.map((end) => end.result),
       code: first ? first.result.exitCode || 1 : 0,
     }
-    sent.then((error) => (error ? reject(error) : resolve(outcome)))
+    const settle = () => {
+      process.stdout.off('error', refuse)
+      if (fault) reject(fault.error)
+      else resolve(outcome)
+    }
+    if (unanswered === 0) settle()
+    else answered = settle
   }
   const launch = () => {
     const task = tasks[started.length]
     const path = join(folder, `${started.length}.log`)
-    let sink: number | undefined
-    let output: number | undefined
-    try {
-      sink = openSync(path, 'a')
-      output = openSync(path, 'r')
+    const opened: number[] = []
+    const registered = guard(() => {
+      const sink = openSync(path, 'a')
+      opened.push(sink)
+      const output = openSync(path, 'r')
+      opened.push(output)
       const slot: Slot = { task, output, printed: 0, shown: false }
       const began = performance.now()
       const child = spawn(process.execPath, ['run', task], {
         cwd: root,
         stdio: ['ignore', sink, sink],
       })
-      const settle = (status: number | null, abnormal: boolean) => {
+      const ended = (status: number | null, abnormal: boolean) => {
         if (slot.end) return
         slot.end = taskEnd(task, began, status, abnormal)
         running -= 1
         failed ||= slot.end.failed
-        print()
+        guard(print)
         start()
       }
-      child.on('error', () => settle(null, true))
-      child.on('exit', (status, signal) => settle(status, !!signal))
+      child.on('error', () => ended(null, true))
+      child.on('exit', (status, signal) => ended(status, !!signal))
       started.push(slot)
       running += 1
-    } catch (error) {
-      if (output !== undefined) closeSync(output)
-      fault = { error }
-    } finally {
-      if (sink !== undefined) closeSync(sink)
-    }
+    })
+    // The task holds a write end of its own; a file without a task has no reader either.
+    const [sink, output] = opened
+    if (sink !== undefined) guard(() => closeSync(sink))
+    if (!registered && output !== undefined) guard(() => closeSync(output))
   }
   const start = () => {
     while (!(fault || failed) && running < limit && started.length < tasks.length) launch()
