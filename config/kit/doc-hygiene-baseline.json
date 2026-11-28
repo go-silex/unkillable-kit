@@ -111,8 +111,8 @@
   },
   "docs/kit/testing/ops-model.md": {
     "overLimitLines": 25,
-    "maxLineBytes": 1173,
-    "fileBytes": 34765
+    "maxLineBytes": 1171,
+    "fileBytes": 34763
   },
   "docs/kit/testing/ownership.md": {
     "overLimitLines": 27,

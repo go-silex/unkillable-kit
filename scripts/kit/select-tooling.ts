@@ -43,8 +43,12 @@ function git(args: string[]): string {
   })
 }
 
-// A new self-test can introduce a source input outside the declared classes. Treat
-// literal references (including references to a parent directory) as inputs too.
+// A new self-test can introduce a source input outside the declared classes. Treat its
+// references to the checkout as inputs too: a `$ROOT/<path>` reference (a directory covers
+// its files) or a root-relative path with a directory part written anywhere in the test.
+// A bare root-level name counts only as `$ROOT/<name>`: self-tests also write names such as
+// CHANGELOG.md inside fixture repositories, and a live probe of a current-tree check is
+// covered by `validate:full`, not by this lane.
 function testReferences(path: string): boolean {
   const dir = join(root, 'scripts/kit')
   const tests = readdirSync(dir).filter(
@@ -52,7 +56,7 @@ function testReferences(path: string): boolean {
   )
   return tests.some((name) => {
     const text = readFileSync(join(dir, name), 'utf8')
-    if (text.includes(path)) return true
+    if (path.includes('/') && text.includes(path)) return true
     const refs = text.matchAll(
       /(?:\$\{(?:ROOT|REPO_ROOT)\}|\$(?:ROOT|REPO_ROOT))\/([A-Za-z0-9_.@/-]+)/g,
     )
