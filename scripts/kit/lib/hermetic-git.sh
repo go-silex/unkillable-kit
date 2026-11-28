@@ -16,8 +16,9 @@
 #
 # Idempotent: re-sourcing does not stack duplicate keys / rewrite the file.
 #
-# Harnesses that run together share the file. It is written aside (mktemp: mode 600) and
-# linked into place, so a reader finds it whole or not at all, and `ln` keeps the first one.
+# Harnesses that run together share the file. It is written aside, private, and published whole:
+# linked into place, where the first one wins, or moved there where hard links are refused. A
+# reader finds it whole or not at all.
 
 # shellcheck shell=bash
 
@@ -27,12 +28,19 @@ _hermetic_dir="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}"
 _hermetic_cfg="${_hermetic_dir}/kit-hermetic-git-282.config"
 
 if [ ! -f "$_hermetic_cfg" ]; then
-  _hermetic_new="$(mktemp "${_hermetic_cfg}.XXXXXX")"
-  printf '[maintenance]\n\tauto = false\n[gc]\n\tauto = 0\n' >"$_hermetic_new"
-  ln "$_hermetic_new" "$_hermetic_cfg" 2>/dev/null || :
-  rm -f "$_hermetic_new"
+  # A subshell: its umask stays in it, and so does a failure, which the check below reports.
+  # errexit is ignored inside the left operand of `||`, hence the explicit exits.
+  (
+    umask 077
+    [ ! -e "$_hermetic_cfg" ] || exit 1
+    new="$(mktemp "${_hermetic_cfg}.XXXXXX")" || exit 1
+    printf '[maintenance]\n\tauto = false\n[gc]\n\tauto = 0\n' >"$new" \
+      && { ln "$new" "$_hermetic_cfg" || mv -n "$new" "$_hermetic_cfg"; } 2>/dev/null
+    rm -f "$new"
+  ) || :
   if [ ! -f "$_hermetic_cfg" ]; then
     echo "hermetic-git: cannot create ${_hermetic_cfg}" >&2
+    unset _hermetic_dir _hermetic_cfg
     return 1
   fi
 fi
@@ -68,4 +76,4 @@ if [ -z "$_hermetic_git_already" ]; then
   _n=$((_n + 1))
   export GIT_CONFIG_COUNT="${_n}"
 fi
-unset _hermetic_git_already _i _k _n _hermetic_dir _hermetic_cfg _hermetic_new
+unset _hermetic_git_already _i _k _n _hermetic_dir _hermetic_cfg

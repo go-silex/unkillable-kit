@@ -78,20 +78,24 @@ rm -rf "$CALLER"
 trap - EXIT
 
 # Harnesses that run together share one config file. The first sourcing creates it whole and
-# private, leaving nothing beside it and its caller's umask alone; a later one keeps what it finds.
+# private whatever its caller's umask, which it leaves alone, and leaves nothing beside it; a
+# later one keeps what it finds.
 SHARED="$(mktemp -d -t hermetic-git-shared.XXXXXX)"
-trap 'rm -rf "$SHARED"' EXIT
+STUBS="$(mktemp -d -t hermetic-git-stubs.XXXXXX)"
+trap 'rm -rf "$SHARED" "$STUBS"' EXIT
 shared_cfg="${SHARED}/kit-hermetic-git-282.config"
+shared_whole=$'[maintenance]\n\tauto = false\n[gc]\n\tauto = 0'
+# 0222 denies even its owner the write: the helper must not need its caller's umask to write.
 caller_umask="$(
   export XDG_RUNTIME_DIR="$SHARED"
   unset GIT_CONFIG_GLOBAL
-  umask 022
+  umask 0222
   # shellcheck source=lib/hermetic-git.sh
   source "$HELPER"
   umask
 )"
-if [[ "$caller_umask" == "0022" && "$(ls -A "$SHARED")" == "${shared_cfg##*/}" \
-  && "$(cat "$shared_cfg")" == $'[maintenance]\n\tauto = false\n[gc]\n\tauto = 0' \
+if [[ "$caller_umask" == "0222" && "$(ls -A "$SHARED")" == "${shared_cfg##*/}" \
+  && "$(cat "$shared_cfg")" == "$shared_whole" \
   && "$(ls -l "$shared_cfg")" == -rw-------* ]]; then
   ok "first sourcing creates the shared config whole and private, caller umask untouched"
 else
@@ -109,7 +113,34 @@ if [[ "$(cat "$shared_cfg")" == "[kept]" ]]; then
 else
   ko "a later sourcing rewrote the shared config"
 fi
-rm -rf "$SHARED"
+# Where hard links are refused, the config still arrives whole, with nothing left beside it.
+rm -f "$shared_cfg"
+printf '%s\n' '#!/bin/sh' 'exit 1' >"$STUBS/ln"
+chmod +x "$STUBS/ln"
+if (
+  export XDG_RUNTIME_DIR="$SHARED" PATH="$STUBS:$PATH"
+  unset GIT_CONFIG_GLOBAL
+  # shellcheck source=lib/hermetic-git.sh
+  source "$HELPER"
+) 2>/dev/null && [[ "$(ls -A "$SHARED")" == "${shared_cfg##*/}" && "$(cat "$shared_cfg")" == "$shared_whole" ]]; then
+  ok "a folder that refuses hard links still gets the shared config whole"
+else
+  ko "shared config without hard links (folder=$(ls -lA "$SHARED" | tr '\n' ' '))"
+fi
+# A runtime folder that cannot hold the file is an explicit failure, not a silent pass.
+rm -f "$shared_cfg"
+printf '' >"$SHARED/not-a-folder"
+if (
+  export XDG_RUNTIME_DIR="$SHARED/not-a-folder"
+  unset GIT_CONFIG_GLOBAL
+  # shellcheck source=lib/hermetic-git.sh
+  source "$HELPER"
+) 2>/dev/null; then
+  ko "sourcing passed although the shared config could not be created"
+else
+  ok "sourcing fails when the shared config cannot be created"
+fi
+rm -rf "$SHARED" "$STUBS"
 trap - EXIT
 
 TRACE2="$(mktemp -t hermetic-git-trace2.XXXXXX)"
