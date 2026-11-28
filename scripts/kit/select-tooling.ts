@@ -30,9 +30,8 @@ const files = [
   '.node-version',
   '.license-policy.json',
   '.editorconfig',
-  // dogfood-zero-edit.sh edits these in clones of the checkout; its text is not scanned below.
+  // dogfood-zero-edit.sh edits it in a clone of the checkout; its text is not scanned below.
   'README.md',
-  'LICENSE',
 ]
 export function isToolingInput(path: string): boolean {
   return files.includes(path) || prefixes.some((p) => path === p.slice(0, -1) || path.startsWith(p))
