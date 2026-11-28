@@ -5,8 +5,8 @@
  * The app is the SSoT: route schemas are the validators, so the document is a
  * projection, never a parallel hand-written contract.
  *
- *   bun run scripts/kit/gen-openapi.ts           # write the snapshot
- *   bun run scripts/kit/gen-openapi.ts --check   # fail on drift (CI)
+ *   bun run openapi         # write the snapshot
+ *   bun run openapi:check   # fail on drift (CI)
  */
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'

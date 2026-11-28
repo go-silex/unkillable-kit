@@ -1,11 +1,14 @@
 /**
- * The launch every lane recipe (`validate:full`, `validate:tooling`) starts with. Every task
- * inherits the runner's environment, so the runner loads neither a cwd `.env` nor a cwd
- * `bunfig.toml` preload: either could otherwise re-point a gate scanner through its `*_ROOT`
- * override (go-silex/unkillable-kit#242).
+ * The Bun flags of a gate launch: Bun loads no cwd `.env` and reads the empty gates config
+ * instead of the tree's `bunfig.toml`, so neither file can set a variable, run a preload or
+ * change how a script runs. The runner and its dispatch of each task use them, because every task
+ * inherits their environment: otherwise either file could re-point a gate scanner through its
+ * `*_ROOT` override (go-silex/unkillable-kit#242).
  */
-export const rootGateLaunch =
-  'bun --no-env-file --config=config/kit/bunfig.gates.toml run scripts/kit/root-gate.ts'
+export const gateFlags = ['--no-env-file', '--config=config/kit/bunfig.gates.toml']
+
+/** The launch every lane recipe (`validate:full`, `validate:tooling`) starts with. */
+export const rootGateLaunch = `bun ${gateFlags.join(' ')} run scripts/kit/root-gate.ts`
 
 /** The tasks of a lane recipe: the words after the runner script, whatever launch precedes it. */
 export function recipeTasks(source: string): string[] {

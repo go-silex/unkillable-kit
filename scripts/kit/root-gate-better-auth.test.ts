@@ -15,7 +15,7 @@ import {
 import { availableParallelism, tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { parseLock } from './deps-guard/lock'
-import { recipeTasks, rootGateLaunch } from './root-gate-recipe'
+import { gateFlags, recipeTasks, rootGateLaunch } from './root-gate-recipe'
 
 const repo = resolve(import.meta.dirname, '../..')
 const app = 'apps/product-fixture'
@@ -42,7 +42,7 @@ const scenarios = {
 const group = process.argv[2] ?? ''
 if (process.argv.length !== 3 || !Object.hasOwn(scenarios, group))
   throw new Error(
-    `usage: bun run scripts/kit/root-gate-better-auth.test.ts <${Object.keys(scenarios).join('|')}>`,
+    `usage: bun ${gateFlags.join(' ')} run scripts/kit/root-gate-better-auth.test.ts <${Object.keys(scenarios).join('|')}>`,
   )
 const toolingTasks = recipeTasks(kitManifest.scripts['validate:tooling'])
 for (const name of Object.keys(scenarios)) {
@@ -50,7 +50,7 @@ for (const name of Object.keys(scenarios)) {
   assert.ok(toolingTasks.includes(task), `validate:tooling must run ${task}`)
   assert.equal(
     kitManifest.scripts[task],
-    `bun run scripts/kit/root-gate-better-auth.test.ts ${name}`,
+    `bun ${gateFlags.join(' ')} run scripts/kit/root-gate-better-auth.test.ts ${name}`,
   )
 }
 const database = 'binding = "DB"\ndatabase_name = "product-fixture"\ndatabase_id = "fixture-db"\n'

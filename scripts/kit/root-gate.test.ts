@@ -16,7 +16,7 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { recipeTasks, rootGateLaunch } from './root-gate-recipe'
+import { gateFlags, recipeTasks, rootGateLaunch } from './root-gate-recipe'
 import { toolingSeconds, toolingShardTasks } from './root-gate-tooling'
 
 const kitScripts = import.meta.dirname
@@ -573,43 +573,86 @@ function toolingAndPlan() {
   })
 }
 
-/** A cwd .env or bunfig.toml preload must not reach the tasks through the runner. */
+/** A cwd .env or bunfig.toml must not reach the tasks through the runner or its task dispatch. */
 function hermeticRunner() {
   withFixture('bun run task.ts test:coverage', (fixture, env) => {
     const manifestPath = join(fixture, 'package.json')
     const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
     const tasks = recipeTasks(manifest.scripts['validate:tooling'])
-    // The tasks launch like the Kit scanners, so only the runner can hand them the variable.
-    for (const task of tasks)
-      manifest.scripts[task] =
-        `bun --no-env-file --config=config/kit/bunfig.gates.toml run task.ts ${task}`
+    // Node reads neither file, so only the runner or its dispatch can hand a task the variable.
+    for (const task of tasks) manifest.scripts[task] = `node task.mjs ${task}`
     writeFileSync(manifestPath, JSON.stringify(manifest))
+    writeFileSync(
+      join(fixture, 'task.mjs'),
+      "import { appendFileSync } from 'node:fs'\nappendFileSync('effects.txt', process.argv[2] + '\\n')\nif (process.env.ROOT_FIXTURE_FAIL === process.argv[2]) process.exit(17)\n",
+    )
     const effects = join(fixture, 'effects.txt')
-    // Each channel sets the variable that makes tooling:first exit 17.
-    const channels: Record<string, Record<string, string>> = {
-      env: { '.env': 'ROOT_FIXTURE_FAIL=tooling:first\n' },
-      bunfig: {
-        'bunfig.toml': 'preload = ["./steal.ts"]\n',
-        'steal.ts': "process.env.ROOT_FIXTURE_FAIL = 'tooling:first'\n",
+    const steal = "process.env.ROOT_FIXTURE_FAIL = 'tooling:first'\n"
+    const runner = ['scripts/kit/root-gate.ts', ...tasks]
+    // Each channel sets the variable that makes tooling:first exit 17. The control drops the
+    // flags at the layer that reads the channel: the runner, or its dispatch of a task.
+    const channels = [
+      {
+        name: '.env',
+        files: { '.env': 'ROOT_FIXTURE_FAIL=tooling:first\n' },
+        gated: ['run', 'validate:tooling'],
+        control: ['run', ...runner],
       },
-    }
-    for (const [channel, files] of Object.entries(channels)) {
+      {
+        name: 'preload',
+        files: { 'bunfig.toml': 'preload = ["./steal.ts"]\n', 'steal.ts': steal },
+        gated: ['run', 'validate:tooling'],
+        control: ['run', ...runner],
+      },
+      {
+        // `bun = true` runs `node` as Bun, which then runs the preload. The outer `bun run`
+        // reads this setting itself, so the runner is launched as its recipe launches it.
+        name: '[run] bun',
+        files: {
+          'bunfig.toml': 'preload = ["./steal.ts"]\n[run]\nbun = true\n',
+          'steal.ts': steal,
+        },
+        gated: [...gateFlags, 'run', ...runner],
+        control: ['run', 'tooling:first'],
+      },
+    ]
+    for (const { name, files, gated, control } of channels) {
       for (const [path, text] of Object.entries(files)) writeFileSync(join(fixture, path), text)
-      requireSuccess(command(fixture, env, process.execPath, ['run', 'validate:tooling']))
-      assert.equal(readFileSync(effects, 'utf8'), `${tasks.join('\n')}\n`, channel)
+      requireSuccess(command(fixture, env, process.execPath, gated))
+      assert.equal(readFileSync(effects, 'utf8'), `${tasks.join('\n')}\n`, name)
       rmSync(effects)
-      // The same runner launched without the recipe flags hands the variable to every task.
-      const open = command(fixture, env, process.execPath, [
-        'run',
-        'scripts/kit/root-gate.ts',
-        ...tasks,
-      ])
-      assert.notEqual(open.status, 0, `${channel}: the control launch must reach the task`)
-      assertTimings(open.stdout, [{ task: 'tooling:first', status: 'failed', exitCode: 17 }])
+      const open = command(fixture, env, process.execPath, control)
+      assert.ok(
+        open.status === 17 || /"task":"tooling:first".*"exitCode":17/.test(open.stdout),
+        `${name}: the control launch must hand the variable to the task\n${open.stdout}\n${open.stderr}`,
+      )
       rmSync(effects)
       for (const path of Object.keys(files)) rmSync(join(fixture, path))
     }
   })
+}
+
+/** Lane tasks that start Bun on a script file, launched without the gate flags. */
+function unflaggedLaunches(scripts: Record<string, string>) {
+  const found: string[] = []
+  for (const lane of ['validate:full', 'validate:tooling'])
+    for (const task of recipeTasks(scripts[lane]))
+      for (const step of scripts[task].split(/&&|\|\||;/).map((part) => part.trim()))
+        if (
+          /^bun\s/.test(step) &&
+          /\s\S+\.(?:[cm]?[jt]s|tsx)(?:\s|$)/.test(step) &&
+          !step.startsWith(`bun ${gateFlags.join(' ')} `)
+        )
+          found.push(`${task}: ${step}`)
+  return found
+}
+
+/** Every Kit script that a lane task starts with Bun reads neither the cwd .env nor bunfig.toml. */
+function hermeticLaneLaunches() {
+  const { scripts } = JSON.parse(readFileSync(join(kitScripts, '../../package.json'), 'utf8'))
+  assert.deepEqual(unflaggedLaunches(scripts), [])
+  const plain = 'bun run scripts/kit/check-env-sync.ts'
+  assert.deepEqual(unflaggedLaunches({ ...scripts, 'env:check': plain }), [`env:check: ${plain}`])
 }
 
 function toolingShards() {
@@ -1521,6 +1564,7 @@ consumerCoverageShardJoin()
 fullAndPlan()
 toolingAndPlan()
 hermeticRunner()
+hermeticLaneLaunches()
 toolingShards()
 toolingDurations()
 coveragePlan()

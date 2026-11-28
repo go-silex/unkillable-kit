@@ -30,11 +30,13 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
 
 ### Root
 
-- `validate:full` and `validate:tooling` launch the Root gate runner with
-  `--no-env-file --config=config/kit/bunfig.gates.toml`, and the runner refuses a lane recipe
-  launched any other way. Every task inherits the runner's environment, so a cwd `.env` or
-  `bunfig.toml` preload could set a scanner's `*_ROOT` override and make a Kit gate check another
-  tree. Gate tasks no longer see variables from a local `.env` (go-silex/unkillable-kit#242).
+- The Root gate runner, its dispatch of each task, and every Kit script that a lane task starts
+  with Bun (`env:check`, `license:check`, `openapi:check` and the TypeScript self-tests) run with
+  `--no-env-file --config=config/kit/bunfig.gates.toml`, like the gate scanners. A cwd `.env` or
+  `bunfig.toml` preload no longer reaches the Kit gate scripts through the environment that every
+  task inherits, including the scanners' `*_ROOT` overrides. The runner refuses a lane recipe
+  that launches it any other way. Kit gate scripts no longer see variables from a local `.env`
+  (go-silex/unkillable-kit#242).
 
 ### UI
 

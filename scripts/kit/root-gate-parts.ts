@@ -17,6 +17,7 @@ import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { basename, join, resolve, sep } from 'node:path'
 import { kitAppPrefixes } from './root-gate-enrollment'
+import { gateFlags } from './root-gate-recipe'
 
 const digest = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex')
 const fail = (message: string): never => {
@@ -60,7 +61,7 @@ export function runPart(
     COVERAGE_PART: `${index}/${count}`,
     COVERAGE_BLOB: blob,
   }
-  const child = spawnSync(process.execPath, ['run', 'test:coverage'], {
+  const child = spawnSync(process.execPath, [...gateFlags, 'run', 'test:coverage'], {
     cwd: root,
     env,
     stdio: 'inherit',
