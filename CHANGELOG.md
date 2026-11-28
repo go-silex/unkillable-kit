@@ -28,6 +28,14 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
   no Bun version file ([deploy runbook](docs/kit/deploy-cloudflare.md#4b-bun-and-node-versions),
   go-silex/unkillable-kit#213).
 
+### Root
+
+- `validate:full` and `validate:tooling` launch the Root gate runner with
+  `--no-env-file --config=config/kit/bunfig.gates.toml`, and the runner refuses a lane recipe
+  launched any other way. Every task inherits the runner's environment, so a cwd `.env` or
+  `bunfig.toml` preload could set a scanner's `*_ROOT` override and make a Kit gate check another
+  tree. Gate tasks no longer see variables from a local `.env` (go-silex/unkillable-kit#242).
+
 ### UI
 
 - `@kit/ui` accepts optional `closeLabel` on `DialogContent`, `DialogFooter`, and `SheetContent`,

@@ -15,18 +15,16 @@ import {
 import { availableParallelism, tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { parseLock } from './deps-guard/lock'
+import { recipeTasks, rootGateLaunch } from './root-gate-recipe'
 
 const repo = resolve(import.meta.dirname, '../..')
 const app = 'apps/product-fixture'
 const wrapper = 'src/better-auth.ts'
 const kitManifest = JSON.parse(readFileSync(join(repo, 'package.json'), 'utf8'))
-const inherited = kitManifest.scripts['validate:full']
-  .split(' ')
-  .filter(
-    (task: string, index: number) =>
-      index < 3 || task === 'better-auth:check' || task === 'test:coverage',
-  )
-  .join(' ')
+const inheritedTasks = recipeTasks(kitManifest.scripts['validate:full']).filter(
+  (task) => task === 'better-auth:check' || task === 'test:coverage',
+)
+const inherited = `${rootGateLaunch} ${inheritedTasks.join(' ')}`
 const locked = parseLock(readFileSync(join(repo, 'bun.lock'), 'utf8')).find(
   (pkg) => pkg.key === 'better-auth',
 )
@@ -46,7 +44,7 @@ if (process.argv.length !== 3 || !Object.hasOwn(scenarios, group))
   throw new Error(
     `usage: bun run scripts/kit/root-gate-better-auth.test.ts <${Object.keys(scenarios).join('|')}>`,
   )
-const toolingTasks: string[] = kitManifest.scripts['validate:tooling'].split(' ').slice(3)
+const toolingTasks = recipeTasks(kitManifest.scripts['validate:tooling'])
 for (const name of Object.keys(scenarios)) {
   const task = `test:root-gate-better-auth:${name}`
   assert.ok(toolingTasks.includes(task), `validate:tooling must run ${task}`)

@@ -13,6 +13,7 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
+import { recipeTasks, rootGateLaunch } from './root-gate-recipe'
 
 const repo = join(import.meta.dirname, '../..')
 const app = 'apps/product-fixture'
@@ -22,10 +23,10 @@ const coverage = 'vitest run --coverage'
 const { scripts: rootScripts } = JSON.parse(readFileSync(join(repo, 'package.json'), 'utf8')) as {
   scripts: Record<string, string>
 }
-const thinRecipe = rootScripts['validate:full']
-  .split(' ')
-  .filter((task, index) => index < 3 || task === 'typecheck' || task === 'test:coverage')
-  .join(' ')
+const thinTasks = recipeTasks(rootScripts['validate:full']).filter(
+  (task) => task === 'typecheck' || task === 'test:coverage',
+)
+const thinRecipe = `${rootGateLaunch} ${thinTasks.join(' ')}`
 
 function checked(result: SpawnSyncReturns<string>): string {
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`)
@@ -120,6 +121,7 @@ function setup(root: string) {
     'scripts/kit/test-coverage.sh',
     'scripts/kit/print-coverage-summary.mjs',
     'config/kit/zero-edit-zones.json',
+    'config/kit/bunfig.gates.toml',
     'packages/config/vitest-coverage.mts',
   ]) {
     copy(path)
