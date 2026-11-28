@@ -28,6 +28,12 @@ New entries go under `Unreleased`. A release moves them under a `<component>/vX.
   no Bun version file ([deploy runbook](docs/kit/deploy-cloudflare.md#4b-bun-and-node-versions),
   go-silex/unkillable-kit#213).
 
+### Local gates
+
+- Pre-push gates use Kit-owned Lefthook scripts so they still run when pushing
+  another ref from a checkout with no changes against the remote default branch.
+  Products inherit the wrappers with the Kit upgrade.
+
 ### UI
 
 - `@kit/ui` accepts optional `closeLabel` on `DialogContent`, `DialogFooter`, and `SheetContent`,

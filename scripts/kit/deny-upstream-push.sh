@@ -14,8 +14,7 @@
 #   - docs/product/deny-upstream.json → { "urlSubstrings": ["…"] }
 #   - optional kit config/kit/deny-upstream-remotes.json (kit-generic only)
 #
-# Lefthook pre-push: bash scripts/kit/deny-upstream-push.sh {1} {2}
-# {1} = remote name · {2} = remote URL
+# The pre-push wrapper passes the remote name and URL, in that order.
 #
 # Client-side UX only — LEFTHOOK=0 / --no-verify still bypass; real integrity = GH write ACLs.
 set -euo pipefail

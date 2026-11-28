@@ -113,6 +113,12 @@ The kit ships no `.semctx/`, `semctx.yml` workflow or `semctx-working-empty` att
 
 #### Hooks
 
+`lefthook.yml` is list-protected, and `.lefthook/` is a protected Kit prefix. Lefthook
+looks there for the pre-push wrappers; they delegate to the gates under `scripts/kit/`.
+Scripts run even when the checkout matches the remote default branch. The tooling wrapper
+passes Git's push stdin and remote name to the selector.
+For annotated tags it checks the tagged commit against the checkout, not the tag object ID.
+
 Products must not fork kit hooks, including by committing a Lefthook local overlay (amendment 2026-10-13). Undetected does not mean permitted.
 Zero-edit does not detect tracked overlays, and per-developer `LEFTHOOK*` variables or Git `core.hooksPath` can skip hooks.
 CI backs up quality gates, `secret-scan.yml` backs up secret scanning, and GitHub write ACLs back up deny-upstream. Commit-message rules have no CI backstop: `pr-title.yml` lints only the PR title.
