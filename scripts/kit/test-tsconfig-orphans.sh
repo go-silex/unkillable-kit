@@ -176,6 +176,11 @@ write_project "${WSTEST}/packages/core/tsconfig.json" '"src", "test/*.test.ts"'
 git -C "${WSTEST}" add -A
 assert_case "implicit workspace project owns test → 0" 0 "${WSTEST}" "0 orphan(s)"
 
+seed_workspace "${WSTEST}" "packages/core" "bun check --no-script"
+write_project "${WSTEST}/packages/core/tsconfig.json" '"src", "test/*.test.ts"'
+git -C "${WSTEST}" add -A
+assert_case "implicit bun check project owns test → 0" 0 "${WSTEST}" "0 orphan(s)"
+
 seed_workspace "${WSTEST}" "packages/core" "tsc --noEmit -p tsconfig.json"
 
 write_project "${WSTEST}/packages/core/tsconfig.json" '"src"'
@@ -204,6 +209,9 @@ for script in \
   'true || tsc --noEmit -p tsconfig.json' \
   'tsc --noEmit -p tsconfig.json --noCheck' \
   'tsc --noEmit -p tsconfig.json --showConfig' \
+  'bun check --no-script -p tsconfig.json --noCheck' \
+  'bun check --no-script -p tsconfig.json --build' \
+  'bun check --no-script -p tsconfig.json src' \
   'tsc --noEmit -p tsconfig.json & true' \
   'echo $(tsc --noEmit -p tsconfig.json)'; do
   seed_workspace "${UNSAFE}" "packages/core" "${script}"
@@ -329,6 +337,50 @@ assert_case "test project dropped from typecheck → 1 naming it" 1 "${UNCITED}"
 seed_workspace "${UNCITED}" "apps/web" "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json"
 git -C "${UNCITED}" add -A
 assert_case "after restoring the citation → 0" 0 "${UNCITED}" "project(s) all cited"
+
+# Bun commands cite projects with either project flag syntax and a direct path.
+# Put the test outside src/ to prove the second command adds coverage too.
+BUNCITED="${TMP}/bun-cited"
+seed_tree "${BUNCITED}"
+seed_workspace "${BUNCITED}" "apps/web" \
+  "bun check --no-pretty -p tsconfig.json --no-script && /fake/bin/bun check --no-script --project=tsconfig.test.json"
+mkdir -p "${BUNCITED}/apps/web/test"
+echo 'export const owned = 1' >"${BUNCITED}/apps/web/test/owned.test.ts"
+write_project "${BUNCITED}/apps/web/tsconfig.test.json" '"test"'
+git -C "${BUNCITED}" add -A
+assert_case "both bun check projects cited and eligible → 0" 0 "${BUNCITED}" "project(s) all cited"
+
+seed_workspace "${BUNCITED}" "apps/web" "bun check --no-script --project tsconfig.json"
+git -C "${BUNCITED}" add -A
+assert_case "test project dropped from bun check → 1 naming it" 1 "${BUNCITED}" \
+  "UNCITED apps/web/tsconfig.test.json"
+
+# An actual `check` script makes the risk concrete; refusal must not depend on
+# whether that script exists today or on workspace tests needing coverage.
+SCRIPTED="${TMP}/scripted"
+seed_tree "${SCRIPTED}"
+seed_workspace "${SCRIPTED}" "apps/web" "bun check -p tsconfig.json"
+cat >"${SCRIPTED}/apps/web/package.json" <<'EOF'
+{"name":"@kit/web","private":true,"scripts":{"check":"true","typecheck":"bun check -p tsconfig.json"}}
+EOF
+git -C "${SCRIPTED}" add -A
+assert_case "workspace bun check without --no-script → 1" 1 "${SCRIPTED}" \
+  'SCRIPTED apps/web — "bun check" without --no-script'
+
+for script in 'bun check -p tsconfig.json # --no-script' 'bun check -p tsconfig.json -- --no-script'; do
+  seed_workspace "${SCRIPTED}" "apps/web" "${script}"
+  git -C "${SCRIPTED}" add -A
+  assert_case "bun check needs --no-script as a flag: ${script} → 1" 1 "${SCRIPTED}" \
+    'SCRIPTED apps/web — "bun check" without --no-script'
+done
+
+seed_workspace "${SCRIPTED}" "apps/web" "bun check --no-script -p tsconfig.json"
+cat >"${SCRIPTED}/package.json" <<'EOF'
+{"name":"fixture","private":true,"scripts":{"typecheck:tooling":"bun check -p tsconfig.json"}}
+EOF
+git -C "${SCRIPTED}" add -A
+assert_case "root bun check without --no-script → 1" 1 "${SCRIPTED}" \
+  'SCRIPTED root — "bun check" without --no-script'
 
 # --- a project present but not yet staged is audited too: it is already the
 #     program vite/vitest/tsserver load ---

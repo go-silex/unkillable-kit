@@ -164,7 +164,7 @@ const packageFile = `${api}/package.json`
 const pkg = JSON.parse(fs.readFileSync(packageFile, 'utf8'))
 const typesPath = `../../.wrangler/${name}-worker-configuration.d.ts`
 pkg.scripts.types = `mkdir -p ../../.wrangler && wrangler types ${typesPath} --include-env=false`
-pkg.scripts.typecheck = `${pkg.scripts.types} && tsc --noEmit -p tsconfig.json`
+pkg.scripts.typecheck = `${pkg.scripts.types} && bun check --no-script --no-pretty -p tsconfig.json`
 fs.writeFileSync(packageFile, `${JSON.stringify(pkg, null, 2)}\n`)
 const tsconfigFile = `${api}/tsconfig.json`
 const tsconfig = JSON.parse(fs.readFileSync(tsconfigFile, 'utf8'))

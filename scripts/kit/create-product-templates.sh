@@ -88,7 +88,7 @@ EOF
   "scripts": {
     "dev": "bun run src/index.ts",
     "start": "bun run src/index.ts",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "bun check --no-script --no-pretty -p tsconfig.json",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "smoke:stdio": "bun --no-env-file run scripts/stdio-smoke.mjs"

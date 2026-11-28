@@ -16,7 +16,8 @@
  *   tracked {ts,tsx,mts,cts} MINUS <ws>/src/** for every {apps,packages}/<ws>
  *   that has a package.json
  *   is a subset of the files opened by the root project or a runnable,
- *   cited workspace project (`tsc --listFilesOnly`).
+ *   cited workspace project (`tsc --listFilesOnly`). Only direct checker
+ *   commands joined by `&&` with checking-only flags can add coverage.
  *
  * The manifest is what makes that subtraction legitimate: a directory under
  * apps|packages without one is not a workspace, nothing runs a project for it,
@@ -37,10 +38,12 @@
  *   for each {apps,packages}/<ws>: tracked files under <ws>/src/ imply at
  *   least one runnable tsconfig*.json at the workspace root (otherwise the
  *   coverage subtraction has nothing to assume); every such project is named
- *   by a tsc command in that workspace's own `typecheck` script — and every
- *   project that script names exists. A citation counts only when tsc/tsgo/
- *   vue-tsc is in the same command as `-p`/`-b`. `|| true` and `|` discard
- *   tsc's status and do not count.
+ *   by the workspace's own `typecheck` script, and every named project exists.
+ *   A citation counts only when `-p` / `--project` belongs to `bun check` or
+ *   `tsc`/`tsgo`/`vue-tsc` (which also support build citations); without a
+ *   project operand, the citation is to the current directory's tsconfig.json.
+ *   `bun check` requires `--no-script`, also in root `typecheck:tooling`.
+ *   `|| true` and `|` discard the checker's status and do not count.
  *
  * Does NOT prove the covering project uses the right compilerOptions, does
  * NOT check coverage of workspace src/ files (a workspace `exclude` can still
@@ -92,12 +95,13 @@ const PROJECT_INPUT_KEYS = ['files', 'include', 'references']
 
 /** `tsc`, `tsgo`, `vue-tsc`, or any of them reached through a path. */
 const TSC_BINARY = /(?:^|\/)(?:[\w.]+-)?ts(?:c|go)$/
+const BUN_BINARY = /(?:^|\/)bun$/
 
 /** Shell operators that end one command inside a package script. */
 const SCRIPT_SEPARATORS = /&&|\|\||;|\|/
 
 /**
- * `|| true`, `|| exit 0`, or a pipe: the script's status is not tsc's.
+ * `|| true`, `|| exit 0`, or a pipe: the script's status is not the checker's.
  * Not a shell parser — these two spellings are the ones that turn a red
  * typecheck green without deleting the command.
  */
@@ -291,13 +295,10 @@ function parseJsonc(rel: string): Record<string, unknown> {
 /**
  * Projects a workspace script runs, as ROOT-relative posix paths.
  *
- * Read the way a shell reads it: split on `&&`/`||`/`;`/`|`, then per command
- * take the `-p` / `--project[=]` / `-b` operands — but only if that command
- * is tsc (or tsgo / vue-tsc). `echo … -p tsconfig.json` is not a citation.
- * A tsc command with no operand compiles `<cwd>/tsconfig.json`, which inside
- * a workspace script is that workspace's own project — counted, so
- * `"typecheck": "tsc --noEmit"` is recognised instead of being reported as
- * an uncited project.
+ * Split the script into commands, then take `-p` / `--project[=]` operands
+ * from `bun check` or `tsc`/`tsgo`/`vue-tsc`; the latter also support `-b`.
+ * `echo … -p tsconfig.json` is not a citation. A checker without a project
+ * operand cites `<cwd>/tsconfig.json`, the workspace's own project.
  */
 function citeProject(cited: Set<string>, wsDir: string, operand: string): void {
   const value = operand.replace(/^\.\//, '')
@@ -337,35 +338,81 @@ function citeBuildOperands(
   return operands
 }
 
-function citeFromTokens(tokens: string[], wsDir: string, cited: Set<string>): number {
+function citeFromTokens(
+  tokens: string[],
+  wsDir: string,
+  cited: Set<string>,
+  bunCheck: boolean,
+): number {
   let operands = 0
-  for (let i = 0; i < tokens.length; i++) {
+  for (let i = bunCheck ? 2 : 0; i < tokens.length; i++) {
     const token = tokens[i] as string
+    if (bunCheck && token === '--') break
     const fromFlag = citeProjectFlag(token, tokens[i + 1], wsDir, cited)
     if (fromFlag > 0) {
       operands += fromFlag
       continue
     }
-    if (token === '-b' || token === '--build') {
+    if (!bunCheck && (token === '-b' || token === '--build')) {
       operands += citeBuildOperands(tokens, i, wsDir, cited)
     }
   }
   return operands
 }
 
-function citedProjects(script: string, wsDir: string): Set<string> {
+function isBunCheck(tokens: string[]): boolean {
+  return BUN_BINARY.test(tokens[0] ?? '') && tokens[1] === 'check'
+}
+
+function citedProjects(commands: string[][], wsDir: string): Set<string> {
   const cited = new Set<string>()
-  for (const segment of script.split(SCRIPT_SEPARATORS)) {
-    const tokens = tokenize(segment)
-    if (!tokens.some((token) => TSC_BINARY.test(token))) continue
-    if (citeFromTokens(tokens, wsDir, cited) === 0) citeProject(cited, wsDir, ROOT_PROJECT_REL)
+  for (const tokens of commands) {
+    const bunCheck = isBunCheck(tokens)
+    if (!(bunCheck || tokens.some((token) => TSC_BINARY.test(token)))) continue
+    if (citeFromTokens(tokens, wsDir, cited, bunCheck) === 0) {
+      citeProject(cited, wsDir, ROOT_PROJECT_REL)
+    }
   }
   return cited
 }
 
+function bunProjectOperand(flag: string, next: string | undefined): string | undefined {
+  if (flag === '-p' || flag === '--project') return next
+  return flag.startsWith('--project=') ? flag.slice('--project='.length) : undefined
+}
+
+/** No shell syntax, no positional inputs, and at most one project operand. */
+function bunCoverageProject(command: string): string | undefined {
+  if (!/^[A-Za-z0-9_./= \t-]+$/.test(command)) return undefined
+  const tokens = command.trim().split(/[ \t]+/)
+  if (!isBunCheck(tokens)) return undefined
+  let noScript = false
+  let project: string | undefined
+  for (let i = 2; i < tokens.length; i++) {
+    const token = tokens[i] as string
+    if (token === '--no-script') {
+      noScript = true
+      continue
+    }
+    if (token === '--no-pretty') continue
+    const operand = bunProjectOperand(token, tokens[i + 1])
+    if (
+      project !== undefined ||
+      operand === undefined ||
+      !/^(?!-)[A-Za-z0-9_./-]+$/.test(operand)
+    ) {
+      return undefined
+    }
+    project = operand
+    if (!token.startsWith('--project=')) i++
+  }
+  return noScript ? (project ?? ROOT_PROJECT_REL) : undefined
+}
+
 /**
  * Coverage requires a narrower proof than the legacy citation audit. Accept
- * only direct tsc commands joined by && and a small checking-only flag set.
+ * only direct `tsc` or `bun check` commands joined by `&&`, with checking-only
+ * flags. `bun check` must include `--no-script` so it cannot run a script.
  * Anything requiring shell interpretation contributes no workspace coverage.
  */
 function coverageProjects(script: unknown, wsDir: string): Set<string> {
@@ -377,8 +424,9 @@ function coverageProjects(script: unknown, wsDir: string): Set<string> {
       /^[ \t]*tsc(?:[ \t]+--noEmit)?(?:[ \t]+(?:-p|--project)[ \t]+([A-Za-z0-9_./-]+))?[ \t]*(?![\s\S])/.exec(
         command,
       )
-    if (!match) return new Set()
-    citeProject(projects, wsDir, match[1] ?? ROOT_PROJECT_REL)
+    const project = match ? (match[1] ?? ROOT_PROJECT_REL) : bunCoverageProject(command)
+    if (project === undefined) return new Set()
+    citeProject(projects, wsDir, project)
   }
   return projects
 }
@@ -392,8 +440,11 @@ function tokenize(segment: string): string[] {
     if (quote !== '') {
       if (char === quote) quote = ''
       else current += char
-    } else if (char === '"' || char === "'") {
+    } else if (/['"]/.test(char)) {
       quote = char
+    } else if (char === '#' && current.length === 0 && isBunCheck(tokens)) {
+      // `bun check -p tsconfig.json # --no-script`: a comment cannot disable script dispatch.
+      break
     } else if (char.trim().length === 0) {
       if (current.length > 0) tokens.push(current)
       current = ''
@@ -410,15 +461,39 @@ function tokenize(segment: string): string[] {
  * `typecheck` script, and every project that script names must exist.
  *
  * This is the invariant the `{apps,packages}/<ws>/src/**` subtraction above
- * assumes. `turbo typecheck` runs the script and nothing else, so the script
- * is the only place where "this program is checked in CI" is expressed. A
- * workspace with src/ and no project makes that assumption false — reported,
- * not silently green.
+ * assumes. `turbo typecheck` executes only that script, so it is the sole place
+ * the workspace declares which projects `bun check` or a legacy checker checks
+ * in CI. A workspace with src/ and no project violates that assumption.
+ * Root `typecheck:tooling` is inspected only for Bun's `--no-script` requirement.
  */
-function typecheckScript(manifest: string): unknown {
+function manifestScript(manifest: string, name: string): unknown {
   const scripts = parseJsonc(manifest).scripts
   if (scripts === null || typeof scripts !== 'object') return undefined
-  return (scripts as Record<string, unknown>).typecheck
+  return (scripts as Record<string, unknown>)[name]
+}
+
+function auditScriptCommands(
+  script: unknown,
+  manifest: string,
+  name: string,
+  location: string,
+  problems: { report: string; fix: string }[],
+): string[][] {
+  if (typeof script !== 'string') return []
+  const commands = script.split(SCRIPT_SEPARATORS).map(tokenize)
+  const scripted = commands.some((tokens) => {
+    if (!isBunCheck(tokens)) return false
+    const noScript = tokens.indexOf('--no-script', 2)
+    const endOfFlags = tokens.indexOf('--', 2)
+    return noScript === -1 || (endOfFlags !== -1 && endOfFlags < noScript)
+  })
+  if (scripted) {
+    problems.push({
+      report: `SCRIPTED ${location} — "bun check" without --no-script can run the manifest's "check" script instead of the type checker`,
+      fix: `add --no-script to each "bun check" in "${name}" in ${manifest}`,
+    })
+  }
+  return commands
 }
 
 function auditWorkspaceProjects(
@@ -455,7 +530,7 @@ function auditWorkspaceProjects(
           ? `the "typecheck" script of ${wsDir} never runs this project`
           : `${wsDir} has no "typecheck" script, so nothing runs this project`
       }`,
-      fix: `make "typecheck" in ${manifest} run \`tsc --noEmit -p ${basename(rel)}\`, or delete ${rel}`,
+      fix: `make "typecheck" in ${manifest} run \`bun check --no-script --no-pretty -p ${basename(rel)}\`, or delete ${rel}`,
     })
   }
   return { audited, runnableHere, projects, problems }
@@ -472,7 +547,7 @@ function auditMissingProjects(
   if (runnableHere === 0 && trackedTs.some((path) => path.startsWith(`${wsDir}/src/`))) {
     problems.push({
       report: `NO PROJECT ${wsDir} — src/ is subtracted from coverage but no project owns it`,
-      fix: `add ${wsDir}/tsconfig.json covering src/ and a "typecheck" script that runs \`tsc --noEmit\``,
+      fix: `add ${wsDir}/tsconfig.json covering src/ and set "typecheck" to \`bun check --no-script --no-pretty -p tsconfig.json\``,
     })
   }
   for (const rel of runs) {
@@ -500,16 +575,22 @@ function auditCitations(): {
   const projects = new Map<string, string>()
   const trackedTs = gitFiles(TS_PATHSPECS, false)
 
+  const rootManifest = 'package.json'
+  if (existsSync(resolve(ROOT, rootManifest))) {
+    const name = 'typecheck:tooling'
+    auditScriptCommands(manifestScript(rootManifest, name), rootManifest, name, 'root', problems)
+  }
+
   for (const manifest of manifests) {
     const wsDir = manifest.slice(0, -'/package.json'.length)
-    const script = typecheckScript(manifest)
+    const script = manifestScript(manifest, 'typecheck')
+    const commands = auditScriptCommands(script, manifest, 'typecheck', wsDir, problems)
     const swallowed = typeof script === 'string' && swallowsExit(script)
-    const runs =
-      typeof script === 'string' && !swallowed ? citedProjects(script, wsDir) : new Set<string>()
+    const runs = swallowed ? new Set<string>() : citedProjects(commands, wsDir)
 
     if (swallowed) {
       problems.push({
-        report: `SWALLOWED ${wsDir} — the "typecheck" script discards tsc's exit status (\`|| true\` or a pipe)`,
+        report: `SWALLOWED ${wsDir} — the "typecheck" script discards the checker's exit status (\`|| true\` or a pipe)`,
         fix: `remove \`|| true\` / the pipe from "typecheck" in ${manifest} so a type error fails the script`,
       })
     }
@@ -558,7 +639,7 @@ function main(): void {
   }
   if (citations.problems.length > 0) {
     console.error(
-      `\ntsconfig-orphans: ${citations.problems.length} citation break(s) of ${citations.audited} workspace project(s) — a project no "typecheck" script runs is checked by nobody`,
+      `\ntsconfig-orphans: ${citations.problems.length} citation break(s); ${citations.audited} workspace project(s) audited`,
     )
   }
   if (orphans.length > 0 || citations.problems.length > 0) {
