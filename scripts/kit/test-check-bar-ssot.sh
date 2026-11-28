@@ -94,8 +94,13 @@ pre-push:
   scripts:
     "validate-full.sh":
       runner: bash
+      args: "--"
+      skip: false
     "validate-tooling.sh":
       runner: bash
+      args: '"{1}"'
+      skip: false
+      use_stdin: true
 EOF
   cat >"${tree}/.lefthook/pre-push/validate-full.sh" <<'EOF'
 exec bun run validate:full
@@ -308,6 +313,8 @@ pre-push:
   scripts:
     "validate-full.sh":
       runner: bash
+      args: "--"
+      skip: false
   # validate-tooling.sh exists but isn't registered
 EOF
 assert_exit "missing tooling script registration → 1" 1 "${MISSING_TOOLING_HOOK}"
@@ -325,6 +332,23 @@ pre-push:
         bun run validate:tooling
 EOF
 assert_exit "inline pre-push commands are not scripts → 1" 1 "${COMMAND_HOOK}"
+
+ECHO_HOOK="${TMP}/echo-hook"
+seed_ok "${ECHO_HOOK}"
+cat >"${ECHO_HOOK}/lefthook.yml" <<'EOF'
+pre-push:
+  scripts:
+    "validate-full.sh":
+      runner: bash
+      args: "--"
+      skip: false
+    "validate-tooling.sh":
+      runner: echo
+      args: '"{1}"'
+      skip: false
+      use_stdin: true
+EOF
+assert_exit "echo runner does not execute the tooling wrapper → 1" 1 "${ECHO_HOOK}"
 
 MISSING_TOOLING_CI="${TMP}/missing-tooling-ci"
 seed_ok "${MISSING_TOOLING_CI}"
@@ -367,6 +391,57 @@ MISSING_PKG="${TMP}/missing-pkg"
 mkdir -p "${MISSING_PKG}"
 echo '# only agents' >"${MISSING_PKG}/AGENTS.md"
 assert_exit "missing package.json → 1" 1 "${MISSING_PKG}"
+
+# Git passes a literal URL as the remote name when pushing to it directly.
+(
+  unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE
+  export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+  export PATH="${TMP}/bin:${ROOT}/node_modules/.bin:${PATH}"
+  export PUSH_URL="${TMP}/remote's.git"
+  probe="${TMP}/push-probe"
+  git init -q --template='' --initial-branch=main --bare "$PUSH_URL"
+  git init -q --template='' --initial-branch=main "$probe"
+  cd "$probe"
+  tree="$(git mktree </dev/null)"
+  head="$(git -c user.name=Fixture -c user.email=fixture@example.invalid commit-tree "$tree" -m init)"
+  git update-ref refs/heads/main "$head"
+  git push -q "$PUSH_URL" main
+
+  mkdir -p "${TMP}/bin" .lefthook/pre-push scripts/kit config/product
+  cp "${ROOT}/lefthook.yml" .
+  cp "${ROOT}"/.lefthook/pre-push/{deny-upstream,validate-tooling}.sh .lefthook/pre-push/
+  cp "${ROOT}/scripts/kit/deny-upstream-push.sh" scripts/kit/
+  for gate in trufflehog validate-full; do
+    printf '#!/usr/bin/env bash\nexit 0\n' >".lefthook/pre-push/${gate}.sh"
+  done
+  chmod +x .lefthook/pre-push/*.sh
+  cat >"${TMP}/bin/bun" <<'SH'
+#!/usr/bin/env bash
+set -eu
+if [[ "$*" == 'run validate:tooling' ]]; then
+  echo 'fixture tooling lane ran'
+else
+  [[ $# == 3 && $1 == scripts/kit/select-tooling.ts && $2 == --pre-push && $3 == "$PUSH_URL" ]]
+  IFS=' ' read -r local_ref local_sha remote_ref remote_sha
+  [[ $local_ref == refs/heads/main && $remote_ref == refs/heads/probe ]]
+  [[ $local_sha == "$(git rev-parse HEAD)" && $remote_sha == 0000000000000000000000000000000000000000 ]]
+fi
+SH
+  chmod +x "${TMP}/bin/bun"
+  lefthook install
+  out="$(git push "$PUSH_URL" main:probe 2>&1)" || { echo "$out" >&2; exit 1; }
+  grep -Fq 'fixture tooling lane ran' <<< "$out"
+
+  printf '{"version":1,"upstreamCommit":"%s"}\n' "$head" >config/product/inheritance.json
+  git remote add upstream "$PUSH_URL"
+  if out="$(git push upstream main:blocked 2>&1)"; then
+    echo 'FAIL: deny-upstream allowed the Product push' >&2
+    exit 1
+  fi
+  grep -Fq "remote=upstream url=$PUSH_URL" <<< "$out"
+  echo '  PASS: pre-push forwards apostrophe URL and stdin; deny-upstream still blocks'
+)
+PASS=$((PASS + 1))
 
 echo "== summary: ${PASS} passed, ${FAIL} failed =="
 if [[ "${FAIL}" -ne 0 ]]; then

@@ -40,7 +40,7 @@ pre-push:
     # Product consumers: block push to kit upstream. Kit origin = no-op.
     "deny-upstream.sh":
       runner: bash
-      args: "{1} {2}"
+      args: '"{1}" "{2}"'
       priority: 1
       skip: false
     # Fail fast on secrets before long validate:full (CI is too late once pushed)
@@ -56,7 +56,7 @@ pre-push:
       skip: false
     "validate-tooling.sh":
       runner: bash
-      args: "{1}"
+      args: '"{1}"'
       priority: 4
       skip: false
       use_stdin: true

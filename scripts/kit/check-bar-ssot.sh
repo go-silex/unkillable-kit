@@ -210,24 +210,31 @@ done
 
 LEFTHOOK="${ROOT}/lefthook.yml"
 if [[ -f "${LEFTHOOK}" ]]; then
-  pre_push_scripts="$(awk '
-    /^pre-push:[[:space:]]*$/ {hook=1; next}
-    hook && /^[^[:space:]#]/ {exit}
-    hook && /^  scripts:[[:space:]]*$/ {scripts=1; next}
-    scripts && /^  [^[:space:]#]/ {exit}
-    scripts {print}
-  ' "${LEFTHOOK}")"
+  # Validate the wiring as YAML; a script key alone does not mean Lefthook executes it.
+  if ! bun - "${LEFTHOOK}" <<'JS'
+const config = Bun.YAML.parse(await Bun.file(process.argv[2]).text())
+const scripts = config?.['pre-push']?.scripts
+const full = scripts?.['validate-full.sh']
+const tooling = scripts?.['validate-tooling.sh']
+process.exitCode = (
+  full?.runner === 'bash' && full.skip === false && full.args === '--' &&
+  tooling?.runner === 'bash' && tooling.skip === false && tooling.args === '"{1}"' &&
+  tooling.use_stdin === true
+) ? 0 : 1
+JS
+  then
+    echo "error: lefthook.yml: pre-push must run both lane scripts with Bash and pass the tooling selector its inputs" >&2
+    FAIL=1
+  fi
   found=0 tooling_found=0 selector_found=0
   full_script="${ROOT}/.lefthook/pre-push/validate-full.sh"
   tooling_script="${ROOT}/.lefthook/pre-push/validate-tooling.sh"
-  if grep -Eq '^    ("validate-full\.sh"|validate-full\.sh):[[:space:]]*$' <<< "${pre_push_scripts}" &&
-    [[ -f "${full_script}" ]]; then
+  if [[ -f "${full_script}" ]]; then
     while IFS= read -r line || [[ -n "${line}" ]]; do
       line_invokes_validate_full "${line#"${line%%[![:space:]]*}"}" hook && found=1
     done <"${full_script}"
   fi
-  if grep -Eq '^    ("validate-tooling\.sh"|validate-tooling\.sh):[[:space:]]*$' <<< "${pre_push_scripts}" &&
-    [[ -f "${tooling_script}" ]]; then
+  if [[ -f "${tooling_script}" ]]; then
     while IFS= read -r line || [[ -n "${line}" ]]; do
       stripped="${line#"${line%%[![:space:]]*}"}"
       line_invokes_tooling "${stripped}" && tooling_found=1

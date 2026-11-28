@@ -195,8 +195,16 @@ function parsePushUpdates(input: string): string[][] {
     )
       throw new Error('malformed push update')
     const local = parts[1]
-    if (!/^0{40}$/.test(local) && local !== checkout)
-      throw new NonHeadPush('pushed commit is not the checked-out HEAD')
+    if (!/^0{40}$/.test(local) && local !== checkout) {
+      // For annotated tags Git sends the tag object ID, not its commit ID.
+      let commit: string
+      try {
+        commit = git(['rev-parse', '--verify', '--end-of-options', `${local}^{commit}`]).trim()
+      } catch {
+        throw new NonHeadPush('pushed object does not resolve to a commit')
+      }
+      if (commit !== checkout) throw new NonHeadPush('pushed commit is not the checked-out HEAD')
+    }
     updates.push(parts)
   }
   return updates
